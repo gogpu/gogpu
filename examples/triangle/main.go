@@ -1,26 +1,32 @@
 // Example: Basic triangle rendering
 //
-// This example demonstrates basic GPU rendering by drawing
-// a single colored triangle on the screen.
+// This example demonstrates the gogpu API by creating a window
+// and clearing it with a cornflower blue color.
+//
+// Compare this ~20 lines with 480+ lines of raw WebGPU code!
 package main
 
 import (
-	"fmt"
+	"log"
+
+	"github.com/gogpu/gogpu"
+	"github.com/gogpu/gogpu/math"
 )
 
 func main() {
-	fmt.Println("GoGPU Triangle Example")
-	fmt.Println("=======================")
-	fmt.Println("")
-	fmt.Println("This example is a placeholder.")
-	fmt.Println("Full implementation coming soon!")
-	fmt.Println("")
-	fmt.Println("The triangle example will demonstrate:")
-	fmt.Println("  - Window creation")
-	fmt.Println("  - GPU device initialization")
-	fmt.Println("  - Shader compilation (WGSL)")
-	fmt.Println("  - Render pipeline creation")
-	fmt.Println("  - Drawing a colored triangle")
-	fmt.Println("")
-	fmt.Println("Stay tuned for updates at https://github.com/gogpu/gogpu")
+	// Create application with simple configuration
+	app := gogpu.NewApp(gogpu.DefaultConfig().
+		WithTitle("GoGPU - Triangle Example").
+		WithSize(800, 600))
+
+	// Set draw callback - called every frame
+	app.OnDraw(func(ctx *gogpu.Context) {
+		// Draw RGB triangle on dark background
+		ctx.DrawTriangleColor(math.DarkGray)
+	})
+
+	// Run the application
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
 }

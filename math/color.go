@@ -99,4 +99,7 @@ var (
 
 	// Gopher blue
 	GopherBlue = Color{0.0, 0.686, 0.843, 1} // #00AFD7
+
+	// Classic demo colors
+	CornflowerBlue = Color{0.392, 0.584, 0.929, 1} // #6495ED
 )
