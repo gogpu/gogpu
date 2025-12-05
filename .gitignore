@@ -1,0 +1,11 @@
+# IDE
+.idea/
+
+# Logs
+*.log
+
+# Private dev docs (not committed)
+docs/dev/
+
+# Claude Code (private)
+.claude/
