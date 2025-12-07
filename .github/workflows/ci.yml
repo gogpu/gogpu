@@ -86,8 +86,8 @@ jobs:
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
       uses: codecov/codecov-action@v4
-      continue-on-error: true
       with:
+        token: ${{ secrets.CODECOV_TOKEN }}
         file: ./coverage.txt
         flags: unittests
         name: codecov-gogpu
