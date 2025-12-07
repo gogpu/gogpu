@@ -17,18 +17,23 @@ import (
 // Backend implements gpu.Backend using wgpu-native.
 type Backend struct {
 	// Store native handles for cleanup
-	instances map[types.Instance]*wgpu.Instance
-	adapters  map[types.Adapter]*wgpu.Adapter
-	devices   map[types.Device]*wgpu.Device
-	queues    map[types.Queue]*wgpu.Queue
-	surfaces  map[types.Surface]*wgpu.Surface
-	shaders   map[types.ShaderModule]*wgpu.ShaderModule
-	pipelines map[types.RenderPipeline]*wgpu.RenderPipeline
-	encoders  map[types.CommandEncoder]*wgpu.CommandEncoder
-	buffers   map[types.CommandBuffer]*wgpu.CommandBuffer
-	passes    map[types.RenderPass]*wgpu.RenderPassEncoder
-	textures  map[types.Texture]*wgpu.Texture
-	views     map[types.TextureView]*wgpu.TextureView
+	instances        map[types.Instance]*wgpu.Instance
+	adapters         map[types.Adapter]*wgpu.Adapter
+	devices          map[types.Device]*wgpu.Device
+	queues           map[types.Queue]*wgpu.Queue
+	surfaces         map[types.Surface]*wgpu.Surface
+	shaders          map[types.ShaderModule]*wgpu.ShaderModule
+	pipelines        map[types.RenderPipeline]*wgpu.RenderPipeline
+	encoders         map[types.CommandEncoder]*wgpu.CommandEncoder
+	cmdBuffers       map[types.CommandBuffer]*wgpu.CommandBuffer
+	passes           map[types.RenderPass]*wgpu.RenderPassEncoder
+	textures         map[types.Texture]*wgpu.Texture
+	views            map[types.TextureView]*wgpu.TextureView
+	samplers         map[types.Sampler]*wgpu.Sampler
+	gpuBuffers       map[types.Buffer]*wgpu.Buffer
+	bindGroupLayouts map[types.BindGroupLayout]*wgpu.BindGroupLayout
+	bindGroups       map[types.BindGroup]*wgpu.BindGroup
+	pipelineLayouts  map[types.PipelineLayout]*wgpu.PipelineLayout
 
 	nextHandle uintptr
 }
@@ -41,19 +46,24 @@ func IsAvailable() bool {
 // New creates a new Rust backend.
 func New() *Backend {
 	return &Backend{
-		instances:  make(map[types.Instance]*wgpu.Instance),
-		adapters:   make(map[types.Adapter]*wgpu.Adapter),
-		devices:    make(map[types.Device]*wgpu.Device),
-		queues:     make(map[types.Queue]*wgpu.Queue),
-		surfaces:   make(map[types.Surface]*wgpu.Surface),
-		shaders:    make(map[types.ShaderModule]*wgpu.ShaderModule),
-		pipelines:  make(map[types.RenderPipeline]*wgpu.RenderPipeline),
-		encoders:   make(map[types.CommandEncoder]*wgpu.CommandEncoder),
-		buffers:    make(map[types.CommandBuffer]*wgpu.CommandBuffer),
-		passes:     make(map[types.RenderPass]*wgpu.RenderPassEncoder),
-		textures:   make(map[types.Texture]*wgpu.Texture),
-		views:      make(map[types.TextureView]*wgpu.TextureView),
-		nextHandle: 1,
+		instances:        make(map[types.Instance]*wgpu.Instance),
+		adapters:         make(map[types.Adapter]*wgpu.Adapter),
+		devices:          make(map[types.Device]*wgpu.Device),
+		queues:           make(map[types.Queue]*wgpu.Queue),
+		surfaces:         make(map[types.Surface]*wgpu.Surface),
+		shaders:          make(map[types.ShaderModule]*wgpu.ShaderModule),
+		pipelines:        make(map[types.RenderPipeline]*wgpu.RenderPipeline),
+		encoders:         make(map[types.CommandEncoder]*wgpu.CommandEncoder),
+		cmdBuffers:       make(map[types.CommandBuffer]*wgpu.CommandBuffer),
+		passes:           make(map[types.RenderPass]*wgpu.RenderPassEncoder),
+		textures:         make(map[types.Texture]*wgpu.Texture),
+		views:            make(map[types.TextureView]*wgpu.TextureView),
+		samplers:         make(map[types.Sampler]*wgpu.Sampler),
+		gpuBuffers:       make(map[types.Buffer]*wgpu.Buffer),
+		bindGroupLayouts: make(map[types.BindGroupLayout]*wgpu.BindGroupLayout),
+		bindGroups:       make(map[types.BindGroup]*wgpu.BindGroup),
+		pipelineLayouts:  make(map[types.PipelineLayout]*wgpu.PipelineLayout),
+		nextHandle:       1,
 	}
 }
 
@@ -74,7 +84,35 @@ func (b *Backend) Init() error {
 }
 
 // Destroy releases all backend resources.
+//
+//nolint:gocognit,gocyclo,cyclop // Cleanup code is inherently repetitive but straightforward.
 func (b *Backend) Destroy() {
+	// Release in reverse order of creation
+	for _, pl := range b.pipelineLayouts {
+		if pl != nil {
+			pl.Release()
+		}
+	}
+	for _, bg := range b.bindGroups {
+		if bg != nil {
+			bg.Release()
+		}
+	}
+	for _, bgl := range b.bindGroupLayouts {
+		if bgl != nil {
+			bgl.Release()
+		}
+	}
+	for _, buf := range b.gpuBuffers {
+		if buf != nil {
+			buf.Release()
+		}
+	}
+	for _, s := range b.samplers {
+		if s != nil {
+			s.Release()
+		}
+	}
 	for _, v := range b.views {
 		if v != nil {
 			v.Release()
@@ -353,14 +391,14 @@ func (b *Backend) FinishEncoder(encoder types.CommandEncoder) types.CommandBuffe
 
 	buffer := enc.Finish(nil)
 	handle := types.CommandBuffer(b.newHandle())
-	b.buffers[handle] = buffer
+	b.cmdBuffers[handle] = buffer
 	return handle
 }
 
 // Submit submits commands to the queue.
 func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer) {
 	q := b.queues[queue]
-	buf := b.buffers[commands]
+	buf := b.cmdBuffers[commands]
 	if q != nil && buf != nil {
 		q.Submit(buf)
 	}
@@ -383,6 +421,37 @@ func (b *Backend) Draw(pass types.RenderPass, vertexCount, instanceCount, firstV
 	}
 }
 
+// CreateTexture creates a texture.
+func (b *Backend) CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error) {
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	wgpuDesc := &wgpu.TextureDescriptor{
+		Label: wgpu.EmptyStringView(),
+		Size: wgpu.Extent3D{
+			Width:              desc.Size.Width,
+			Height:             desc.Size.Height,
+			DepthOrArrayLayers: desc.Size.DepthOrArrayLayers,
+		},
+		MipLevelCount: desc.MipLevelCount,
+		SampleCount:   desc.SampleCount,
+		Dimension:     wgpu.TextureDimension(desc.Dimension),
+		Format:        wgpu.TextureFormat(desc.Format),
+		Usage:         wgpu.TextureUsage(desc.Usage),
+	}
+
+	texture := dev.CreateTexture(wgpuDesc)
+	if texture == nil {
+		return 0, fmt.Errorf("rust backend: failed to create texture")
+	}
+
+	handle := types.Texture(b.newHandle())
+	b.textures[handle] = texture
+	return handle, nil
+}
+
 // CreateTextureView creates a texture view.
 func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView {
 	tex := b.textures[texture]
@@ -394,6 +463,297 @@ func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureVi
 	handle := types.TextureView(b.newHandle())
 	b.views[handle] = view
 	return handle
+}
+
+// WriteTexture writes data to a texture.
+func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D) {
+	q := b.queues[queue]
+	tex := b.textures[dst.Texture]
+	if q == nil || tex == nil {
+		return
+	}
+
+	wgpuDst := &wgpu.TexelCopyTextureInfo{
+		Texture:  tex.Handle(),
+		MipLevel: dst.MipLevel,
+		Origin: wgpu.Origin3D{
+			X: dst.Origin.X,
+			Y: dst.Origin.Y,
+			Z: dst.Origin.Z,
+		},
+		Aspect: wgpu.TextureAspect(dst.Aspect),
+	}
+
+	wgpuLayout := &wgpu.TexelCopyBufferLayout{
+		Offset:       layout.Offset,
+		BytesPerRow:  layout.BytesPerRow,
+		RowsPerImage: layout.RowsPerImage,
+	}
+
+	wgpuSize := &wgpu.Extent3D{
+		Width:              size.Width,
+		Height:             size.Height,
+		DepthOrArrayLayers: size.DepthOrArrayLayers,
+	}
+
+	q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
+}
+
+// CreateSampler creates a sampler.
+func (b *Backend) CreateSampler(device types.Device, desc *types.SamplerDescriptor) (types.Sampler, error) {
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	wgpuDesc := &wgpu.SamplerDescriptor{
+		Label:         wgpu.EmptyStringView(),
+		AddressModeU:  wgpu.AddressMode(desc.AddressModeU),
+		AddressModeV:  wgpu.AddressMode(desc.AddressModeV),
+		AddressModeW:  wgpu.AddressMode(desc.AddressModeW),
+		MagFilter:     wgpu.FilterMode(desc.MagFilter),
+		MinFilter:     wgpu.FilterMode(desc.MinFilter),
+		MipmapFilter:  wgpu.MipmapFilterMode(desc.MipmapFilter),
+		LodMinClamp:   desc.LodMinClamp,
+		LodMaxClamp:   desc.LodMaxClamp,
+		Compare:       wgpu.CompareFunction(desc.Compare),
+		MaxAnisotropy: desc.MaxAnisotropy,
+	}
+
+	sampler := dev.CreateSampler(wgpuDesc)
+	if sampler == nil {
+		return 0, fmt.Errorf("rust backend: failed to create sampler")
+	}
+
+	handle := types.Sampler(b.newHandle())
+	b.samplers[handle] = sampler
+	return handle, nil
+}
+
+// CreateBuffer creates a buffer.
+func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error) {
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	var mappedAtCreation wgpu.Bool
+	if desc.MappedAtCreation {
+		mappedAtCreation = wgpu.True
+	} else {
+		mappedAtCreation = wgpu.False
+	}
+
+	wgpuDesc := &wgpu.BufferDescriptor{
+		Label:            wgpu.EmptyStringView(),
+		Size:             desc.Size,
+		Usage:            wgpu.BufferUsage(desc.Usage),
+		MappedAtCreation: mappedAtCreation,
+	}
+
+	buffer := dev.CreateBuffer(wgpuDesc)
+	if buffer == nil {
+		return 0, fmt.Errorf("rust backend: failed to create buffer")
+	}
+
+	handle := types.Buffer(b.newHandle())
+	b.gpuBuffers[handle] = buffer
+	return handle, nil
+}
+
+// WriteBuffer writes data to a buffer.
+func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte) {
+	q := b.queues[queue]
+	buf := b.gpuBuffers[buffer]
+	if q == nil || buf == nil {
+		return
+	}
+
+	q.WriteBuffer(buf, offset, data)
+}
+
+// CreateBindGroupLayout creates a bind group layout.
+func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	entries := make([]wgpu.BindGroupLayoutEntry, len(desc.Entries))
+	for i, entry := range desc.Entries {
+		wgpuEntry := wgpu.BindGroupLayoutEntry{
+			Binding:    entry.Binding,
+			Visibility: wgpu.ShaderStage(entry.Visibility),
+		}
+
+		if entry.Buffer != nil {
+			var hasDynamicOffset wgpu.Bool
+			if entry.Buffer.HasDynamicOffset {
+				hasDynamicOffset = wgpu.True
+			} else {
+				hasDynamicOffset = wgpu.False
+			}
+			wgpuEntry.Buffer = wgpu.BufferBindingLayout{
+				Type:             wgpu.BufferBindingType(entry.Buffer.Type),
+				HasDynamicOffset: hasDynamicOffset,
+				MinBindingSize:   entry.Buffer.MinBindingSize,
+			}
+		}
+
+		if entry.Sampler != nil {
+			wgpuEntry.Sampler = wgpu.SamplerBindingLayout{
+				Type: wgpu.SamplerBindingType(entry.Sampler.Type),
+			}
+		}
+
+		if entry.Texture != nil {
+			var multisampled wgpu.Bool
+			if entry.Texture.Multisampled {
+				multisampled = wgpu.True
+			} else {
+				multisampled = wgpu.False
+			}
+			wgpuEntry.Texture = wgpu.TextureBindingLayout{
+				SampleType:    wgpu.TextureSampleType(entry.Texture.SampleType),
+				ViewDimension: wgpu.TextureViewDimension(entry.Texture.ViewDimension),
+				Multisampled:  multisampled,
+			}
+		}
+
+		entries[i] = wgpuEntry
+	}
+
+	layout := dev.CreateBindGroupLayoutSimple(entries)
+	if layout == nil {
+		return 0, fmt.Errorf("rust backend: failed to create bind group layout")
+	}
+
+	handle := types.BindGroupLayout(b.newHandle())
+	b.bindGroupLayouts[handle] = layout
+	return handle, nil
+}
+
+// CreateBindGroup creates a bind group.
+func (b *Backend) CreateBindGroup(device types.Device, desc *types.BindGroupDescriptor) (types.BindGroup, error) {
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	layout := b.bindGroupLayouts[desc.Layout]
+	if layout == nil {
+		return 0, fmt.Errorf("rust backend: invalid bind group layout")
+	}
+
+	entries := make([]wgpu.BindGroupEntry, len(desc.Entries))
+	for i, entry := range desc.Entries {
+		wgpuEntry := wgpu.BindGroupEntry{
+			Binding: entry.Binding,
+		}
+
+		if entry.Buffer != 0 {
+			buf := b.gpuBuffers[entry.Buffer]
+			if buf != nil {
+				wgpuEntry.Buffer = buf.Handle()
+				wgpuEntry.Offset = entry.Offset
+				wgpuEntry.Size = entry.Size
+			}
+		}
+
+		if entry.Sampler != 0 {
+			sampler := b.samplers[entry.Sampler]
+			if sampler != nil {
+				wgpuEntry.Sampler = sampler.Handle()
+			}
+		}
+
+		if entry.TextureView != 0 {
+			view := b.views[entry.TextureView]
+			if view != nil {
+				wgpuEntry.TextureView = view.Handle()
+			}
+		}
+
+		entries[i] = wgpuEntry
+	}
+
+	bindGroup := dev.CreateBindGroupSimple(layout, entries)
+	if bindGroup == nil {
+		return 0, fmt.Errorf("rust backend: failed to create bind group")
+	}
+
+	handle := types.BindGroup(b.newHandle())
+	b.bindGroups[handle] = bindGroup
+	return handle, nil
+}
+
+// CreatePipelineLayout creates a pipeline layout.
+func (b *Backend) CreatePipelineLayout(device types.Device, desc *types.PipelineLayoutDescriptor) (types.PipelineLayout, error) {
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	layouts := make([]*wgpu.BindGroupLayout, len(desc.BindGroupLayouts))
+	for i, layoutHandle := range desc.BindGroupLayouts {
+		layout := b.bindGroupLayouts[layoutHandle]
+		if layout == nil {
+			return 0, fmt.Errorf("rust backend: invalid bind group layout at index %d", i)
+		}
+		layouts[i] = layout
+	}
+
+	pipelineLayout := dev.CreatePipelineLayoutSimple(layouts)
+	if pipelineLayout == nil {
+		return 0, fmt.Errorf("rust backend: failed to create pipeline layout")
+	}
+
+	handle := types.PipelineLayout(b.newHandle())
+	b.pipelineLayouts[handle] = pipelineLayout
+	return handle, nil
+}
+
+// SetBindGroup sets a bind group for rendering.
+func (b *Backend) SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
+	p := b.passes[pass]
+	bg := b.bindGroups[bindGroup]
+	if p == nil || bg == nil {
+		return
+	}
+
+	p.SetBindGroup(index, bg, dynamicOffsets)
+}
+
+// SetVertexBuffer sets a vertex buffer for rendering.
+func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64) {
+	p := b.passes[pass]
+	buf := b.gpuBuffers[buffer]
+	if p == nil || buf == nil {
+		return
+	}
+
+	p.SetVertexBuffer(slot, buf, offset, size)
+}
+
+// SetIndexBuffer sets an index buffer for rendering.
+func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64) {
+	p := b.passes[pass]
+	buf := b.gpuBuffers[buffer]
+	if p == nil || buf == nil {
+		return
+	}
+
+	p.SetIndexBuffer(buf, wgpu.IndexFormat(format), offset, size)
+}
+
+// DrawIndexed issues an indexed draw call.
+func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	p := b.passes[pass]
+	if p == nil {
+		return
+	}
+
+	p.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
 }
 
 // ReleaseTextureView releases a texture view.
@@ -414,12 +774,57 @@ func (b *Backend) ReleaseTexture(texture types.Texture) {
 	}
 }
 
-// ReleaseCommandBuffer releases a command buffer.
-func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer) {
-	buf := b.buffers[buffer]
+// ReleaseSampler releases a sampler.
+func (b *Backend) ReleaseSampler(sampler types.Sampler) {
+	s := b.samplers[sampler]
+	if s != nil {
+		s.Release()
+		delete(b.samplers, sampler)
+	}
+}
+
+// ReleaseBuffer releases a buffer.
+func (b *Backend) ReleaseBuffer(buffer types.Buffer) {
+	buf := b.gpuBuffers[buffer]
 	if buf != nil {
 		buf.Release()
-		delete(b.buffers, buffer)
+		delete(b.gpuBuffers, buffer)
+	}
+}
+
+// ReleaseBindGroupLayout releases a bind group layout.
+func (b *Backend) ReleaseBindGroupLayout(layout types.BindGroupLayout) {
+	l := b.bindGroupLayouts[layout]
+	if l != nil {
+		l.Release()
+		delete(b.bindGroupLayouts, layout)
+	}
+}
+
+// ReleaseBindGroup releases a bind group.
+func (b *Backend) ReleaseBindGroup(group types.BindGroup) {
+	g := b.bindGroups[group]
+	if g != nil {
+		g.Release()
+		delete(b.bindGroups, group)
+	}
+}
+
+// ReleasePipelineLayout releases a pipeline layout.
+func (b *Backend) ReleasePipelineLayout(layout types.PipelineLayout) {
+	l := b.pipelineLayouts[layout]
+	if l != nil {
+		l.Release()
+		delete(b.pipelineLayouts, layout)
+	}
+}
+
+// ReleaseCommandBuffer releases a command buffer.
+func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer) {
+	buf := b.cmdBuffers[buffer]
+	if buf != nil {
+		buf.Release()
+		delete(b.cmdBuffers, buffer)
 	}
 }
 

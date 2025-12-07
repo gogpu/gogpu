@@ -54,6 +54,26 @@ type (
 	// RenderPass represents an active render pass.
 	// Created via Backend.BeginRenderPass().
 	RenderPass uintptr
+
+	// Buffer represents a GPU buffer for vertex/index/uniform data.
+	// Created via Backend.CreateBuffer().
+	Buffer uintptr
+
+	// Sampler represents a texture sampler.
+	// Created via Backend.CreateSampler().
+	Sampler uintptr
+
+	// BindGroupLayout defines the structure of a bind group.
+	// Created via Backend.CreateBindGroupLayout().
+	BindGroupLayout uintptr
+
+	// BindGroup represents a set of resources bound together.
+	// Created via Backend.CreateBindGroup().
+	BindGroup uintptr
+
+	// PipelineLayout defines the layout of bind groups for a pipeline.
+	// Created via Backend.CreatePipelineLayout().
+	PipelineLayout uintptr
 )
 
 // SurfaceTexture is returned by GetCurrentTexture.

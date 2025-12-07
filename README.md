@@ -20,9 +20,9 @@
 
 ---
 
-## Status: v0.2.0-alpha — Dual Backend Architecture
+## Status: v0.3.0-alpha — Texture API
 
-> **Triangle rendering works!** Now with switchable backends.
+> **Texture loading works!** Load from files, Go images, or raw RGBA data.
 >
 > **Star the repo to follow progress!**
 
@@ -79,6 +79,30 @@ func main() {
 
 ---
 
+## Texture Loading
+
+```go
+// Load texture from file (PNG, JPEG)
+tex, err := renderer.LoadTexture("sprite.png")
+defer tex.Destroy()
+
+// Create from Go image
+img := image.NewRGBA(image.Rect(0, 0, 128, 128))
+tex, err := renderer.NewTextureFromImage(img)
+
+// Create from raw RGBA data
+tex, err := renderer.NewTextureFromRGBA(width, height, rgbaPixels)
+
+// With custom options (pixel art, tiling)
+opts := gogpu.TextureOptions{
+    MagFilter:    types.FilterModeNearest,  // Crisp pixels
+    AddressModeU: types.AddressModeRepeat,  // Tiling
+}
+tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
+```
+
+---
+
 ## Why GoGPU?
 
 This project was inspired by [a discussion on r/golang](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) about the state of GUI and graphics development in Go.
@@ -116,12 +140,18 @@ go get github.com/gogpu/gogpu
 
 ```
 gogpu/
-├── gpu/                    # Backend abstraction layer
+├── app.go                 # Application lifecycle
+├── config.go              # Configuration with builder pattern
+├── context.go             # Drawing context API
+├── renderer.go            # Backend-agnostic rendering
+├── texture.go             # Texture loading API
+├── shader.go              # Built-in WGSL shaders
+├── gpu/                   # Backend abstraction layer
 │   ├── backend.go         # Backend interface
 │   ├── types/             # Standalone types (wgpu-types pattern)
-│   │   ├── handles.go     # Instance, Device, Texture, etc.
+│   │   ├── handles.go     # Instance, Device, Texture, Sampler, etc.
 │   │   ├── enums.go       # TextureFormat, PresentMode, etc.
-│   │   └── descriptors.go # SurfaceConfig, Color, etc.
+│   │   └── descriptors.go # SamplerDescriptor, BindGroup, etc.
 │   └── backend/
 │       ├── rust/          # Rust backend (wgpu-native)
 │       └── native/        # Native Go backend (stub)
@@ -129,7 +159,8 @@ gogpu/
 ├── input/                 # Keyboard, mouse input
 ├── gmath/                 # Vec2, Vec3, Vec4, Mat4, Color
 ├── examples/              # Example applications
-│   └── triangle/         # Simple triangle demo
+│   ├── triangle/         # Simple triangle demo
+│   └── texture/          # Texture API demo
 └── internal/
     └── platform/          # Platform abstraction (Win32, etc.)
 ```
@@ -143,16 +174,19 @@ gogpu/
 - [x] Basic rendering (triangle)
 - [x] Simple API (~20 lines)
 
-### v0.2.0-alpha — Dual Backend ✅ (Current)
+### v0.2.0-alpha — Dual Backend ✅
 - [x] Backend interface abstraction
 - [x] Rust backend wrapper
 - [x] Native Go backend stub
 - [x] `WithBackend()` configuration
 
-### v0.3.0-alpha — Textures & Sprites
-- [ ] Texture loading
-- [ ] Sprite rendering
-- [ ] Basic shapes
+### v0.3.0-alpha — Textures ✅ (Current)
+- [x] Texture loading from files (PNG, JPEG)
+- [x] Texture from Go image.Image
+- [x] Texture from raw RGBA data
+- [x] Sampler configuration (filtering, addressing)
+- [ ] Sprite rendering (next)
+- [ ] Basic shapes (next)
 
 ### v0.4.0-alpha — Native Go Backend
 - [ ] Pure Go WebGPU implementation
@@ -169,7 +203,7 @@ gogpu/
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.2.0-alpha |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0-alpha |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | Active |
 | [gogpu/gg](https://github.com/gogpu/gg) | Simple 2D graphics library | Planned |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | Future |

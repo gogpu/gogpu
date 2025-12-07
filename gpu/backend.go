@@ -60,10 +60,37 @@ type Backend interface {
 	SetPipeline(pass types.RenderPass, pipeline types.RenderPipeline)
 	Draw(pass types.RenderPass, vertexCount, instanceCount, firstVertex, firstInstance uint32)
 
-	// Resource operations
+	// Texture operations
+	CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error)
 	CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView
-	ReleaseTextureView(view types.TextureView)
+	WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D)
+
+	// Sampler operations
+	CreateSampler(device types.Device, desc *types.SamplerDescriptor) (types.Sampler, error)
+
+	// Buffer operations
+	CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error)
+	WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte)
+
+	// Bind group operations
+	CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error)
+	CreateBindGroup(device types.Device, desc *types.BindGroupDescriptor) (types.BindGroup, error)
+	CreatePipelineLayout(device types.Device, desc *types.PipelineLayoutDescriptor) (types.PipelineLayout, error)
+
+	// Render pass operations (extended)
+	SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32)
+	SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64)
+	SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64)
+	DrawIndexed(pass types.RenderPass, indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)
+
+	// Resource release
 	ReleaseTexture(texture types.Texture)
+	ReleaseTextureView(view types.TextureView)
+	ReleaseSampler(sampler types.Sampler)
+	ReleaseBuffer(buffer types.Buffer)
+	ReleaseBindGroupLayout(layout types.BindGroupLayout)
+	ReleaseBindGroup(group types.BindGroup)
+	ReleasePipelineLayout(layout types.PipelineLayout)
 	ReleaseCommandBuffer(buffer types.CommandBuffer)
 	ReleaseCommandEncoder(encoder types.CommandEncoder)
 	ReleaseRenderPass(pass types.RenderPass)

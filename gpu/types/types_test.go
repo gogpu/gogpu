@@ -202,6 +202,345 @@ func TestSurfaceHandle(t *testing.T) {
 	}
 }
 
+func TestAddressModeValues(t *testing.T) {
+	// Verify iota ordering
+	if AddressModeClampToEdge != 0 {
+		t.Errorf("AddressModeClampToEdge = %d, want 0", AddressModeClampToEdge)
+	}
+	if AddressModeRepeat != 1 {
+		t.Errorf("AddressModeRepeat = %d, want 1", AddressModeRepeat)
+	}
+	if AddressModeMirrorRepeat != 2 {
+		t.Errorf("AddressModeMirrorRepeat = %d, want 2", AddressModeMirrorRepeat)
+	}
+}
+
+func TestFilterModeValues(t *testing.T) {
+	// Verify iota ordering
+	if FilterModeNearest != 0 {
+		t.Errorf("FilterModeNearest = %d, want 0", FilterModeNearest)
+	}
+	if FilterModeLinear != 1 {
+		t.Errorf("FilterModeLinear = %d, want 1", FilterModeLinear)
+	}
+}
+
+func TestMipmapFilterModeValues(t *testing.T) {
+	// Verify iota ordering
+	if MipmapFilterModeNearest != 0 {
+		t.Errorf("MipmapFilterModeNearest = %d, want 0", MipmapFilterModeNearest)
+	}
+	if MipmapFilterModeLinear != 1 {
+		t.Errorf("MipmapFilterModeLinear = %d, want 1", MipmapFilterModeLinear)
+	}
+}
+
+func TestShaderStageValues(t *testing.T) {
+	// Values must match WebGPU spec (bit flags)
+	if ShaderStageNone != 0 {
+		t.Errorf("ShaderStageNone = 0x%x, want 0", ShaderStageNone)
+	}
+	if ShaderStageVertex != 0x1 {
+		t.Errorf("ShaderStageVertex = 0x%x, want 0x1", ShaderStageVertex)
+	}
+	if ShaderStageFragment != 0x2 {
+		t.Errorf("ShaderStageFragment = 0x%x, want 0x2", ShaderStageFragment)
+	}
+	if ShaderStageCompute != 0x4 {
+		t.Errorf("ShaderStageCompute = 0x%x, want 0x4", ShaderStageCompute)
+	}
+}
+
+func TestShaderStageCombinations(t *testing.T) {
+	// Test that shader stage flags can be combined
+	stage := ShaderStageVertex | ShaderStageFragment
+	if stage != 0x3 {
+		t.Errorf("Combined stage = 0x%x, want 0x3", stage)
+	}
+
+	// Test individual flag checks
+	if stage&ShaderStageVertex == 0 {
+		t.Error("Expected Vertex flag to be set")
+	}
+	if stage&ShaderStageFragment == 0 {
+		t.Error("Expected Fragment flag to be set")
+	}
+	if stage&ShaderStageCompute != 0 {
+		t.Error("Expected Compute flag to NOT be set")
+	}
+}
+
+func TestBufferUsageValues(t *testing.T) {
+	// Values must match WebGPU spec (bit flags)
+	tests := []struct {
+		usage    BufferUsage
+		expected BufferUsage
+		name     string
+	}{
+		{BufferUsageMapRead, 0x0001, "MapRead"},
+		{BufferUsageMapWrite, 0x0002, "MapWrite"},
+		{BufferUsageCopySrc, 0x0004, "CopySrc"},
+		{BufferUsageCopyDst, 0x0008, "CopyDst"},
+		{BufferUsageIndex, 0x0010, "Index"},
+		{BufferUsageVertex, 0x0020, "Vertex"},
+		{BufferUsageUniform, 0x0040, "Uniform"},
+		{BufferUsageStorage, 0x0080, "Storage"},
+		{BufferUsageIndirect, 0x0100, "Indirect"},
+		{BufferUsageQueryResolve, 0x0200, "QueryResolve"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.usage != tt.expected {
+				t.Errorf("BufferUsage%s = 0x%x, want 0x%x", tt.name, tt.usage, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBufferUsageCombinations(t *testing.T) {
+	// Test typical buffer usage combination
+	usage := BufferUsageVertex | BufferUsageCopyDst
+	if usage != 0x28 {
+		t.Errorf("Combined usage = 0x%x, want 0x28", usage)
+	}
+
+	if usage&BufferUsageVertex == 0 {
+		t.Error("Expected Vertex flag to be set")
+	}
+	if usage&BufferUsageCopyDst == 0 {
+		t.Error("Expected CopyDst flag to be set")
+	}
+	if usage&BufferUsageUniform != 0 {
+		t.Error("Expected Uniform flag to NOT be set")
+	}
+}
+
+func TestTextureDimensionValues(t *testing.T) {
+	if TextureDimension1D != 0x00 {
+		t.Errorf("TextureDimension1D = 0x%x, want 0x00", TextureDimension1D)
+	}
+	if TextureDimension2D != 0x01 {
+		t.Errorf("TextureDimension2D = 0x%x, want 0x01", TextureDimension2D)
+	}
+	if TextureDimension3D != 0x02 {
+		t.Errorf("TextureDimension3D = 0x%x, want 0x02", TextureDimension3D)
+	}
+}
+
+func TestTextureViewDimensionValues(t *testing.T) {
+	tests := []struct {
+		dim      TextureViewDimension
+		expected TextureViewDimension
+		name     string
+	}{
+		{TextureViewDimensionUndefined, 0x00, "Undefined"},
+		{TextureViewDimension1D, 0x01, "1D"},
+		{TextureViewDimension2D, 0x02, "2D"},
+		{TextureViewDimension2DArray, 0x03, "2DArray"},
+		{TextureViewDimensionCube, 0x04, "Cube"},
+		{TextureViewDimensionCubeArray, 0x05, "CubeArray"},
+		{TextureViewDimension3D, 0x06, "3D"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.dim != tt.expected {
+				t.Errorf("TextureViewDimension%s = 0x%x, want 0x%x", tt.name, tt.dim, tt.expected)
+			}
+		})
+	}
+}
+
+func TestTextureAspectValues(t *testing.T) {
+	if TextureAspectAll != 0x00 {
+		t.Errorf("TextureAspectAll = 0x%x, want 0x00", TextureAspectAll)
+	}
+	if TextureAspectStencilOnly != 0x01 {
+		t.Errorf("TextureAspectStencilOnly = 0x%x, want 0x01", TextureAspectStencilOnly)
+	}
+	if TextureAspectDepthOnly != 0x02 {
+		t.Errorf("TextureAspectDepthOnly = 0x%x, want 0x02", TextureAspectDepthOnly)
+	}
+}
+
+func TestIndexFormatValues(t *testing.T) {
+	if IndexFormatUint16 != 0 {
+		t.Errorf("IndexFormatUint16 = %d, want 0", IndexFormatUint16)
+	}
+	if IndexFormatUint32 != 1 {
+		t.Errorf("IndexFormatUint32 = %d, want 1", IndexFormatUint32)
+	}
+}
+
+func TestVertexStepModeValues(t *testing.T) {
+	if VertexStepModeVertex != 0 {
+		t.Errorf("VertexStepModeVertex = %d, want 0", VertexStepModeVertex)
+	}
+	if VertexStepModeInstance != 1 {
+		t.Errorf("VertexStepModeInstance = %d, want 1", VertexStepModeInstance)
+	}
+}
+
+func TestBufferBindingTypeValues(t *testing.T) {
+	if BufferBindingTypeUndefined != 0 {
+		t.Errorf("BufferBindingTypeUndefined = %d, want 0", BufferBindingTypeUndefined)
+	}
+	if BufferBindingTypeUniform != 1 {
+		t.Errorf("BufferBindingTypeUniform = %d, want 1", BufferBindingTypeUniform)
+	}
+	if BufferBindingTypeStorage != 2 {
+		t.Errorf("BufferBindingTypeStorage = %d, want 2", BufferBindingTypeStorage)
+	}
+	if BufferBindingTypeReadOnlyStorage != 3 {
+		t.Errorf("BufferBindingTypeReadOnlyStorage = %d, want 3", BufferBindingTypeReadOnlyStorage)
+	}
+}
+
+func TestSamplerBindingTypeValues(t *testing.T) {
+	if SamplerBindingTypeUndefined != 0 {
+		t.Errorf("SamplerBindingTypeUndefined = %d, want 0", SamplerBindingTypeUndefined)
+	}
+	if SamplerBindingTypeFiltering != 1 {
+		t.Errorf("SamplerBindingTypeFiltering = %d, want 1", SamplerBindingTypeFiltering)
+	}
+	if SamplerBindingTypeNonFiltering != 2 {
+		t.Errorf("SamplerBindingTypeNonFiltering = %d, want 2", SamplerBindingTypeNonFiltering)
+	}
+	if SamplerBindingTypeComparison != 3 {
+		t.Errorf("SamplerBindingTypeComparison = %d, want 3", SamplerBindingTypeComparison)
+	}
+}
+
+func TestTextureSampleTypeValues(t *testing.T) {
+	tests := []struct {
+		sampleType TextureSampleType
+		expected   TextureSampleType
+		name       string
+	}{
+		{TextureSampleTypeUndefined, 0, "Undefined"},
+		{TextureSampleTypeFloat, 1, "Float"},
+		{TextureSampleTypeUnfilterableFloat, 2, "UnfilterableFloat"},
+		{TextureSampleTypeDepth, 3, "Depth"},
+		{TextureSampleTypeSint, 4, "Sint"},
+		{TextureSampleTypeUint, 5, "Uint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.sampleType != tt.expected {
+				t.Errorf("TextureSampleType%s = %d, want %d", tt.name, tt.sampleType, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCompareFunctionValues(t *testing.T) {
+	tests := []struct {
+		fn       CompareFunction
+		expected CompareFunction
+		name     string
+	}{
+		{CompareFunctionUndefined, 0, "Undefined"},
+		{CompareFunctionNever, 1, "Never"},
+		{CompareFunctionLess, 2, "Less"},
+		{CompareFunctionEqual, 3, "Equal"},
+		{CompareFunctionLessEqual, 4, "LessEqual"},
+		{CompareFunctionGreater, 5, "Greater"},
+		{CompareFunctionNotEqual, 6, "NotEqual"},
+		{CompareFunctionGreaterEqual, 7, "GreaterEqual"},
+		{CompareFunctionAlways, 8, "Always"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.fn != tt.expected {
+				t.Errorf("CompareFunction%s = %d, want %d", tt.name, tt.fn, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtent3D(t *testing.T) {
+	ext := Extent3D{
+		Width:              512,
+		Height:             256,
+		DepthOrArrayLayers: 1,
+	}
+
+	if ext.Width != 512 {
+		t.Errorf("Extent3D.Width = %d, want 512", ext.Width)
+	}
+	if ext.Height != 256 {
+		t.Errorf("Extent3D.Height = %d, want 256", ext.Height)
+	}
+	if ext.DepthOrArrayLayers != 1 {
+		t.Errorf("Extent3D.DepthOrArrayLayers = %d, want 1", ext.DepthOrArrayLayers)
+	}
+}
+
+func TestOrigin3D(t *testing.T) {
+	origin := Origin3D{
+		X: 10,
+		Y: 20,
+		Z: 0,
+	}
+
+	if origin.X != 10 {
+		t.Errorf("Origin3D.X = %d, want 10", origin.X)
+	}
+	if origin.Y != 20 {
+		t.Errorf("Origin3D.Y = %d, want 20", origin.Y)
+	}
+	if origin.Z != 0 {
+		t.Errorf("Origin3D.Z = %d, want 0", origin.Z)
+	}
+}
+
+func TestImageDataLayout(t *testing.T) {
+	layout := ImageDataLayout{
+		Offset:       0,
+		BytesPerRow:  512 * 4, // 512 pixels * 4 bytes (RGBA)
+		RowsPerImage: 256,
+	}
+
+	if layout.Offset != 0 {
+		t.Errorf("ImageDataLayout.Offset = %d, want 0", layout.Offset)
+	}
+	if layout.BytesPerRow != 2048 {
+		t.Errorf("ImageDataLayout.BytesPerRow = %d, want 2048", layout.BytesPerRow)
+	}
+	if layout.RowsPerImage != 256 {
+		t.Errorf("ImageDataLayout.RowsPerImage = %d, want 256", layout.RowsPerImage)
+	}
+}
+
+func TestNewHandleTypes(t *testing.T) {
+	// Test new handle types added for texture support
+	var (
+		buffer          Buffer          = 1
+		sampler         Sampler         = 2
+		bindGroupLayout BindGroupLayout = 3
+		bindGroup       BindGroup       = 4
+		pipelineLayout  PipelineLayout  = 5
+	)
+
+	handles := []uintptr{
+		uintptr(buffer),
+		uintptr(sampler),
+		uintptr(bindGroupLayout),
+		uintptr(bindGroup),
+		uintptr(pipelineLayout),
+	}
+
+	for i, h := range handles {
+		expected := uintptr(i + 1)
+		if h != expected {
+			t.Errorf("New Handle[%d] = %d, want %d", i, h, expected)
+		}
+	}
+}
+
 func TestHandleTypes(t *testing.T) {
 	// Verify handles are distinct types (compile-time check via assignments)
 	var (

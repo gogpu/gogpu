@@ -116,9 +116,74 @@ func (b *Backend) Draw(pass types.RenderPass, vertexCount, instanceCount, firstV
 	// Not implemented
 }
 
+// CreateTexture creates a GPU texture.
+func (b *Backend) CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
 // CreateTextureView creates a texture view.
 func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView {
 	return 0
+}
+
+// WriteTexture writes data to a texture.
+func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D) {
+	// Not implemented
+}
+
+// CreateSampler creates a texture sampler.
+func (b *Backend) CreateSampler(device types.Device, desc *types.SamplerDescriptor) (types.Sampler, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// CreateBuffer creates a GPU buffer.
+func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// WriteBuffer writes data to a buffer.
+func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte) {
+	// Not implemented
+}
+
+// CreateBindGroupLayout creates a bind group layout.
+func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// CreateBindGroup creates a bind group.
+func (b *Backend) CreateBindGroup(device types.Device, desc *types.BindGroupDescriptor) (types.BindGroup, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// CreatePipelineLayout creates a pipeline layout.
+func (b *Backend) CreatePipelineLayout(device types.Device, desc *types.PipelineLayoutDescriptor) (types.PipelineLayout, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// SetBindGroup sets a bind group for a render pass.
+func (b *Backend) SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
+	// Not implemented
+}
+
+// SetVertexBuffer sets a vertex buffer for a render pass.
+func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64) {
+	// Not implemented
+}
+
+// SetIndexBuffer sets an index buffer for a render pass.
+func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64) {
+	// Not implemented
+}
+
+// DrawIndexed issues an indexed draw call.
+func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	// Not implemented
+}
+
+// ReleaseTexture releases a texture.
+func (b *Backend) ReleaseTexture(texture types.Texture) {
+	// Not implemented
 }
 
 // ReleaseTextureView releases a texture view.
@@ -126,8 +191,28 @@ func (b *Backend) ReleaseTextureView(view types.TextureView) {
 	// Not implemented
 }
 
-// ReleaseTexture releases a texture.
-func (b *Backend) ReleaseTexture(texture types.Texture) {
+// ReleaseSampler releases a sampler.
+func (b *Backend) ReleaseSampler(sampler types.Sampler) {
+	// Not implemented
+}
+
+// ReleaseBuffer releases a buffer.
+func (b *Backend) ReleaseBuffer(buffer types.Buffer) {
+	// Not implemented
+}
+
+// ReleaseBindGroupLayout releases a bind group layout.
+func (b *Backend) ReleaseBindGroupLayout(layout types.BindGroupLayout) {
+	// Not implemented
+}
+
+// ReleaseBindGroup releases a bind group.
+func (b *Backend) ReleaseBindGroup(group types.BindGroup) {
+	// Not implemented
+}
+
+// ReleasePipelineLayout releases a pipeline layout.
+func (b *Backend) ReleasePipelineLayout(layout types.PipelineLayout) {
 	// Not implemented
 }
 

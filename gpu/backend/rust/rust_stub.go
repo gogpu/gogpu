@@ -96,15 +96,61 @@ func (b *Backend) SetPipeline(pass types.RenderPass, pipeline types.RenderPipeli
 func (b *Backend) Draw(pass types.RenderPass, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
 }
 
+func (b *Backend) CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
 func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView {
 	return 0
 }
 
-func (b *Backend) ReleaseTextureView(view types.TextureView)          {}
-func (b *Backend) ReleaseTexture(texture types.Texture)               {}
-func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer)    {}
-func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder) {}
-func (b *Backend) ReleaseRenderPass(pass types.RenderPass)            {}
+func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D) {
+}
+
+func (b *Backend) CreateSampler(device types.Device, desc *types.SamplerDescriptor) (types.Sampler, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte) {}
+
+func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) CreateBindGroup(device types.Device, desc *types.BindGroupDescriptor) (types.BindGroup, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) CreatePipelineLayout(device types.Device, desc *types.PipelineLayoutDescriptor) (types.PipelineLayout, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
+}
+
+func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64) {
+}
+
+func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64) {
+}
+
+func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+}
+
+func (b *Backend) ReleaseTexture(texture types.Texture)                {}
+func (b *Backend) ReleaseTextureView(view types.TextureView)           {}
+func (b *Backend) ReleaseSampler(sampler types.Sampler)                {}
+func (b *Backend) ReleaseBuffer(buffer types.Buffer)                   {}
+func (b *Backend) ReleaseBindGroupLayout(layout types.BindGroupLayout) {}
+func (b *Backend) ReleaseBindGroup(group types.BindGroup)              {}
+func (b *Backend) ReleasePipelineLayout(layout types.PipelineLayout)   {}
+func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer)     {}
+func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder)  {}
+func (b *Backend) ReleaseRenderPass(pass types.RenderPass)             {}
 
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)
