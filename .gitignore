@@ -1,6 +1,12 @@
 # IDE
 .idea/
 
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
 # Logs
 *.log
 
