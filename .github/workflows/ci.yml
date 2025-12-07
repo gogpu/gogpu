@@ -1,78 +1,140 @@
 name: CI
 
+# CI Strategy:
+# - Tests run on Linux, macOS, and Windows (cross-platform GPU library)
+# - Go 1.25+ required (matches go.mod requirement)
+# - Requires wgpu-native for Rust backend tests
+#
+# Branch Strategy (GitHub Flow):
+# - main branch: Production-ready code
+# - feat/** branches: Feature development
+# - fix/** branches: Bug fixes
+# - Pull requests: Must pass all checks before merge
+
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
-  test:
-    name: Test
+  # Build verification - Cross-platform
+  build:
+    name: Build - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        go: ['1.25']
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.25']
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go }}
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
 
-      - name: Download dependencies
-        run: go mod download
+    - name: Download dependencies
+      run: go mod download
 
-      - name: Run tests
-        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+    - name: Verify dependencies
+      run: go mod verify
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: matrix.os == 'ubuntu-latest'
-        with:
-          files: ./coverage.txt
-          fail_ci_if_error: false
+    - name: Build all packages
+      run: go build ./...
 
+    - name: Build examples
+      run: go build ./examples/...
+
+  # Unit tests - Cross-platform
+  test:
+    name: Test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.25']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run go vet
+      if: matrix.os == 'ubuntu-latest'
+      run: go vet ./...
+
+    - name: Run tests with race detector
+      shell: bash
+      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest'
+      uses: codecov/codecov-action@v4
+      continue-on-error: true
+      with:
+        file: ./coverage.txt
+        flags: unittests
+        name: codecov-gogpu
+
+  # Linting
   lint:
     name: Lint
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v8
+      with:
+        version: latest
+        args: --timeout=5m
 
-  build:
-    name: Build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+  # Code formatting check
+  formatting:
+    name: Formatting
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
 
-      - name: Build
-        run: go build ./...
-
-      - name: Build examples
-        run: go build ./examples/...
+    - name: Check formatting
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "ERROR: The following files are not formatted:"
+          gofmt -l .
+          echo ""
+          echo "Run 'go fmt ./...' to fix formatting issues."
+          exit 1
+        fi
+        echo "All files are properly formatted"

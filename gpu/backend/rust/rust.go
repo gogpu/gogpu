@@ -32,18 +32,18 @@ type Backend struct {
 // New creates a new Rust backend.
 func New() *Backend {
 	return &Backend{
-		instances: make(map[gpu.Instance]*wgpu.Instance),
-		adapters:  make(map[gpu.Adapter]*wgpu.Adapter),
-		devices:   make(map[gpu.Device]*wgpu.Device),
-		queues:    make(map[gpu.Queue]*wgpu.Queue),
-		surfaces:  make(map[gpu.Surface]*wgpu.Surface),
-		shaders:   make(map[gpu.ShaderModule]*wgpu.ShaderModule),
-		pipelines: make(map[gpu.RenderPipeline]*wgpu.RenderPipeline),
-		encoders:  make(map[gpu.CommandEncoder]*wgpu.CommandEncoder),
-		buffers:   make(map[gpu.CommandBuffer]*wgpu.CommandBuffer),
-		passes:    make(map[gpu.RenderPass]*wgpu.RenderPassEncoder),
-		textures:  make(map[gpu.Texture]*wgpu.Texture),
-		views:     make(map[gpu.TextureView]*wgpu.TextureView),
+		instances:  make(map[gpu.Instance]*wgpu.Instance),
+		adapters:   make(map[gpu.Adapter]*wgpu.Adapter),
+		devices:    make(map[gpu.Device]*wgpu.Device),
+		queues:     make(map[gpu.Queue]*wgpu.Queue),
+		surfaces:   make(map[gpu.Surface]*wgpu.Surface),
+		shaders:    make(map[gpu.ShaderModule]*wgpu.ShaderModule),
+		pipelines:  make(map[gpu.RenderPipeline]*wgpu.RenderPipeline),
+		encoders:   make(map[gpu.CommandEncoder]*wgpu.CommandEncoder),
+		buffers:    make(map[gpu.CommandBuffer]*wgpu.CommandBuffer),
+		passes:     make(map[gpu.RenderPass]*wgpu.RenderPassEncoder),
+		textures:   make(map[gpu.Texture]*wgpu.Texture),
+		views:      make(map[gpu.TextureView]*wgpu.TextureView),
 		nextHandle: 1,
 	}
 }

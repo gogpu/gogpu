@@ -1,33 +1,174 @@
+# GolangCI-Lint v2.5 Configuration for GoGPU - Pure Go GPU Computing Ecosystem
+# Documentation: https://golangci-lint.run/docs/configuration/
+
+version: "2"
+
 run:
   timeout: 5m
-  modules-download-mode: readonly
+  tests: true
 
 linters:
+  # Enable comprehensive set of linters for production-quality code
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - goimports
-    - misspell
-    - unconvert
-    - unparam
+    # Code quality and complexity
+    - gocyclo       # Check cyclomatic complexity
+    - gocognit      # Check cognitive complexity
+    - funlen        # Check function length
+    - maintidx      # Maintainability index
+    - cyclop        # Check cyclomatic complexity (alternative)
+    - nestif        # Reports deeply nested if statements
 
-linters-settings:
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/gogpu/gogpu
-  misspell:
-    locale: US
+    # Bug detection
+    - govet         # Standard Go vet
+    - staticcheck   # Comprehensive static analysis
+    - errcheck      # Check that errors are handled
+    - errorlint     # Check error wrapping
+    - gosec         # Security issues
+    - nilnil        # Check that functions don't return nil both ways
+    - nilerr        # Check nil error returns
+    - ineffassign   # Detect ineffectual assignments
+
+    # Code style and consistency
+    - misspell      # Check for misspelled words
+    - whitespace    # Check for trailing whitespace
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Detect unused function parameters
+
+    # Naming conventions
+    - errname       # Check error naming conventions
+    - revive        # Fast, configurable, extensible linter
+
+    # Performance
+    - prealloc      # Find slice declarations that could be preallocated
+    - bodyclose     # Check HTTP response bodies are closed
+    - makezero      # Find slice declarations with non-zero initial length
+
+    # Code practices
+    - goconst       # Find repeated strings that could be constants
+    - gocritic      # Comprehensive code checker
+    - goprintffuncname  # Check printf-like function names
+    - nolintlint    # Check nolint directives are used correctly
+    - nakedret      # Checks for naked returns
+
+    # Additional quality checkers
+    - dupl          # Detect duplicate code
+    - dogsled       # Check for assignments with too many blank identifiers
+    - durationcheck # Check for two durations multiplied together
+
+  settings:
+    govet:
+      enable:
+        - copylocks
+      disable:
+        - fieldalignment
+
+    gocyclo:
+      # GPU backend code can be moderately complex
+      min-complexity: 20
+
+    cyclop:
+      max-complexity: 20
+
+    funlen:
+      # Backend wrappers can be long due to many methods
+      lines: 120
+      statements: 60
+
+    gocognit:
+      min-complexity: 30
+
+    misspell:
+      locale: US
+
+    nestif:
+      min-complexity: 4
+
+    revive:
+      rules:
+        - name: var-naming
+        - name: error-return
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+
+      disabled-checks:
+        - commentFormatting
+        - whyNoLint
+        - unnamedResult
+        - commentedOutCode
+        - octalLiteral
+        - paramTypeCombine
+
+      settings:
+        hugeParam:
+          sizeThreshold: 256
+
+  exclusions:
+    rules:
+      # Test files - allow more flexibility
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - cyclop
+          - funlen
+          - maintidx
+          - errcheck
+          - gosec
+          - goconst
+          - dupl
+          - gocognit
+
+      # Backend implementations - many similar methods
+      - path: gpu/backend/.*\.go
+        linters:
+          - funlen       # Backend wrappers have many methods
+          - dupl         # Backend methods are similar by design
+
+      # Platform abstraction - platform-specific code
+      - path: internal/platform/.*\.go
+        linters:
+          - gocyclo      # Platform code can be complex
+          - funlen       # Win32 code is verbose
+          - gosec        # Platform syscalls are intentional
+
+      # Internal utilities
+      - path: internal/.*\.go
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+
+      # Example code - demonstration purposes
+      - path: examples?/.*\.go
+        linters:
+          - errcheck
+          - errorlint
+          - funlen
+          - gocyclo
+          - cyclop
+          - gocognit
+          - godot
+          - revive
+          - gosec
+          - gocritic
 
 issues:
-  exclude-rules:
-    # Exclude some linters from running on test files
-    - path: _test\.go
-      linters:
-        - errcheck
-        - unparam
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false

@@ -1,0 +1,53 @@
+# CODEOWNERS for GoGPU
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Code owners are automatically requested for review when someone opens a pull request
+# that modifies code they own.
+
+# Default owner for everything in the repo
+* @kolkov
+
+# GPU backend abstraction - Core architecture
+/gpu/ @kolkov
+
+# Backend implementations
+/gpu/backend/rust/ @kolkov
+/gpu/backend/native/ @kolkov
+
+# Platform abstraction - OS-specific code
+/internal/platform/ @kolkov
+
+# Core API files - Breaking changes require careful review
+/app.go @kolkov
+/config.go @kolkov
+/context.go @kolkov
+/renderer.go @kolkov
+
+# Math library
+/math/ @kolkov
+
+# Window and input handling
+/window/ @kolkov
+/input/ @kolkov
+
+# Examples
+/examples/ @kolkov
+
+# Documentation
+*.md @kolkov
+
+# GitHub configuration and CI/CD
+/.github/ @kolkov
+
+# Code quality and linting configuration
+/.golangci.yml @kolkov
+
+# Tests
+*_test.go @kolkov
+
+# Go module files - Dependency management
+/go.mod @kolkov
+/go.sum @kolkov
+
+# Scripts
+/scripts/ @kolkov

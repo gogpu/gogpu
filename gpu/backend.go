@@ -180,7 +180,7 @@ const (
 type PresentMode uint32
 
 const (
-	PresentModeFifo     PresentMode = 0x01 // VSync
+	PresentModeFifo      PresentMode = 0x01 // VSync
 	PresentModeImmediate PresentMode = 0x03 // No VSync
 )
 
