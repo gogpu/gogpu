@@ -6,6 +6,7 @@ import (
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/backend/rust"
+	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
 )
 
@@ -16,31 +17,31 @@ type Renderer struct {
 	backend gpu.Backend
 
 	// GPU handles
-	instance gpu.Instance
-	adapter  gpu.Adapter
-	device   gpu.Device
-	queue    gpu.Queue
-	surface  gpu.Surface
+	instance types.Instance
+	adapter  types.Adapter
+	device   types.Device
+	queue    types.Queue
+	surface  types.Surface
 
 	// Surface configuration
-	format gpu.TextureFormat
+	format types.TextureFormat
 	width  uint32
 	height uint32
 
 	// Current frame state
-	currentTexture gpu.Texture
-	currentView    gpu.TextureView
+	currentTexture types.Texture
+	currentView    types.TextureView
 
 	// Built-in pipelines
-	trianglePipeline gpu.RenderPipeline
-	triangleShader   gpu.ShaderModule
+	trianglePipeline types.RenderPipeline
+	triangleShader   types.ShaderModule
 
 	// Platform reference
 	platform platform.Platform
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(plat platform.Platform, backendType gpu.BackendType) (*Renderer, error) {
+func newRenderer(plat platform.Platform, backendType types.BackendType) (*Renderer, error) {
 	// Create backend based on type
 	backend, err := createBackend(backendType)
 	if err != nil {
@@ -61,16 +62,16 @@ func newRenderer(plat platform.Platform, backendType gpu.BackendType) (*Renderer
 }
 
 // createBackend creates a backend of the specified type.
-func createBackend(typ gpu.BackendType) (gpu.Backend, error) {
+func createBackend(typ types.BackendType) (gpu.Backend, error) {
 	switch typ {
-	case gpu.BackendRust:
+	case types.BackendRust:
 		if !rust.IsAvailable() {
 			return nil, fmt.Errorf("rust backend not available on this platform")
 		}
 		return rust.New(), nil
-	case gpu.BackendGo:
+	case types.BackendGo:
 		return native.New(), nil
-	case gpu.BackendAuto:
+	case types.BackendAuto:
 		// Auto: prefer Rust backend if available, fallback to native
 		if rust.IsAvailable() {
 			return rust.New(), nil
@@ -103,7 +104,7 @@ func (r *Renderer) init() error {
 	hinstance, hwnd := r.platform.GetHandle()
 
 	// Create surface
-	r.surface, err = r.backend.CreateSurface(r.instance, gpu.SurfaceHandle{
+	r.surface, err = r.backend.CreateSurface(r.instance, types.SurfaceHandle{
 		Instance: hinstance,
 		Window:   hwnd,
 	})
@@ -112,8 +113,8 @@ func (r *Renderer) init() error {
 	}
 
 	// Request adapter
-	r.adapter, err = r.backend.RequestAdapter(r.instance, &gpu.AdapterOptions{
-		PowerPreference: gpu.PowerPreferenceHighPerformance,
+	r.adapter, err = r.backend.RequestAdapter(r.instance, &types.AdapterOptions{
+		PowerPreference: types.PowerPreferenceHighPerformance,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
@@ -134,15 +135,15 @@ func (r *Renderer) init() error {
 	r.height = uint32(height)
 
 	// Use BGRA8Unorm which is common on Windows
-	r.format = gpu.TextureFormatBGRA8Unorm
+	r.format = types.TextureFormatBGRA8Unorm
 
-	r.backend.ConfigureSurface(r.surface, r.device, &gpu.SurfaceConfig{
+	r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 		Format:      r.format,
-		Usage:       gpu.TextureUsageRenderAttachment,
+		Usage:       types.TextureUsageRenderAttachment,
 		Width:       r.width,
 		Height:      r.height,
-		AlphaMode:   gpu.AlphaModeOpaque,
-		PresentMode: gpu.PresentModeFifo, // VSync
+		AlphaMode:   types.AlphaModeOpaque,
+		PresentMode: types.PresentModeFifo, // VSync
 	})
 
 	return nil
@@ -157,13 +158,13 @@ func (r *Renderer) Resize(width, height int) {
 	r.width = uint32(width)
 	r.height = uint32(height)
 
-	r.backend.ConfigureSurface(r.surface, r.device, &gpu.SurfaceConfig{
+	r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 		Format:      r.format,
-		Usage:       gpu.TextureUsageRenderAttachment,
+		Usage:       types.TextureUsageRenderAttachment,
 		Width:       r.width,
 		Height:      r.height,
-		AlphaMode:   gpu.AlphaModeOpaque,
-		PresentMode: gpu.PresentModeFifo,
+		AlphaMode:   types.AlphaModeOpaque,
+		PresentMode: types.PresentModeFifo,
 	})
 }
 
@@ -171,15 +172,15 @@ func (r *Renderer) Resize(width, height int) {
 // Returns false if frame cannot be acquired.
 func (r *Renderer) BeginFrame() bool {
 	surfTex, err := r.backend.GetCurrentTexture(r.surface)
-	if err != nil || surfTex.Status != gpu.SurfaceStatusSuccess {
+	if err != nil || surfTex.Status != types.SurfaceStatusSuccess {
 		// Surface needs reconfiguration
-		r.backend.ConfigureSurface(r.surface, r.device, &gpu.SurfaceConfig{
+		r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 			Format:      r.format,
-			Usage:       gpu.TextureUsageRenderAttachment,
+			Usage:       types.TextureUsageRenderAttachment,
 			Width:       r.width,
 			Height:      r.height,
-			AlphaMode:   gpu.AlphaModeOpaque,
-			PresentMode: gpu.PresentModeFifo,
+			AlphaMode:   types.AlphaModeOpaque,
+			PresentMode: types.PresentModeFifo,
 		})
 		return false
 	}
@@ -217,13 +218,13 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 		return
 	}
 
-	renderPass := r.backend.BeginRenderPass(encoder, &gpu.RenderPassDescriptor{
-		ColorAttachments: []gpu.ColorAttachment{
+	renderPass := r.backend.BeginRenderPass(encoder, &types.RenderPassDescriptor{
+		ColorAttachments: []types.ColorAttachment{
 			{
 				View:       r.currentView,
-				LoadOp:     gpu.LoadOpClear,
-				StoreOp:    gpu.StoreOpStore,
-				ClearColor: gpu.Color{R: red, G: green, B: blue, A: alpha},
+				LoadOp:     types.LoadOpClear,
+				StoreOp:    types.StoreOpStore,
+				ClearValue: types.Color{R: red, G: green, B: blue, A: alpha},
 			},
 		},
 	})
@@ -244,7 +245,7 @@ func (r *Renderer) Size() (width, height int) {
 }
 
 // Format returns the surface texture format.
-func (r *Renderer) Format() gpu.TextureFormat {
+func (r *Renderer) Format() types.TextureFormat {
 	return r.format
 }
 
@@ -268,7 +269,7 @@ func (r *Renderer) initTrianglePipeline() error {
 	}
 
 	// Create render pipeline
-	r.trianglePipeline, err = r.backend.CreateRenderPipeline(r.device, &gpu.RenderPipelineDescriptor{
+	r.trianglePipeline, err = r.backend.CreateRenderPipeline(r.device, &types.RenderPipelineDescriptor{
 		VertexShader:     r.triangleShader,
 		VertexEntryPoint: "vs_main",
 		FragmentShader:   r.triangleShader,
@@ -300,13 +301,13 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 		return fmt.Errorf("gogpu: failed to create command encoder")
 	}
 
-	renderPass := r.backend.BeginRenderPass(encoder, &gpu.RenderPassDescriptor{
-		ColorAttachments: []gpu.ColorAttachment{
+	renderPass := r.backend.BeginRenderPass(encoder, &types.RenderPassDescriptor{
+		ColorAttachments: []types.ColorAttachment{
 			{
 				View:       r.currentView,
-				LoadOp:     gpu.LoadOpClear,
-				StoreOp:    gpu.StoreOpStore,
-				ClearColor: gpu.Color{R: clearR, G: clearG, B: clearB, A: clearA},
+				LoadOp:     types.LoadOpClear,
+				StoreOp:    types.StoreOpStore,
+				ClearValue: types.Color{R: clearR, G: clearG, B: clearB, A: clearA},
 			},
 		},
 	})

@@ -11,23 +11,24 @@ import (
 	"github.com/go-webgpu/webgpu/wgpu"
 
 	"github.com/gogpu/gogpu/gpu"
+	"github.com/gogpu/gogpu/gpu/types"
 )
 
 // Backend implements gpu.Backend using wgpu-native.
 type Backend struct {
 	// Store native handles for cleanup
-	instances map[gpu.Instance]*wgpu.Instance
-	adapters  map[gpu.Adapter]*wgpu.Adapter
-	devices   map[gpu.Device]*wgpu.Device
-	queues    map[gpu.Queue]*wgpu.Queue
-	surfaces  map[gpu.Surface]*wgpu.Surface
-	shaders   map[gpu.ShaderModule]*wgpu.ShaderModule
-	pipelines map[gpu.RenderPipeline]*wgpu.RenderPipeline
-	encoders  map[gpu.CommandEncoder]*wgpu.CommandEncoder
-	buffers   map[gpu.CommandBuffer]*wgpu.CommandBuffer
-	passes    map[gpu.RenderPass]*wgpu.RenderPassEncoder
-	textures  map[gpu.Texture]*wgpu.Texture
-	views     map[gpu.TextureView]*wgpu.TextureView
+	instances map[types.Instance]*wgpu.Instance
+	adapters  map[types.Adapter]*wgpu.Adapter
+	devices   map[types.Device]*wgpu.Device
+	queues    map[types.Queue]*wgpu.Queue
+	surfaces  map[types.Surface]*wgpu.Surface
+	shaders   map[types.ShaderModule]*wgpu.ShaderModule
+	pipelines map[types.RenderPipeline]*wgpu.RenderPipeline
+	encoders  map[types.CommandEncoder]*wgpu.CommandEncoder
+	buffers   map[types.CommandBuffer]*wgpu.CommandBuffer
+	passes    map[types.RenderPass]*wgpu.RenderPassEncoder
+	textures  map[types.Texture]*wgpu.Texture
+	views     map[types.TextureView]*wgpu.TextureView
 
 	nextHandle uintptr
 }
@@ -40,18 +41,18 @@ func IsAvailable() bool {
 // New creates a new Rust backend.
 func New() *Backend {
 	return &Backend{
-		instances:  make(map[gpu.Instance]*wgpu.Instance),
-		adapters:   make(map[gpu.Adapter]*wgpu.Adapter),
-		devices:    make(map[gpu.Device]*wgpu.Device),
-		queues:     make(map[gpu.Queue]*wgpu.Queue),
-		surfaces:   make(map[gpu.Surface]*wgpu.Surface),
-		shaders:    make(map[gpu.ShaderModule]*wgpu.ShaderModule),
-		pipelines:  make(map[gpu.RenderPipeline]*wgpu.RenderPipeline),
-		encoders:   make(map[gpu.CommandEncoder]*wgpu.CommandEncoder),
-		buffers:    make(map[gpu.CommandBuffer]*wgpu.CommandBuffer),
-		passes:     make(map[gpu.RenderPass]*wgpu.RenderPassEncoder),
-		textures:   make(map[gpu.Texture]*wgpu.Texture),
-		views:      make(map[gpu.TextureView]*wgpu.TextureView),
+		instances:  make(map[types.Instance]*wgpu.Instance),
+		adapters:   make(map[types.Adapter]*wgpu.Adapter),
+		devices:    make(map[types.Device]*wgpu.Device),
+		queues:     make(map[types.Queue]*wgpu.Queue),
+		surfaces:   make(map[types.Surface]*wgpu.Surface),
+		shaders:    make(map[types.ShaderModule]*wgpu.ShaderModule),
+		pipelines:  make(map[types.RenderPipeline]*wgpu.RenderPipeline),
+		encoders:   make(map[types.CommandEncoder]*wgpu.CommandEncoder),
+		buffers:    make(map[types.CommandBuffer]*wgpu.CommandBuffer),
+		passes:     make(map[types.RenderPass]*wgpu.RenderPassEncoder),
+		textures:   make(map[types.Texture]*wgpu.Texture),
+		views:      make(map[types.TextureView]*wgpu.TextureView),
 		nextHandle: 1,
 	}
 }
@@ -122,18 +123,18 @@ func (b *Backend) Destroy() {
 }
 
 // CreateInstance creates a WebGPU instance.
-func (b *Backend) CreateInstance() (gpu.Instance, error) {
+func (b *Backend) CreateInstance() (types.Instance, error) {
 	inst, err := wgpu.CreateInstance(nil)
 	if err != nil {
 		return 0, fmt.Errorf("rust backend: create instance: %w", err)
 	}
-	handle := gpu.Instance(b.newHandle())
+	handle := types.Instance(b.newHandle())
 	b.instances[handle] = inst
 	return handle, nil
 }
 
 // RequestAdapter requests a GPU adapter.
-func (b *Backend) RequestAdapter(instance gpu.Instance, opts *gpu.AdapterOptions) (gpu.Adapter, error) {
+func (b *Backend) RequestAdapter(instance types.Instance, opts *types.AdapterOptions) (types.Adapter, error) {
 	inst := b.instances[instance]
 	if inst == nil {
 		return 0, fmt.Errorf("rust backend: invalid instance")
@@ -151,13 +152,13 @@ func (b *Backend) RequestAdapter(instance gpu.Instance, opts *gpu.AdapterOptions
 		return 0, fmt.Errorf("rust backend: request adapter: %w", err)
 	}
 
-	handle := gpu.Adapter(b.newHandle())
+	handle := types.Adapter(b.newHandle())
 	b.adapters[handle] = adapter
 	return handle, nil
 }
 
 // RequestDevice requests a GPU device.
-func (b *Backend) RequestDevice(adapter gpu.Adapter, opts *gpu.DeviceOptions) (gpu.Device, error) {
+func (b *Backend) RequestDevice(adapter types.Adapter, opts *types.DeviceOptions) (types.Device, error) {
 	adpt := b.adapters[adapter]
 	if adpt == nil {
 		return 0, fmt.Errorf("rust backend: invalid adapter")
@@ -168,25 +169,25 @@ func (b *Backend) RequestDevice(adapter gpu.Adapter, opts *gpu.DeviceOptions) (g
 		return 0, fmt.Errorf("rust backend: request device: %w", err)
 	}
 
-	handle := gpu.Device(b.newHandle())
+	handle := types.Device(b.newHandle())
 	b.devices[handle] = device
 	return handle, nil
 }
 
 // GetQueue gets the device queue.
-func (b *Backend) GetQueue(device gpu.Device) gpu.Queue {
+func (b *Backend) GetQueue(device types.Device) types.Queue {
 	dev := b.devices[device]
 	if dev == nil {
 		return 0
 	}
 	queue := dev.GetQueue()
-	handle := gpu.Queue(b.newHandle())
+	handle := types.Queue(b.newHandle())
 	b.queues[handle] = queue
 	return handle
 }
 
 // CreateSurface creates a rendering surface.
-func (b *Backend) CreateSurface(instance gpu.Instance, sh gpu.SurfaceHandle) (gpu.Surface, error) {
+func (b *Backend) CreateSurface(instance types.Instance, sh types.SurfaceHandle) (types.Surface, error) {
 	inst := b.instances[instance]
 	if inst == nil {
 		return 0, fmt.Errorf("rust backend: invalid instance")
@@ -197,13 +198,13 @@ func (b *Backend) CreateSurface(instance gpu.Instance, sh gpu.SurfaceHandle) (gp
 		return 0, fmt.Errorf("rust backend: create surface: %w", err)
 	}
 
-	handle := gpu.Surface(b.newHandle())
+	handle := types.Surface(b.newHandle())
 	b.surfaces[handle] = surface
 	return handle, nil
 }
 
 // ConfigureSurface configures the surface.
-func (b *Backend) ConfigureSurface(surface gpu.Surface, device gpu.Device, config *gpu.SurfaceConfig) {
+func (b *Backend) ConfigureSurface(surface types.Surface, device types.Device, config *types.SurfaceConfig) {
 	surf := b.surfaces[surface]
 	dev := b.devices[device]
 	if surf == nil || dev == nil {
@@ -222,28 +223,28 @@ func (b *Backend) ConfigureSurface(surface gpu.Surface, device gpu.Device, confi
 }
 
 // GetCurrentTexture gets the current surface texture.
-func (b *Backend) GetCurrentTexture(surface gpu.Surface) (gpu.SurfaceTexture, error) {
+func (b *Backend) GetCurrentTexture(surface types.Surface) (types.SurfaceTexture, error) {
 	surf := b.surfaces[surface]
 	if surf == nil {
-		return gpu.SurfaceTexture{}, fmt.Errorf("rust backend: invalid surface")
+		return types.SurfaceTexture{}, fmt.Errorf("rust backend: invalid surface")
 	}
 
 	tex, err := surf.GetCurrentTexture()
 	if err != nil {
-		return gpu.SurfaceTexture{Status: gpu.SurfaceStatusError}, err
+		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
 	}
 
-	handle := gpu.Texture(b.newHandle())
+	handle := types.Texture(b.newHandle())
 	b.textures[handle] = tex.Texture
 
-	return gpu.SurfaceTexture{
+	return types.SurfaceTexture{
 		Texture: handle,
-		Status:  gpu.SurfaceStatusSuccess,
+		Status:  types.SurfaceStatusSuccess,
 	}, nil
 }
 
 // Present presents the surface.
-func (b *Backend) Present(surface gpu.Surface) {
+func (b *Backend) Present(surface types.Surface) {
 	surf := b.surfaces[surface]
 	if surf != nil {
 		surf.Present()
@@ -251,7 +252,7 @@ func (b *Backend) Present(surface gpu.Surface) {
 }
 
 // CreateShaderModuleWGSL creates a shader module from WGSL code.
-func (b *Backend) CreateShaderModuleWGSL(device gpu.Device, code string) (gpu.ShaderModule, error) {
+func (b *Backend) CreateShaderModuleWGSL(device types.Device, code string) (types.ShaderModule, error) {
 	dev := b.devices[device]
 	if dev == nil {
 		return 0, fmt.Errorf("rust backend: invalid device")
@@ -262,13 +263,13 @@ func (b *Backend) CreateShaderModuleWGSL(device gpu.Device, code string) (gpu.Sh
 		return 0, fmt.Errorf("rust backend: failed to create shader module")
 	}
 
-	handle := gpu.ShaderModule(b.newHandle())
+	handle := types.ShaderModule(b.newHandle())
 	b.shaders[handle] = shader
 	return handle, nil
 }
 
 // CreateRenderPipeline creates a render pipeline.
-func (b *Backend) CreateRenderPipeline(device gpu.Device, desc *gpu.RenderPipelineDescriptor) (gpu.RenderPipeline, error) {
+func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPipelineDescriptor) (types.RenderPipeline, error) {
 	dev := b.devices[device]
 	if dev == nil {
 		return 0, fmt.Errorf("rust backend: invalid device")
@@ -290,26 +291,26 @@ func (b *Backend) CreateRenderPipeline(device gpu.Device, desc *gpu.RenderPipeli
 		return 0, fmt.Errorf("rust backend: failed to create pipeline")
 	}
 
-	handle := gpu.RenderPipeline(b.newHandle())
+	handle := types.RenderPipeline(b.newHandle())
 	b.pipelines[handle] = pipeline
 	return handle, nil
 }
 
 // CreateCommandEncoder creates a command encoder.
-func (b *Backend) CreateCommandEncoder(device gpu.Device) gpu.CommandEncoder {
+func (b *Backend) CreateCommandEncoder(device types.Device) types.CommandEncoder {
 	dev := b.devices[device]
 	if dev == nil {
 		return 0
 	}
 
 	encoder := dev.CreateCommandEncoder(nil)
-	handle := gpu.CommandEncoder(b.newHandle())
+	handle := types.CommandEncoder(b.newHandle())
 	b.encoders[handle] = encoder
 	return handle
 }
 
 // BeginRenderPass begins a render pass.
-func (b *Backend) BeginRenderPass(encoder gpu.CommandEncoder, desc *gpu.RenderPassDescriptor) gpu.RenderPass {
+func (b *Backend) BeginRenderPass(encoder types.CommandEncoder, desc *types.RenderPassDescriptor) types.RenderPass {
 	enc := b.encoders[encoder]
 	if enc == nil {
 		return 0
@@ -322,7 +323,7 @@ func (b *Backend) BeginRenderPass(encoder gpu.CommandEncoder, desc *gpu.RenderPa
 			View:       view,
 			LoadOp:     wgpu.LoadOp(att.LoadOp),
 			StoreOp:    wgpu.StoreOp(att.StoreOp),
-			ClearValue: wgpu.Color{R: att.ClearColor.R, G: att.ClearColor.G, B: att.ClearColor.B, A: att.ClearColor.A},
+			ClearValue: wgpu.Color{R: att.ClearValue.R, G: att.ClearValue.G, B: att.ClearValue.B, A: att.ClearValue.A},
 		}
 	}
 
@@ -330,13 +331,13 @@ func (b *Backend) BeginRenderPass(encoder gpu.CommandEncoder, desc *gpu.RenderPa
 		ColorAttachments: attachments,
 	})
 
-	handle := gpu.RenderPass(b.newHandle())
+	handle := types.RenderPass(b.newHandle())
 	b.passes[handle] = pass
 	return handle
 }
 
 // EndRenderPass ends a render pass.
-func (b *Backend) EndRenderPass(pass gpu.RenderPass) {
+func (b *Backend) EndRenderPass(pass types.RenderPass) {
 	p := b.passes[pass]
 	if p != nil {
 		p.End()
@@ -344,20 +345,20 @@ func (b *Backend) EndRenderPass(pass gpu.RenderPass) {
 }
 
 // FinishEncoder finishes the command encoder.
-func (b *Backend) FinishEncoder(encoder gpu.CommandEncoder) gpu.CommandBuffer {
+func (b *Backend) FinishEncoder(encoder types.CommandEncoder) types.CommandBuffer {
 	enc := b.encoders[encoder]
 	if enc == nil {
 		return 0
 	}
 
 	buffer := enc.Finish(nil)
-	handle := gpu.CommandBuffer(b.newHandle())
+	handle := types.CommandBuffer(b.newHandle())
 	b.buffers[handle] = buffer
 	return handle
 }
 
 // Submit submits commands to the queue.
-func (b *Backend) Submit(queue gpu.Queue, commands gpu.CommandBuffer) {
+func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer) {
 	q := b.queues[queue]
 	buf := b.buffers[commands]
 	if q != nil && buf != nil {
@@ -366,7 +367,7 @@ func (b *Backend) Submit(queue gpu.Queue, commands gpu.CommandBuffer) {
 }
 
 // SetPipeline sets the render pipeline.
-func (b *Backend) SetPipeline(pass gpu.RenderPass, pipeline gpu.RenderPipeline) {
+func (b *Backend) SetPipeline(pass types.RenderPass, pipeline types.RenderPipeline) {
 	p := b.passes[pass]
 	pipe := b.pipelines[pipeline]
 	if p != nil && pipe != nil {
@@ -375,7 +376,7 @@ func (b *Backend) SetPipeline(pass gpu.RenderPass, pipeline gpu.RenderPipeline) 
 }
 
 // Draw issues a draw call.
-func (b *Backend) Draw(pass gpu.RenderPass, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+func (b *Backend) Draw(pass types.RenderPass, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
 	p := b.passes[pass]
 	if p != nil {
 		p.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
@@ -383,20 +384,20 @@ func (b *Backend) Draw(pass gpu.RenderPass, vertexCount, instanceCount, firstVer
 }
 
 // CreateTextureView creates a texture view.
-func (b *Backend) CreateTextureView(texture gpu.Texture, desc *gpu.TextureViewDescriptor) gpu.TextureView {
+func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView {
 	tex := b.textures[texture]
 	if tex == nil {
 		return 0
 	}
 
 	view := tex.CreateView(nil)
-	handle := gpu.TextureView(b.newHandle())
+	handle := types.TextureView(b.newHandle())
 	b.views[handle] = view
 	return handle
 }
 
 // ReleaseTextureView releases a texture view.
-func (b *Backend) ReleaseTextureView(view gpu.TextureView) {
+func (b *Backend) ReleaseTextureView(view types.TextureView) {
 	v := b.views[view]
 	if v != nil {
 		v.Release()
@@ -405,7 +406,7 @@ func (b *Backend) ReleaseTextureView(view gpu.TextureView) {
 }
 
 // ReleaseTexture releases a texture.
-func (b *Backend) ReleaseTexture(texture gpu.Texture) {
+func (b *Backend) ReleaseTexture(texture types.Texture) {
 	t := b.textures[texture]
 	if t != nil {
 		t.Release()
@@ -414,7 +415,7 @@ func (b *Backend) ReleaseTexture(texture gpu.Texture) {
 }
 
 // ReleaseCommandBuffer releases a command buffer.
-func (b *Backend) ReleaseCommandBuffer(buffer gpu.CommandBuffer) {
+func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer) {
 	buf := b.buffers[buffer]
 	if buf != nil {
 		buf.Release()
@@ -423,7 +424,7 @@ func (b *Backend) ReleaseCommandBuffer(buffer gpu.CommandBuffer) {
 }
 
 // ReleaseCommandEncoder releases a command encoder.
-func (b *Backend) ReleaseCommandEncoder(encoder gpu.CommandEncoder) {
+func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder) {
 	enc := b.encoders[encoder]
 	if enc != nil {
 		enc.Release()
@@ -432,7 +433,7 @@ func (b *Backend) ReleaseCommandEncoder(encoder gpu.CommandEncoder) {
 }
 
 // ReleaseRenderPass releases a render pass.
-func (b *Backend) ReleaseRenderPass(pass gpu.RenderPass) {
+func (b *Backend) ReleaseRenderPass(pass types.RenderPass) {
 	p := b.passes[pass]
 	if p != nil {
 		p.Release()

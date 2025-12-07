@@ -155,6 +155,12 @@ linters:
           - revive
         text: "var-naming: avoid meaningless package names"
 
+      # gpu/types package - follows wgpu-types pattern
+      - path: gpu/types/.*\.go
+        linters:
+          - revive
+        text: "var-naming: avoid meaningless package names"
+
       # Example code - demonstration purposes
       - path: examples?/.*\.go
         linters:

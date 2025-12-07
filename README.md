@@ -115,7 +115,11 @@ go get github.com/gogpu/gogpu
 ```
 gogpu/
 ├── gpu/                    # Backend abstraction layer
-│   ├── backend.go         # Backend interface, handle types
+│   ├── backend.go         # Backend interface
+│   ├── types/             # Standalone types (wgpu-types pattern)
+│   │   ├── handles.go     # Instance, Device, Texture, etc.
+│   │   ├── enums.go       # TextureFormat, PresentMode, etc.
+│   │   └── descriptors.go # SurfaceConfig, Color, etc.
 │   └── backend/
 │       ├── rust/          # Rust backend (wgpu-native)
 │       └── native/        # Native Go backend (stub)

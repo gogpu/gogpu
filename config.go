@@ -1,6 +1,6 @@
 package gogpu
 
-import "github.com/gogpu/gogpu/gpu"
+import "github.com/gogpu/gogpu/gpu/types"
 
 // Config configures the application.
 type Config struct {
@@ -24,7 +24,7 @@ type Config struct {
 
 	// Backend specifies which WebGPU implementation to use.
 	// BackendAuto (default) selects the best available.
-	Backend gpu.BackendType
+	Backend types.BackendType
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -52,17 +52,17 @@ func (c Config) WithSize(width, height int) Config {
 }
 
 // WithBackend returns a copy with the backend set.
-// Use gpu.BackendRust for maximum performance (requires native library).
-// Use gpu.BackendGo for zero dependencies (pure Go, may be slower).
-// Use gpu.BackendAuto (default) to automatically select the best available.
-func (c Config) WithBackend(backend gpu.BackendType) Config {
+// Use types.BackendRust for maximum performance (requires native library).
+// Use types.BackendGo for zero dependencies (pure Go, may be slower).
+// Use types.BackendAuto (default) to automatically select the best available.
+func (c Config) WithBackend(backend types.BackendType) Config {
 	c.Backend = backend
 	return c
 }
 
 // Re-export backend types for convenience.
 const (
-	BackendAuto = gpu.BackendAuto
-	BackendRust = gpu.BackendRust
-	BackendGo   = gpu.BackendGo
+	BackendAuto = types.BackendAuto
+	BackendRust = types.BackendRust
+	BackendGo   = types.BackendGo
 )
