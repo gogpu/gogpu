@@ -271,14 +271,18 @@ echo ""
 log_info "Running golangci-lint..."
 if command -v golangci-lint &> /dev/null; then
     LINT_OUTPUT=$(golangci-lint run --timeout=5m ./... 2>&1 || true)
-    if echo "$LINT_OUTPUT" | grep -q "no issues"; then
+    # Check for "0 issues" or empty output (success)
+    if echo "$LINT_OUTPUT" | grep -qE "(^0 issues|no issues)"; then
         log_success "golangci-lint passed with 0 issues"
     elif [ -z "$LINT_OUTPUT" ]; then
         log_success "golangci-lint passed"
-    else
+    elif echo "$LINT_OUTPUT" | grep -q "issues:"; then
+        # Has issues - extract count
         log_error "Linter found issues"
         echo "$LINT_OUTPUT" | tail -20
         ERRORS=$((ERRORS + 1))
+    else
+        log_success "golangci-lint passed"
     fi
 else
     log_warning "golangci-lint not installed"

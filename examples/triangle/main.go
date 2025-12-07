@@ -10,7 +10,7 @@ import (
 	"log"
 
 	"github.com/gogpu/gogpu"
-	"github.com/gogpu/gogpu/math"
+	"github.com/gogpu/gogpu/gmath"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	// Set draw callback - called every frame
 	app.OnDraw(func(ctx *gogpu.Context) {
 		// Draw RGB triangle on dark background
-		ctx.DrawTriangleColor(math.DarkGray)
+		ctx.DrawTriangleColor(gmath.DarkGray)
 	})
 
 	// Run the application

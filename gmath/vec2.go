@@ -1,5 +1,5 @@
 // Package math provides vector and matrix types for gogpu.
-package math
+package gmath
 
 import (
 	"fmt"
@@ -127,9 +127,9 @@ func (v Vec2) Max(other Vec2) Vec2 {
 	}
 }
 
-// Clamp returns v clamped to [min, max].
-func (v Vec2) Clamp(min, max Vec2) Vec2 {
-	return v.Max(min).Min(max)
+// Clamp returns v clamped to [minVal, maxVal].
+func (v Vec2) Clamp(minVal, maxVal Vec2) Vec2 {
+	return v.Max(minVal).Min(maxVal)
 }
 
 // String returns a string representation.

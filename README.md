@@ -57,7 +57,7 @@ package main
 
 import (
     "github.com/gogpu/gogpu"
-    "github.com/gogpu/gogpu/math"
+    "github.com/gogpu/gogpu/gmath"
 )
 
 func main() {
@@ -66,7 +66,7 @@ func main() {
         WithSize(800, 600))
 
     app.OnDraw(func(ctx *gogpu.Context) {
-        ctx.DrawTriangleColor(math.DarkGray)
+        ctx.DrawTriangleColor(gmath.DarkGray)
     })
 
     app.Run()
@@ -121,7 +121,7 @@ gogpu/
 │       └── native/        # Native Go backend (stub)
 ├── window/                # Window configuration
 ├── input/                 # Keyboard, mouse input
-├── math/                  # Vec2, Vec3, Vec4, Mat4, Color
+├── gmath/                 # Vec2, Vec3, Vec4, Mat4, Color
 ├── examples/              # Example applications
 │   └── triangle/         # Simple triangle demo
 └── internal/

@@ -147,6 +147,7 @@ linters:
           - gocyclo      # Platform code can be complex
           - funlen       # Win32 code is verbose
           - gosec        # Platform syscalls are intentional
+          - errcheck     # Win32 syscall returns are often ignored
 
       # Internal utilities
       - path: internal/.*\.go

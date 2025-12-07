@@ -99,11 +99,11 @@ func (b *Backend) CreateTextureView(texture gpu.Texture, desc *gpu.TextureViewDe
 	return 0
 }
 
-func (b *Backend) ReleaseTextureView(view gpu.TextureView)       {}
-func (b *Backend) ReleaseTexture(texture gpu.Texture)            {}
-func (b *Backend) ReleaseCommandBuffer(buffer gpu.CommandBuffer) {}
+func (b *Backend) ReleaseTextureView(view gpu.TextureView)          {}
+func (b *Backend) ReleaseTexture(texture gpu.Texture)               {}
+func (b *Backend) ReleaseCommandBuffer(buffer gpu.CommandBuffer)    {}
 func (b *Backend) ReleaseCommandEncoder(encoder gpu.CommandEncoder) {}
-func (b *Backend) ReleaseRenderPass(pass gpu.RenderPass)         {}
+func (b *Backend) ReleaseRenderPass(pass gpu.RenderPass)            {}
 
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)

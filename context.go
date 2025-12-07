@@ -1,8 +1,8 @@
 package gogpu
 
 import (
+	"github.com/gogpu/gogpu/gmath"
 	"github.com/gogpu/gogpu/gpu"
-	"github.com/gogpu/gogpu/math"
 )
 
 // Context provides drawing operations for a single frame.
@@ -27,7 +27,7 @@ func (c *Context) Clear(r, g, b, a float32) {
 }
 
 // ClearColor clears the framebuffer with a Color value.
-func (c *Context) ClearColor(color math.Color) {
+func (c *Context) ClearColor(color gmath.Color) {
 	c.Clear(color.R, color.G, color.B, color.A)
 }
 
@@ -73,11 +73,11 @@ func (c *Context) Backend() string {
 // This is a convenience method for quick demos and testing.
 // The background is cleared with the specified color before drawing.
 func (c *Context) DrawTriangle(bgR, bgG, bgB, bgA float32) {
-	c.renderer.DrawTriangle(float64(bgR), float64(bgG), float64(bgB), float64(bgA))
+	_ = c.renderer.DrawTriangle(float64(bgR), float64(bgG), float64(bgB), float64(bgA))
 	c.cleared = true
 }
 
 // DrawTriangleColor draws a triangle with a background Color.
-func (c *Context) DrawTriangleColor(bg math.Color) {
+func (c *Context) DrawTriangleColor(bg gmath.Color) {
 	c.DrawTriangle(bg.R, bg.G, bg.B, bg.A)
 }

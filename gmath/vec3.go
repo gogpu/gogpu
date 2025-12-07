@@ -1,4 +1,4 @@
-package math
+package gmath
 
 import (
 	"fmt"
@@ -139,9 +139,9 @@ func (v Vec3) Max(other Vec3) Vec3 {
 	}
 }
 
-// Clamp returns v clamped to [min, max].
-func (v Vec3) Clamp(min, max Vec3) Vec3 {
-	return v.Max(min).Min(max)
+// Clamp returns v clamped to [minVal, maxVal].
+func (v Vec3) Clamp(minVal, maxVal Vec3) Vec3 {
+	return v.Max(minVal).Min(maxVal)
 }
 
 // XY returns a Vec2 with X and Y components.
