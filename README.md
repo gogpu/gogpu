@@ -204,9 +204,9 @@ gogpu/
 | Project | Description | Status |
 |---------|-------------|--------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0-alpha |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.1.0-alpha |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | Active |
 | [gogpu/gg](https://github.com/gogpu/gg) | Simple 2D graphics library | Planned |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | Future |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
 
 ---

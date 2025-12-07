@@ -13,5 +13,8 @@
 # Private dev docs (not committed)
 docs/dev/
 
-# Claude Code (private)
+# AI settings
 .claude/
+.goda/
+.goco/
+.gode/
