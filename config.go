@@ -1,5 +1,7 @@
 package gogpu
 
+import "github.com/gogpu/gogpu/gpu"
+
 // Config configures the application.
 type Config struct {
 	// Title is the window title.
@@ -19,6 +21,10 @@ type Config struct {
 
 	// Fullscreen starts in fullscreen mode.
 	Fullscreen bool
+
+	// Backend specifies which WebGPU implementation to use.
+	// BackendAuto (default) selects the best available.
+	Backend gpu.BackendType
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -44,3 +50,19 @@ func (c Config) WithSize(width, height int) Config {
 	c.Height = height
 	return c
 }
+
+// WithBackend returns a copy with the backend set.
+// Use gpu.BackendRust for maximum performance (requires native library).
+// Use gpu.BackendGo for zero dependencies (pure Go, may be slower).
+// Use gpu.BackendAuto (default) to automatically select the best available.
+func (c Config) WithBackend(backend gpu.BackendType) Config {
+	c.Backend = backend
+	return c
+}
+
+// Re-export backend types for convenience.
+const (
+	BackendAuto = gpu.BackendAuto
+	BackendRust = gpu.BackendRust
+	BackendGo   = gpu.BackendGo
+)

@@ -1,43 +1,56 @@
-// Package gpu provides the core GPU abstraction layer for gogpu.
+// Package gpu provides the backend abstraction layer for gogpu.
 //
-// This package defines types and interfaces for GPU operations following
-// the WebGPU specification. It provides a Go-friendly API while maintaining
-// compatibility with the underlying WebGPU implementation.
+// This package defines the Backend interface that abstracts over different
+// WebGPU implementations. Users can choose between:
+//
+//   - Rust backend (wgpu-native): Maximum performance, battle-tested
+//   - Pure Go backend: Zero dependencies, simple cross-compilation
+//
+// # Backend Selection
+//
+// By default, gogpu auto-selects the best available backend. Users can
+// explicitly choose a backend:
+//
+//	// Auto-select (default)
+//	config := gogpu.DefaultConfig()
+//
+//	// Explicit Rust backend
+//	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendRust)
+//
+//	// Explicit Pure Go backend
+//	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendGo)
 //
 // # Architecture
 //
-// The gpu package is organized into several components:
+// The gpu package defines:
 //
-//   - Device: Represents a GPU device and provides methods for creating resources
-//   - Buffer: GPU memory buffer for vertex, index, uniform, and storage data
-//   - Texture: 2D and 3D textures with various formats
-//   - Pipeline: Render and compute pipelines
-//   - Shader: Shader modules compiled from WGSL
+//   - Backend: Interface for WebGPU operations
+//   - BackendType: Enum for backend selection (Auto, Rust, Go)
+//   - Handle types: Opaque references to GPU objects (Instance, Device, etc.)
+//   - Configuration types: Options for adapters, devices, surfaces, pipelines
 //
-// # Usage
+// # Handle Types
 //
-// First, request an adapter and create a device:
+// GPU objects are represented as opaque handles (uintptr). This allows
+// efficient backend switching without exposing implementation details:
 //
-//	adapter, err := gpu.RequestAdapter(gpu.RequestAdapterOptions{})
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
+//	type Instance uintptr
+//	type Adapter uintptr
+//	type Device uintptr
+//	type Queue uintptr
+//	type Surface uintptr
+//	type Texture uintptr
+//	type ShaderModule uintptr
+//	type RenderPipeline uintptr
 //
-//	device, err := adapter.RequestDevice(nil)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
+// # Subpackages
 //
-// Then create resources and render:
-//
-//	buffer := device.CreateBuffer(&gpu.BufferDescriptor{
-//	    Size:  1024,
-//	    Usage: gpu.BufferUsageVertex | gpu.BufferUsageCopyDst,
-//	})
+//   - gpu/backend/rust: Rust backend using go-webgpu/webgpu
+//   - gpu/backend/native: Native Go backend (stub, in development)
 //
 // # WebGPU Compatibility
 //
 // This package follows the WebGPU specification where applicable.
 // Types and methods are named to match WebGPU conventions while
-// following Go naming conventions (e.g., CreateBuffer instead of createBuffer).
+// following Go naming conventions.
 package gpu

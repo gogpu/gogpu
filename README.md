@@ -18,24 +18,75 @@
 
 ---
 
-## Status: Early Development (v0.0.x-dev)
+## Status: v0.2.0-alpha — Dual Backend Architecture
 
-> **This project is in active development.** The API is unstable and will change without notice. Not recommended for production use yet.
+> **Triangle rendering works!** Now with switchable backends.
 >
 > **Star the repo to follow progress!**
 
 ---
 
+## Key Feature: Choose Your Backend
+
+GoGPU lets you choose between two WebGPU implementations:
+
+| Backend | Library | Use Case |
+|---------|---------|----------|
+| **Rust** | wgpu-native via FFI | Maximum performance, production apps |
+| **Native Go** | gogpu/wgpu (planned) | Zero dependencies, simple `go build` |
+
+```go
+// Auto-select best available (default)
+app := gogpu.NewApp(gogpu.DefaultConfig())
+
+// Explicit Rust backend — max performance
+app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
+
+// Explicit Native Go backend — zero dependencies
+app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
+```
+
+**Same API, your choice of backend.**
+
+---
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "github.com/gogpu/gogpu"
+    "github.com/gogpu/gogpu/math"
+)
+
+func main() {
+    app := gogpu.NewApp(gogpu.DefaultConfig().
+        WithTitle("Hello GoGPU").
+        WithSize(800, 600))
+
+    app.OnDraw(func(ctx *gogpu.Context) {
+        ctx.DrawTriangleColor(math.DarkGray)
+    })
+
+    app.Run()
+}
+```
+
+**~20 lines vs 480+ lines of raw WebGPU code.**
+
+---
+
 ## Why GoGPU?
 
-This project was inspired by [a discussion on r/golang](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) about the state of GUI and graphics development in Go. The Go ecosystem lacks a cohesive, modern GPU computing stack that follows Go's philosophy of simplicity and zero-friction tooling.
+This project was inspired by [a discussion on r/golang](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) about the state of GUI and graphics development in Go.
 
-**GoGPU aims to fill this gap** by providing:
+**GoGPU provides:**
 
-1. **Graphics Foundation** — GPU abstraction layer (this repo)
-2. **Shader Tooling** — Pure Go shader compiler ([gogpu/naga](https://github.com/gogpu/naga))
-3. **2D Graphics** — Simple drawing API ([gogpu/gg](https://github.com/gogpu/gg)) — planned
-4. **GUI Framework** — Widget toolkit (future) — planned
+1. **Simple API** — Hide WebGPU complexity behind intuitive Go code
+2. **Dual Backend** — Choose performance (Rust) or simplicity (Pure Go)
+3. **Zero CGO** — No C compiler required
+4. **Cross-Platform** — Windows, Linux, macOS
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -45,24 +96,13 @@ This project was inspired by [a discussion on r/golang](https://www.reddit.com/r
 ├─────────────────────────────────────────────────────────┤
 │              gogpu/gogpu (this repo)                     │
 │         GPU abstraction, windowing, input                │
-├─────────────────────────────────────────────────────────┤
-│    go-webgpu/webgpu (FFI)  →  gogpu/wgpu (Pure Go)      │
-├─────────────────────────────────────────────────────────┤
+├──────────────────────┬──────────────────────────────────┤
+│   gpu/backend/rust   │      gpu/backend/native          │
+│  (go-webgpu/webgpu)  │      (gogpu/wgpu)                │
+├──────────────────────┴──────────────────────────────────┤
 │           Vulkan  │  Metal  │  DX12  │  OpenGL          │
 └─────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Zero CGO** | No C compiler required, simple `go build` |
-| **WebGPU API** | Modern, portable GPU abstraction |
-| **Cross-Platform** | Windows, Linux, macOS |
-| **Pure Go Goal** | Gradually replacing FFI with native implementation |
-| **Simple API** | Inspired by raylib, Ebitengine, Processing |
 
 ---
 
@@ -74,39 +114,7 @@ go get github.com/gogpu/gogpu
 
 **Requirements:**
 - Go 1.25+
-- [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) library (auto-downloaded in future)
-
----
-
-## Quick Start
-
-```go
-package main
-
-import "github.com/gogpu/gogpu"
-
-func main() {
-    app := gogpu.NewApp(gogpu.Config{
-        Title:  "Hello GoGPU",
-        Width:  800,
-        Height: 600,
-    })
-
-    app.OnDraw(func(ctx *gogpu.Context) {
-        ctx.Clear(gogpu.Color{0.1, 0.1, 0.1, 1.0})
-        ctx.DrawTriangle(
-            gogpu.Vec2{400, 100},
-            gogpu.Vec2{200, 500},
-            gogpu.Vec2{600, 500},
-            gogpu.Red,
-        )
-    })
-
-    app.Run()
-}
-```
-
-> **Note:** This API is not yet implemented. It represents the target design.
+- [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) DLL/dylib/so (for Rust backend)
 
 ---
 
@@ -114,35 +122,46 @@ func main() {
 
 ```
 gogpu/
-├── gpu/           # Core GPU abstraction (Device, Buffer, Texture, Pipeline)
-├── window/        # Cross-platform windowing
-├── input/         # Keyboard, mouse, gamepad input
-├── math/          # Vec2, Vec3, Vec4, Mat4, Color
-├── examples/      # Example applications
-└── internal/      # Private implementation details
+├── gpu/                    # Backend abstraction layer
+│   ├── backend.go         # Backend interface, handle types
+│   └── backend/
+│       ├── rust/          # Rust backend (wgpu-native)
+│       └── native/        # Native Go backend (stub)
+├── window/                # Window configuration
+├── input/                 # Keyboard, mouse input
+├── math/                  # Vec2, Vec3, Vec4, Mat4, Color
+├── examples/              # Example applications
+│   └── triangle/         # Simple triangle demo
+└── internal/
+    └── platform/          # Platform abstraction (Win32, etc.)
 ```
 
 ---
 
 ## Roadmap
 
-### v0.1.0-alpha — First Rendering
-- [ ] Window creation
-- [ ] Basic rendering (triangle)
-- [ ] WGSL shader support
+### v0.1.0-alpha — First Rendering ✅
+- [x] Window creation (Windows)
+- [x] Basic rendering (triangle)
+- [x] Simple API (~20 lines)
 
-### v0.2.0-alpha — 2D Graphics
+### v0.2.0-alpha — Dual Backend ✅ (Current)
+- [x] Backend interface abstraction
+- [x] Rust backend wrapper
+- [x] Native Go backend stub
+- [x] `WithBackend()` configuration
+
+### v0.3.0-alpha — Textures & Sprites
 - [ ] Texture loading
-- [ ] Sprite batching
+- [ ] Sprite rendering
 - [ ] Basic shapes
 
-### v0.5.0-beta — Usable
-- [ ] Text rendering
-- [ ] Input handling
-- [ ] Audio (basic)
+### v0.4.0-alpha — Native Go Backend
+- [ ] Pure Go WebGPU implementation
+- [ ] Vulkan backend (via purego)
 
 ### v1.0.0 — Stable
-- [ ] Stable API
+- [ ] Both backends production-ready
 - [ ] Full documentation
 - [ ] Performance optimized
 
@@ -152,12 +171,18 @@ gogpu/
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | Active |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.2.0-alpha |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | Active |
 | [gogpu/gg](https://github.com/gogpu/gg) | Simple 2D graphics library | Planned |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | Future |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
-| [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library | Stable |
+
+---
+
+## Announcement
+
+Read our launch announcement on Dev.to:
+**[GoGPU: A Pure Go Graphics Library for GPU Programming](https://dev.to/kolkov/gogpu-a-pure-go-graphics-library-for-gpu-programming-2j5d)**
 
 ---
 
@@ -166,24 +191,17 @@ gogpu/
 Contributions are welcome! This is an early-stage project, so there's lots to do.
 
 **Areas where we need help:**
+- Pure Go WebGPU implementation
+- Platform support (Linux, macOS)
 - WGSL parser implementation
-- WebGPU examples
-- Platform testing (especially Linux/macOS)
-- Documentation
+- Documentation and examples
 
 ```bash
-# Clone
 git clone https://github.com/gogpu/gogpu
 cd gogpu
-
-# Test
+go build ./...
 go test ./...
-
-# Lint
-golangci-lint run
 ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 

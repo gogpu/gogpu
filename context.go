@@ -1,8 +1,7 @@
 package gogpu
 
 import (
-	"github.com/go-webgpu/webgpu/wgpu"
-
+	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/math"
 )
 
@@ -58,28 +57,16 @@ func (c *Context) AspectRatio() float32 {
 	return float32(w) / float32(h)
 }
 
-// Device returns the underlying WebGPU device for advanced operations.
-// Most users should not need this.
-func (c *Context) Device() *wgpu.Device {
-	return c.renderer.Device()
-}
-
-// Queue returns the command queue for advanced operations.
-// Most users should not need this.
-func (c *Context) Queue() *wgpu.Queue {
-	return c.renderer.Queue()
-}
-
-// TextureView returns the current frame's render target.
-// Use for custom render passes.
-func (c *Context) TextureView() *wgpu.TextureView {
-	return c.renderer.CurrentView()
-}
-
 // Format returns the surface texture format.
 // Useful for creating compatible pipelines.
-func (c *Context) Format() wgpu.TextureFormat {
+func (c *Context) Format() gpu.TextureFormat {
 	return c.renderer.Format()
+}
+
+// Backend returns the name of the active backend.
+// Returns "Rust (wgpu-native)" or "Pure Go (gogpu/wgpu)".
+func (c *Context) Backend() string {
+	return c.renderer.Backend()
 }
 
 // DrawTriangle draws a built-in RGB-colored triangle.

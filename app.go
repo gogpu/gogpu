@@ -66,9 +66,9 @@ func (a *App) Run() error {
 	}
 	defer a.platform.Destroy()
 
-	// Initialize renderer
+	// Initialize renderer with selected backend
 	var err error
-	a.renderer, err = newRenderer(a.platform)
+	a.renderer, err = newRenderer(a.platform, a.config.Backend)
 	if err != nil {
 		return err
 	}
