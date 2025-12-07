@@ -88,21 +88,13 @@ This project was inspired by [a discussion on r/golang](https://www.reddit.com/r
 3. **Zero CGO** — No C compiler required
 4. **Cross-Platform** — Windows, Linux, macOS
 
-```
-┌─────────────────────────────────────────────────────────┐
-│              Your Application / GUI                      │
-├─────────────────────────────────────────────────────────┤
-│    gogpu/ui (future)    │    gogpu/gg (2D graphics)     │
-├─────────────────────────────────────────────────────────┤
-│              gogpu/gogpu (this repo)                     │
-│         GPU abstraction, windowing, input                │
-├──────────────────────┬──────────────────────────────────┤
-│   gpu/backend/rust   │      gpu/backend/native          │
-│  (go-webgpu/webgpu)  │      (gogpu/wgpu)                │
-├──────────────────────┴──────────────────────────────────┤
-│           Vulkan  │  Metal  │  DX12  │  OpenGL          │
-└─────────────────────────────────────────────────────────┘
-```
+| Layer | Component |
+|-------|-----------|
+| **Application** | Your App / GUI |
+| **High-Level** | gogpu/ui (future), gogpu/gg (2D) |
+| **Core** | **gogpu/gogpu** — GPU abstraction, windowing, input |
+| **Backend** | gpu/backend/rust (wgpu-native) · gpu/backend/native (Pure Go) |
+| **Graphics API** | Vulkan · Metal · DX12 · OpenGL |
 
 ---
 

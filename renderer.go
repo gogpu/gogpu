@@ -64,14 +64,23 @@ func newRenderer(plat platform.Platform, backendType gpu.BackendType) (*Renderer
 func createBackend(typ gpu.BackendType) (gpu.Backend, error) {
 	switch typ {
 	case gpu.BackendRust:
+		if !rust.IsAvailable() {
+			return nil, fmt.Errorf("rust backend not available on this platform")
+		}
 		return rust.New(), nil
 	case gpu.BackendGo:
 		return native.New(), nil
 	case gpu.BackendAuto:
-		// Auto: prefer Rust backend (more stable)
-		return rust.New(), nil
+		// Auto: prefer Rust backend if available, fallback to native
+		if rust.IsAvailable() {
+			return rust.New(), nil
+		}
+		return native.New(), nil
 	default:
-		return rust.New(), nil
+		if rust.IsAvailable() {
+			return rust.New(), nil
+		}
+		return native.New(), nil
 	}
 }
 

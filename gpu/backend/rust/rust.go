@@ -1,5 +1,8 @@
+//go:build windows
+
 // Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
 // This backend offers maximum performance and is battle-tested in production.
+// Currently only available on Windows due to go-webgpu/goffi limitations.
 package rust
 
 import (
@@ -27,6 +30,11 @@ type Backend struct {
 	views     map[gpu.TextureView]*wgpu.TextureView
 
 	nextHandle uintptr
+}
+
+// IsAvailable returns true on Windows where go-webgpu/goffi is supported.
+func IsAvailable() bool {
+	return true
 }
 
 // New creates a new Rust backend.
