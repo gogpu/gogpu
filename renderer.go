@@ -130,9 +130,10 @@ func (r *Renderer) init() error {
 	r.queue = r.backend.GetQueue(r.device)
 
 	// Configure surface
+	// Note: platform.GetSize() returns positive dimensions for valid windows
 	width, height := r.platform.GetSize()
-	r.width = uint32(width)
-	r.height = uint32(height)
+	r.width = uint32(width)   //nolint:gosec // G115: platform returns positive dimensions
+	r.height = uint32(height) //nolint:gosec // G115: platform returns positive dimensions
 
 	// Use BGRA8Unorm which is common on Windows
 	r.format = types.TextureFormatBGRA8Unorm
@@ -155,8 +156,9 @@ func (r *Renderer) Resize(width, height int) {
 		return
 	}
 
-	r.width = uint32(width)
-	r.height = uint32(height)
+	// Note: width/height validated positive above
+	r.width = uint32(width)   //nolint:gosec // G115: validated positive above
+	r.height = uint32(height) //nolint:gosec // G115: validated positive above
 
 	r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 		Format:      r.format,

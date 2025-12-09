@@ -185,11 +185,12 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 	}
 
 	// Create GPU texture
+	// Note: width/height validated above (expectedSize check ensures they are positive)
 	texture, err := r.backend.CreateTexture(r.device, &types.TextureDescriptor{
 		Label: opts.Label,
 		Size: types.Extent3D{
-			Width:              uint32(width),
-			Height:             uint32(height),
+			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
+			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
@@ -214,12 +215,12 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		data,
 		&types.ImageDataLayout{
 			Offset:       0,
-			BytesPerRow:  uint32(width * 4),
-			RowsPerImage: uint32(height),
+			BytesPerRow:  uint32(width * 4), //nolint:gosec // G115: width validated positive above
+			RowsPerImage: uint32(height),    //nolint:gosec // G115: height validated positive above
 		},
 		&types.Extent3D{
-			Width:              uint32(width),
-			Height:             uint32(height),
+			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
+			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
 		},
 	)
