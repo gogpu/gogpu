@@ -35,7 +35,7 @@ GoGPU lets you choose between two WebGPU implementations:
 | Backend | Library | Use Case |
 |---------|---------|----------|
 | **Rust** | wgpu-native via FFI | Maximum performance, production apps |
-| **Native Go** | gogpu/wgpu (planned) | Zero dependencies, simple `go build` |
+| **Native Go** | gogpu/wgpu | Zero dependencies, simple `go build` |
 
 ```go
 // Auto-select best available (default)
@@ -208,6 +208,17 @@ gogpu/
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | Active |
 | [gogpu/gg](https://github.com/gogpu/gg) | Simple 2D graphics library | Planned |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
+
+### wgpu Backends
+
+The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
+
+| Backend | Status | Lines | Features |
+|---------|--------|-------|----------|
+| OpenGL ES | ✅ Done | ~3.5K | Windows (WGL) |
+| **Vulkan** | ✅ Done | ~23K | Windows, auto-gen bindings, Vulkan 1.3 |
+| Metal | Planned | - | macOS/iOS |
+| DX12 | Planned | - | Windows |
 
 ---
 
