@@ -1,6 +1,9 @@
+//go:build !windows
+
 // Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
 // This backend offers zero dependencies and simple cross-compilation.
 // Currently a stub - returns ErrNotImplemented for all operations.
+// TODO: Implement OpenGL/Metal backends for Linux/macOS.
 package native
 
 import (

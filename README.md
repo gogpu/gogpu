@@ -154,7 +154,7 @@ gogpu/
 │   │   └── descriptors.go # SamplerDescriptor, BindGroup, etc.
 │   └── backend/
 │       ├── rust/          # Rust backend (wgpu-native)
-│       └── native/        # Native Go backend (stub)
+│       └── native/        # Native Go backend (Vulkan via gogpu/wgpu)
 ├── window/                # Window configuration
 ├── input/                 # Keyboard, mouse input
 ├── gmath/                 # Vec2, Vec3, Vec4, Mat4, Color
@@ -188,9 +188,11 @@ gogpu/
 - [ ] Sprite rendering (next)
 - [ ] Basic shapes (next)
 
-### v0.4.0-alpha — Native Go Backend
-- [ ] Pure Go WebGPU implementation
-- [ ] Vulkan backend (via purego)
+### v0.4.0-alpha — Native Go Backend (In Progress)
+- [x] Pure Go WebGPU implementation (gogpu/wgpu)
+- [x] Vulkan backend integration
+- [ ] Integration test (vulkan-triangle)
+- [ ] Linux support
 
 ### v1.0.0 — Stable
 - [ ] Both backends production-ready
