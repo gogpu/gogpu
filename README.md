@@ -30,12 +30,27 @@
 
 ## Key Feature: Choose Your Backend
 
-GoGPU lets you choose between two WebGPU implementations:
+GoGPU lets you choose between two WebGPU implementations at **compile time** or **runtime**:
 
 | Backend | Library | Use Case |
 |---------|---------|----------|
 | **Rust** | wgpu-native via FFI | Maximum performance, production apps |
 | **Native Go** | gogpu/wgpu | Zero dependencies, simple `go build` |
+
+### Build Tags (Compile Time)
+
+```bash
+# Include both backends (default)
+go build ./...
+
+# Only Rust backend (production)
+go build -tags rust ./...
+
+# Only Pure Go backend (zero dependencies)
+go build -tags purego ./...
+```
+
+### Runtime Selection
 
 ```go
 // Auto-select best available (default)
@@ -148,13 +163,16 @@ gogpu/
 ├── shader.go              # Built-in WGSL shaders
 ├── gpu/                   # Backend abstraction layer
 │   ├── backend.go         # Backend interface
+│   ├── registry.go        # Backend registration (auto-discovery)
 │   ├── types/             # Standalone types (wgpu-types pattern)
 │   │   ├── handles.go     # Instance, Device, Texture, Sampler, etc.
 │   │   ├── enums.go       # TextureFormat, PresentMode, etc.
 │   │   └── descriptors.go # SamplerDescriptor, BindGroup, etc.
 │   └── backend/
 │       ├── rust/          # Rust backend (wgpu-native)
+│       │   └── init.go    # Auto-registration (build tags)
 │       └── native/        # Native Go backend (Vulkan via gogpu/wgpu)
+│           └── init.go    # Auto-registration (build tags)
 ├── window/                # Window configuration
 ├── input/                 # Keyboard, mouse input
 ├── gmath/                 # Vec2, Vec3, Vec4, Mat4, Color
