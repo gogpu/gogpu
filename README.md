@@ -235,10 +235,16 @@ The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
 
 | Backend | Status | Lines | Features |
 |---------|--------|-------|----------|
+| **Software** | ✅ Done | ~1K | **Headless!** CPU rendering, CI/CD, no GPU required |
 | OpenGL ES | ✅ Done | ~3.5K | Windows (WGL) |
 | **Vulkan** | ✅ Done | ~27K | **Cross-platform!** Windows/Linux/macOS, goffi FFI, Vulkan 1.3, memory allocator |
 | Metal | Planned | - | macOS/iOS |
 | DX12 | Planned | - | Windows |
+
+**Software backend** enables headless rendering:
+```bash
+go build -tags software ./...  # CPU-only, no GPU needed
+```
 
 **Vulkan backend now implements the complete HAL Device interface** including:
 - Buffer, Texture, TextureView, Sampler
