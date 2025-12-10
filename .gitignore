@@ -18,3 +18,5 @@ docs/dev/
 .goda/
 .goco/
 .gode/
+
+tmp/

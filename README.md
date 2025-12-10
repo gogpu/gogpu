@@ -191,8 +191,8 @@ gogpu/
 ### v0.4.0-alpha — Native Go Backend (In Progress)
 - [x] Pure Go WebGPU implementation (gogpu/wgpu)
 - [x] Vulkan backend integration
+- [x] Cross-platform FFI via goffi (Windows/Linux/macOS)
 - [ ] Integration test (vulkan-triangle)
-- [ ] Linux support
 
 ### v1.0.0 — Stable
 - [ ] Both backends production-ready
@@ -206,7 +206,7 @@ gogpu/
 | Project | Description | Status |
 |---------|-------------|--------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0-alpha |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.1.0-alpha |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.2.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | Active |
 | [gogpu/gg](https://github.com/gogpu/gg) | Simple 2D graphics library | Planned |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
@@ -218,7 +218,7 @@ The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
 | Backend | Status | Lines | Features |
 |---------|--------|-------|----------|
 | OpenGL ES | ✅ Done | ~3.5K | Windows (WGL) |
-| **Vulkan** | ✅ Done | ~27K | **HAL complete!** Windows, auto-gen bindings, Vulkan 1.3, memory allocator |
+| **Vulkan** | ✅ Done | ~27K | **Cross-platform!** Windows/Linux/macOS, goffi FFI, Vulkan 1.3, memory allocator |
 | Metal | Planned | - | macOS/iOS |
 | DX12 | Planned | - | Windows |
 
