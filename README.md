@@ -20,7 +20,7 @@
 
 ---
 
-## Status: v0.3.0-alpha — Texture API
+## Status: v0.3.0 — Textures & Build Tags
 
 > **Texture loading works!** Load from files, Go images, or raw RGBA data.
 >
@@ -187,30 +187,28 @@ gogpu/
 
 ## Roadmap
 
-### v0.1.0-alpha — First Rendering ✅
+### v0.1.0 — First Rendering ✅
 - [x] Window creation (Windows)
 - [x] Basic rendering (triangle)
 - [x] Simple API (~20 lines)
 
-### v0.2.0-alpha — Dual Backend ✅
+### v0.2.0 — Dual Backend & Textures ✅
 - [x] Backend interface abstraction
 - [x] Rust backend wrapper
-- [x] Native Go backend stub
-- [x] `WithBackend()` configuration
-
-### v0.3.0-alpha — Textures ✅ (Current)
+- [x] Native Go backend
 - [x] Texture loading from files (PNG, JPEG)
 - [x] Texture from Go image.Image
-- [x] Texture from raw RGBA data
-- [x] Sampler configuration (filtering, addressing)
-- [ ] Sprite rendering (next)
-- [ ] Basic shapes (next)
 
-### v0.4.0-alpha — Native Go Backend (In Progress)
-- [x] Pure Go WebGPU implementation (gogpu/wgpu)
-- [x] Vulkan backend integration
-- [x] Cross-platform FFI via goffi (Windows/Linux/macOS)
-- [ ] Integration test (vulkan-triangle)
+### v0.3.0 — Build Tags & Registry ✅ (Current)
+- [x] Build tags: `-tags rust`, `-tags purego`
+- [x] Backend registry with auto-discovery
+- [x] Pure Go Vulkan backend via gogpu/wgpu
+- [x] Cross-platform support (Windows/Linux/macOS)
+
+### v0.4.0 — 2D Graphics (Next)
+- [ ] Sprite rendering
+- [ ] Basic shapes
+- [ ] Text rendering
 
 ### v1.0.0 — Stable
 - [ ] Both backends production-ready
