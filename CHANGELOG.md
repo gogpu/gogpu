@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Updated ecosystem: wgpu v0.4.0 - OpenGL ES backend now supports Linux (EGL) + Windows (WGL)
+
 ## [0.3.0] - 2025-12-10
 
 ### Added
