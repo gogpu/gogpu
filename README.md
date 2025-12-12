@@ -223,7 +223,7 @@ gogpu/
 |---------|-------------|--------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.3.0 |
-| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | **v0.3.0** |
+| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | **v0.4.0** |
 | [gogpu/gg](https://github.com/gogpu/gg) | Simple 2D graphics library | Planned |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
 
