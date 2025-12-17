@@ -224,7 +224,7 @@ gogpu/
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | v0.4.0 |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with parallel rendering, SIMD, layers | **v0.6.0** |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with scene graph, parallel rendering, SIMD | **v0.7.0** |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
 
 ### wgpu Backends
