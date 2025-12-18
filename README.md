@@ -222,7 +222,7 @@ gogpu/
 | Project | Description | Status |
 |---------|-------------|--------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0 |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.4.0 |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | **v0.5.0** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | v0.4.0 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with GPU backend, scene graph, SIMD | **v0.9.0** |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
@@ -233,7 +233,7 @@ The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
 
 | Backend | Status | Lines | Features |
 |---------|--------|-------|----------|
-| **Software** | ✅ Done | ~1K | **Headless!** CPU rendering, CI/CD, no GPU required |
+| **Software** | ✅ Done | ~10K | **Full rasterizer!** Triangle rendering, depth/stencil, blending, clipping, parallel |
 | OpenGL ES | ✅ Done | ~7.5K | Windows (WGL) + Linux (EGL) |
 | **Vulkan** | ✅ Done | ~27K | **Cross-platform!** Windows/Linux/macOS, goffi FFI, Vulkan 1.3, memory allocator |
 | Metal | Planned | - | macOS/iOS |
