@@ -187,33 +187,15 @@ gogpu/
 
 ## Roadmap
 
-### v0.1.0 — First Rendering ✅
-- [x] Window creation (Windows)
-- [x] Basic rendering (triangle)
-- [x] Simple API (~20 lines)
+See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-### v0.2.0 — Dual Backend & Textures ✅
-- [x] Backend interface abstraction
-- [x] Rust backend wrapper
-- [x] Native Go backend
-- [x] Texture loading from files (PNG, JPEG)
-- [x] Texture from Go image.Image
+**Current:** v0.3.0 — Dual Backend, Textures, Build Tags
 
-### v0.3.0 — Build Tags & Registry ✅ (Current)
-- [x] Build tags: `-tags rust`, `-tags purego`
-- [x] Backend registry with auto-discovery
-- [x] Pure Go Vulkan backend via gogpu/wgpu
-- [x] Cross-platform support (Windows/Linux/macOS)
-
-### v0.4.0 — 2D Graphics (Next)
-- [ ] Sprite rendering
-- [ ] Basic shapes
-- [ ] Text rendering
-
-### v1.0.0 — Stable
-- [ ] Both backends production-ready
-- [ ] Full documentation
-- [ ] Performance optimized
+**Next:**
+- Linux X11/Wayland windowing support
+- macOS Cocoa windowing support
+- SIMD optimization for 2D rendering
+- GPU-accelerated text rendering
 
 ---
 
@@ -224,7 +206,7 @@ gogpu/
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | **v0.5.0** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | v0.4.0 |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics with GPU backend, scene graph, SIMD | **v0.9.0** |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | **v0.9.1** |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
 
 ### wgpu Backends
