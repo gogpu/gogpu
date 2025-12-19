@@ -73,6 +73,19 @@ func (b *Backend) newHandle() uintptr {
 	return h
 }
 
+// Releasable is implemented by all wgpu resource types.
+type Releasable interface {
+	Release()
+}
+
+// releaseMap releases all resources in a map (Rust Drop pattern).
+func releaseMap[K comparable, V Releasable](m map[K]V) {
+	for k, v := range m {
+		v.Release()
+		delete(m, k)
+	}
+}
+
 // Name returns the backend identifier.
 func (b *Backend) Name() string {
 	return "Rust (wgpu-native)"
@@ -83,81 +96,22 @@ func (b *Backend) Init() error {
 	return nil
 }
 
-// Destroy releases all backend resources.
-//
-//nolint:gocognit,gocyclo,cyclop // Cleanup code is inherently repetitive but straightforward.
+// Destroy releases all backend resources in reverse order of creation.
 func (b *Backend) Destroy() {
-	// Release in reverse order of creation
-	for _, pl := range b.pipelineLayouts {
-		if pl != nil {
-			pl.Release()
-		}
-	}
-	for _, bg := range b.bindGroups {
-		if bg != nil {
-			bg.Release()
-		}
-	}
-	for _, bgl := range b.bindGroupLayouts {
-		if bgl != nil {
-			bgl.Release()
-		}
-	}
-	for _, buf := range b.gpuBuffers {
-		if buf != nil {
-			buf.Release()
-		}
-	}
-	for _, s := range b.samplers {
-		if s != nil {
-			s.Release()
-		}
-	}
-	for _, v := range b.views {
-		if v != nil {
-			v.Release()
-		}
-	}
-	for _, t := range b.textures {
-		if t != nil {
-			t.Release()
-		}
-	}
-	for _, p := range b.pipelines {
-		if p != nil {
-			p.Release()
-		}
-	}
-	for _, s := range b.shaders {
-		if s != nil {
-			s.Release()
-		}
-	}
-	for _, s := range b.surfaces {
-		if s != nil {
-			s.Release()
-		}
-	}
-	for _, q := range b.queues {
-		if q != nil {
-			q.Release()
-		}
-	}
-	for _, d := range b.devices {
-		if d != nil {
-			d.Release()
-		}
-	}
-	for _, a := range b.adapters {
-		if a != nil {
-			a.Release()
-		}
-	}
-	for _, i := range b.instances {
-		if i != nil {
-			i.Release()
-		}
-	}
+	releaseMap(b.pipelineLayouts)
+	releaseMap(b.bindGroups)
+	releaseMap(b.bindGroupLayouts)
+	releaseMap(b.gpuBuffers)
+	releaseMap(b.samplers)
+	releaseMap(b.views)
+	releaseMap(b.textures)
+	releaseMap(b.pipelines)
+	releaseMap(b.shaders)
+	releaseMap(b.surfaces)
+	releaseMap(b.queues)
+	releaseMap(b.devices)
+	releaseMap(b.adapters)
+	releaseMap(b.instances)
 }
 
 // CreateInstance creates a WebGPU instance.
