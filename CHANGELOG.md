@@ -5,10 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2025-12-21
+
+### Added
+- **Linux Wayland Platform** (Pure Go, ~5,700 LOC)
+  - Full Wayland wire protocol implementation (no libwayland-client dependency)
+  - Core interfaces: wl_display, wl_registry, wl_compositor, wl_surface
+  - XDG Shell: xdg_wm_base, xdg_surface, xdg_toplevel for window management
+  - Input handling: wl_seat, wl_keyboard, wl_pointer
+  - Frame synchronization via wl_callback
+  - Cross-compilable from Windows/macOS to Linux
+- **Wayland Wire Protocol**
+  - Message encoding/decoding with 24.8 fixed-point support
+  - File descriptor passing via Unix sockets (SCM_RIGHTS)
+  - Object ID allocation and management
+- **Unit Tests** for Wayland package
+  - Wire protocol tests
+  - Compositor, XDG Shell, Input tests
+  - 312 test cases
 
 ### Changed
-- Updated ecosystem: wgpu v0.4.0 - OpenGL ES backend now supports Linux (EGL) + Windows (WGL)
+- `platform_linux.go` now implements full Wayland windowing (was stub)
+- Updated ecosystem: wgpu v0.5.0, gg v0.9.2
+
+### Notes
+- **Community Testing Requested**: Wayland implementation needs testing on real Linux systems with Wayland compositors (GNOME 45+, KDE Plasma 6, Sway, etc.)
+- X11 support planned for next release
 
 ## [0.3.0] - 2025-12-10
 
@@ -78,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gogpu/gogpu/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/gogpu/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gogpu/gogpu/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gogpu/gogpu/releases/tag/v0.1.0
