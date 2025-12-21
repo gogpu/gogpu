@@ -48,12 +48,12 @@ const maxMessageSize = 64 * 1024
 
 // Errors returned by the wire protocol.
 var (
-	ErrMessageTooLarge    = errors.New("wayland: message exceeds maximum size")
-	ErrMessageTooSmall    = errors.New("wayland: message smaller than header")
-	ErrBufferTooSmall     = errors.New("wayland: buffer too small for message")
-	ErrInvalidStringLen   = errors.New("wayland: invalid string length")
-	ErrInvalidArrayLen    = errors.New("wayland: invalid array length")
-	ErrUnexpectedEOF      = errors.New("wayland: unexpected end of message")
+	ErrMessageTooLarge     = errors.New("wayland: message exceeds maximum size")
+	ErrMessageTooSmall     = errors.New("wayland: message smaller than header")
+	ErrBufferTooSmall      = errors.New("wayland: buffer too small for message")
+	ErrInvalidStringLen    = errors.New("wayland: invalid string length")
+	ErrInvalidArrayLen     = errors.New("wayland: invalid array length")
+	ErrUnexpectedEOF       = errors.New("wayland: unexpected end of message")
 	ErrStringNotTerminated = errors.New("wayland: string not null-terminated")
 )
 

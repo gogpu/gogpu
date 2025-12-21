@@ -540,8 +540,10 @@ func TestDecoderRemaining(t *testing.T) {
 
 func TestFloatToFixedClamping(t *testing.T) {
 	// Test values that would overflow
+	// Max for 24.8 fixed point is MaxInt32/256 = 8388607.996...
+	// Min for 24.8 fixed point is MinInt32/256 = -8388608.0
 	large := FloatToFixed(1e10)
-	if large.Float() > 8388607 {
+	if large.Float() >= 8388608 {
 		t.Errorf("Large value not clamped properly: %f", large.Float())
 	}
 

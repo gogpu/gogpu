@@ -22,15 +22,15 @@ const (
 
 // wl_display event opcodes
 const (
-	displayEventError     Opcode = 0 // error(object_id: object, code: uint, message: string)
-	displayEventDeleteID  Opcode = 1 // delete_id(id: uint)
+	displayEventError    Opcode = 0 // error(object_id: object, code: uint, message: string)
+	displayEventDeleteID Opcode = 1 // delete_id(id: uint)
 )
 
 // Display error codes (from wayland.xml).
 const (
-	DisplayErrorInvalidObject Opcode = 0 // server couldn't find object
-	DisplayErrorInvalidMethod Opcode = 1 // method doesn't exist on the specified interface
-	DisplayErrorNoMemory      Opcode = 2 // server is out of memory
+	DisplayErrorInvalidObject  Opcode = 0 // server couldn't find object
+	DisplayErrorInvalidMethod  Opcode = 1 // method doesn't exist on the specified interface
+	DisplayErrorNoMemory       Opcode = 2 // server is out of memory
 	DisplayErrorImplementation Opcode = 3 // implementation error in compositor
 )
 
@@ -512,6 +512,14 @@ func (d *Display) Fd() int {
 		return -1
 	}
 	return int(d.connFile.Fd())
+}
+
+// Ptr returns the file descriptor as a uintptr for use with Vulkan surface creation.
+// This is used with VK_KHR_wayland_surface extension.
+// Note: In Wayland, we pass the fd as the "display pointer" since the Display
+// struct wraps a Unix socket connection, not a C pointer.
+func (d *Display) Ptr() uintptr {
+	return uintptr(d.Fd())
 }
 
 // parseFileDescriptors extracts file descriptors from socket control messages.
