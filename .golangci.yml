@@ -148,6 +148,8 @@ linters:
           - funlen       # Win32 code is verbose
           - gosec        # Platform syscalls are intentional
           - errcheck     # Win32 syscall returns are often ignored
+          - unused       # dispatch methods will be used by event loop
+          - unparam      # dispatch methods follow consistent signature pattern
 
       # Internal utilities
       - path: internal/.*\.go

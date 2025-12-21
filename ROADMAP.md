@@ -89,7 +89,7 @@ All platforms use Pure Go FFI (no CGO required).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    User Application                          │
+│                    User Application                         │
 ├─────────────────────────────────────────────────────────────┤
 │     gogpu/gg          │     gogpu/gogpu      │   Custom     │
 │   2D Graphics         │    GPU Framework     │    Apps      │
@@ -97,8 +97,8 @@ All platforms use Pure Go FFI (no CGO required).
 │   Rust Backend        │     Pure Go Backend                 │
 │  (go-webgpu/webgpu)   │       (gogpu/wgpu)                  │
 ├─────────────────────────────────────────────────────────────┤
-│   Vulkan    │   OpenGL ES   │   Software   │    Metal      │
-│  (Win+Lin)  │   (Win+Lin)   │  (Headless)  │   (macOS)     │
+│   Vulkan    │   OpenGL ES   │   Software   │    Metal       │
+│  (Win+Lin)  │   (Win+Lin)   │  (Headless)  │   (macOS)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 

@@ -20,9 +20,11 @@
 
 ---
 
-## Status: v0.3.0 — Textures & Build Tags
+## Status: v0.4.0 — Linux Wayland Platform
 
-> **Texture loading works!** Load from files, Go images, or raw RGBA data.
+> **Linux support is here!** Pure Go Wayland implementation (5,700 LOC).
+>
+> **🧪 Community Testing Requested** — Help us test on Wayland compositors!
 >
 > **Star the repo to follow progress!**
 
@@ -118,6 +120,27 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
+## Linux Platform (New in v0.4.0)
+
+**Pure Go Wayland implementation** — no libwayland-client required!
+
+```
+internal/platform/wayland/
+├── wire.go          # Wayland wire protocol (message encoding)
+├── display.go       # wl_display connection via Unix socket
+├── compositor.go    # wl_compositor, wl_surface
+├── xdg_shell.go     # Window management (xdg_toplevel)
+├── input.go         # Keyboard and mouse (wl_seat)
+└── ...              # ~5,700 lines total
+```
+
+**🧪 Community Testing Requested:**
+- GNOME 45+, KDE Plasma 6, Sway, Hyprland
+- Run `go build -tags purego ./examples/triangle/` on Linux Wayland
+- Report issues at [github.com/gogpu/gogpu/issues](https://github.com/gogpu/gogpu/issues)
+
+---
+
 ## Why GoGPU?
 
 This project was inspired by [a discussion on r/golang](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) about the state of GUI and graphics development in Go.
@@ -127,7 +150,7 @@ This project was inspired by [a discussion on r/golang](https://www.reddit.com/r
 1. **Simple API** — Hide WebGPU complexity behind intuitive Go code
 2. **Dual Backend** — Choose performance (Rust) or simplicity (Pure Go)
 3. **Zero CGO** — No C compiler required
-4. **Cross-Platform** — Windows, Linux, macOS
+4. **Cross-Platform** — Windows, Linux (Wayland), macOS (planned)
 
 | Layer | Component |
 |-------|-----------|
@@ -189,13 +212,16 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.3.0 — Dual Backend, Textures, Build Tags
+**Current:** v0.4.0 — Linux Wayland Platform
+
+**Recent:**
+- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
+- ✅ Dual Backend, Textures, Build Tags
 
 **Next:**
-- Linux X11/Wayland windowing support
+- Linux X11 windowing support
 - macOS Cocoa windowing support
-- SIMD optimization for 2D rendering
-- GPU-accelerated text rendering
+- Metal backend for macOS
 
 ---
 
@@ -203,10 +229,10 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | v0.3.0 |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | **v0.5.0** |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.4.0** |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.5.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | v0.4.0 |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | **v0.9.1** |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | v0.9.2 |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
 
 ### wgpu Backends
@@ -246,9 +272,9 @@ Read our launch announcement on Dev.to:
 Contributions are welcome! This is an early-stage project, so there's lots to do.
 
 **Areas where we need help:**
-- Pure Go WebGPU implementation
-- Platform support (Linux, macOS)
-- WGSL parser implementation
+- 🧪 **Linux Wayland testing** — Test on real Wayland compositors
+- Platform support (X11, macOS Cocoa)
+- Metal backend for macOS
 - Documentation and examples
 
 ```bash
