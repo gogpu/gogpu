@@ -16,14 +16,14 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.3.0)
+## Current State (v0.4.0)
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.3.0 | GPU abstraction, windowing, dual backend |
+| **gogpu/gogpu** | v0.4.0 | GPU abstraction, windowing, dual backend |
 | **gogpu/wgpu** | v0.5.0 | Pure Go WebGPU (Vulkan, GLES, Software) |
 | **gogpu/naga** | v0.4.0 | WGSL shader compiler |
-| **gogpu/gg** | v0.9.1 | 2D graphics library |
+| **gogpu/gg** | v0.9.2 | 2D graphics library |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
