@@ -16,14 +16,14 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.3.0)
+## Current State (v0.4.0)
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.3.0 | GPU abstraction, windowing, dual backend |
+| **gogpu/gogpu** | v0.4.0 | GPU abstraction, windowing, dual backend |
 | **gogpu/wgpu** | v0.5.0 | Pure Go WebGPU (Vulkan, GLES, Software) |
 | **gogpu/naga** | v0.4.0 | WGSL shader compiler |
-| **gogpu/gg** | v0.9.1 | 2D graphics library |
+| **gogpu/gg** | v0.9.2 | 2D graphics library |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
@@ -39,7 +39,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 |----------|-----------|-------------|--------|
 | **Windows** | Win32 | Vulkan, GLES | Production |
 | **Linux X11** | X11 | Vulkan, GLES | Planned |
-| **Linux Wayland** | Wayland | Vulkan, GLES | Planned |
+| **Linux Wayland** | Wayland | Vulkan, GLES | Community Testing |
 | **macOS** | Cocoa | Metal | Planned |
 
 All platforms use Pure Go FFI (no CGO required).
@@ -48,12 +48,16 @@ All platforms use Pure Go FFI (no CGO required).
 
 ## Roadmap
 
+### Q4 2025 (Current)
+
+**Platform Expansion:**
+- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
+
 ### Q1 2026
 
 **Platform Expansion:**
 - Linux X11 windowing support
 - macOS Cocoa windowing support
-- Linux Wayland windowing support
 
 **Performance:**
 - SIMD optimization for 2D rendering (gg)
