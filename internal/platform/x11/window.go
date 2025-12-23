@@ -84,7 +84,7 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 func (c *Connection) MapWindow(window ResourceID) error {
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeMapWindow)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(2) // length
 	e.PutUint32(uint32(window))
 
@@ -98,7 +98,7 @@ func (c *Connection) MapWindow(window ResourceID) error {
 func (c *Connection) UnmapWindow(window ResourceID) error {
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeUnmapWindow)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(2) // length
 	e.PutUint32(uint32(window))
 
@@ -112,7 +112,7 @@ func (c *Connection) UnmapWindow(window ResourceID) error {
 func (c *Connection) DestroyWindow(window ResourceID) error {
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeDestroyWindow)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(2) // length
 	e.PutUint32(uint32(window))
 
@@ -249,7 +249,7 @@ func (c *Connection) ConfigureWindow(window ResourceID, x, y int16, width, heigh
 
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeConfigureWindow)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(8) // length: 3 + 1 + 4 values = 8 4-byte units
 	e.PutUint32(uint32(window))
 	e.PutUint16(valueMask)
@@ -269,7 +269,7 @@ func (c *Connection) ConfigureWindow(window ResourceID, x, y int16, width, heigh
 func (c *Connection) GetGeometry(drawable ResourceID) (x, y int16, width, height uint16, err error) {
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeGetGeometry)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(2) // length
 	e.PutUint32(uint32(drawable))
 
@@ -420,7 +420,7 @@ func (c *Connection) SendClientMessage(window, target ResourceID, msgType Atom, 
 	// Build SendEvent request
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeSendEvent)
-	e.PutUint8(0) // propagate = false
+	e.PutUint8(0)   // propagate = false
 	e.PutUint16(11) // length = 11 4-byte units
 	e.PutUint32(uint32(target))
 	e.PutUint32(EventMaskSubstructureNotify | EventMaskSubstructureRedirect)

@@ -15,12 +15,12 @@ func TestKeysymToString(t *testing.T) {
 		{Keysyma, "a"},
 		{KeysymA, "A"},
 		{Keysym0, "0"},
-		{KeysymBackSpace, ""},      // Non-printable
-		{KeysymReturn, ""},         // Non-printable
-		{KeysymF1, ""},             // Non-printable
-		{0x00a9, "\u00a9"},         // Copyright symbol
-		{0x01000041, "A"},          // Unicode keysym for 'A'
-		{0x010003b1, "\u03b1"},     // Unicode keysym for Greek alpha
+		{KeysymBackSpace, ""},  // Non-printable
+		{KeysymReturn, ""},     // Non-printable
+		{KeysymF1, ""},         // Non-printable
+		{0x00a9, "\u00a9"},     // Copyright symbol
+		{0x01000041, "A"},      // Unicode keysym for 'A'
+		{0x010003b1, "\u03b1"}, // Unicode keysym for Greek alpha
 	}
 
 	for _, tt := range tests {

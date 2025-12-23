@@ -14,41 +14,41 @@ const (
 	KeysymVoidSymbol = 0xffffff
 
 	// TTY function keys
-	KeysymBackSpace = 0xff08
-	KeysymTab       = 0xff09
-	KeysymLinefeed  = 0xff0a
-	KeysymClear     = 0xff0b
-	KeysymReturn    = 0xff0d
-	KeysymPause     = 0xff13
+	KeysymBackSpace  = 0xff08
+	KeysymTab        = 0xff09
+	KeysymLinefeed   = 0xff0a
+	KeysymClear      = 0xff0b
+	KeysymReturn     = 0xff0d
+	KeysymPause      = 0xff13
 	KeysymScrollLock = 0xff14
-	KeysymSysReq    = 0xff15
-	KeysymEscape    = 0xff1b
-	KeysymDelete    = 0xffff
+	KeysymSysReq     = 0xff15
+	KeysymEscape     = 0xff1b
+	KeysymDelete     = 0xffff
 
 	// Cursor control & motion
-	KeysymHome      = 0xff50
-	KeysymLeft      = 0xff51
-	KeysymUp        = 0xff52
-	KeysymRight     = 0xff53
-	KeysymDown      = 0xff54
-	KeysymPageUp    = 0xff55
-	KeysymPageDown  = 0xff56
-	KeysymEnd       = 0xff57
-	KeysymBegin     = 0xff58
+	KeysymHome     = 0xff50
+	KeysymLeft     = 0xff51
+	KeysymUp       = 0xff52
+	KeysymRight    = 0xff53
+	KeysymDown     = 0xff54
+	KeysymPageUp   = 0xff55
+	KeysymPageDown = 0xff56
+	KeysymEnd      = 0xff57
+	KeysymBegin    = 0xff58
 
 	// Misc functions
-	KeysymSelect    = 0xff60
-	KeysymPrint     = 0xff61
-	KeysymExecute   = 0xff62
-	KeysymInsert    = 0xff63
-	KeysymUndo      = 0xff65
-	KeysymRedo      = 0xff66
-	KeysymMenu      = 0xff67
-	KeysymFind      = 0xff68
-	KeysymCancel    = 0xff69
-	KeysymHelp      = 0xff6a
-	KeysymBreak     = 0xff6b
-	KeysymNumLock   = 0xff7f
+	KeysymSelect  = 0xff60
+	KeysymPrint   = 0xff61
+	KeysymExecute = 0xff62
+	KeysymInsert  = 0xff63
+	KeysymUndo    = 0xff65
+	KeysymRedo    = 0xff66
+	KeysymMenu    = 0xff67
+	KeysymFind    = 0xff68
+	KeysymCancel  = 0xff69
+	KeysymHelp    = 0xff6a
+	KeysymBreak   = 0xff6b
+	KeysymNumLock = 0xff7f
 
 	// Keypad
 	KeysymKPSpace     = 0xff80
@@ -242,10 +242,10 @@ const (
 
 // KeyboardMapping holds the keyboard mapping for a connection.
 type KeyboardMapping struct {
-	MinKeycode      uint8
-	MaxKeycode      uint8
-	KeysymsPerCode  int
-	Keysyms         []Keysym
+	MinKeycode     uint8
+	MaxKeycode     uint8
+	KeysymsPerCode int
+	Keysyms        []Keysym
 }
 
 // GetKeyboardMapping requests the keyboard mapping from the server.
@@ -260,7 +260,7 @@ func (c *Connection) GetKeyboardMapping() (*KeyboardMapping, error) {
 
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeGetKeyboardMapping)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(2) // length
 	e.PutUint8(minKeycode)
 	e.PutUint8(uint8(count))

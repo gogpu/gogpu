@@ -42,9 +42,9 @@ func TestClientMessageEvent_IsDeleteWindow(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		event  *ClientMessageEvent
-		want   bool
+		name  string
+		event *ClientMessageEvent
+		want  bool
 	}{
 		{
 			name: "delete window",

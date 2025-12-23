@@ -15,11 +15,11 @@ import (
 
 // Connection errors.
 var (
-	ErrNotConnected    = errors.New("x11: not connected")
+	ErrNotConnected     = errors.New("x11: not connected")
 	ErrConnectionClosed = errors.New("x11: connection closed")
-	ErrNoDisplay       = errors.New("x11: DISPLAY not set")
-	ErrInvalidDisplay  = errors.New("x11: invalid DISPLAY format")
-	ErrProtocolError   = errors.New("x11: protocol error")
+	ErrNoDisplay        = errors.New("x11: DISPLAY not set")
+	ErrInvalidDisplay   = errors.New("x11: invalid DISPLAY format")
+	ErrProtocolError    = errors.New("x11: protocol error")
 )
 
 // Connection represents a connection to an X11 server.
@@ -462,7 +462,7 @@ func (c *Connection) Sync() error {
 	// Send GetInputFocus request which always generates a reply
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeGetInputFocus)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(1) // length in 4-byte units
 
 	_, err := c.sendRequestWithReply(e.Bytes())

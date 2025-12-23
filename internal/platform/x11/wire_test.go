@@ -71,9 +71,9 @@ func TestEncoder_PutUint32_BigEndian(t *testing.T) {
 
 func TestEncoder_PutPad(t *testing.T) {
 	tests := []struct {
-		name     string
-		initial  int
-		wantPad  int
+		name    string
+		initial int
+		wantPad int
 	}{
 		{"aligned 0", 0, 0},
 		{"aligned 4", 4, 0},

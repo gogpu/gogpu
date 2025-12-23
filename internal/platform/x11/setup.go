@@ -9,8 +9,8 @@ import (
 
 // Setup response status codes.
 const (
-	SetupFailed    = 0
-	SetupSuccess   = 1
+	SetupFailed       = 0
+	SetupSuccess      = 1
 	SetupAuthenticate = 2
 )
 
@@ -21,8 +21,8 @@ type SetupInfo struct {
 	ProtocolMinorVersion uint16
 
 	// Vendor information
-	Vendor       string
-	VendorLength uint16
+	Vendor        string
+	VendorLength  uint16
 	ReleaseNumber uint32
 
 	// Resource ID allocation
@@ -69,9 +69,9 @@ type ScreenInfo struct {
 
 // DepthInfo contains information about a supported color depth.
 type DepthInfo struct {
-	Depth       uint8
+	Depth        uint8
 	VisualsCount uint16
-	Visuals     []VisualType
+	Visuals      []VisualType
 }
 
 // VisualType contains information about a visual.

@@ -8,23 +8,23 @@ import (
 
 // Common atom names used by window managers.
 const (
-	AtomNameWMProtocols    = "WM_PROTOCOLS"
-	AtomNameWMDeleteWindow = "WM_DELETE_WINDOW"
-	AtomNameWMTakeFocus    = "WM_TAKE_FOCUS"
-	AtomNameWMState        = "WM_STATE"
-	AtomNameNetWMName      = "_NET_WM_NAME"
-	AtomNameNetWMState     = "_NET_WM_STATE"
-	AtomNameNetWMStateFullscreen = "_NET_WM_STATE_FULLSCREEN"
+	AtomNameWMProtocols             = "WM_PROTOCOLS"
+	AtomNameWMDeleteWindow          = "WM_DELETE_WINDOW"
+	AtomNameWMTakeFocus             = "WM_TAKE_FOCUS"
+	AtomNameWMState                 = "WM_STATE"
+	AtomNameNetWMName               = "_NET_WM_NAME"
+	AtomNameNetWMState              = "_NET_WM_STATE"
+	AtomNameNetWMStateFullscreen    = "_NET_WM_STATE_FULLSCREEN"
 	AtomNameNetWMStateMaximizedVert = "_NET_WM_STATE_MAXIMIZED_VERT"
 	AtomNameNetWMStateMaximizedHorz = "_NET_WM_STATE_MAXIMIZED_HORZ"
-	AtomNameNetWMStateHidden = "_NET_WM_STATE_HIDDEN"
-	AtomNameNetWMWindowType = "_NET_WM_WINDOW_TYPE"
-	AtomNameNetWMWindowTypeNormal = "_NET_WM_WINDOW_TYPE_NORMAL"
-	AtomNameNetWMPID        = "_NET_WM_PID"
-	AtomNameNetWMIcon       = "_NET_WM_ICON"
-	AtomNameNetFrameExtents = "_NET_FRAME_EXTENTS"
-	AtomNameUTF8String      = "UTF8_STRING"
-	AtomNameMotifWMHints    = "_MOTIF_WM_HINTS"
+	AtomNameNetWMStateHidden        = "_NET_WM_STATE_HIDDEN"
+	AtomNameNetWMWindowType         = "_NET_WM_WINDOW_TYPE"
+	AtomNameNetWMWindowTypeNormal   = "_NET_WM_WINDOW_TYPE_NORMAL"
+	AtomNameNetWMPID                = "_NET_WM_PID"
+	AtomNameNetWMIcon               = "_NET_WM_ICON"
+	AtomNameNetFrameExtents         = "_NET_FRAME_EXTENTS"
+	AtomNameUTF8String              = "UTF8_STRING"
+	AtomNameMotifWMHints            = "_MOTIF_WM_HINTS"
 )
 
 // InternAtom interns an atom name and returns its ID.
@@ -100,7 +100,7 @@ func (c *Connection) GetAtomName(atom Atom) (string, error) {
 	// Build request
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeGetAtomName)
-	e.PutUint8(0) // unused
+	e.PutUint8(0)  // unused
 	e.PutUint16(2) // length in 4-byte units
 	e.PutUint32(uint32(atom))
 
@@ -167,20 +167,20 @@ func (c *Connection) InternAtoms(names []string) (map[string]Atom, error) {
 
 // StandardAtoms contains commonly used atoms that are interned at connection time.
 type StandardAtoms struct {
-	WMProtocols    Atom
-	WMDeleteWindow Atom
-	WMTakeFocus    Atom
-	WMState        Atom
-	NetWMName      Atom
-	NetWMState     Atom
-	NetWMStateFullscreen Atom
+	WMProtocols             Atom
+	WMDeleteWindow          Atom
+	WMTakeFocus             Atom
+	WMState                 Atom
+	NetWMName               Atom
+	NetWMState              Atom
+	NetWMStateFullscreen    Atom
 	NetWMStateMaximizedVert Atom
 	NetWMStateMaximizedHorz Atom
-	NetWMWindowType Atom
-	NetWMWindowTypeNormal Atom
-	NetWMPID       Atom
-	UTF8String     Atom
-	MotifWMHints   Atom
+	NetWMWindowType         Atom
+	NetWMWindowTypeNormal   Atom
+	NetWMPID                Atom
+	UTF8String              Atom
+	MotifWMHints            Atom
 }
 
 // InternStandardAtoms interns all standard atoms needed for windowing.

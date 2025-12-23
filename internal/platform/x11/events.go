@@ -149,26 +149,26 @@ func (*ExposeEvent) eventMarker() {}
 
 // ConfigureNotifyEvent is generated when a window is reconfigured.
 type ConfigureNotifyEvent struct {
-	Sequence        uint16     // Sequence number
-	Event           ResourceID // Event window
-	Window          ResourceID // Configured window
-	AboveSibling    ResourceID // Sibling above (or None)
-	X               int16      // New X coordinate
-	Y               int16      // New Y coordinate
-	Width           uint16     // New width
-	Height          uint16     // New height
-	BorderWidth     uint16     // New border width
-	OverrideRedirect bool      // Override redirect flag
+	Sequence         uint16     // Sequence number
+	Event            ResourceID // Event window
+	Window           ResourceID // Configured window
+	AboveSibling     ResourceID // Sibling above (or None)
+	X                int16      // New X coordinate
+	Y                int16      // New Y coordinate
+	Width            uint16     // New width
+	Height           uint16     // New height
+	BorderWidth      uint16     // New border width
+	OverrideRedirect bool       // Override redirect flag
 }
 
 func (*ConfigureNotifyEvent) eventMarker() {}
 
 // MapNotifyEvent is generated when a window is mapped.
 type MapNotifyEvent struct {
-	Sequence        uint16     // Sequence number
-	Event           ResourceID // Event window
-	Window          ResourceID // Mapped window
-	OverrideRedirect bool      // Override redirect flag
+	Sequence         uint16     // Sequence number
+	Event            ResourceID // Event window
+	Window           ResourceID // Mapped window
+	OverrideRedirect bool       // Override redirect flag
 }
 
 func (*MapNotifyEvent) eventMarker() {}
@@ -205,11 +205,11 @@ func (*PropertyNotifyEvent) eventMarker() {}
 
 // ClientMessageEvent is generated for client-to-client communication.
 type ClientMessageEvent struct {
-	Format   uint8       // 8, 16, or 32 bits
-	Sequence uint16      // Sequence number
-	Window   ResourceID  // Target window
-	Type     Atom        // Message type atom
-	Data     [20]byte    // Message data (format-dependent)
+	Format   uint8      // 8, 16, or 32 bits
+	Sequence uint16     // Sequence number
+	Window   ResourceID // Target window
+	Type     Atom       // Message type atom
+	Data     [20]byte   // Message data (format-dependent)
 }
 
 func (*ClientMessageEvent) eventMarker() {}
@@ -529,15 +529,15 @@ func (c *Connection) parseConfigureNotifyEvent(buf []byte) (Event, error) {
 	overrideRedirect, _ := d.Uint8()
 
 	return &ConfigureNotifyEvent{
-		Sequence:        seq,
-		Event:           ResourceID(event),
-		Window:          ResourceID(window),
-		AboveSibling:    ResourceID(aboveSibling),
-		X:               x,
-		Y:               y,
-		Width:           width,
-		Height:          height,
-		BorderWidth:     borderWidth,
+		Sequence:         seq,
+		Event:            ResourceID(event),
+		Window:           ResourceID(window),
+		AboveSibling:     ResourceID(aboveSibling),
+		X:                x,
+		Y:                y,
+		Width:            width,
+		Height:           height,
+		BorderWidth:      borderWidth,
 		OverrideRedirect: overrideRedirect != 0,
 	}, nil
 }
@@ -553,9 +553,9 @@ func (c *Connection) parseMapNotifyEvent(buf []byte) (Event, error) {
 	overrideRedirect, _ := d.Uint8()
 
 	return &MapNotifyEvent{
-		Sequence:        seq,
-		Event:           ResourceID(event),
-		Window:          ResourceID(window),
+		Sequence:         seq,
+		Event:            ResourceID(event),
+		Window:           ResourceID(window),
 		OverrideRedirect: overrideRedirect != 0,
 	}, nil
 }
