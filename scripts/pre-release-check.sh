@@ -156,79 +156,41 @@ else
 fi
 echo ""
 
-# 7. Run tests with race detector (supports WSL2 fallback)
-USE_WSL=0
-WSL_DISTRO=""
+# 7. Run tests with race detector
+# Priority: 1) kolkov/racedetector (Pure Go), 2) go test -race (requires CGO), 3) no race detection
+RACE_MODE="none"
 
-# Helper function to find WSL distro with Go installed
-find_wsl_distro() {
-    if ! command -v wsl &> /dev/null; then
-        return 1
-    fi
-
-    # Try common distros first
-    for distro in "Gentoo" "Ubuntu" "Debian" "Alpine"; do
-        if wsl -d "$distro" bash -c "command -v go &> /dev/null" 2>/dev/null; then
-            echo "$distro"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
-    log_info "Running tests with race detector..."
-    RACE_FLAG="-race"
-    TEST_CMD="go test -race ./... 2>&1"
+if command -v racedetector &> /dev/null; then
+    log_info "Using kolkov/racedetector (Pure Go, no CGO required)..."
+    RACE_MODE="racedetector"
+elif command -v gcc &> /dev/null || command -v clang &> /dev/null; then
+    log_info "Using standard race detector (CGO enabled)..."
+    RACE_MODE="standard"
 else
-    # Try to find WSL distro with Go
-    WSL_DISTRO=$(find_wsl_distro)
-    if [ -n "$WSL_DISTRO" ]; then
-        log_info "GCC not found locally, but WSL2 ($WSL_DISTRO) detected!"
-        log_info "Running tests with race detector via WSL2 $WSL_DISTRO..."
-        USE_WSL=1
-        RACE_FLAG="-race"
-
-        # Convert Windows path to WSL path (D:\projects\... -> /mnt/d/projects/...)
-        CURRENT_DIR=$(pwd)
-        if [[ "$CURRENT_DIR" =~ ^/([a-z])/ ]]; then
-            # Already in /d/... format (MSYS), convert to /mnt/d/...
-            WSL_PATH="/mnt${CURRENT_DIR}"
-        else
-            # Windows format D:\... convert to /mnt/d/...
-            DRIVE_LETTER=$(echo "$CURRENT_DIR" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
-            PATH_WITHOUT_DRIVE=${CURRENT_DIR#*:}
-            WSL_PATH="/mnt/$DRIVE_LETTER${PATH_WITHOUT_DRIVE//\\//}"
-        fi
-
-        TEST_CMD="wsl -d \"$WSL_DISTRO\" bash -c \"cd \\\"$WSL_PATH\\\" && go test -race -ldflags '-linkmode=external' ./... 2>&1\""
-    else
-        log_warning "GCC not found, running tests WITHOUT race detector"
-        log_info "Install GCC (mingw-w64) or setup WSL2 with Go for race detection"
-        WARNINGS=$((WARNINGS + 1))
-        RACE_FLAG=""
-        TEST_CMD="go test ./... 2>&1"
-    fi
+    log_warning "No race detector available"
+    log_info "Install: go install github.com/kolkov/racedetector/cmd/racedetector@latest"
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 log_info "Running tests..."
-if [ $USE_WSL -eq 1 ]; then
-    TEST_OUTPUT=$(wsl -d "$WSL_DISTRO" bash -c "cd $WSL_PATH && timeout 180 stdbuf -oL -eL go test -race -ldflags '-linkmode=external' ./... 2>&1" || true)
-    if [ -z "$TEST_OUTPUT" ]; then
-        log_error "WSL2 tests timed out or failed to run"
-        ERRORS=$((ERRORS + 1))
-    fi
-else
-    TEST_OUTPUT=$(eval "$TEST_CMD")
-fi
+case "$RACE_MODE" in
+    "racedetector")
+        TEST_OUTPUT=$(racedetector test ./... 2>&1 || true)
+        ;;
+    "standard")
+        TEST_OUTPUT=$(go test -race ./... 2>&1 || true)
+        ;;
+    *)
+        TEST_OUTPUT=$(go test ./... 2>&1 || true)
+        ;;
+esac
 
 if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
     log_error "Tests failed"
     echo "$TEST_OUTPUT"
     ERRORS=$((ERRORS + 1))
 elif echo "$TEST_OUTPUT" | grep -q "PASS\|ok"; then
-    if [ -n "$RACE_FLAG" ]; then
+    if [ "$RACE_MODE" != "none" ]; then
         log_success "All tests passed with race detector"
     else
         log_success "All tests passed (race detector not available)"

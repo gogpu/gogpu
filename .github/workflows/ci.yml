@@ -3,13 +3,16 @@ name: CI
 # CI Strategy:
 # - Tests run on Linux, macOS, and Windows (cross-platform GPU library)
 # - Go 1.25+ required (matches go.mod requirement)
-# - Requires wgpu-native for Rust backend tests
+# - CGO_ENABLED=0: Pure Go library, no C compiler required
 #
 # Branch Strategy (GitHub Flow):
 # - main branch: Production-ready code
 # - feat/** branches: Feature development
 # - fix/** branches: Bug fixes
 # - Pull requests: Must pass all checks before merge
+
+env:
+  CGO_ENABLED: "0"
 
 on:
   push:
@@ -79,9 +82,12 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: go vet ./...
 
+    - name: Install race detector
+      run: go install github.com/kolkov/racedetector/cmd/racedetector@latest
+
     - name: Run tests with race detector
       shell: bash
-      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
