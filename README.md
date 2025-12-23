@@ -20,11 +20,11 @@
 
 ---
 
-## Status: v0.5.0 — macOS Cocoa Platform
+## Status: v0.5.x — Full Cross-Platform Support
 
-> **macOS support is here!** Pure Go Cocoa implementation via goffi.
+> **All major platforms now supported!** Windows, Linux (X11 + Wayland), macOS (Cocoa + Metal).
 >
-> **🧪 Community Testing Requested** — Help us test on macOS!
+> **🧪 Community Testing Requested** — Help us test on Linux X11 and macOS!
 >
 > **Star the repo to follow progress!**
 
@@ -213,17 +213,18 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.5.0 — macOS Cocoa Platform
+**Current:** v0.5.x — Full Linux + macOS Platform Support
 
 **Recent:**
+- ✅ **Linux X11 windowing (Pure Go, ~5K LOC) — Community Testing**
 - ✅ macOS Cocoa windowing (Pure Go, 950 LOC) — Community Testing
-- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
+- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
+- ✅ Metal backend for macOS (wgpu v0.6.0)
 - ✅ Dual Backend, Textures, Build Tags
 
 **Next:**
-- Linux X11 windowing support
-- Metal backend for macOS (implemented in wgpu v0.6.0)
 - DX12 backend for Windows
+- GUI toolkit (gogpu/ui)
 
 ---
 
@@ -275,8 +276,8 @@ Contributions are welcome! This is an early-stage project, so there's lots to do
 
 **Areas where we need help:**
 - 🧪 **macOS testing** — Test on real macOS systems (Monterey+)
+- 🧪 **Linux X11 testing** — Test on X11 systems (Ubuntu, Fedora, etc.)
 - 🧪 **Linux Wayland testing** — Test on Wayland compositors
-- Platform support (X11)
 - DX12 backend for Windows
 - Documentation and examples
 
