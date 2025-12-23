@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2025-12-23
+
+### Fixed
+- **macOS Apple Silicon (ARM64) support** — Updated goffi to v0.3.2
+  - Fixes runtime failure on M1/M2/M3/M4 Macs
+  - HFA structs (NSRect, NSPoint, NSSize) now correctly passed via float registers
+  - Resolves: `darwin: failed to create NSAutoreleasePool`
+
+### Changed
+- Updated dependency: go-webgpu/goffi v0.3.1 → v0.3.2
+
 ## [0.6.0] - 2025-12-23
 
 ### Added
@@ -144,7 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/gogpu/gogpu/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/gogpu/gogpu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/gogpu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/gogpu/compare/v0.3.0...v0.4.0
