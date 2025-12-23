@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-12-23
+
+### Added
+- **Linux X11 Platform** (Pure Go, ~5,000 LOC)
+  - Full X11 wire protocol implementation (no libX11/libxcb dependency)
+  - Connection management with MIT-MAGIC-COOKIE-1 authentication
+  - Window creation and management (CreateWindow, MapWindow, DestroyWindow)
+  - Event handling: KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify, Expose, ConfigureNotify, ClientMessage
+  - Atom interning with caching for performance
+  - Keyboard mapping (keycodes to keysyms)
+  - ICCCM/EWMH compliance (WM_DELETE_WINDOW, _NET_WM_NAME)
+  - Cross-compilable from Windows/macOS to Linux
+- Platform auto-selection: Wayland preferred if `WAYLAND_DISPLAY` set, X11 fallback if `DISPLAY` set
+
+### Changed
+- Updated dependency: gogpu/wgpu v0.5.0 → v0.6.0
+
+### Notes
+- **Community Testing Requested**: X11 implementation needs testing on real Linux X11 systems (Ubuntu, Fedora, Arch, etc.)
+
 ## [0.5.0] - 2025-12-23
 
 ### Added
@@ -124,7 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gogpu/gogpu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/gogpu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/gogpu/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/gogpu/compare/v0.2.0...v0.3.0

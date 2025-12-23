@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gogpu/internal/platform/wayland"
+	"github.com/gogpu/gogpu/internal/platform/x11"
 )
 
 // waylandPlatform implements the Platform interface using Wayland.
@@ -40,10 +41,69 @@ type waylandPlatform struct {
 	hasResize     bool
 }
 
+// x11Platform wraps x11.Platform to implement the Platform interface.
+type x11Platform struct {
+	inner *x11.Platform
+}
+
 // newPlatform creates the platform-specific implementation.
-// On Linux, this returns a Wayland platform.
+// On Linux, this returns a Wayland platform if available, otherwise X11.
 func newPlatform() Platform {
+	// Prefer Wayland if WAYLAND_DISPLAY is set
+	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		return &waylandPlatform{}
+	}
+	// Fall back to X11 if DISPLAY is set
+	if os.Getenv("DISPLAY") != "" {
+		return &x11Platform{inner: x11.NewPlatform()}
+	}
+	// Default to Wayland (will fail in Init if not available)
 	return &waylandPlatform{}
+}
+
+// Init creates the X11 window.
+func (p *x11Platform) Init(config Config) error {
+	x11Config := x11.Config{
+		Title:      config.Title,
+		Width:      config.Width,
+		Height:     config.Height,
+		Resizable:  config.Resizable,
+		Fullscreen: config.Fullscreen,
+	}
+	return p.inner.Init(x11Config)
+}
+
+// PollEvents processes pending X11 events.
+func (p *x11Platform) PollEvents() Event {
+	event := p.inner.PollEvents()
+	switch event.Type {
+	case x11.EventTypeClose:
+		return Event{Type: EventClose}
+	case x11.EventTypeResize:
+		return Event{Type: EventResize, Width: event.Width, Height: event.Height}
+	default:
+		return Event{Type: EventNone}
+	}
+}
+
+// ShouldClose returns true if window close was requested.
+func (p *x11Platform) ShouldClose() bool {
+	return p.inner.ShouldClose()
+}
+
+// GetSize returns current window size in pixels.
+func (p *x11Platform) GetSize() (width, height int) {
+	return p.inner.GetSize()
+}
+
+// GetHandle returns platform-specific handles for Vulkan surface creation.
+func (p *x11Platform) GetHandle() (instance, window uintptr) {
+	return p.inner.GetHandle()
+}
+
+// Destroy closes the window and releases resources.
+func (p *x11Platform) Destroy() {
+	p.inner.Destroy()
 }
 
 // Init creates the Wayland window.

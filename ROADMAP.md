@@ -38,7 +38,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 | Platform | Windowing | GPU Backend | Status |
 |----------|-----------|-------------|--------|
 | **Windows** | Win32 | Vulkan, GLES | Production |
-| **Linux X11** | X11 | Vulkan, GLES | Planned |
+| **Linux X11** | X11 | Vulkan, GLES | **NEW — Community Testing** |
 | **Linux Wayland** | Wayland | Vulkan, GLES | Community Testing |
 | **macOS** | Cocoa | Metal | Community Testing |
 
@@ -55,15 +55,14 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ macOS Cocoa windowing (Pure Go, 950 LOC) — Community Testing
 - ✅ Metal backend for macOS (wgpu v0.6.0, ~3K LOC)
 - ✅ MSL shader backend (naga v0.5.0, ~3.6K LOC)
+- ✅ **Linux X11 windowing (Pure Go, ~5K LOC) — Community Testing**
 
 ### Q1 2026
 
-**Platform Expansion:**
-- Linux X11 windowing support
-
-**Performance:**
+**Performance & Stability:**
 - SIMD optimization for 2D rendering (gg)
 - Parallel rendering pipeline
+- Platform testing and bug fixes
 
 ### Q2 2026
 
