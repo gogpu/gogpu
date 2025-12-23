@@ -20,7 +20,7 @@
 
 ---
 
-## Status: v0.5.x — Full Cross-Platform Support
+## Status: v0.6.x — Full Cross-Platform Support
 
 > **All major platforms now supported!** Windows, Linux (X11 + Wayland), macOS (Cocoa + Metal).
 >
@@ -213,7 +213,7 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.5.x — Full Linux + macOS Platform Support
+**Current:** v0.6.x — Full Linux + macOS Platform Support
 
 **Recent:**
 - ✅ **Linux X11 windowing (Pure Go, ~5K LOC) — Community Testing**
@@ -232,7 +232,7 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.5.0** |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.6.1** |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.6.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | v0.5.0 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | v0.9.2 |
