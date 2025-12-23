@@ -20,11 +20,11 @@
 
 ---
 
-## Status: v0.4.0 — Linux Wayland Platform
+## Status: v0.5.0 — macOS Cocoa Platform
 
-> **Linux support is here!** Pure Go Wayland implementation (5,700 LOC).
+> **macOS support is here!** Pure Go Cocoa implementation via goffi.
 >
-> **🧪 Community Testing Requested** — Help us test on Wayland compositors!
+> **🧪 Community Testing Requested** — Help us test on macOS!
 >
 > **Star the repo to follow progress!**
 
@@ -120,23 +120,24 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
-## Linux Platform (New in v0.4.0)
+## macOS Platform (New in v0.5.0)
 
-**Pure Go Wayland implementation** — no libwayland-client required!
+**Pure Go Cocoa implementation** — via goffi Objective-C runtime!
 
 ```
-internal/platform/wayland/
-├── wire.go          # Wayland wire protocol (message encoding)
-├── display.go       # wl_display connection via Unix socket
-├── compositor.go    # wl_compositor, wl_surface
-├── xdg_shell.go     # Window management (xdg_toplevel)
-├── input.go         # Keyboard and mouse (wl_seat)
-└── ...              # ~5,700 lines total
+internal/platform/darwin/
+├── types.go         # CGFloat, CGPoint, CGRect, NSWindowStyleMask
+├── objc.go          # Objective-C runtime via goffi
+├── selectors.go     # Cached ObjC selectors
+├── application.go   # NSApplication lifecycle
+├── window.go        # NSWindow, NSView management
+├── surface.go       # CAMetalLayer integration
+└── ...              # ~950 lines total
 ```
 
 **🧪 Community Testing Requested:**
-- GNOME 45+, KDE Plasma 6, Sway, Hyprland
-- Run `go build -tags purego ./examples/triangle/` on Linux Wayland
+- macOS 12+ (Monterey and later)
+- Run `go build -tags purego ./examples/triangle/` on macOS
 - Report issues at [github.com/gogpu/gogpu/issues](https://github.com/gogpu/gogpu/issues)
 
 ---
@@ -150,7 +151,7 @@ This project was inspired by [a discussion on r/golang](https://www.reddit.com/r
 1. **Simple API** — Hide WebGPU complexity behind intuitive Go code
 2. **Dual Backend** — Choose performance (Rust) or simplicity (Pure Go)
 3. **Zero CGO** — No C compiler required
-4. **Cross-Platform** — Windows, Linux (Wayland), macOS (planned)
+4. **Cross-Platform** — Windows, Linux (Wayland), macOS (Cocoa)
 
 | Layer | Component |
 |-------|-----------|
@@ -212,16 +213,17 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.4.0 — Linux Wayland Platform
+**Current:** v0.5.0 — macOS Cocoa Platform
 
 **Recent:**
-- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
+- ✅ macOS Cocoa windowing (Pure Go, 950 LOC) — Community Testing
+- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
 - ✅ Dual Backend, Textures, Build Tags
 
 **Next:**
 - Linux X11 windowing support
-- macOS Cocoa windowing support
-- Metal backend for macOS
+- Metal backend for macOS (implemented in wgpu v0.6.0)
+- DX12 backend for Windows
 
 ---
 
@@ -229,9 +231,9 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.4.0** |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.5.0 |
-| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V) | v0.4.0 |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.5.0** |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.6.0 |
+| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | v0.5.0 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | v0.9.2 |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
 
@@ -244,7 +246,7 @@ The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
 | **Software** | ✅ Done | ~10K | **Full rasterizer!** Triangle rendering, depth/stencil, blending, clipping, parallel |
 | OpenGL ES | ✅ Done | ~7.5K | Windows (WGL) + Linux (EGL) |
 | **Vulkan** | ✅ Done | ~27K | **Cross-platform!** Windows/Linux/macOS, goffi FFI, Vulkan 1.3, memory allocator |
-| Metal | Planned | - | macOS/iOS |
+| **Metal** | ✅ Done | ~3K | **macOS/iOS!** Pure Go via goffi Objective-C bridge |
 | DX12 | Planned | - | Windows |
 
 **Software backend** enables headless rendering:
@@ -272,9 +274,10 @@ Read our launch announcement on Dev.to:
 Contributions are welcome! This is an early-stage project, so there's lots to do.
 
 **Areas where we need help:**
-- 🧪 **Linux Wayland testing** — Test on real Wayland compositors
-- Platform support (X11, macOS Cocoa)
-- Metal backend for macOS
+- 🧪 **macOS testing** — Test on real macOS systems (Monterey+)
+- 🧪 **Linux Wayland testing** — Test on Wayland compositors
+- Platform support (X11)
+- DX12 backend for Windows
 - Documentation and examples
 
 ```bash

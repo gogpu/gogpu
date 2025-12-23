@@ -16,19 +16,19 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.4.0)
+## Current State (v0.5.0)
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.4.0 | GPU abstraction, windowing, dual backend |
-| **gogpu/wgpu** | v0.5.0 | Pure Go WebGPU (Vulkan, GLES, Software) |
-| **gogpu/naga** | v0.4.0 | WGSL shader compiler |
+| **gogpu/gogpu** | v0.5.0 | GPU abstraction, windowing, dual backend |
+| **gogpu/wgpu** | v0.6.0 | Pure Go WebGPU (Vulkan, Metal, GLES, Software) |
+| **gogpu/naga** | v0.5.0 | WGSL shader compiler (SPIR-V, MSL) |
 | **gogpu/gg** | v0.9.2 | 2D graphics library |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
 - Dual backend — Rust (wgpu-native) or Pure Go
-- Windows platform fully supported
+- Cross-platform — Windows, Linux (Wayland), macOS (Cocoa)
 - WebGPU-first API design
 
 ---
@@ -40,7 +40,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 | **Windows** | Win32 | Vulkan, GLES | Production |
 | **Linux X11** | X11 | Vulkan, GLES | Planned |
 | **Linux Wayland** | Wayland | Vulkan, GLES | Community Testing |
-| **macOS** | Cocoa | Metal | Planned |
+| **macOS** | Cocoa | Metal | Community Testing |
 
 All platforms use Pure Go FFI (no CGO required).
 
@@ -52,12 +52,14 @@ All platforms use Pure Go FFI (no CGO required).
 
 **Platform Expansion:**
 - ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
+- ✅ macOS Cocoa windowing (Pure Go, 950 LOC) — Community Testing
+- ✅ Metal backend for macOS (wgpu v0.6.0, ~3K LOC)
+- ✅ MSL shader backend (naga v0.5.0, ~3.6K LOC)
 
 ### Q1 2026
 
 **Platform Expansion:**
 - Linux X11 windowing support
-- macOS Cocoa windowing support
 
 **Performance:**
 - SIMD optimization for 2D rendering (gg)
@@ -66,7 +68,7 @@ All platforms use Pure Go FFI (no CGO required).
 ### Q2 2026
 
 **GPU Backends:**
-- Metal backend for macOS/iOS
+- DX12 backend for Windows
 - GLES improvements for Linux
 
 **Shader Compiler:**
@@ -101,7 +103,7 @@ All platforms use Pure Go FFI (no CGO required).
 │   Rust Backend        │     Pure Go Backend                 │
 │  (go-webgpu/webgpu)   │       (gogpu/wgpu)                  │
 ├─────────────────────────────────────────────────────────────┤
-│   Vulkan    │   OpenGL ES   │   Software   │    Metal       │
+│   Vulkan    │   OpenGL ES   │   Software   │    Metal  ✅   │
 │  (Win+Lin)  │   (Win+Lin)   │  (Headless)  │   (macOS)      │
 └─────────────────────────────────────────────────────────────┘
 ```

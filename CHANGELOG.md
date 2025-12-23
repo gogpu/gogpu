@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-12-23
+
+### Added
+- **macOS Cocoa Platform** (Pure Go, ~950 LOC)
+  - Objective-C runtime via goffi (go-webgpu/goffi)
+  - NSApplication lifecycle management
+  - NSWindow and NSView creation
+  - CAMetalLayer integration for GPU rendering
+  - Cached selector system for performance
+  - Cross-compilable from Windows/Linux to macOS
+- **Platform types for macOS**
+  - CGFloat, CGPoint, CGSize, CGRect
+  - NSWindowStyleMask constants
+  - NSBackingStoreType constants
+
+### Changed
+- Updated ecosystem: wgpu v0.6.0 (Metal backend), naga v0.5.0 (MSL backend)
+- Pre-release check script now uses kolkov/racedetector (Pure Go, no CGO)
+
+### Notes
+- **Community Testing Requested**: macOS Cocoa implementation needs testing on real macOS systems (12+ Monterey)
+- Metal backend available in wgpu v0.6.0
+- MSL shader compilation available in naga v0.5.0
+
 ## [0.4.0] - 2025-12-21
 
 ### Added
@@ -100,7 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/gogpu/gogpu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/gogpu/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/gogpu/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gogpu/gogpu/compare/v0.1.0...v0.2.0
