@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2025-12-25
+
+### Fixed
+- **macOS ARM64 Main Thread Crash** — Fixes `nextEventMatchingMask should only be called from the Main Thread`
+  - Added `runtime.LockOSThread()` in darwin platform init to pin main goroutine to main OS thread
+  - macOS Cocoa/AppKit requires ALL UI operations on the main thread (thread 0)
+  - This is the standard approach used by Gio, Ebitengine, Fyne, and go-gl/glfw
+- **CAMetalLayer Initialization Order** — Fixes `CAMetalLayer ignoring invalid setDrawableSize width=0 height=0`
+  - Layer is now attached to view before setting drawable size
+  - Drawable size is set after window becomes visible
+  - Added validation to skip SetDrawableSize if dimensions are 0
+
+### Changed
+- Renamed internal `runtime` variable to `objcRT` to avoid conflict with standard library `runtime` package
+- Updated darwin package documentation with main thread requirements
+
+### Notes
+- Fixes [#10](https://github.com/gogpu/gogpu/issues/10) (macOS ARM64 crash)
+- **Community Testing Requested**: Pure Go backend on macOS ARM64 (M1/M2/M3/M4)
+
 ## [0.7.0] - 2025-12-24
 
 ### Added
@@ -186,7 +206,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/gogpu/gogpu/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/gogpu/gogpu/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gogpu/gogpu/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/gogpu/gogpu/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/gogpu/gogpu/compare/v0.6.0...v0.6.1

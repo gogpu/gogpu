@@ -54,15 +54,17 @@ type objcRuntime struct {
 	cifSelector *types.CallInterface // For sel_registerName
 }
 
-var runtime objcRuntime
+// objcRT is the global Objective-C runtime state.
+// Named to avoid conflict with the standard library "runtime" package.
+var objcRT objcRuntime
 
 // initRuntime initializes the Objective-C runtime by loading required libraries
 // and resolving function symbols. This is called once on first use.
 func initRuntime() error {
-	runtime.once.Do(func() {
-		runtime.err = loadRuntime()
+	objcRT.once.Do(func() {
+		objcRT.err = loadRuntime()
 	})
-	return runtime.err
+	return objcRT.err
 }
 
 // loadRuntime loads all required macOS libraries and resolves symbols.
@@ -70,79 +72,79 @@ func loadRuntime() error {
 	var err error
 
 	// Load libobjc.A.dylib (Objective-C runtime)
-	runtime.libobjc, err = ffi.LoadLibrary("/usr/lib/libobjc.A.dylib")
+	objcRT.libobjc, err = ffi.LoadLibrary("/usr/lib/libobjc.A.dylib")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load Foundation framework
-	runtime.foundation, err = ffi.LoadLibrary(
+	objcRT.foundation, err = ffi.LoadLibrary(
 		"/System/Library/Frameworks/Foundation.framework/Foundation")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load AppKit framework
-	runtime.appKit, err = ffi.LoadLibrary(
+	objcRT.appKit, err = ffi.LoadLibrary(
 		"/System/Library/Frameworks/AppKit.framework/AppKit")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load QuartzCore framework (for CAMetalLayer)
-	runtime.quartzCore, err = ffi.LoadLibrary(
+	objcRT.quartzCore, err = ffi.LoadLibrary(
 		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load CoreFoundation framework
-	runtime.coreFoundation, err = ffi.LoadLibrary(
+	objcRT.coreFoundation, err = ffi.LoadLibrary(
 		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Resolve objc_getClass
-	runtime.objcGetClass, err = ffi.GetSymbol(runtime.libobjc, "objc_getClass")
+	objcRT.objcGetClass, err = ffi.GetSymbol(objcRT.libobjc, "objc_getClass")
 	if err != nil {
 		return errors.Join(ErrSymbolNotFound, err)
 	}
 
 	// Resolve objc_msgSend
-	runtime.objcMsgSend, err = ffi.GetSymbol(runtime.libobjc, "objc_msgSend")
+	objcRT.objcMsgSend, err = ffi.GetSymbol(objcRT.libobjc, "objc_msgSend")
 	if err != nil {
 		return errors.Join(ErrSymbolNotFound, err)
 	}
 
 	// Resolve objc_msgSend_fpret (for floating point returns)
-	runtime.objcMsgSendFpret, err = ffi.GetSymbol(runtime.libobjc, "objc_msgSend_fpret")
+	objcRT.objcMsgSendFpret, err = ffi.GetSymbol(objcRT.libobjc, "objc_msgSend_fpret")
 	if err != nil {
 		// Some platforms may not have this, fall back to objc_msgSend
-		runtime.objcMsgSendFpret = runtime.objcMsgSend
+		objcRT.objcMsgSendFpret = objcRT.objcMsgSend
 	}
 
 	// Resolve objc_msgSend_stret (for struct returns)
-	runtime.objcMsgSendStret, err = ffi.GetSymbol(runtime.libobjc, "objc_msgSend_stret")
+	objcRT.objcMsgSendStret, err = ffi.GetSymbol(objcRT.libobjc, "objc_msgSend_stret")
 	if err != nil {
 		// ARM64 doesn't use stret, fall back to objc_msgSend
-		runtime.objcMsgSendStret = runtime.objcMsgSend
+		objcRT.objcMsgSendStret = objcRT.objcMsgSend
 	}
 
 	// Resolve sel_registerName
-	runtime.selRegisterName, err = ffi.GetSymbol(runtime.libobjc, "sel_registerName")
+	objcRT.selRegisterName, err = ffi.GetSymbol(objcRT.libobjc, "sel_registerName")
 	if err != nil {
 		return errors.Join(ErrSymbolNotFound, err)
 	}
 
 	// Prepare reusable call interfaces
-	runtime.cifVoidPtr = &types.CallInterface{}
-	runtime.cifFpret = &types.CallInterface{}
-	runtime.cifSelector = &types.CallInterface{}
+	objcRT.cifVoidPtr = &types.CallInterface{}
+	objcRT.cifFpret = &types.CallInterface{}
+	objcRT.cifSelector = &types.CallInterface{}
 
 	// CIF for generic pointer-returning calls (2 args: self, _cmd)
 	err = ffi.PrepareCallInterface(
-		runtime.cifVoidPtr,
+		objcRT.cifVoidPtr,
 		types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
@@ -156,7 +158,7 @@ func loadRuntime() error {
 
 	// CIF for sel_registerName (1 arg: const char*)
 	err = ffi.PrepareCallInterface(
-		runtime.cifSelector,
+		objcRT.cifSelector,
 		types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
@@ -184,8 +186,8 @@ func GetClass(name string) Class {
 	namePtr := unsafe.Pointer(&cname[0])
 
 	err := ffi.CallFunction(
-		runtime.cifSelector,
-		runtime.objcGetClass,
+		objcRT.cifSelector,
+		objcRT.objcGetClass,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{unsafe.Pointer(&namePtr)},
 	)
@@ -211,8 +213,8 @@ func RegisterSelector(name string) SEL {
 	namePtr := unsafe.Pointer(&cname[0])
 
 	err := ffi.CallFunction(
-		runtime.cifSelector,
-		runtime.selRegisterName,
+		objcRT.cifSelector,
+		objcRT.selRegisterName,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{unsafe.Pointer(&namePtr)},
 	)
@@ -240,8 +242,8 @@ func (id ID) Send(sel SEL) ID {
 	cmd := uintptr(sel)
 
 	err := ffi.CallFunction(
-		runtime.cifVoidPtr,
-		runtime.objcMsgSend,
+		objcRT.cifVoidPtr,
+		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
 			unsafe.Pointer(&self),
@@ -335,7 +337,7 @@ func msgSend(self ID, sel SEL, args ...uintptr) ID {
 	var result uintptr
 	err = ffi.CallFunction(
 		cif,
-		runtime.objcMsgSend,
+		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		argPtrs,
 	)
@@ -423,7 +425,7 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 	var result uintptr
 	err = ffi.CallFunction(
 		cif,
-		runtime.objcMsgSend,
+		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		argPtrs,
 	)
@@ -497,7 +499,7 @@ func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backin
 	var result uintptr
 	err = ffi.CallFunction(
 		cif,
-		runtime.objcMsgSend,
+		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		argPtrs,
 	)
@@ -567,7 +569,7 @@ func (id ID) GetRect(sel SEL) NSRect {
 	var result [4]float64
 	err = ffi.CallFunction(
 		cif,
-		runtime.objcMsgSend,
+		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		argPtrs,
 	)
@@ -624,7 +626,7 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 	var result uintptr
 	err = ffi.CallFunction(
 		cif,
-		runtime.objcMsgSend,
+		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		argPtrs,
 	)

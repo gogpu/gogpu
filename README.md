@@ -20,11 +20,13 @@
 
 ---
 
-## Status: v0.7.0 — Cross-Platform Pure Go Backend!
+## Status: v0.7.2 — macOS ARM64 Fix!
 
 > **Pure Go backend now works on ALL platforms!** Windows (Vulkan), Linux (Vulkan), macOS (Metal).
 >
-> **🧪 Community Testing Requested** — Help us test Pure Go backend on Linux and macOS!
+> **v0.7.2** fixes macOS ARM64 crash (`nextEventMatchingMask should only be called from the Main Thread`)
+>
+> **🧪 Community Testing Requested** — Help us test on M1/M2/M3/M4 Macs!
 >
 > **Star the repo to follow progress!**
 
@@ -120,24 +122,28 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
-## macOS Platform (New in v0.5.0)
+## macOS Platform (v0.5.0+)
 
 **Pure Go Cocoa implementation** — via goffi Objective-C runtime!
 
 ```
 internal/platform/darwin/
+├── init.go          # runtime.LockOSThread() for main thread
 ├── types.go         # CGFloat, CGPoint, CGRect, NSWindowStyleMask
 ├── objc.go          # Objective-C runtime via goffi
 ├── selectors.go     # Cached ObjC selectors
 ├── application.go   # NSApplication lifecycle
 ├── window.go        # NSWindow, NSView management
 ├── surface.go       # CAMetalLayer integration
-└── ...              # ~950 lines total
+└── ...              # ~1,000 lines total
 ```
 
+**Main Thread Requirement:** macOS Cocoa requires all UI operations on the main thread.
+GoGPU automatically handles this with `runtime.LockOSThread()` — no action needed from users.
+
 **🧪 Community Testing Requested:**
-- macOS 12+ (Monterey and later)
-- Run `go build -tags purego ./examples/triangle/` on macOS
+- macOS 12+ (Monterey and later) on Apple Silicon (M1/M2/M3/M4)
+- Run `CGO_ENABLED=0 go build -tags purego ./examples/triangle/` on macOS
 - Report issues at [github.com/gogpu/gogpu/issues](https://github.com/gogpu/gogpu/issues)
 
 ---
@@ -213,12 +219,13 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.7.0 — Cross-Platform Pure Go Backend
+**Current:** v0.7.2 — macOS ARM64 Fix
 
 **Recent:**
+- ✅ **macOS ARM64 main thread fix** (v0.7.2)
 - ✅ **Pure Go backend for ALL platforms** (Windows/Linux Vulkan, macOS Metal)
 - ✅ Linux X11 windowing (Pure Go, ~5K LOC)
-- ✅ macOS Cocoa windowing (Pure Go, 950 LOC)
+- ✅ macOS Cocoa windowing (Pure Go, ~1K LOC)
 - ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
 - ✅ Metal backend for macOS (wgpu v0.6.0)
 
@@ -232,8 +239,8 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.7.0** |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.6.0 |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.7.2** |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.6.1 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | v0.5.0 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | v0.13.0 |
 | [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
