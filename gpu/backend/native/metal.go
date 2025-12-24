@@ -1,9 +1,9 @@
-//go:build windows || linux
+//go:build darwin
 
 // Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
 // This backend offers zero dependencies and simple cross-compilation.
 //
-// Implementation uses gogpu/wgpu HAL (Hardware Abstraction Layer) with Vulkan backend.
+// Implementation uses gogpu/wgpu HAL (Hardware Abstraction Layer) with Metal backend.
 package native
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/vulkan"
+	"github.com/gogpu/wgpu/hal/metal"
 	wgputypes "github.com/gogpu/wgpu/types"
 )
 
@@ -26,13 +26,13 @@ type Backend struct {
 func New() *Backend {
 	return &Backend{
 		registry: NewResourceRegistry(),
-		backend:  vulkan.Backend{}, // Vulkan is the first HAL implementation
+		backend:  metal.Backend{}, // Metal is the HAL implementation for macOS
 	}
 }
 
 // Name returns the backend identifier.
 func (b *Backend) Name() string {
-	return "Pure Go (gogpu/wgpu/vulkan)"
+	return "Pure Go (gogpu/wgpu/metal)"
 }
 
 // Init initializes the backend.
@@ -54,8 +54,8 @@ func (b *Backend) Destroy() {
 func (b *Backend) CreateInstance() (types.Instance, error) {
 	// Create HAL instance with default config
 	desc := &hal.InstanceDescriptor{
-		Backends: wgputypes.Backends(1 << wgputypes.BackendVulkan), // Vulkan backend
-		Flags:    0,                                                // No debug for now
+		Backends: wgputypes.Backends(1 << wgputypes.BackendMetal), // Metal backend
+		Flags:    0,                                               // No debug for now
 	}
 
 	halInstance, err := b.backend.CreateInstance(desc)
@@ -107,7 +107,7 @@ func (b *Backend) RequestDevice(adapter types.Adapter, opts *types.DeviceOptions
 	deviceHandle := b.registry.RegisterDevice(openDevice.Device)
 	queueHandle := b.registry.RegisterQueue(openDevice.Queue)
 
-	// Store device→queue mapping
+	// Store device->queue mapping
 	b.registry.RegisterDeviceQueue(deviceHandle, queueHandle)
 
 	return deviceHandle, nil

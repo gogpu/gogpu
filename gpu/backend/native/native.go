@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux && !darwin
 
 // Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
 // This backend offers zero dependencies and simple cross-compilation.
