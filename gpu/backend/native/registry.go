@@ -44,6 +44,12 @@ type ResourceRegistry struct {
 	// Device → Queue mapping (one queue per device in WebGPU)
 	deviceQueues map[types.Device]types.Queue
 
+	// Surface → Device mapping (for Present to find queue)
+	surfaceDevices map[types.Surface]types.Device
+
+	// Surface → current SurfaceTexture mapping (for Present)
+	currentSurfaceTextures map[types.Surface]hal.SurfaceTexture
+
 	// Reverse maps for cleanup - HAL objects → handles
 	instanceHandles        map[hal.Instance]types.Instance
 	adapterHandles         map[hal.Adapter]types.Adapter
@@ -85,7 +91,9 @@ func NewResourceRegistry() *ResourceRegistry {
 		bindGroups:       make(map[types.BindGroup]hal.BindGroup),
 		pipelineLayouts:  make(map[types.PipelineLayout]hal.PipelineLayout),
 
-		deviceQueues: make(map[types.Device]types.Queue),
+		deviceQueues:           make(map[types.Device]types.Queue),
+		surfaceDevices:         make(map[types.Surface]types.Device),
+		currentSurfaceTextures: make(map[types.Surface]hal.SurfaceTexture),
 
 		instanceHandles:        make(map[hal.Instance]types.Instance),
 		adapterHandles:         make(map[hal.Adapter]types.Adapter),
@@ -242,6 +250,46 @@ func (r *ResourceRegistry) GetQueueForDevice(device types.Device) (types.Queue, 
 		return 0, fmt.Errorf("no queue found for device handle: %d", device)
 	}
 	return queue, nil
+}
+
+// RegisterSurfaceDevice stores the surface→device mapping for Present.
+func (r *ResourceRegistry) RegisterSurfaceDevice(surface types.Surface, device types.Device) {
+	r.mu.Lock()
+	r.surfaceDevices[surface] = device
+	r.mu.Unlock()
+}
+
+// GetDeviceForSurface returns the device handle associated with a surface.
+func (r *ResourceRegistry) GetDeviceForSurface(surface types.Surface) (types.Device, error) {
+	r.mu.RLock()
+	device, ok := r.surfaceDevices[surface]
+	r.mu.RUnlock()
+	if !ok {
+		return 0, fmt.Errorf("no device found for surface handle: %d", surface)
+	}
+	return device, nil
+}
+
+// SetCurrentSurfaceTexture stores the current surface texture for Present.
+func (r *ResourceRegistry) SetCurrentSurfaceTexture(surface types.Surface, texture hal.SurfaceTexture) {
+	r.mu.Lock()
+	r.currentSurfaceTextures[surface] = texture
+	r.mu.Unlock()
+}
+
+// GetCurrentSurfaceTexture returns the current surface texture for Present.
+func (r *ResourceRegistry) GetCurrentSurfaceTexture(surface types.Surface) hal.SurfaceTexture {
+	r.mu.RLock()
+	texture := r.currentSurfaceTextures[surface]
+	r.mu.RUnlock()
+	return texture
+}
+
+// ClearCurrentSurfaceTexture clears the current surface texture after Present.
+func (r *ResourceRegistry) ClearCurrentSurfaceTexture(surface types.Surface) {
+	r.mu.Lock()
+	delete(r.currentSurfaceTextures, surface)
+	r.mu.Unlock()
 }
 
 // --- Surface ---
@@ -661,6 +709,8 @@ func (r *ResourceRegistry) Clear() {
 
 	// Clear device→queue mapping
 	r.deviceQueues = make(map[types.Device]types.Queue)
+	r.surfaceDevices = make(map[types.Surface]types.Device)
+	r.currentSurfaceTextures = make(map[types.Surface]hal.SurfaceTexture)
 
 	// Clear reverse maps
 	r.instanceHandles = make(map[hal.Instance]types.Instance)

@@ -121,6 +121,12 @@ func (a *App) processEvents() {
 
 // renderFrame renders a single frame.
 func (a *App) renderFrame() {
+	// Skip rendering if window is minimized (zero dimensions)
+	width, height := a.platform.GetSize()
+	if width <= 0 || height <= 0 {
+		return // Window minimized, skip frame
+	}
+
 	// Acquire frame
 	if !a.renderer.BeginFrame() {
 		return // Frame not available
