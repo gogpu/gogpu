@@ -16,31 +16,31 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.6.1)
+## Current State (v0.7.0)
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.6.1 | GPU abstraction, windowing, dual backend |
+| **gogpu/gogpu** | v0.7.0 | GPU abstraction, windowing, cross-platform Pure Go backend |
 | **gogpu/wgpu** | v0.6.0 | Pure Go WebGPU (Vulkan, Metal, GLES, Software) |
 | **gogpu/naga** | v0.5.0 | WGSL shader compiler (SPIR-V, MSL) |
-| **gogpu/gg** | v0.9.2 | 2D graphics library |
+| **gogpu/gg** | v0.13.0 | 2D graphics library (47K LOC) |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
 - Dual backend — Rust (wgpu-native) or Pure Go
-- Cross-platform — Windows, Linux (Wayland), macOS (Cocoa)
+- **Cross-platform Pure Go backend** — Windows/Linux (Vulkan), macOS (Metal)
 - WebGPU-first API design
 
 ---
 
 ## Platform Support
 
-| Platform | Windowing | GPU Backend | Status |
-|----------|-----------|-------------|--------|
-| **Windows** | Win32 | Vulkan, GLES | Production |
-| **Linux X11** | X11 | Vulkan, GLES | **NEW — Community Testing** |
-| **Linux Wayland** | Wayland | Vulkan, GLES | Community Testing |
-| **macOS** | Cocoa | Metal | Community Testing |
+| Platform | Windowing | Pure Go Backend | Rust Backend | Status |
+|----------|-----------|-----------------|--------------|--------|
+| **Windows** | Win32 | Vulkan ✅ | Vulkan ✅ | Production |
+| **Linux X11** | X11 | Vulkan ✅ | Vulkan ✅ | Community Testing |
+| **Linux Wayland** | Wayland | Vulkan ✅ | Vulkan ✅ | Community Testing |
+| **macOS** | Cocoa | Metal ✅ | Metal ✅ | Community Testing |
 
 All platforms use Pure Go FFI (no CGO required).
 
@@ -48,14 +48,18 @@ All platforms use Pure Go FFI (no CGO required).
 
 ## Roadmap
 
-### Q4 2025 (Current)
+### Q4 2025 (Current) ✅
 
 **Platform Expansion:**
-- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
-- ✅ macOS Cocoa windowing (Pure Go, 950 LOC) — Community Testing
+- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
+- ✅ macOS Cocoa windowing (Pure Go, 950 LOC)
 - ✅ Metal backend for macOS (wgpu v0.6.0, ~3K LOC)
 - ✅ MSL shader backend (naga v0.5.0, ~3.6K LOC)
-- ✅ **Linux X11 windowing (Pure Go, ~5K LOC) — Community Testing**
+- ✅ Linux X11 windowing (Pure Go, ~5K LOC)
+- ✅ **Cross-platform Pure Go backend integration (v0.7.0)**
+  - Windows: Vulkan
+  - Linux: Vulkan
+  - macOS: Metal
 
 ### Q1 2026
 
