@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2025-12-24
+
+### Changed
+- Updated dependency: go-webgpu/webgpu v0.1.0 → v0.1.1
+- Updated dependency: go-webgpu/goffi v0.3.2 → v0.3.3
+  - Fixes PointerType for ARM64 macOS in Pure Go backends
+
 ## [0.6.1] - 2025-12-23
 
 ### Fixed
@@ -155,7 +162,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/gogpu/gogpu/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/gogpu/gogpu/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/gogpu/gogpu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/gogpu/compare/v0.4.0...v0.5.0
