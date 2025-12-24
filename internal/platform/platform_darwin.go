@@ -50,7 +50,9 @@ func (p *darwinPlatform) Init(config Config) error {
 	}
 	p.window = window
 
-	// Create Metal surface for GPU rendering
+	// Create Metal surface for GPU rendering.
+	// Note: Surface is created before window is shown, but drawable size
+	// is set after Show() when window has valid dimensions.
 	surface, err := darwin.NewSurface(window)
 	if err != nil {
 		// Non-fatal: window works without Metal surface
@@ -60,8 +62,15 @@ func (p *darwinPlatform) Init(config Config) error {
 		p.surface = surface
 	}
 
-	// Show window
+	// Show window - this makes the window visible and gives it valid dimensions
 	p.window.Show()
+
+	// Update surface size now that window is visible.
+	// This ensures CAMetalLayer has correct drawable dimensions
+	// and avoids "ignoring invalid setDrawableSize" warnings.
+	if p.surface != nil {
+		p.surface.UpdateSize()
+	}
 
 	return nil
 }

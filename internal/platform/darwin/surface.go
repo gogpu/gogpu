@@ -252,6 +252,10 @@ type Surface struct {
 }
 
 // NewSurface creates a new Metal surface for the given window.
+//
+// The surface is created with default configuration but drawable size
+// is deferred until the window is visible and has valid dimensions.
+// Call UpdateSize() after the window is shown to set the correct size.
 func NewSurface(window *Window) (*Surface, error) {
 	if window == nil {
 		return nil, errors.New("darwin: window is nil")
@@ -268,12 +272,19 @@ func NewSurface(window *Window) (*Surface, error) {
 	layer.SetFramebufferOnly(true)
 	layer.SetMaximumDrawableCount(3) // Triple buffering
 
-	// Get window size and set drawable size
-	width, height := window.Size()
-	layer.SetDrawableSize(width, height)
-
-	// Attach layer to window
+	// Attach layer to window FIRST (before setting drawable size).
+	// This is the correct order for macOS - the layer must be attached
+	// to a view before setting drawable size, otherwise CAMetalLayer
+	// may report warnings about invalid dimensions.
 	window.SetMetalLayer(layer.ID())
+
+	// Now set drawable size. Get actual size from window.
+	// If dimensions are still 0 (window not yet visible), skip -
+	// the size will be set correctly on first resize event.
+	width, height := window.Size()
+	if width > 0 && height > 0 {
+		layer.SetDrawableSize(width, height)
+	}
 
 	return &Surface{
 		layer:  layer,
@@ -301,7 +312,26 @@ func (s *Surface) Resize(width, height int) {
 		return
 	}
 
-	s.layer.SetDrawableSize(width, height)
+	// Only set drawable size if dimensions are valid.
+	// CAMetalLayer logs warnings for 0x0 dimensions.
+	if width > 0 && height > 0 {
+		s.layer.SetDrawableSize(width, height)
+	}
+}
+
+// UpdateSize updates the surface size from the current window dimensions.
+// Call this after the window becomes visible to ensure correct sizing.
+func (s *Surface) UpdateSize() {
+	if s == nil || s.window == nil || s.layer == nil {
+		return
+	}
+
+	// Get actual window size and update layer
+	s.window.UpdateSize()
+	width, height := s.window.Size()
+	if width > 0 && height > 0 {
+		s.layer.SetDrawableSize(width, height)
+	}
 }
 
 // AcquireDrawable acquires the next drawable for rendering.
