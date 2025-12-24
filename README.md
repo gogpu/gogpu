@@ -20,11 +20,11 @@
 
 ---
 
-## Status: v0.6.x — Full Cross-Platform Support
+## Status: v0.7.0 — Cross-Platform Pure Go Backend!
 
-> **All major platforms now supported!** Windows, Linux (X11 + Wayland), macOS (Cocoa + Metal).
+> **Pure Go backend now works on ALL platforms!** Windows (Vulkan), Linux (Vulkan), macOS (Metal).
 >
-> **🧪 Community Testing Requested** — Help us test on Linux X11 and macOS!
+> **🧪 Community Testing Requested** — Help us test Pure Go backend on Linux and macOS!
 >
 > **Star the repo to follow progress!**
 
@@ -213,14 +213,14 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.6.x — Full Linux + macOS Platform Support
+**Current:** v0.7.0 — Cross-Platform Pure Go Backend
 
 **Recent:**
-- ✅ **Linux X11 windowing (Pure Go, ~5K LOC) — Community Testing**
-- ✅ macOS Cocoa windowing (Pure Go, 950 LOC) — Community Testing
-- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC) — Community Testing
+- ✅ **Pure Go backend for ALL platforms** (Windows/Linux Vulkan, macOS Metal)
+- ✅ Linux X11 windowing (Pure Go, ~5K LOC)
+- ✅ macOS Cocoa windowing (Pure Go, 950 LOC)
+- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
 - ✅ Metal backend for macOS (wgpu v0.6.0)
-- ✅ Dual Backend, Textures, Build Tags
 
 **Next:**
 - DX12 backend for Windows
@@ -232,7 +232,7 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 | Project | Description | Status |
 |---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.6.2** |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.7.0** |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.6.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | v0.5.0 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | v0.13.0 |

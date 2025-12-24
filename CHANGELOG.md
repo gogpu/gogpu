@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-12-24
+
+### Added
+- **Cross-Platform Pure Go Backend** — All major platforms now supported!
+  - **macOS Metal backend** (`gpu/backend/native/metal.go`) — Pure Go via goffi
+  - **Linux Vulkan backend** — Extended from Windows-only
+  - Shared `ResourceRegistry` across all platforms
+- Platform support matrix (Pure Go backend):
+  | Platform | Backend | Status |
+  |----------|---------|--------|
+  | Windows | Vulkan | ✅ Working |
+  | Linux | Vulkan | ✅ Working |
+  | macOS | Metal | ✅ Working |
+
+### Changed
+- Build tags restructured for cross-platform support:
+  - `vulkan.go`: `windows || linux`
+  - `metal.go`: `darwin`
+  - `native.go`: `!windows && !linux && !darwin` (stub for unsupported)
+
+### Notes
+- **Community Testing Requested**: Pure Go backend on macOS and Linux
+- Closes [#10](https://github.com/gogpu/gogpu/issues/10)
+
 ## [0.6.2] - 2025-12-24
 
 ### Changed
@@ -162,7 +186,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/gogpu/gogpu/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/gogpu/gogpu/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/gogpu/gogpu/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/gogpu/gogpu/compare/v0.5.0...v0.6.0
