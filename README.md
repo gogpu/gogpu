@@ -16,6 +16,8 @@
   <a href="https://goreportcard.com/report/github.com/gogpu/gogpu"><img src="https://goreportcard.com/badge/github.com/gogpu/gogpu" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
   <a href="https://github.com/gogpu/gogpu"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
+  <a href="https://github.com/gogpu/gogpu/stargazers"><img src="https://img.shields.io/github/stars/gogpu/gogpu?style=social" alt="Stars"></a>
+  <a href="https://github.com/gogpu/gogpu/discussions"><img src="https://img.shields.io/github/discussions/gogpu/gogpu?logo=github" alt="Discussions"></a>
 </p>
 
 ---
@@ -280,6 +282,8 @@ Read our launch announcement on Dev.to:
 ## Contributing
 
 Contributions are welcome! This is an early-stage project, so there's lots to do.
+
+**Join the discussion:** [GitHub Discussions](https://github.com/gogpu/gogpu/discussions) — Share ideas, ask questions, help shape the **gogpu/ui** GUI toolkit!
 
 **Areas where we need help:**
 - 🧪 **macOS testing** — Test on real macOS systems (Monterey+)
