@@ -16,19 +16,20 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.7.0)
+## Current State (v0.8.0)
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.7.0 | GPU abstraction, windowing, cross-platform Pure Go backend |
-| **gogpu/wgpu** | v0.6.0 | Pure Go WebGPU (Vulkan, Metal, GLES, Software) |
-| **gogpu/naga** | v0.5.0 | WGSL shader compiler (SPIR-V, MSL) |
+| **gogpu/gogpu** | v0.8.0 | GPU abstraction, windowing, Metal backend fixed |
+| **gogpu/wgpu** | v0.7.0 | Pure Go WebGPU (Vulkan, Metal, GLES, Software) |
+| **gogpu/naga** | v0.6.0 | WGSL shader compiler (SPIR-V, MSL, GLSL) |
 | **gogpu/gg** | v0.13.0 | 2D graphics library (47K LOC) |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
 - Dual backend — Rust (wgpu-native) or Pure Go
 - **Cross-platform Pure Go backend** — Windows/Linux (Vulkan), macOS (Metal)
+- **All shader backends** — SPIR-V, MSL, GLSL
 - WebGPU-first API design
 
 ---
@@ -53,13 +54,12 @@ All platforms use Pure Go FFI (no CGO required).
 **Platform Expansion:**
 - ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
 - ✅ macOS Cocoa windowing (Pure Go, 950 LOC)
-- ✅ Metal backend for macOS (wgpu v0.6.0, ~3K LOC)
+- ✅ Metal backend for macOS (wgpu v0.7.0, ~3K LOC)
 - ✅ MSL shader backend (naga v0.5.0, ~3.6K LOC)
 - ✅ Linux X11 windowing (Pure Go, ~5K LOC)
-- ✅ **Cross-platform Pure Go backend integration (v0.7.0)**
-  - Windows: Vulkan
-  - Linux: Vulkan
-  - macOS: Metal
+- ✅ Cross-platform Pure Go backend integration (v0.7.0)
+- ✅ **Metal backend fixed (v0.8.0)** — Present, WGSL→MSL, CreateRenderPipeline
+- ✅ **GLSL shader backend (naga v0.6.0, ~2.8K LOC)** — OpenGL 3.3+, ES 3.0+
 
 ### Q1 2026
 
@@ -71,12 +71,13 @@ All platforms use Pure Go FFI (no CGO required).
 ### Q2 2026
 
 **GPU Backends:**
-- DX12 backend for Windows
+- DX12 backend for Windows (native, ~5-8K LOC)
 - GLES improvements for Linux
 
 **Shader Compiler:**
-- GLSL output support in naga
-- Shader optimization passes
+- ✅ ~~GLSL output support in naga~~ — **Done in v0.6.0!**
+- Shader optimization passes (dead code elimination, constant folding)
+- Source maps for debugging
 
 ### Q3 2026
 
