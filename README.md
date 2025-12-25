@@ -239,13 +239,16 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 ## Ecosystem
 
-| Project | Description | Status |
-|---------|-------------|--------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | **v0.7.2** |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation | v0.6.1 |
-| [gogpu/naga](https://github.com/gogpu/naga) | Pure Go shader compiler (WGSL → SPIR-V, MSL) | v0.5.0 |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library | v0.13.0 |
-| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | Zero-CGO WebGPU bindings | Stable |
+| Project | Description | Purpose |
+|---------|-------------|---------|
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | GPU abstraction, windowing, input |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | Vulkan, Metal, GLES, Software backends |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | WGSL → SPIR-V, MSL, GLSL |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics | Canvas API, scene graph, GPU text |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | Widgets, layouts, themes (planned) |
+| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings | wgpu-native integration |
+
+> **Note:** Always use the latest versions. Check each repository for current releases.
 
 ### wgpu Backends
 
