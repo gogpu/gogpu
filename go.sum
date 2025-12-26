@@ -4,7 +4,7 @@ github.com/go-webgpu/webgpu v0.1.1 h1:qlG4oZqcAdewGnwBrBawZVSsKyIRiWnWsWMAYaiYEc
 github.com/go-webgpu/webgpu v0.1.1/go.mod h1:gdWdzyvKYWZ4cIegCGvUSaMDdD6MppY/sqgecPngHGI=
 github.com/gogpu/naga v0.5.0 h1:4ohXAubMXWERnp4f1Ta7Xv4ImvicKrjZUabEQzdzF0U=
 github.com/gogpu/naga v0.5.0/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
-github.com/gogpu/wgpu v0.7.0 h1:+CodlqXb/gi8GE/HXST0e3t68tweGNsy2Y8IWsCxOy4=
-github.com/gogpu/wgpu v0.7.0/go.mod h1:MRBA/7wAukW6orOEB/8wPG3T4h7fVywF8TlgoIjKczc=
+github.com/gogpu/wgpu v0.7.1 h1:V9d0H0P3TkK1Wgeanl7Ksca9ePToxno9E7epdUeogJ4=
+github.com/gogpu/wgpu v0.7.1/go.mod h1:MRBA/7wAukW6orOEB/8wPG3T4h7fVywF8TlgoIjKczc=
 golang.org/x/sys v0.39.0 h1:CvCKL8MeisomCi6qNZ+wbb0DN9E5AATixKsvNtMoMFk=
 golang.org/x/sys v0.39.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
