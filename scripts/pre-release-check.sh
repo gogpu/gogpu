@@ -220,13 +220,56 @@ echo ""
 
 # 9. Dependency check
 log_info "Checking dependencies..."
+
+# Check go-webgpu/webgpu (Rust backend)
 WEBGPU_VERSION=$(grep "go-webgpu/webgpu" go.mod | awk '{print $2}')
 if [ -n "$WEBGPU_VERSION" ]; then
-    log_success "go-webgpu/webgpu dependency: $WEBGPU_VERSION"
+    log_success "go-webgpu/webgpu: $WEBGPU_VERSION"
 else
     log_warning "go-webgpu/webgpu not found (Rust backend won't work)"
     WARNINGS=$((WARNINGS + 1))
 fi
+
+# 9.1 Ecosystem dependency validation (gogpu/wgpu, gogpu/naga, gogpu/gg)
+log_info "Validating ecosystem dependencies..."
+
+check_ecosystem_dep() {
+    local DEP_NAME=$1
+    local REPO=$2
+
+    LOCAL_VERSION=$(grep "$DEP_NAME" go.mod 2>/dev/null | grep -v "^module" | awk '{print $2}')
+
+    if [ -z "$LOCAL_VERSION" ]; then
+        return 0  # Dependency not used, skip
+    fi
+
+    # Get latest release from GitHub
+    if command -v gh &> /dev/null; then
+        LATEST_VERSION=$(gh release view --repo "$REPO" --json tagName -q '.tagName' 2>/dev/null || echo "")
+    else
+        LATEST_VERSION=""
+    fi
+
+    if [ -z "$LATEST_VERSION" ]; then
+        log_warning "$DEP_NAME: $LOCAL_VERSION (cannot check latest)"
+        WARNINGS=$((WARNINGS + 1))
+        return 0
+    fi
+
+    if [ "$LOCAL_VERSION" = "$LATEST_VERSION" ]; then
+        log_success "$DEP_NAME: $LOCAL_VERSION (latest)"
+    else
+        log_error "$DEP_NAME: $LOCAL_VERSION (latest: $LATEST_VERSION)"
+        log_info "  Run: go get $DEP_NAME@$LATEST_VERSION"
+        ERRORS=$((ERRORS + 1))
+    fi
+}
+
+check_ecosystem_dep "github.com/gogpu/wgpu" "gogpu/wgpu"
+check_ecosystem_dep "github.com/gogpu/naga" "gogpu/naga"
+check_ecosystem_dep "github.com/gogpu/gg" "gogpu/gg"
+check_ecosystem_dep "github.com/go-webgpu/goffi" "go-webgpu/goffi"
+
 echo ""
 
 # 10. golangci-lint (same as CI)
