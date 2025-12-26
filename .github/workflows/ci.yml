@@ -144,3 +144,71 @@ jobs:
           exit 1
         fi
         echo "All files are properly formatted"
+
+  # Dependency freshness check
+  # Uses go-mod-outdated (https://github.com/psampaz/go-mod-outdated)
+  # Non-blocking: reports outdated deps as warnings, does not fail CI
+  deps:
+    name: Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Install go-mod-outdated
+      run: go install github.com/psampaz/go-mod-outdated@latest
+
+    - name: Check all dependencies
+      run: |
+        echo "## All Dependencies Status"
+        go list -u -m -json all 2>/dev/null | go-mod-outdated -style markdown || true
+
+    - name: Check direct dependencies for updates
+      run: |
+        echo "## Direct Dependencies with Available Updates"
+        OUTDATED=$(go list -u -m -json all 2>/dev/null | go-mod-outdated -update -direct || true)
+        if [ -n "$OUTDATED" ]; then
+          echo "$OUTDATED"
+          echo ""
+          echo "::warning::Some direct dependencies have updates available"
+        else
+          echo "All direct dependencies are up to date!"
+        fi
+
+    - name: Check ecosystem dependencies (gogpu/*)
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        echo "## Ecosystem Dependencies (gogpu/*)"
+        WARNINGS=0
+
+        check_ecosystem_dep() {
+          local DEP=$1 REPO=$2
+          LOCAL=$(grep "$DEP" go.mod 2>/dev/null | grep -v "^module" | awk '{print $2}')
+          [ -z "$LOCAL" ] && return 0
+
+          LATEST=$(gh release view --repo "$REPO" --json tagName -q '.tagName' 2>/dev/null || echo "")
+          [ -z "$LATEST" ] && { echo "⚠️  $DEP: $LOCAL (cannot verify)"; return 0; }
+
+          if [ "$LOCAL" = "$LATEST" ]; then
+            echo "✅ $DEP: $LOCAL"
+          else
+            echo "❌ $DEP: $LOCAL → $LATEST available"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+        }
+
+        check_ecosystem_dep "github.com/gogpu/wgpu" "gogpu/wgpu"
+        check_ecosystem_dep "github.com/gogpu/naga" "gogpu/naga"
+        check_ecosystem_dep "github.com/gogpu/gg" "gogpu/gg"
+        check_ecosystem_dep "github.com/go-webgpu/goffi" "go-webgpu/goffi"
+
+        [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated. Run: go get <dep>@latest"
+        exit 0  # Non-blocking
