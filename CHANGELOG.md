@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2025-12-26
+
+### Fixed
+- **macOS Zero Dimension Crash** — Fixes Issue [#20](https://github.com/gogpu/gogpu/issues/20)
+  - Added `surfaceConfigured` flag to track surface state
+  - Deferred surface configuration when window has zero dimensions
+  - `BeginFrame()` returns false if surface is not configured
+  - `Resize()` properly configures surface when valid dimensions arrive
+  - Follows wgpu-core pattern for handling minimized/invisible windows
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.7.0 → v0.7.1
+  - Uses new `ErrZeroArea` sentinel error from HAL
+
+### Notes
+- macOS window visibility is async — initial GetSize() may return 0,0
+- Triangle example now properly waits for valid window dimensions
+
 ## [0.8.0] - 2025-12-24
 
 ### Fixed

@@ -24,9 +24,10 @@ type Renderer struct {
 	surface  types.Surface
 
 	// Surface configuration
-	format types.TextureFormat
-	width  uint32
-	height uint32
+	format            types.TextureFormat
+	width             uint32
+	height            uint32
+	surfaceConfigured bool // Whether surface has been configured with valid dimensions
 
 	// Current frame state
 	currentTexture types.Texture
@@ -130,27 +131,41 @@ func (r *Renderer) init() error {
 	r.queue = r.backend.GetQueue(r.device)
 
 	// Configure surface
-	// Note: platform.GetSize() returns positive dimensions for valid windows
+	// Get current window dimensions. On some platforms (especially macOS),
+	// the window may not have valid dimensions immediately after creation.
+	// In that case, we defer surface configuration until the first Resize event.
 	width, height := r.platform.GetSize()
-	r.width = uint32(width)   //nolint:gosec // G115: platform returns positive dimensions
-	r.height = uint32(height) //nolint:gosec // G115: platform returns positive dimensions
 
-	// Use BGRA8Unorm which is common on Windows
+	// Use BGRA8Unorm which is common across platforms
 	r.format = types.TextureFormatBGRA8Unorm
 
-	r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
-		Format:      r.format,
-		Usage:       types.TextureUsageRenderAttachment,
-		Width:       r.width,
-		Height:      r.height,
-		AlphaMode:   types.AlphaModeOpaque,
-		PresentMode: types.PresentModeFifo, // VSync
-	})
+	// Only configure surface if dimensions are valid.
+	// If dimensions are zero (window not yet visible, minimized, or timing issue),
+	// defer configuration until Resize is called with valid dimensions.
+	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
+	if width > 0 && height > 0 {
+		r.width = uint32(width)   //nolint:gosec // G115: validated positive above
+		r.height = uint32(height) //nolint:gosec // G115: validated positive above
+
+		r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
+			Format:      r.format,
+			Usage:       types.TextureUsageRenderAttachment,
+			Width:       r.width,
+			Height:      r.height,
+			AlphaMode:   types.AlphaModeOpaque,
+			PresentMode: types.PresentModeFifo, // VSync
+		})
+		r.surfaceConfigured = true
+	}
+	// If dimensions are zero, surfaceConfigured remains false.
+	// The surface will be configured on the first Resize event with valid dimensions.
 
 	return nil
 }
 
 // Resize handles window resize.
+// This also handles deferred surface configuration when the window
+// first becomes visible with valid dimensions (especially important on macOS).
 func (r *Renderer) Resize(width, height int) {
 	if width <= 0 || height <= 0 {
 		return
@@ -168,22 +183,32 @@ func (r *Renderer) Resize(width, height int) {
 		AlphaMode:   types.AlphaModeOpaque,
 		PresentMode: types.PresentModeFifo,
 	})
+	r.surfaceConfigured = true
 }
 
 // BeginFrame prepares a new frame for rendering.
-// Returns false if frame cannot be acquired.
+// Returns false if frame cannot be acquired (surface not configured, minimized, etc.).
 func (r *Renderer) BeginFrame() bool {
+	// Skip if surface is not configured yet.
+	// This happens when the window has zero dimensions (minimized, not yet visible).
+	if !r.surfaceConfigured {
+		return false
+	}
+
 	surfTex, err := r.backend.GetCurrentTexture(r.surface)
 	if err != nil || surfTex.Status != types.SurfaceStatusSuccess {
-		// Surface needs reconfiguration
-		r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
-			Format:      r.format,
-			Usage:       types.TextureUsageRenderAttachment,
-			Width:       r.width,
-			Height:      r.height,
-			AlphaMode:   types.AlphaModeOpaque,
-			PresentMode: types.PresentModeFifo,
-		})
+		// Surface needs reconfiguration.
+		// Only attempt if we have valid dimensions.
+		if r.width > 0 && r.height > 0 {
+			r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
+				Format:      r.format,
+				Usage:       types.TextureUsageRenderAttachment,
+				Width:       r.width,
+				Height:      r.height,
+				AlphaMode:   types.AlphaModeOpaque,
+				PresentMode: types.PresentModeFifo,
+			})
+		}
 		return false
 	}
 
