@@ -22,7 +22,7 @@
 
 ---
 
-## Status: v0.8.1 — Metal Backend Complete!
+## Status: v0.8.2 — Metal Backend Complete!
 
 > **Pure Go backend works on ALL platforms!** Windows (Vulkan), Linux (Vulkan), macOS (Metal).
 >
@@ -231,7 +231,7 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 - ✅ Linux X11 windowing (Pure Go, ~5K LOC)
 - ✅ macOS Cocoa windowing (Pure Go, ~1K LOC)
 - ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
-- ✅ Metal backend for macOS (wgpu v0.6.0)
+- ✅ Metal backend for macOS (wgpu v0.7.2)
 
 **Next:**
 - DX12 backend for Windows
