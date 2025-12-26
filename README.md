@@ -22,13 +22,15 @@
 
 ---
 
-## Status: v0.7.2 — macOS ARM64 Fix!
+## Status: v0.8.1 — Metal Backend Complete!
 
-> **Pure Go backend now works on ALL platforms!** Windows (Vulkan), Linux (Vulkan), macOS (Metal).
+> **Pure Go backend works on ALL platforms!** Windows (Vulkan), Linux (Vulkan), macOS (Metal).
 >
-> **v0.7.2** fixes macOS ARM64 crash (`nextEventMatchingMask should only be called from the Main Thread`)
+> **v0.8.0** — Metal backend fully implemented: Present(), WGSL→MSL compilation, CreateRenderPipeline
 >
-> **🧪 Community Testing Requested** — Help us test on M1/M2/M3/M4 Macs!
+> **v0.8.1** — Hotfix for macOS zero-dimension window crash (Issue #20)
+>
+> **🧪 Community Testing Requested** — Help us test on macOS (M1/M2/M3/M4)!
 >
 > **Star the repo to follow progress!**
 
