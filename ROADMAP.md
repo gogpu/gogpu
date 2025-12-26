@@ -23,7 +23,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 | **gogpu/gogpu** | v0.8.0 | GPU abstraction, windowing, Metal backend fixed |
 | **gogpu/wgpu** | v0.7.0 | Pure Go WebGPU (Vulkan, Metal, GLES, Software) |
 | **gogpu/naga** | v0.6.0 | WGSL shader compiler (SPIR-V, MSL, GLSL) |
-| **gogpu/gg** | v0.13.0 | 2D graphics library (47K LOC) |
+| **gogpu/gg** | v0.15.0 | 2D graphics library (53K+ LOC) |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation

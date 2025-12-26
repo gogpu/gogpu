@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-12-24
+
+### Fixed
+- **Metal Backend Blank Window** — Present() was a NO-OP and didn't call HAL's Queue.Present() method
+  - Properly wires gogpu's Present() to HAL Queue.Present()
+  - Added Surface→Device tracking via registry mappings for correct queue lookup
+  - Added zero-dimension guard to skip rendering when window is minimized
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.6.1 → v0.7.0
+  - WGSL→MSL shader compilation via naga
+  - CreateRenderPipeline implementation for Metal
+
 ## [0.7.2] - 2025-12-25
 
 ### Fixed
