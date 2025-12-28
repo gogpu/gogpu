@@ -292,6 +292,19 @@ func (r *ResourceRegistry) ClearCurrentSurfaceTexture(surface types.Surface) {
 	r.mu.Unlock()
 }
 
+// GetAnySurfaceTexture returns any current surface texture.
+// This is used to get the drawable for Metal presentation.
+// In practice, there's only one surface per frame.
+func (r *ResourceRegistry) GetAnySurfaceTexture() hal.SurfaceTexture {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, tex := range r.currentSurfaceTextures {
+		return tex
+	}
+	return nil
+}
+
 // --- Surface ---
 
 func (r *ResourceRegistry) RegisterSurface(surface hal.Surface) types.Surface {

@@ -16,20 +16,21 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.8.1)
+## Current State (v0.8.4)
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.8.1 | GPU abstraction, windowing, Metal backend complete |
-| **gogpu/wgpu** | v0.7.1 | Pure Go WebGPU (Vulkan, Metal, GLES, Software) |
-| **gogpu/naga** | v0.6.0 | WGSL shader compiler (SPIR-V, MSL, GLSL) |
+| **gogpu/gogpu** | v0.8.4 | GPU abstraction, windowing, Metal macOS fix |
+| **gogpu/wgpu** | v0.8.3 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | v0.8.0 | WGSL shader compiler (SPIR-V, MSL, GLSL, HLSL) |
 | **gogpu/gg** | v0.15.1 | 2D graphics library (53K+ LOC) |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
 - Dual backend — Rust (wgpu-native) or Pure Go
-- **Cross-platform Pure Go backend** — Windows/Linux (Vulkan), macOS (Metal)
-- **All shader backends** — SPIR-V, MSL, GLSL
+- **Cross-platform Pure Go backend** — Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
+- **All 4 shader backends** — SPIR-V, MSL, GLSL, HLSL
+- **5 HAL backends** — Vulkan, Metal, DX12, GLES, Software
 - WebGPU-first API design
 
 ---
@@ -60,6 +61,9 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ Cross-platform Pure Go backend integration (v0.7.0)
 - ✅ **Metal backend fixed (v0.8.0)** — Present, WGSL→MSL, CreateRenderPipeline
 - ✅ **GLSL shader backend (naga v0.6.0, ~2.8K LOC)** — OpenGL 3.3+, ES 3.0+
+- ✅ **DX12 backend complete (wgpu v0.8.0, ~12K LOC)** — Pure Go COM via syscall
+- ✅ **HLSL shader backend (naga v0.8.0)** — DirectX 11/12
+- ✅ **Metal macOS blank window fix (gogpu v0.8.4)** — Issue #24
 
 ### Q1 2026
 
@@ -71,11 +75,13 @@ All platforms use Pure Go FFI (no CGO required).
 ### Q2 2026
 
 **GPU Backends:**
-- DX12 backend for Windows (native, ~5-8K LOC)
+- ✅ ~~DX12 backend for Windows~~ — **Done in v0.8.0!** (~12K LOC)
 - GLES improvements for Linux
+- Compute shader pipeline
 
 **Shader Compiler:**
 - ✅ ~~GLSL output support in naga~~ — **Done in v0.6.0!**
+- ✅ ~~HLSL output support in naga~~ — **Done in v0.8.0!**
 - Shader optimization passes (dead code elimination, constant folding)
 - Source maps for debugging
 
@@ -107,8 +113,8 @@ All platforms use Pure Go FFI (no CGO required).
 │   Rust Backend        │     Pure Go Backend                 │
 │  (go-webgpu/webgpu)   │       (gogpu/wgpu)                  │
 ├─────────────────────────────────────────────────────────────┤
-│   Vulkan    │   OpenGL ES   │   Software   │    Metal  ✅   │
-│  (Win+Lin)  │   (Win+Lin)   │  (Headless)  │   (macOS)      │
+│ Vulkan ✅ │ DX12 ✅ │ Metal ✅ │ OpenGL ES │ Software │
+│ Win+Lin   │ Windows │  macOS   │  Win+Lin  │ Headless │
 └─────────────────────────────────────────────────────────────┘
 ```
 

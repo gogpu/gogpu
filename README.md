@@ -22,13 +22,13 @@
 
 ---
 
-## Status: v0.8.2 — Metal Backend Complete!
+## Status: v0.8.4 — Metal macOS Fix + DX12 Complete!
 
-> **Pure Go backend works on ALL platforms!** Windows (Vulkan), Linux (Vulkan), macOS (Metal).
+> **Pure Go backend works on ALL platforms!** Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal).
 >
-> **v0.8.0** — Metal backend fully implemented: Present(), WGSL→MSL compilation, CreateRenderPipeline
+> **v0.8.4** — Metal macOS blank window fix (Issue #24) — proper drawable presentation timing
 >
-> **v0.8.1** — Hotfix for macOS zero-dimension window crash (Issue #20)
+> **v0.8.3** — DX12 backend complete (~12K LOC), HLSL shader backend
 >
 > **🧪 Community Testing Requested** — Help us test on macOS (M1/M2/M3/M4)!
 >
@@ -223,19 +223,20 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.7.2 — macOS ARM64 Fix
+**Current:** v0.8.4 — Metal macOS Fix
 
 **Recent:**
-- ✅ **macOS ARM64 main thread fix** (v0.7.2)
-- ✅ **Pure Go backend for ALL platforms** (Windows/Linux Vulkan, macOS Metal)
-- ✅ Linux X11 windowing (Pure Go, ~5K LOC)
-- ✅ macOS Cocoa windowing (Pure Go, ~1K LOC)
+- ✅ **Metal macOS blank window fix** (v0.8.4) — proper drawable presentation timing
+- ✅ **DX12 backend complete** (wgpu v0.8.0, ~12K LOC)
+- ✅ **HLSL shader backend** (naga v0.8.0) — all 4 shader backends stable
+- ✅ **Pure Go backend for ALL platforms** (Windows Vulkan/DX12, Linux Vulkan, macOS Metal)
+- ✅ Metal backend for macOS (wgpu v0.7.0)
 - ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
-- ✅ Metal backend for macOS (wgpu v0.7.2)
 
 **Next:**
-- DX12 backend for Windows
 - GUI toolkit (gogpu/ui)
+- Compute shader pipeline
+- Performance optimization
 
 ---
 
@@ -262,7 +263,7 @@ The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
 | OpenGL ES | ✅ Done | ~7.5K | Windows (WGL) + Linux (EGL) |
 | **Vulkan** | ✅ Done | ~27K | **Cross-platform!** Windows/Linux/macOS, goffi FFI, Vulkan 1.3, memory allocator |
 | **Metal** | ✅ Done | ~3K | **macOS/iOS!** Pure Go via goffi Objective-C bridge |
-| DX12 | Planned | - | Windows |
+| **DX12** | ✅ Done | ~12K | **Windows!** Pure Go COM via syscall, D3D12, DXGI |
 
 **Software backend** enables headless rendering:
 ```bash
