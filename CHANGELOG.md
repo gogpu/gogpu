@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2025-12-29
+
+### Fixed
+- **macOS Metal Blank Window** — Fixes Issue [#24](https://github.com/gogpu/gogpu/issues/24)
+  - Root cause: Metal presentation timing and resource release order
+  - Fix: Wire up drawable attachment to command buffer for `presentDrawable:` before `commit`
+  - Fix: Reorder `EndFrame()` to present surface before releasing texture resources
+  - Added `attachDrawableToCommandBuffer()` helper in native Metal backend
+  - Added `GetAnySurfaceTexture()` to registry for Metal drawable access
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.1 → v0.8.3
+  - Metal present timing: schedule `presentDrawable:` before `commit`
+  - TextureView NSRange parameters fix
+- Updated dependency: `github.com/go-webgpu/webgpu` v0.1.1 → v0.1.2
+- Updated dependency: `github.com/go-webgpu/goffi` v0.3.3 → v0.3.5
+
 ## [0.8.3] - 2025-12-29
 
 ### Changed
