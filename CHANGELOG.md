@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2025-12-29
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.7.2 → v0.8.1
+  - DX12 backend complete
+  - Intel GPU COM calling convention fix
+- Updated dependency: `github.com/gogpu/naga` v0.6.0 → v0.8.0
+  - HLSL backend for DirectX 11/12
+  - All 4 shader backends stable
+
 ## [0.8.2] - 2025-12-26
 
 ### Changed
