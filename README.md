@@ -22,15 +22,13 @@
 
 ---
 
-## Status: v0.8.4 — Metal macOS Fix + DX12 Complete!
+## Status: Active Development
 
 > **Pure Go backend works on ALL platforms!** Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal).
 >
-> **v0.8.4** — Metal macOS blank window fix (Issue #24) — proper drawable presentation timing
+> All 5 GPU backends complete: Vulkan, Metal, DX12, GLES, Software.
 >
-> **v0.8.3** — DX12 backend complete (~12K LOC), HLSL shader backend
->
-> **🧪 Community Testing Requested** — Help us test on macOS (M1/M2/M3/M4)!
+> **Community Testing Welcome** — Help us test on your platform!
 >
 > **Star the repo to follow progress!**
 
@@ -126,7 +124,7 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
-## macOS Platform (v0.5.0+)
+## macOS Platform
 
 **Pure Go Cocoa implementation** — via goffi Objective-C runtime!
 
@@ -223,17 +221,13 @@ gogpu/
 
 See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
-**Current:** v0.8.4 — Metal macOS Fix
+**Completed:**
+- ✅ **All 5 GPU backends** — Vulkan, Metal, DX12, GLES, Software
+- ✅ **All 4 shader backends** — SPIR-V, MSL, GLSL, HLSL
+- ✅ **Cross-platform windowing** — Win32, Cocoa, X11, Wayland
+- ✅ **Pure Go backend for ALL platforms** — Windows, Linux, macOS
 
-**Recent:**
-- ✅ **Metal macOS blank window fix** (v0.8.4) — proper drawable presentation timing
-- ✅ **DX12 backend complete** (wgpu v0.8.0, ~12K LOC)
-- ✅ **HLSL shader backend** (naga v0.8.0) — all 4 shader backends stable
-- ✅ **Pure Go backend for ALL platforms** (Windows Vulkan/DX12, Linux Vulkan, macOS Metal)
-- ✅ Metal backend for macOS (wgpu v0.7.0)
-- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
-
-**Next:**
+**In Progress:**
 - GUI toolkit (gogpu/ui)
 - Compute shader pipeline
 - Performance optimization
@@ -257,13 +251,13 @@ See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
 
 The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
 
-| Backend | Status | Lines | Features |
-|---------|--------|-------|----------|
-| **Software** | ✅ Done | ~10K | **Full rasterizer!** Triangle rendering, depth/stencil, blending, clipping, parallel |
-| OpenGL ES | ✅ Done | ~7.5K | Windows (WGL) + Linux (EGL) |
-| **Vulkan** | ✅ Done | ~27K | **Cross-platform!** Windows/Linux/macOS, goffi FFI, Vulkan 1.3, memory allocator |
-| **Metal** | ✅ Done | ~3K | **macOS/iOS!** Pure Go via goffi Objective-C bridge |
-| **DX12** | ✅ Done | ~12K | **Windows!** Pure Go COM via syscall, D3D12, DXGI |
+| Backend | Status | Features |
+|---------|--------|----------|
+| **Software** | ✅ Done | Full rasterizer, depth/stencil, blending, clipping, parallel |
+| **OpenGL ES** | ✅ Done | Windows (WGL) + Linux (EGL) |
+| **Vulkan** | ✅ Done | Cross-platform (Windows/Linux/macOS), Vulkan 1.3 |
+| **Metal** | ✅ Done | macOS/iOS via goffi Objective-C bridge |
+| **DX12** | ✅ Done | Windows via Pure Go COM syscall |
 
 **Software backend** enables headless rendering:
 ```bash

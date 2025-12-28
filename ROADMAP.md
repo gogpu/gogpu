@@ -16,14 +16,14 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State (v0.8.4)
+## Current State
 
-| Component | Version | Description |
-|-----------|---------|-------------|
-| **gogpu/gogpu** | v0.8.4 | GPU abstraction, windowing, Metal macOS fix |
-| **gogpu/wgpu** | v0.8.3 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
-| **gogpu/naga** | v0.8.0 | WGSL shader compiler (SPIR-V, MSL, GLSL, HLSL) |
-| **gogpu/gg** | v0.15.1 | 2D graphics library (53K+ LOC) |
+| Component | Description |
+|-----------|-------------|
+| **gogpu/gogpu** | GPU abstraction, windowing, input |
+| **gogpu/wgpu** | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | WGSL shader compiler (SPIR-V, MSL, GLSL, HLSL) |
+| **gogpu/gg** | 2D graphics library with GPU acceleration |
 
 **Key Features:**
 - Zero CGO — Pure Go, easy cross-compilation
@@ -50,38 +50,33 @@ All platforms use Pure Go FFI (no CGO required).
 
 ## Roadmap
 
-### Q4 2025 (Current) ✅
+### Completed ✅
 
 **Platform Expansion:**
-- ✅ Linux Wayland windowing (Pure Go, 5,700 LOC)
-- ✅ macOS Cocoa windowing (Pure Go, 950 LOC)
-- ✅ Metal backend for macOS (wgpu v0.7.0, ~3K LOC)
-- ✅ MSL shader backend (naga v0.5.0, ~3.6K LOC)
-- ✅ Linux X11 windowing (Pure Go, ~5K LOC)
-- ✅ Cross-platform Pure Go backend integration (v0.7.0)
-- ✅ **Metal backend fixed (v0.8.0)** — Present, WGSL→MSL, CreateRenderPipeline
-- ✅ **GLSL shader backend (naga v0.6.0, ~2.8K LOC)** — OpenGL 3.3+, ES 3.0+
-- ✅ **DX12 backend complete (wgpu v0.8.0, ~12K LOC)** — Pure Go COM via syscall
-- ✅ **HLSL shader backend (naga v0.8.0)** — DirectX 11/12
-- ✅ **Metal macOS blank window fix (gogpu v0.8.4)** — Issue #24
+- ✅ Linux Wayland windowing (Pure Go)
+- ✅ macOS Cocoa windowing (Pure Go)
+- ✅ Metal backend for macOS
+- ✅ MSL shader backend
+- ✅ Linux X11 windowing (Pure Go)
+- ✅ Cross-platform Pure Go backend integration
+- ✅ Metal backend — Present, WGSL→MSL, CreateRenderPipeline
+- ✅ GLSL shader backend — OpenGL 3.3+, ES 3.0+
+- ✅ DX12 backend complete — Pure Go COM via syscall
+- ✅ HLSL shader backend — DirectX 11/12
+- ✅ Metal macOS fixes — Issue #24
 
-### Q1 2026
+### In Progress
 
 **Performance & Stability:**
 - SIMD optimization for 2D rendering (gg)
 - Parallel rendering pipeline
 - Platform testing and bug fixes
 
-### Q2 2026
-
 **GPU Backends:**
-- ✅ ~~DX12 backend for Windows~~ — **Done in v0.8.0!** (~12K LOC)
 - GLES improvements for Linux
 - Compute shader pipeline
 
 **Shader Compiler:**
-- ✅ ~~GLSL output support in naga~~ — **Done in v0.6.0!**
-- ✅ ~~HLSL output support in naga~~ — **Done in v0.8.0!**
 - Shader optimization passes (dead code elimination, constant folding)
 - Source maps for debugging
 
