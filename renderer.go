@@ -221,13 +221,16 @@ func (r *Renderer) BeginFrame() bool {
 
 // EndFrame presents the rendered frame.
 func (r *Renderer) EndFrame() {
+	// Present first while texture is still valid.
+	// On Metal (macOS), releasing the texture view before present
+	// can invalidate the drawable, causing blank frames.
+	r.backend.Present(r.surface)
+
+	// Release resources after presentation
 	if r.currentView != 0 {
 		r.backend.ReleaseTextureView(r.currentView)
 		r.currentView = 0
 	}
-
-	r.backend.Present(r.surface)
-
 	if r.currentTexture != 0 {
 		r.backend.ReleaseTexture(r.currentTexture)
 		r.currentTexture = 0
