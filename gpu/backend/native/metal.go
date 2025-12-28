@@ -401,8 +401,41 @@ func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer) {
 		return
 	}
 
+	// Attach drawable from current surface texture to command buffer (Metal requirement).
+	// The drawable must be scheduled for presentation before commit.
+	b.attachDrawableToCommandBuffer(halCmdBuffer)
+
 	// Submit with no fence
 	_ = halQueue.Submit([]hal.CommandBuffer{halCmdBuffer}, nil, 0)
+}
+
+// attachDrawableToCommandBuffer attaches the current drawable to a command buffer.
+// This is required for Metal where presentDrawable: must be called before commit.
+func (b *Backend) attachDrawableToCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	// Type-assert to Metal command buffer
+	metalCmdBuffer, ok := cmdBuffer.(*metal.CommandBuffer)
+	if !ok {
+		return // Not Metal backend
+	}
+
+	// Find any current surface texture and get its drawable.
+	// In practice, there's only one surface per frame.
+	surfaceTexture := b.registry.GetAnySurfaceTexture()
+	if surfaceTexture == nil {
+		return
+	}
+
+	// Type-assert to Metal surface texture
+	metalSurfaceTex, ok := surfaceTexture.(*metal.SurfaceTexture)
+	if !ok {
+		return
+	}
+
+	// Get drawable using accessor and attach to command buffer
+	drawable := metalSurfaceTex.Drawable()
+	if drawable != 0 {
+		metalCmdBuffer.SetDrawable(drawable)
+	}
 }
 
 // SetPipeline sets the render pipeline.
