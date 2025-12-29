@@ -301,6 +301,21 @@ go test ./...
 
 ---
 
+## Acknowledgments
+
+### Special Thanks
+
+**Professor Ancha Baranova** — This project would not have been possible without her invaluable help and support. Her assistance was crucial in bringing this ecosystem to life.
+
+### Contributors
+
+Thanks to our community testers who help improve GoGPU:
+
+- **[@ppoage](https://github.com/ppoage)** — macOS ARM64 testing (M1/M4), Issue #24 investigation
+- **[@Nickrocky](https://github.com/Nickrocky)** — macOS testing and feedback
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
