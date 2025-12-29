@@ -310,6 +310,7 @@ go test ./...
 ### Inspiration
 
 - **[u/m-unknown-2025](https://www.reddit.com/user/m-unknown-2025/)** — The [Reddit post](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) that started it all
+- **[born-ml/born](https://github.com/born-ml/born)** — ML framework where [go-webgpu](https://github.com/go-webgpu/webgpu) bindings originated
 
 ### Contributors
 
