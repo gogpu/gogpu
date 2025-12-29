@@ -289,7 +289,7 @@ Contributions are welcome! This is an early-stage project, so there's lots to do
 - 🧪 **macOS testing** — Test on real macOS systems (Monterey+)
 - 🧪 **Linux X11 testing** — Test on X11 systems (Ubuntu, Fedora, etc.)
 - 🧪 **Linux Wayland testing** — Test on Wayland compositors
-- DX12 backend for Windows
+- 🧪 **DX12 testing** — Test on Windows with DirectX 12
 - Documentation and examples
 
 ```bash
