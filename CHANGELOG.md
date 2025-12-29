@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2025-12-29
+
+### Fixed
+- **macOS ARM64 Blank Window** — Final fix for Issue [#24](https://github.com/gogpu/gogpu/issues/24)
+  - `GetSize()` now returns correct dimensions on Apple Silicon (M1/M2/M3/M4)
+  - Triangle example renders correctly on macOS ARM64
+
+### Changed
+- Updated dependency: `github.com/go-webgpu/webgpu` v0.1.2 → v0.1.3
+  - Includes goffi v0.3.6 with ARM64 ABI fixes
+- Updated dependency: `github.com/go-webgpu/goffi` v0.3.5 → v0.3.6
+  - **ARM64 HFA Returns** — `NSRect` (4×float64) correctly returns on Apple Silicon
+  - **Large Struct Returns** — Structs >16 bytes use X8 register properly
+  - Fixes Objective-C `objc_msgSend` struct return calling convention
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.5 → v0.8.6
+  - Metal double present fix
+  - goffi v0.3.6 integration
+
 ## [0.8.6] - 2025-12-29
 
 ### Changed
@@ -291,7 +309,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/gogpu/gogpu/compare/v0.8.6...v0.8.7
+[0.8.6]: https://github.com/gogpu/gogpu/compare/v0.8.5...v0.8.6
+[0.8.5]: https://github.com/gogpu/gogpu/compare/v0.8.4...v0.8.5
+[0.8.4]: https://github.com/gogpu/gogpu/compare/v0.8.3...v0.8.4
+[0.8.3]: https://github.com/gogpu/gogpu/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/gogpu/gogpu/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/gogpu/gogpu/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/gogpu/gogpu/compare/v0.7.2...v0.8.0
