@@ -102,7 +102,7 @@ func (a *Application) Destroy() {
 	defer a.mu.Unlock()
 
 	if a.pool != 0 {
-		a.pool.Send(selectors.drain)
+		a.pool.Send(selectors.release)
 		a.pool = 0
 	}
 
@@ -121,7 +121,7 @@ func (a *Application) PollEvents() bool {
 
 	// Create local autorelease pool for event processing
 	pool := classes.NSAutoreleasePool.Send(selectors.new)
-	defer pool.Send(selectors.drain)
+	defer pool.Send(selectors.release)
 
 	// Get distant past date for non-blocking poll
 	distantPast := classes.NSDate.Send(selectors.distantPast)
@@ -152,7 +152,7 @@ func (a *Application) WaitEvents() {
 
 	// Create local autorelease pool
 	pool := classes.NSAutoreleasePool.Send(selectors.new)
-	defer pool.Send(selectors.drain)
+	defer pool.Send(selectors.release)
 
 	// Get distant future date for blocking wait
 	distantFuture := classes.NSDate.Send(selectors.distantFuture)

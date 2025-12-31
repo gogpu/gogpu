@@ -185,7 +185,12 @@ func (b *Backend) GetCurrentTexture(surface types.Surface) (types.SurfaceTexture
 	b.registry.SetCurrentSurfaceTexture(surface, acquired.Texture)
 
 	// Register texture and return
-	textureHandle := b.registry.RegisterTexture(acquired.Texture)
+	device, err := b.registry.GetDeviceForSurface(surface)
+	if err != nil {
+		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
+	}
+
+	textureHandle := b.registry.RegisterTextureForDevice(acquired.Texture, device)
 
 	return types.SurfaceTexture{
 		Texture: textureHandle,
@@ -475,20 +480,28 @@ func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureVi
 		return 0
 	}
 
-	halDevice, err := b.registry.GetDevice(types.Device(1)) // HACK: assume device handle is 1
+	deviceHandle, err := b.registry.GetDeviceForTexture(texture)
+	if err != nil {
+		return 0
+	}
+
+	halDevice, err := b.registry.GetDevice(deviceHandle)
 	if err != nil {
 		return 0
 	}
 
 	// Convert descriptor
-	halDesc := &hal.TextureViewDescriptor{
-		Format:          convertTextureFormat(desc.Format),
-		Dimension:       convertTextureViewDimension(desc.Dimension),
-		Aspect:          convertTextureAspect(desc.Aspect),
-		BaseMipLevel:    desc.BaseMipLevel,
-		MipLevelCount:   desc.MipLevelCount,
-		BaseArrayLayer:  desc.BaseArrayLayer,
-		ArrayLayerCount: desc.ArrayLayerCount,
+	var halDesc *hal.TextureViewDescriptor
+	if desc != nil {
+		halDesc = &hal.TextureViewDescriptor{
+			Format:          convertTextureFormat(desc.Format),
+			Dimension:       convertTextureViewDimension(desc.Dimension),
+			Aspect:          convertTextureAspect(desc.Aspect),
+			BaseMipLevel:    desc.BaseMipLevel,
+			MipLevelCount:   desc.MipLevelCount,
+			BaseArrayLayer:  desc.BaseArrayLayer,
+			ArrayLayerCount: desc.ArrayLayerCount,
+		}
 	}
 
 	view, err := halDevice.CreateTextureView(halTexture, halDesc)

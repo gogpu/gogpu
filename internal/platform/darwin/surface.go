@@ -173,7 +173,7 @@ func (l *MetalLayer) SetContentsScale(scale float64) {
 	}
 
 	// Send CGFloat (double) argument
-	l.id.SendUint(selectors.setContentsScale, uint64(scale))
+	l.id.SendDouble(selectors.setContentsScale, scale)
 }
 
 // NextDrawable returns the next available drawable.

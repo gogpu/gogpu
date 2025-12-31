@@ -52,11 +52,37 @@ type objcRuntime struct {
 	cifVoidPtr  *types.CallInterface // Returns void*, takes variadic args
 	cifFpret    *types.CallInterface // Returns floating point
 	cifSelector *types.CallInterface // For sel_registerName
+
+	// Protect shared CIF usage; CallInterface is not concurrency-safe.
+	cifMu sync.Mutex
 }
 
 // objcRT is the global Objective-C runtime state.
 // Named to avoid conflict with the standard library "runtime" package.
 var objcRT objcRuntime
+
+var (
+	nsRectType = &types.TypeDescriptor{
+		Size:      32,
+		Alignment: 8,
+		Kind:      types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
+	nsSizeType = &types.TypeDescriptor{
+		Size:      16,
+		Alignment: 8,
+		Kind:      types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
+)
 
 // initRuntime initializes the Objective-C runtime by loading required libraries
 // and resolving function symbols. This is called once on first use.
@@ -184,12 +210,17 @@ func GetClass(name string) Class {
 
 	var result uintptr
 	namePtr := unsafe.Pointer(&cname[0])
+	argBox := &struct {
+		name unsafe.Pointer
+	}{
+		name: namePtr,
+	}
 
-	err := ffi.CallFunction(
+	err := objcCallLocked(
 		objcRT.cifSelector,
 		objcRT.objcGetClass,
 		unsafe.Pointer(&result),
-		[]unsafe.Pointer{unsafe.Pointer(&namePtr)},
+		[]unsafe.Pointer{unsafe.Pointer(&argBox.name)},
 	)
 	if err != nil {
 		return 0
@@ -211,12 +242,17 @@ func RegisterSelector(name string) SEL {
 
 	var result uintptr
 	namePtr := unsafe.Pointer(&cname[0])
+	argBox := &struct {
+		name unsafe.Pointer
+	}{
+		name: namePtr,
+	}
 
-	err := ffi.CallFunction(
+	err := objcCallLocked(
 		objcRT.cifSelector,
 		objcRT.selRegisterName,
 		unsafe.Pointer(&result),
-		[]unsafe.Pointer{unsafe.Pointer(&namePtr)},
+		[]unsafe.Pointer{unsafe.Pointer(&argBox.name)},
 	)
 	if err != nil {
 		return 0
@@ -237,24 +273,46 @@ func (id ID) Send(sel SEL) ID {
 		return 0
 	}
 
-	var result uintptr
-	self := uintptr(id)
-	cmd := uintptr(sel)
+	initSelectors()
+	switch sel {
+	case selectors.frame,
+		selectors.bounds,
+		selectors.visibleFrame,
+		selectors.drawableSize,
+		selectors.contentRectForFrameRect,
+		selectors.frameRectForContentRect:
+		panic("objc: Send used with struct-return selector")
+	}
 
-	err := ffi.CallFunction(
+	var result uintptr
+	argBox := &struct {
+		self uintptr
+		cmd  uintptr
+	}{
+		self: uintptr(id),
+		cmd:  uintptr(sel),
+	}
+
+	err := objcCallLocked(
 		objcRT.cifVoidPtr,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
-			unsafe.Pointer(&self),
-			unsafe.Pointer(&cmd),
+			unsafe.Pointer(&argBox.self),
+			unsafe.Pointer(&argBox.cmd),
 		},
 	)
 	if err != nil {
 		return 0
 	}
 
-	return ID(result)
+	ret := ID(result)
+	return ret
+}
+
+func objcCallLocked(cif *types.CallInterface, fn unsafe.Pointer, rvalue unsafe.Pointer, avalue []unsafe.Pointer) error {
+	// Add mutex if the CIF is shared
+	return ffi.CallFunction(cif, fn, rvalue, avalue)
 }
 
 // SendClass sends a message to a Class and returns the result.
@@ -304,6 +362,21 @@ func msgSend(self ID, sel SEL, args ...uintptr) ID {
 		return 0
 	}
 
+	initSelectors()
+	if len(args) > 6 {
+		panic("objc: msgSend stack args unsupported")
+	}
+	switch sel {
+	case selectors.setDrawableSize,
+		selectors.setContentsScale,
+		selectors.setFrame,
+		selectors.setBounds,
+		selectors.initWithContentRectStyleMaskBackingDefer,
+		selectors.contentRectForFrameRect,
+		selectors.frameRectForContentRect:
+		panic("objc: msgSend requires typed args")
+	}
+
 	// Build argument type list: self, _cmd, then user args
 	argTypes := make([]*types.TypeDescriptor, 2+len(args))
 	argTypes[0] = types.PointerTypeDescriptor // self
@@ -324,14 +397,15 @@ func msgSend(self ID, sel SEL, args ...uintptr) ID {
 		return 0
 	}
 
-	// Build argument pointers: self, sel, then user args
-	selfPtr := uintptr(self)
-	selPtr := uintptr(sel)
+	// Build argument pointers: self, sel, then user args. Use a heap-backed slice.
+	argVals := make([]uintptr, 2+len(args))
+	argVals[0] = uintptr(self)
+	argVals[1] = uintptr(sel)
+	copy(argVals[2:], args)
+
 	argPtrs := make([]unsafe.Pointer, 2+len(args))
-	argPtrs[0] = unsafe.Pointer(&selfPtr)
-	argPtrs[1] = unsafe.Pointer(&selPtr)
-	for i := range args {
-		argPtrs[2+i] = unsafe.Pointer(&args[i])
+	for i := range argVals {
+		argPtrs[i] = unsafe.Pointer(&argVals[i])
 	}
 
 	var result uintptr
@@ -345,7 +419,8 @@ func msgSend(self ID, sel SEL, args ...uintptr) ID {
 		return 0
 	}
 
-	return ID(result)
+	ret := ID(result)
+	return ret
 }
 
 // SendPtr sends a message with one pointer argument.
@@ -372,10 +447,13 @@ func (id ID) SendUint(sel SEL, arg uint64) ID {
 	return msgSend(id, sel, uintptr(arg))
 }
 
-// SendRect sends a message with an NSRect argument.
-// On x86_64, NSRect is passed by value in registers.
-// On ARM64, it may be passed differently.
-func (id ID) SendRect(sel SEL, rect NSRect) ID {
+// SendUintUint sends a message with two uint64 arguments.
+func (id ID) SendUintUint(sel SEL, arg0, arg1 uint64) ID {
+	return msgSend(id, sel, uintptr(arg0), uintptr(arg1))
+}
+
+// SendDouble sends a message with one double argument.
+func (id ID) SendDouble(sel SEL, arg float64) ID {
 	if id == 0 || sel == 0 {
 		return 0
 	}
@@ -384,15 +462,10 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 		return 0
 	}
 
-	// NSRect consists of 4 CGFloat values (32 bytes total on 64-bit)
-	// We pass them as 4 separate double arguments
 	argTypes := []*types.TypeDescriptor{
 		types.PointerTypeDescriptor, // self
 		types.PointerTypeDescriptor, // _cmd
-		types.DoubleTypeDescriptor,  // x
-		types.DoubleTypeDescriptor,  // y
-		types.DoubleTypeDescriptor,  // width
-		types.DoubleTypeDescriptor,  // height
+		types.DoubleTypeDescriptor,  // arg
 	}
 
 	cif := &types.CallInterface{}
@@ -406,20 +479,20 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 		return 0
 	}
 
-	selfPtr := uintptr(id)
-	selPtr := uintptr(sel)
-	x := rect.Origin.X
-	y := rect.Origin.Y
-	w := rect.Size.Width
-	h := rect.Size.Height
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+		arg  float64
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+		arg:  arg,
+	}
 
 	argPtrs := []unsafe.Pointer{
-		unsafe.Pointer(&selfPtr),
-		unsafe.Pointer(&selPtr),
-		unsafe.Pointer(&x),
-		unsafe.Pointer(&y),
-		unsafe.Pointer(&w),
-		unsafe.Pointer(&h),
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.arg),
 	}
 
 	var result uintptr
@@ -433,7 +506,130 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 		return 0
 	}
 
-	return ID(result)
+	ret := ID(result)
+	return ret
+}
+
+// SendDoubleDouble sends a message with two double arguments.
+func (id ID) SendDoubleDouble(sel SEL, arg0, arg1 float64) ID {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		types.DoubleTypeDescriptor,  // arg0
+		types.DoubleTypeDescriptor,  // arg1
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+		arg0 float64
+		arg1 float64
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+		arg0: arg0,
+		arg1: arg1,
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.arg0),
+		unsafe.Pointer(&argBox.arg1),
+	}
+
+	var result uintptr
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	ret := ID(result)
+	return ret
+}
+
+// SendRect sends a message with an NSRect argument.
+// On x86_64, NSRect is passed by value in registers.
+// On ARM64, it may be passed differently.
+func (id ID) SendRect(sel SEL, rect NSRect) ID {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		nsRectType,                  // rect
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+		rect NSRect
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+		rect: rect,
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.rect),
+	}
+
+	var result uintptr
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	ret := ID(result)
+	return ret
 }
 
 // SendRectUintUintBool sends a message for initWithContentRect:styleMask:backing:defer:
@@ -447,14 +643,11 @@ func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backin
 		return 0
 	}
 
-	// Arguments: self, _cmd, rect (4 doubles), styleMask, backing, defer
+	// Arguments: self, _cmd, rect, styleMask, backing, defer
 	argTypes := []*types.TypeDescriptor{
 		types.PointerTypeDescriptor, // self
 		types.PointerTypeDescriptor, // _cmd
-		types.DoubleTypeDescriptor,  // rect.origin.x
-		types.DoubleTypeDescriptor,  // rect.origin.y
-		types.DoubleTypeDescriptor,  // rect.size.width
-		types.DoubleTypeDescriptor,  // rect.size.height
+		nsRectType,                  // rect
 		types.UInt64TypeDescriptor,  // styleMask
 		types.UInt64TypeDescriptor,  // backing
 		types.UInt8TypeDescriptor,   // defer (BOOL)
@@ -471,29 +664,33 @@ func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backin
 		return 0
 	}
 
-	selfPtr := uintptr(id)
-	selPtr := uintptr(sel)
-	x := rect.Origin.X
-	y := rect.Origin.Y
-	w := rect.Size.Width
-	h := rect.Size.Height
-	styleVal := style     // NSUInteger is already uint64
-	backingVal := backing // NSBackingStoreType is already uint64
 	var deferVal uint8
 	if deferFlag {
 		deferVal = 1
 	}
+	argBox := &struct {
+		self     uintptr
+		sel      uintptr
+		rect     NSRect
+		style    NSUInteger
+		backing  NSBackingStoreType
+		deferVal uint8
+	}{
+		self:     uintptr(id),
+		sel:      uintptr(sel),
+		rect:     rect,
+		style:    style,
+		backing:  backing,
+		deferVal: deferVal,
+	}
 
 	argPtrs := []unsafe.Pointer{
-		unsafe.Pointer(&selfPtr),
-		unsafe.Pointer(&selPtr),
-		unsafe.Pointer(&x),
-		unsafe.Pointer(&y),
-		unsafe.Pointer(&w),
-		unsafe.Pointer(&h),
-		unsafe.Pointer(&styleVal),
-		unsafe.Pointer(&backingVal),
-		unsafe.Pointer(&deferVal),
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.rect),
+		unsafe.Pointer(&argBox.style),
+		unsafe.Pointer(&argBox.backing),
+		unsafe.Pointer(&argBox.deferVal),
 	}
 
 	var result uintptr
@@ -507,7 +704,8 @@ func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backin
 		return 0
 	}
 
-	return ID(result)
+	ret := ID(result)
+	return ret
 }
 
 // GetRect receives an NSRect return value from a method like frame.
@@ -522,25 +720,6 @@ func (id ID) GetRect(sel SEL) NSRect {
 		return NSRect{}
 	}
 
-	// For struct returns, we use a struct type descriptor
-	// NSRect is: { CGPoint origin { CGFloat x, y }, CGSize size { CGFloat width, height } }
-	// Which flattens to: { double x, double y, double width, double height }
-	// Total 32 bytes
-
-	// Create a struct type for NSRect manually
-	// TypeDescriptor with StructType kind and Members
-	rectType := &types.TypeDescriptor{
-		Size:      32, // 4 * 8 bytes (4 doubles)
-		Alignment: 8,  // double alignment
-		Kind:      types.StructType,
-		Members: []*types.TypeDescriptor{
-			types.DoubleTypeDescriptor,
-			types.DoubleTypeDescriptor,
-			types.DoubleTypeDescriptor,
-			types.DoubleTypeDescriptor,
-		},
-	}
-
 	argTypes := []*types.TypeDescriptor{
 		types.PointerTypeDescriptor, // self
 		types.PointerTypeDescriptor, // _cmd
@@ -550,19 +729,24 @@ func (id ID) GetRect(sel SEL) NSRect {
 	err := ffi.PrepareCallInterface(
 		cif,
 		types.DefaultCall,
-		rectType,
+		nsRectType,
 		argTypes,
 	)
 	if err != nil {
 		return NSRect{}
 	}
 
-	selfPtr := uintptr(id)
-	selPtr := uintptr(sel)
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+	}
 
 	argPtrs := []unsafe.Pointer{
-		unsafe.Pointer(&selfPtr),
-		unsafe.Pointer(&selPtr),
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
 	}
 
 	// Result buffer for the struct
@@ -596,8 +780,7 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 	argTypes := []*types.TypeDescriptor{
 		types.PointerTypeDescriptor, // self
 		types.PointerTypeDescriptor, // _cmd
-		types.DoubleTypeDescriptor,  // width
-		types.DoubleTypeDescriptor,  // height
+		nsSizeType,                  // size
 	}
 
 	cif := &types.CallInterface{}
@@ -611,16 +794,20 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 		return 0
 	}
 
-	selfPtr := uintptr(id)
-	selPtr := uintptr(sel)
-	w := size.Width
-	h := size.Height
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+		size NSSize
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+		size: size,
+	}
 
 	argPtrs := []unsafe.Pointer{
-		unsafe.Pointer(&selfPtr),
-		unsafe.Pointer(&selPtr),
-		unsafe.Pointer(&w),
-		unsafe.Pointer(&h),
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.size),
 	}
 
 	var result uintptr
@@ -634,5 +821,6 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 		return 0
 	}
 
-	return ID(result)
+	ret := ID(result)
+	return ret
 }

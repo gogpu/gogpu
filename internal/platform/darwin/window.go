@@ -254,7 +254,7 @@ func (w *Window) Destroy() {
 	defer w.mu.Unlock()
 
 	if w.metalLayer != 0 {
-		w.metalLayer.Send(selectors.release)
+		// Surface owns the layer; window only keeps a weak reference.
 		w.metalLayer = 0
 	}
 
