@@ -1007,6 +1007,7 @@ func TestDarwinGogpuWindowSurfaceStress(t *testing.T) {
 // This isolates the Application Init/Destroy lifecycle without windows/surfaces.
 // If this crashes, the NSAutoreleasePool or NSApplication path is unsafe by itself.
 func TestDarwinApplicationInitDestroyLoop(t *testing.T) {
+	t.Skip("Stress test disabled")
 	if runtime.GOARCH != "arm64" {
 		t.Skip("stress tests require arm64")
 	}

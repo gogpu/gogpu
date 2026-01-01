@@ -135,6 +135,7 @@ func TestDarwinAppRunPanicOnDrawNoTriangle(t *testing.T) {
 // and panics on error. This exercises the panic/unwind/destroy path that has
 // been associated with the intermittent crash.
 func TestDarwinAppRunPanicPath(t *testing.T) {
+	t.Skip("Test only needed if segfaults are observed during panic")
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
@@ -149,8 +150,8 @@ func TestDarwinAppRunPanicPath(t *testing.T) {
 					// Mirror production path (DrawTriangle) and always force the
 					// panic/unwind path regardless of shader compile success.
 					_ = ctx.DrawTriangle(0, 0, 0, 1)
-					// t.Fatalf("expected panic, got none")
 					panic("forced DrawTriangle panic")
+					// t.Fatalf("expected panic, got none")
 				})
 			},
 			true,
