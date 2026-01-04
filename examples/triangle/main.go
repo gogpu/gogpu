@@ -8,7 +8,6 @@ package main
 
 import (
 	"log"
-	"runtime"
 
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gogpu/gmath"
@@ -27,10 +26,6 @@ func main() {
 
 		if err != nil {
 			println("DrawTriangle failed:", err.Error())
-			if runtime.GOOS == "darwin" {
-				// Panic can be used to test for segfaults under panic with ObjC
-				// panic("DrawTriangle failed: " + err.Error())
-			}
 		}
 	})
 
