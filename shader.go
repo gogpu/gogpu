@@ -3,35 +3,35 @@ package gogpu
 // coloredTriangleShaderSource is the WGSL shader for a vertex-colored triangle.
 const coloredTriangleShaderSource = `
 struct VertexOutput {
-    @builtin(position) position: vec4f,
-    @location(0) color: vec3f,
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec3<f32>,
 }
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
     // Triangle vertices in clip space
-    var positions = array<vec2f, 3>(
-        vec2f( 0.0,  0.5),  // top
-        vec2f(-0.5, -0.5),  // bottom left
-        vec2f( 0.5, -0.5)   // bottom right
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>( 0.0,  0.5),  // top
+        vec2<f32>(-0.5, -0.5),  // bottom left
+        vec2<f32>( 0.5, -0.5)   // bottom right
     );
 
     // Vertex colors (RGB)
-    var colors = array<vec3f, 3>(
-        vec3f(1.0, 0.0, 0.0),  // red
-        vec3f(0.0, 1.0, 0.0),  // green
-        vec3f(0.0, 0.0, 1.0)   // blue
+    var colors = array<vec3<f32>, 3>(
+        vec3<f32>(1.0, 0.0, 0.0),  // red
+        vec3<f32>(0.0, 1.0, 0.0),  // green
+        vec3<f32>(0.0, 0.0, 1.0)   // blue
     );
 
     var output: VertexOutput;
-    output.position = vec4f(positions[vertexIndex], 0.0, 1.0);
+    output.position = vec4<f32>(positions[vertexIndex], 0.0, 1.0);
     output.color = colors[vertexIndex];
     return output;
 }
 
 @fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4f {
-    return vec4f(input.color, 1.0);
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(input.color, 1.0);
 }
 `
 
@@ -50,8 +50,8 @@ func SimpleTextureShader() string {
 const texturedQuadShaderSource = `
 // Uniform buffer for transforms
 struct Uniforms {
-    transform: mat4x4f,
-    color: vec4f,
+    transform: mat4x4<f32>,
+    color: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -59,25 +59,25 @@ struct Uniforms {
 @group(1) @binding(1) var tex: texture_2d<f32>;
 
 struct VertexInput {
-    @location(0) position: vec2f,
-    @location(1) uv: vec2f,
+    @location(0) position: vec2<f32>,
+    @location(1) uv: vec2<f32>,
 }
 
 struct VertexOutput {
-    @builtin(position) position: vec4f,
-    @location(0) uv: vec2f,
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 }
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = uniforms.transform * vec4f(input.position, 0.0, 1.0);
+    output.position = uniforms.transform * vec4<f32>(input.position, 0.0, 1.0);
     output.uv = input.uv;
     return output;
 }
 
 @fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4f {
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texColor = textureSample(tex, texSampler, input.uv);
     return texColor * uniforms.color;
 }
@@ -90,39 +90,39 @@ const simpleTextureShaderSource = `
 @group(0) @binding(1) var tex: texture_2d<f32>;
 
 struct VertexOutput {
-    @builtin(position) position: vec4f,
-    @location(0) uv: vec2f,
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 }
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
     // Full-screen quad vertices (2 triangles)
-    var positions = array<vec2f, 6>(
-        vec2f(-1.0,  1.0),  // top-left
-        vec2f(-1.0, -1.0),  // bottom-left
-        vec2f( 1.0, -1.0),  // bottom-right
-        vec2f(-1.0,  1.0),  // top-left
-        vec2f( 1.0, -1.0),  // bottom-right
-        vec2f( 1.0,  1.0)   // top-right
+    var positions = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0,  1.0),  // top-left
+        vec2<f32>(-1.0, -1.0),  // bottom-left
+        vec2<f32>( 1.0, -1.0),  // bottom-right
+        vec2<f32>(-1.0,  1.0),  // top-left
+        vec2<f32>( 1.0, -1.0),  // bottom-right
+        vec2<f32>( 1.0,  1.0)   // top-right
     );
 
-    var uvs = array<vec2f, 6>(
-        vec2f(0.0, 0.0),  // top-left
-        vec2f(0.0, 1.0),  // bottom-left
-        vec2f(1.0, 1.0),  // bottom-right
-        vec2f(0.0, 0.0),  // top-left
-        vec2f(1.0, 1.0),  // bottom-right
-        vec2f(1.0, 0.0)   // top-right
+    var uvs = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0),  // top-left
+        vec2<f32>(0.0, 1.0),  // bottom-left
+        vec2<f32>(1.0, 1.0),  // bottom-right
+        vec2<f32>(0.0, 0.0),  // top-left
+        vec2<f32>(1.0, 1.0),  // bottom-right
+        vec2<f32>(1.0, 0.0)   // top-right
     );
 
     var output: VertexOutput;
-    output.position = vec4f(positions[vertexIndex], 0.0, 1.0);
+    output.position = vec4<f32>(positions[vertexIndex], 0.0, 1.0);
     output.uv = uvs[vertexIndex];
     return output;
 }
 
 @fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4f {
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(tex, texSampler, input.uv);
 }
 `

@@ -29,6 +29,7 @@ type ResourceRegistry struct {
 	queues           map[types.Queue]hal.Queue
 	surfaces         map[types.Surface]hal.Surface
 	textures         map[types.Texture]hal.Texture
+	textureDevices   map[types.Texture]types.Device
 	textureViews     map[types.TextureView]hal.TextureView
 	shaderModules    map[types.ShaderModule]hal.ShaderModule
 	renderPipelines  map[types.RenderPipeline]hal.RenderPipeline
@@ -79,6 +80,7 @@ func NewResourceRegistry() *ResourceRegistry {
 		queues:           make(map[types.Queue]hal.Queue),
 		surfaces:         make(map[types.Surface]hal.Surface),
 		textures:         make(map[types.Texture]hal.Texture),
+		textureDevices:   make(map[types.Texture]types.Device),
 		textureViews:     make(map[types.TextureView]hal.TextureView),
 		shaderModules:    make(map[types.ShaderModule]hal.ShaderModule),
 		renderPipelines:  make(map[types.RenderPipeline]hal.RenderPipeline),
@@ -346,6 +348,18 @@ func (r *ResourceRegistry) RegisterTexture(texture hal.Texture) types.Texture {
 	return handle
 }
 
+func (r *ResourceRegistry) RegisterTextureForDevice(texture hal.Texture, device types.Device) types.Texture {
+	handle := types.Texture(r.newHandle())
+	r.mu.Lock()
+	r.textures[handle] = texture
+	r.textureHandles[texture] = handle
+	if device != 0 {
+		r.textureDevices[handle] = device
+	}
+	r.mu.Unlock()
+	return handle
+}
+
 func (r *ResourceRegistry) GetTexture(handle types.Texture) (hal.Texture, error) {
 	r.mu.RLock()
 	texture, ok := r.textures[handle]
@@ -356,11 +370,22 @@ func (r *ResourceRegistry) GetTexture(handle types.Texture) (hal.Texture, error)
 	return texture, nil
 }
 
+func (r *ResourceRegistry) GetDeviceForTexture(texture types.Texture) (types.Device, error) {
+	r.mu.RLock()
+	device, ok := r.textureDevices[texture]
+	r.mu.RUnlock()
+	if !ok {
+		return 0, fmt.Errorf("no device found for texture handle: %d", texture)
+	}
+	return device, nil
+}
+
 func (r *ResourceRegistry) UnregisterTexture(handle types.Texture) {
 	r.mu.Lock()
 	if texture, ok := r.textures[handle]; ok {
 		delete(r.textures, handle)
 		delete(r.textureHandles, texture)
+		delete(r.textureDevices, handle)
 	}
 	r.mu.Unlock()
 }
@@ -708,6 +733,7 @@ func (r *ResourceRegistry) Clear() {
 	r.queues = make(map[types.Queue]hal.Queue)
 	r.surfaces = make(map[types.Surface]hal.Surface)
 	r.textures = make(map[types.Texture]hal.Texture)
+	r.textureDevices = make(map[types.Texture]types.Device)
 	r.textureViews = make(map[types.TextureView]hal.TextureView)
 	r.shaderModules = make(map[types.ShaderModule]hal.ShaderModule)
 	r.renderPipelines = make(map[types.RenderPipeline]hal.RenderPipeline)

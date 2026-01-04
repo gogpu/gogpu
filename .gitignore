@@ -20,3 +20,4 @@ docs/dev/
 .gode/
 
 tmp/
+.DS_Store

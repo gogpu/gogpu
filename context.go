@@ -72,12 +72,15 @@ func (c *Context) Backend() string {
 // DrawTriangle draws a built-in RGB-colored triangle.
 // This is a convenience method for quick demos and testing.
 // The background is cleared with the specified color before drawing.
-func (c *Context) DrawTriangle(bgR, bgG, bgB, bgA float32) {
-	_ = c.renderer.DrawTriangle(float64(bgR), float64(bgG), float64(bgB), float64(bgA))
+func (c *Context) DrawTriangle(bgR, bgG, bgB, bgA float32) error {
+	err := c.renderer.DrawTriangle(float64(bgR), float64(bgG), float64(bgB), float64(bgA))
+
 	c.cleared = true
+	return err
 }
 
 // DrawTriangleColor draws a triangle with a background Color.
-func (c *Context) DrawTriangleColor(bg gmath.Color) {
-	c.DrawTriangle(bg.R, bg.G, bg.B, bg.A)
+func (c *Context) DrawTriangleColor(bg gmath.Color) error {
+	err := c.DrawTriangle(bg.R, bg.G, bg.B, bg.A)
+	return err
 }
