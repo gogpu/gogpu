@@ -65,6 +65,7 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ HLSL shader backend — DirectX 11/12
 - ✅ Metal macOS fixes — Issue #24
 - ✅ ARM64 ObjC typed arguments (v0.8.8, @ppoage)
+- ✅ CI Metal test fixes (v0.8.9) — Skip Metal tests on GitHub Actions
 
 ### In Progress
 

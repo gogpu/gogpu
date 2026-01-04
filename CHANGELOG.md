@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] - 2026-01-04
+
+### Fixed
+
+#### CI
+- **Metal Tests on CI** — Skip Metal-dependent darwin tests on GitHub Actions
+  - Metal unavailable in virtualized macOS runners
+  - See: https://github.com/actions/runner-images/discussions/6138
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.7 → v0.8.8
+  - Skip Metal tests on CI
+  - MSL `[[position]]` attribute fix via naga v0.8.3
+- Updated dependency: `github.com/gogpu/naga` v0.8.2 → v0.8.3
+  - Fixes MSL `[[position]]` attribute placement (now on struct member, not function)
+
 ## [0.8.8] - 2026-01-04
 
 ### Fixed
@@ -331,7 +347,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.8.9...HEAD
+[0.8.9]: https://github.com/gogpu/gogpu/compare/v0.8.8...v0.8.9
+[0.8.8]: https://github.com/gogpu/gogpu/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/gogpu/gogpu/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/gogpu/gogpu/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/gogpu/gogpu/compare/v0.8.4...v0.8.5
