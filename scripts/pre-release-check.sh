@@ -237,11 +237,25 @@ check_ecosystem_dep() {
     local DEP_NAME=$1
     local REPO=$2
 
-    LOCAL_VERSION=$(grep "$DEP_NAME" go.mod 2>/dev/null | grep -v "^module" | awk '{print $2}')
+    # Check if dependency exists in go.mod (excluding module line)
+    local DEP_LINE=$(grep "$DEP_NAME" go.mod 2>/dev/null | grep -v "^module")
 
-    if [ -z "$LOCAL_VERSION" ]; then
+    if [ -z "$DEP_LINE" ]; then
         return 0  # Dependency not used, skip
     fi
+
+    # Extract version - handle both formats:
+    # "github.com/foo v1.2.3" (inside require block)
+    # "require github.com/foo v1.2.3" (single require)
+    # "require github.com/foo v1.2.3 // indirect" (indirect)
+    LOCAL_VERSION=$(echo "$DEP_LINE" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?')
+
+    if [ -z "$LOCAL_VERSION" ]; then
+        return 0  # Could not extract version, skip
+    fi
+
+    # Check if indirect dependency (managed transitively)
+    local IS_INDIRECT=$(echo "$DEP_LINE" | grep -c "// indirect" || true)
 
     # Get latest release from GitHub
     if command -v gh &> /dev/null; then
@@ -258,6 +272,9 @@ check_ecosystem_dep() {
 
     if [ "$LOCAL_VERSION" = "$LATEST_VERSION" ]; then
         log_success "$DEP_NAME: $LOCAL_VERSION (latest)"
+    elif [ "$IS_INDIRECT" -gt 0 ]; then
+        # Indirect dependencies are managed by direct deps - just info, not error
+        log_info "$DEP_NAME: $LOCAL_VERSION (indirect, latest: $LATEST_VERSION)"
     else
         log_error "$DEP_NAME: $LOCAL_VERSION (latest: $LATEST_VERSION)"
         log_info "  Run: go get $DEP_NAME@$LATEST_VERSION"
