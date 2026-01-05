@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-01-05
+
+### Fixed
+
+#### CI
+- **Metal Tests on CI** — Skip Metal-dependent darwin tests on GitHub Actions ([#36])
+  - Metal unavailable in virtualized macOS runners
+  - See: https://github.com/actions/runner-images/discussions/6138
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.9.1 → v0.9.2
+  - Metal NSString double-free fix on autorelease pool drain
+
+[#36]: https://github.com/gogpu/gogpu/pull/36
+
 ## [0.9.1] - 2026-01-05
 
 ### Changed
