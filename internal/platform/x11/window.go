@@ -181,8 +181,8 @@ func (c *Connection) SetWindowTitle(window ResourceID, title string, atoms *Stan
 
 // SetWMProtocols sets the WM_PROTOCOLS property to receive WM_DELETE_WINDOW events.
 func (c *Connection) SetWMProtocols(window ResourceID, atoms *StandardAtoms) error {
-	// Build array of atoms we want to receive
-	var protocols []byte
+	// Build array of atoms we want to receive (4 bytes per atom)
+	protocols := make([]byte, 0, 4)
 
 	// Add WM_DELETE_WINDOW
 	protocols = append(protocols, byte(atoms.WMDeleteWindow), byte(atoms.WMDeleteWindow>>8),
