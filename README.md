@@ -15,61 +15,39 @@
   <a href="https://pkg.go.dev/github.com/gogpu/gogpu"><img src="https://pkg.go.dev/badge/github.com/gogpu/gogpu.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/gogpu/gogpu"><img src="https://goreportcard.com/badge/github.com/gogpu/gogpu" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
+  <a href="https://github.com/gogpu/gogpu/releases"><img src="https://img.shields.io/github/v/release/gogpu/gogpu" alt="Latest Release"></a>
   <a href="https://github.com/gogpu/gogpu"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
   <a href="https://github.com/gogpu/gogpu/stargazers"><img src="https://img.shields.io/github/stars/gogpu/gogpu?style=flat&labelColor=555&color=yellow" alt="Stars"></a>
-  <a href="https://github.com/gogpu/gogpu/discussions"><img src="https://img.shields.io/github/discussions/gogpu/gogpu?style=flat&labelColor=555&color=blue" alt="Discussions"></a>
 </p>
 
 ---
 
-## Status: Active Development
+## Overview
 
-> **Pure Go backend works on ALL platforms!** Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal).
->
-> All 5 GPU backends complete: Vulkan, Metal, DX12, GLES, Software.
->
-> **Community Testing Welcome** — Help us test on your platform!
->
-> **Star the repo to follow progress!**
+**GoGPU** is a GPU computing framework for Go that provides a high-level API for graphics and compute operations. It supports dual backends: a high-performance Rust backend (wgpu-native) and a pure Go backend for zero-dependency builds.
+
+### Key Features
+
+| Category | Capabilities |
+|----------|--------------|
+| **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
+| **Platforms** | Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal) |
+| **Graphics** | Windowing, input handling, texture loading |
+| **Compute** | Full compute shader support |
+| **Integration** | DeviceProvider for gg 2D graphics |
+| **Build** | Zero CGO with Pure Go backend |
 
 ---
 
-## Key Feature: Choose Your Backend
-
-GoGPU lets you choose between two WebGPU implementations at **compile time** or **runtime**:
-
-| Backend | Library | Use Case |
-|---------|---------|----------|
-| **Rust** | wgpu-native via FFI | Maximum performance, production apps |
-| **Native Go** | gogpu/wgpu | Zero dependencies, simple `go build` |
-
-### Build Tags (Compile Time)
+## Installation
 
 ```bash
-# Include both backends (default)
-go build ./...
-
-# Only Rust backend (production)
-go build -tags rust ./...
-
-# Only Pure Go backend (zero dependencies)
-go build -tags purego ./...
+go get github.com/gogpu/gogpu
 ```
 
-### Runtime Selection
-
-```go
-// Auto-select best available (default)
-app := gogpu.NewApp(gogpu.DefaultConfig())
-
-// Explicit Rust backend — max performance
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
-
-// Explicit Native Go backend — zero dependencies
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
-```
-
-**Same API, your choice of backend.**
+**Requirements:**
+- Go 1.25+
+- For Rust backend: [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) library
 
 ---
 
@@ -96,14 +74,51 @@ func main() {
 }
 ```
 
-**~20 lines vs 480+ lines of raw WebGPU code.**
+**Result:** A window with a rendered triangle in approximately 20 lines of code, compared to 480+ lines of raw WebGPU.
+
+---
+
+## Backend Selection
+
+GoGPU supports two WebGPU implementations, selectable at compile time or runtime.
+
+### Build Tags
+
+```bash
+# Both backends available (default)
+go build ./...
+
+# Rust backend only (maximum performance)
+go build -tags rust ./...
+
+# Pure Go backend only (zero dependencies)
+go build -tags purego ./...
+```
+
+### Runtime Selection
+
+```go
+// Auto-select best available (default)
+app := gogpu.NewApp(gogpu.DefaultConfig())
+
+// Explicit Rust backend
+app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
+
+// Explicit Pure Go backend
+app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
+```
+
+| Backend | Library | Use Case |
+|---------|---------|----------|
+| **Rust** | wgpu-native via FFI | Production apps, maximum performance |
+| **Native Go** | gogpu/wgpu | Zero dependencies, simple deployment |
 
 ---
 
 ## Texture Loading
 
 ```go
-// Load texture from file (PNG, JPEG)
+// Load from file (PNG, JPEG)
 tex, err := renderer.LoadTexture("sprite.png")
 defer tex.Destroy()
 
@@ -111,10 +126,7 @@ defer tex.Destroy()
 img := image.NewRGBA(image.Rect(0, 0, 128, 128))
 tex, err := renderer.NewTextureFromImage(img)
 
-// Create from raw RGBA data
-tex, err := renderer.NewTextureFromRGBA(width, height, rgbaPixels)
-
-// With custom options (pixel art, tiling)
+// With custom filtering options
 opts := gogpu.TextureOptions{
     MagFilter:    types.FilterModeNearest,  // Crisp pixels
     AddressModeU: types.AddressModeRepeat,  // Tiling
@@ -124,173 +136,207 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
-## macOS Platform
+## gg Integration (2D Graphics)
 
-**Pure Go Cocoa implementation** — via goffi Objective-C runtime!
+GoGPU provides seamless integration with [gogpu/gg](https://github.com/gogpu/gg) for 2D graphics through the `ggrender` package and `DeviceProvider` interface.
+
+### DeviceProvider Interface
+
+The `DeviceProvider` interface enables dependency injection of GPU resources:
+
+```go
+type DeviceProvider interface {
+    Backend() gpu.Backend        // GPU backend (rust or native)
+    Device() types.Device        // GPU device handle
+    Queue() types.Queue          // Command queue
+    SurfaceFormat() types.TextureFormat
+}
+```
+
+### GPU-Accelerated 2D Drawing
+
+```go
+package main
+
+import (
+    "github.com/gogpu/gogpu"
+    "github.com/gogpu/gogpu/ggrender"
+    "github.com/gogpu/gg"
+)
+
+func main() {
+    app := gogpu.NewApp(gogpu.DefaultConfig().
+        WithTitle("gg + GoGPU").
+        WithSize(800, 600))
+
+    var gpuRenderer *ggrender.Renderer
+    var dc *gg.Context
+
+    app.OnDraw(func(ctx *gogpu.Context) {
+        // Initialize on first frame
+        if gpuRenderer == nil {
+            gpuRenderer = ggrender.New(app.DeviceProvider())
+            dc = gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+        }
+
+        dc.Clear()
+
+        // Draw with gg API
+        dc.SetHexColor("#3498db")
+        dc.DrawCircle(400, 300, 100)
+        dc.Fill()
+
+        dc.SetHexColor("#e74c3c")
+        dc.DrawRoundedRectangle(200, 200, 200, 200, 20)
+        dc.Fill()
+    })
+
+    app.Run()
+}
+```
+
+The `ggrender.Renderer` implements the `gg.Renderer` interface, enabling GPU-accelerated rendering while maintaining gg's familiar API.
+
+---
+
+## Compute Shaders
+
+Full compute shader support in both backends:
+
+```go
+// Create compute pipeline via backend
+pipeline, _ := backend.CreateComputePipeline(device, &types.ComputePipelineDescriptor{
+    Layout: pipelineLayout,
+    Compute: types.ProgrammableStageDescriptor{
+        Module:     shaderModule,
+        EntryPoint: "main",
+    },
+})
+
+// Create storage buffers
+inputBuffer, _ := backend.CreateBuffer(device, &types.BufferDescriptor{
+    Size:  dataSize,
+    Usage: types.BufferUsageStorage | types.BufferUsageCopyDst,
+})
+
+outputBuffer, _ := backend.CreateBuffer(device, &types.BufferDescriptor{
+    Size:  dataSize,
+    Usage: types.BufferUsageStorage | types.BufferUsageCopySrc,
+})
+
+// Dispatch compute work
+computePass.SetPipeline(pipeline)
+computePass.SetBindGroup(0, bindGroup, nil)
+computePass.Dispatch(workgroupsX, 1, 1)
+```
+
+---
+
+## Architecture
+
+```
+User Application
+       │
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│                      gogpu.App                          │
+│    Config, Lifecycle, Event Loop                        │
+└─────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│                    gogpu.Renderer                       │
+│    Surface, Device, Queue, Frame Management             │
+└─────────────────────────────────────────────────────────┘
+       │
+       ├─────────────────┬─────────────────┐
+       ▼                 ▼                 ▼
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│   Rust      │  │  Native Go  │  │  Platform   │
+│   Backend   │  │   Backend   │  │  Windowing  │
+│ (wgpu-native)│ │ (gogpu/wgpu)│  │ Win32/Cocoa │
+└─────────────┘  └─────────────┘  └─────────────┘
+```
+
+### Package Structure
+
+| Package | Purpose |
+|---------|---------|
+| `gogpu` (root) | App, Config, Context, Renderer, Texture |
+| `gpu/` | Backend interface, registry, auto-selection |
+| `gpu/types/` | WebGPU type definitions |
+| `gpu/backend/rust/` | Rust backend via wgpu-native FFI |
+| `gpu/backend/native/` | Pure Go backend via gogpu/wgpu |
+| `ggrender/` | gg integration via DeviceProvider |
+| `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
+| `window/` | Window configuration |
+| `input/` | Keyboard and mouse input |
+| `internal/platform/` | Platform-specific windowing |
+
+---
+
+## Platform Support
+
+### Windows
+
+Native Win32 windowing with Vulkan and DirectX 12 backends.
+
+### Linux
+
+X11 and Wayland support with Vulkan backend.
+
+### macOS
+
+Pure Go Cocoa implementation via goffi Objective-C runtime:
 
 ```
 internal/platform/darwin/
-├── init.go          # runtime.LockOSThread() for main thread
-├── types.go         # CGFloat, CGPoint, CGRect, NSWindowStyleMask
-├── objc.go          # Objective-C runtime via goffi
-├── selectors.go     # Cached ObjC selectors
 ├── application.go   # NSApplication lifecycle
 ├── window.go        # NSWindow, NSView management
 ├── surface.go       # CAMetalLayer integration
-└── ...              # ~1,000 lines total
+└── objc.go          # Objective-C runtime via goffi
 ```
 
-**Main Thread Requirement:** macOS Cocoa requires all UI operations on the main thread.
-GoGPU automatically handles this with `runtime.LockOSThread()` — no action needed from users.
-
-**🧪 Community Testing Requested:**
-- macOS 12+ (Monterey and later) on Apple Silicon (M1/M2/M3/M4)
-- Run `CGO_ENABLED=0 go build -tags purego ./examples/triangle/` on macOS
-- Report issues at [github.com/gogpu/gogpu/issues](https://github.com/gogpu/gogpu/issues)
-
----
-
-## Why GoGPU?
-
-This project was inspired by [a discussion on r/golang](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) about the state of GUI and graphics development in Go.
-
-**GoGPU provides:**
-
-1. **Simple API** — Hide WebGPU complexity behind intuitive Go code
-2. **Dual Backend** — Choose performance (Rust) or simplicity (Pure Go)
-3. **Zero CGO** — No C compiler required
-4. **Cross-Platform** — Windows, Linux (Wayland), macOS (Cocoa)
-
-| Layer | Component |
-|-------|-----------|
-| **Application** | Your App / GUI |
-| **High-Level** | gogpu/ui (future), gogpu/gg (2D) |
-| **Core** | **gogpu/gogpu** — GPU abstraction, windowing, input |
-| **Backend** | gpu/backend/rust (wgpu-native) · gpu/backend/native (Pure Go) |
-| **Graphics API** | Vulkan · Metal · DX12 · OpenGL |
-
----
-
-## Installation
-
-```bash
-go get github.com/gogpu/gogpu
-```
-
-**Requirements:**
-- Go 1.25+
-- [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) DLL/dylib/so (for Rust backend)
-
----
-
-## Package Structure
-
-```
-gogpu/
-├── app.go                 # Application lifecycle
-├── config.go              # Configuration with builder pattern
-├── context.go             # Drawing context API
-├── renderer.go            # Backend-agnostic rendering
-├── texture.go             # Texture loading API
-├── shader.go              # Built-in WGSL shaders
-├── gpu/                   # Backend abstraction layer
-│   ├── backend.go         # Backend interface
-│   ├── registry.go        # Backend registration (auto-discovery)
-│   ├── types/             # Standalone types (wgpu-types pattern)
-│   │   ├── handles.go     # Instance, Device, Texture, Sampler, etc.
-│   │   ├── enums.go       # TextureFormat, PresentMode, etc.
-│   │   └── descriptors.go # SamplerDescriptor, BindGroup, etc.
-│   └── backend/
-│       ├── rust/          # Rust backend (wgpu-native)
-│       │   └── init.go    # Auto-registration (build tags)
-│       └── native/        # Native Go backend (Vulkan via gogpu/wgpu)
-│           └── init.go    # Auto-registration (build tags)
-├── window/                # Window configuration
-├── input/                 # Keyboard, mouse input
-├── gmath/                 # Vec2, Vec3, Vec4, Mat4, Color
-├── examples/              # Example applications
-│   ├── triangle/         # Simple triangle demo
-│   └── texture/          # Texture API demo
-└── internal/
-    └── platform/          # Platform abstraction (Win32, etc.)
-```
-
----
-
-## Roadmap
-
-See **[ROADMAP.md](ROADMAP.md)** for the full roadmap.
-
-**Completed:**
-- ✅ **All 5 GPU backends** — Vulkan, Metal, DX12, GLES, Software
-- ✅ **All 4 shader backends** — SPIR-V, MSL, GLSL, HLSL
-- ✅ **Cross-platform windowing** — Win32, Cocoa, X11, Wayland
-- ✅ **Pure Go backend for ALL platforms** — Windows, Linux, macOS
-
-**In Progress:**
-- GUI toolkit (gogpu/ui)
-- Compute shader pipeline
-- Performance optimization
+**Note:** macOS Cocoa requires UI operations on the main thread. GoGPU handles this automatically.
 
 ---
 
 ## Ecosystem
 
-| Project | Description | Purpose |
-|---------|-------------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (this repo) | GPU abstraction, windowing, input |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | Vulkan, Metal, GLES, Software backends |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | WGSL → SPIR-V, MSL, GLSL |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics | Canvas API, scene graph, GPU text |
-| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | Widgets, layouts, themes (planned) |
-| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | FFI bindings | wgpu-native integration |
-
-> **Note:** Always use the latest versions. Check each repository for current releases.
-
-### wgpu Backends
-
-The Pure Go WebGPU implementation (gogpu/wgpu) now includes:
-
-| Backend | Status | Features |
-|---------|--------|----------|
-| **Software** | ✅ Done | Full rasterizer, depth/stencil, blending, clipping, parallel |
-| **OpenGL ES** | ✅ Done | Windows (WGL) + Linux (EGL) |
-| **Vulkan** | ✅ Done | Cross-platform (Windows/Linux/macOS), Vulkan 1.3 |
-| **Metal** | ✅ Done | macOS/iOS via goffi Objective-C bridge |
-| **DX12** | ✅ Done | Windows via Pure Go COM syscall |
-
-**Software backend** enables headless rendering:
-```bash
-go build -tags software ./...  # CPU-only, no GPU needed
-```
-
-**Vulkan backend now implements the complete HAL Device interface** including:
-- Buffer, Texture, TextureView, Sampler
-- ShaderModule, Pipeline, BindGroup
-- CommandEncoder, RenderPass, ComputePass
-- Fence synchronization, WriteTexture
+| Project | Description |
+|---------|-------------|
+| **gogpu/gogpu** | **GPU framework (this repo)** |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit (planned) |
+| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | wgpu-native FFI bindings |
+| [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |
 
 ---
 
-## Announcement
+## Documentation
 
-Read our launch announcement on Dev.to:
-**[GoGPU: A Pure Go Graphics Library for GPU Programming](https://dev.to/kolkov/gogpu-a-pure-go-graphics-library-for-gpu-programming-2j5d)**
+- **[ROADMAP.md](ROADMAP.md)** — Development milestones
+- **[CHANGELOG.md](CHANGELOG.md)** — Release notes
+- **[pkg.go.dev](https://pkg.go.dev/github.com/gogpu/gogpu)** — API reference
+
+### Articles
+
+- [GoGPU: From Idea to 100K Lines in Two Weeks](https://dev.to/kolkov/gogpu-from-idea-to-100k-lines-in-two-weeks-building-gos-gpu-ecosystem-3b2)
+- [GoGPU Announcement](https://dev.to/kolkov/gogpu-a-pure-go-graphics-library-for-gpu-programming-2j5d)
 
 ---
 
 ## Contributing
 
-Contributions are welcome! This is an early-stage project, so there's lots to do.
+Contributions welcome! See [GitHub Discussions](https://github.com/gogpu/gogpu/discussions) to share ideas and ask questions.
 
-**Join the discussion:** [GitHub Discussions](https://github.com/gogpu/gogpu/discussions) — Share ideas, ask questions, help shape the **gogpu/ui** GUI toolkit!
-
-**Areas where we need help:**
-- 🧪 **macOS testing** — Test on real macOS systems (Monterey+)
-- 🧪 **Linux X11 testing** — Test on X11 systems (Ubuntu, Fedora, etc.)
-- 🧪 **Linux Wayland testing** — Test on Wayland compositors
-- 🧪 **DX12 testing** — Test on Windows with DirectX 12
+**Priority areas:**
+- Platform testing (macOS, Linux X11/Wayland, Windows DX12)
 - Documentation and examples
+- Performance benchmarks
+- Bug reports
 
 ```bash
 git clone https://github.com/gogpu/gogpu
@@ -303,21 +349,17 @@ go test ./...
 
 ## Acknowledgments
 
-### Special Thanks
-
-**Professor Ancha Baranova** — This project would not have been possible without her invaluable help and support. Her assistance was crucial in bringing this ecosystem to life.
+**Professor Ancha Baranova** — This project would not have been possible without her invaluable help and support.
 
 ### Inspiration
 
-- **[u/m-unknown-2025](https://www.reddit.com/user/m-unknown-2025/)** — The [Reddit post](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) that started it all
-- **[born-ml/born](https://github.com/born-ml/born)** — ML framework where [go-webgpu](https://github.com/go-webgpu/webgpu) bindings originated
+- [u/m-unknown-2025](https://www.reddit.com/user/m-unknown-2025/) — The [Reddit post](https://www.reddit.com/r/golang/comments/1pdw9i7/go_deserves_more_support_in_gui_development/) that started it all
+- [born-ml/born](https://github.com/born-ml/born) — ML framework where go-webgpu bindings originated
 
 ### Contributors
 
-Thanks to our community testers who help improve GoGPU:
-
-- **[@ppoage](https://github.com/ppoage)** — macOS ARM64 testing (M1/M4), Issue #24 investigation
-- **[@Nickrocky](https://github.com/Nickrocky)** — macOS testing and feedback
+- [@ppoage](https://github.com/ppoage) — macOS ARM64 testing (M1/M4)
+- [@Nickrocky](https://github.com/Nickrocky) — macOS testing and feedback
 
 ---
 

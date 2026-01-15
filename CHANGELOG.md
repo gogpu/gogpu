@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-01-15
+
+### Added
+
+#### DeviceProvider Interface
+- **DeviceProvider Interface** — Standardized GPU resource access for external libraries
+  - `Backend()` — Access to underlying gpu.Backend
+  - `Device()` — GPU device handle
+  - `Queue()` — Command queue for submission
+  - `SurfaceFormat()` — Texture format for surface rendering
+- **App.DeviceProvider()** — Access GPU resources from App instance
+
+#### ggrender Package
+- **ggrender.Renderer** — GPU-accelerated renderer implementing `gg.Renderer` interface
+  - `New(provider)` — Create renderer from DeviceProvider
+  - `NewWithSize(provider, width, height)` — Create with specific dimensions
+  - Software fallback while GPU pipeline is in development
+
+#### Compute Shader Support
+- **gpu.Backend.CreateComputePipeline()** — Compute pipeline creation
+- **gpu.Backend.CreateBindGroupLayout()** — Bind group layout for compute
+- **gpu.Backend.CreateBindGroup()** — Bind group with storage buffers
+- **gpu.Backend.CreateBuffer()** — Buffer creation with compute usage
+- Full compute shader support in both Rust and Native backends
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.9.3 → v0.10.0
+  - HAL Backend Integration layer
+
 ## [0.9.3] - 2026-01-10
 
 ### Changed
@@ -389,7 +418,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/gogpu/gogpu/compare/v0.9.3...v0.10.0
+[0.9.3]: https://github.com/gogpu/gogpu/compare/v0.9.2...v0.9.3
+[0.9.2]: https://github.com/gogpu/gogpu/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gogpu/gogpu/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gogpu/gogpu/compare/v0.8.9...v0.9.0
 [0.8.9]: https://github.com/gogpu/gogpu/compare/v0.8.8...v0.8.9

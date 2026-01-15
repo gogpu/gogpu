@@ -66,6 +66,9 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ Metal macOS fixes — Issue #24
 - ✅ ARM64 ObjC typed arguments (v0.8.8, @ppoage)
 - ✅ CI Metal test fixes (v0.8.9) — Skip Metal tests on GitHub Actions
+- ✅ DeviceProvider interface — Standardized GPU resource access for external libraries (v0.10.0)
+- ✅ ggrender package — GPU-accelerated renderer for gg integration (v0.10.0)
+- ✅ Compute shader support — Full compute pipeline in both Rust and Native backends (v0.10.0)
 
 ### In Progress
 

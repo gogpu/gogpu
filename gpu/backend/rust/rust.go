@@ -17,26 +17,26 @@ import (
 // Backend implements gpu.Backend using wgpu-native.
 type Backend struct {
 	// Store native handles for cleanup
-	instances         map[types.Instance]*wgpu.Instance
-	adapters          map[types.Adapter]*wgpu.Adapter
-	devices           map[types.Device]*wgpu.Device
-	queues            map[types.Queue]*wgpu.Queue
-	surfaces          map[types.Surface]*wgpu.Surface
-	shaders           map[types.ShaderModule]*wgpu.ShaderModule
-	pipelines         map[types.RenderPipeline]*wgpu.RenderPipeline
-	computePipelines  map[types.ComputePipeline]*wgpu.ComputePipeline
-	encoders          map[types.CommandEncoder]*wgpu.CommandEncoder
-	cmdBuffers        map[types.CommandBuffer]*wgpu.CommandBuffer
-	passes            map[types.RenderPass]*wgpu.RenderPassEncoder
-	computePasses     map[types.ComputePass]*wgpu.ComputePassEncoder
-	textures          map[types.Texture]*wgpu.Texture
-	views             map[types.TextureView]*wgpu.TextureView
-	samplers          map[types.Sampler]*wgpu.Sampler
-	gpuBuffers        map[types.Buffer]*wgpu.Buffer
-	bindGroupLayouts  map[types.BindGroupLayout]*wgpu.BindGroupLayout
-	bindGroups        map[types.BindGroup]*wgpu.BindGroup
-	pipelineLayouts   map[types.PipelineLayout]*wgpu.PipelineLayout
-	mappedBufferData  map[types.Buffer][]byte
+	instances        map[types.Instance]*wgpu.Instance
+	adapters         map[types.Adapter]*wgpu.Adapter
+	devices          map[types.Device]*wgpu.Device
+	queues           map[types.Queue]*wgpu.Queue
+	surfaces         map[types.Surface]*wgpu.Surface
+	shaders          map[types.ShaderModule]*wgpu.ShaderModule
+	pipelines        map[types.RenderPipeline]*wgpu.RenderPipeline
+	computePipelines map[types.ComputePipeline]*wgpu.ComputePipeline
+	encoders         map[types.CommandEncoder]*wgpu.CommandEncoder
+	cmdBuffers       map[types.CommandBuffer]*wgpu.CommandBuffer
+	passes           map[types.RenderPass]*wgpu.RenderPassEncoder
+	computePasses    map[types.ComputePass]*wgpu.ComputePassEncoder
+	textures         map[types.Texture]*wgpu.Texture
+	views            map[types.TextureView]*wgpu.TextureView
+	samplers         map[types.Sampler]*wgpu.Sampler
+	gpuBuffers       map[types.Buffer]*wgpu.Buffer
+	bindGroupLayouts map[types.BindGroupLayout]*wgpu.BindGroupLayout
+	bindGroups       map[types.BindGroup]*wgpu.BindGroup
+	pipelineLayouts  map[types.PipelineLayout]*wgpu.PipelineLayout
+	mappedBufferData map[types.Buffer][]byte
 
 	nextHandle uintptr
 }
