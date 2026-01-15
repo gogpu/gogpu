@@ -557,6 +557,53 @@ func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, 
 	// Not implemented yet
 }
 
+// --- Compute shader operations (stubs) ---
+
+// CreateShaderModuleSPIRV creates a shader module from SPIR-V bytecode.
+func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// CreateComputePipeline creates a compute pipeline.
+func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// BeginComputePass begins a compute pass.
+func (b *Backend) BeginComputePass(encoder types.CommandEncoder) types.ComputePass {
+	return 0
+}
+
+// EndComputePass ends a compute pass.
+func (b *Backend) EndComputePass(pass types.ComputePass) {
+	// Not implemented yet
+}
+
+// SetComputePipeline sets the compute pipeline for a compute pass.
+func (b *Backend) SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline) {
+	// Not implemented yet
+}
+
+// SetComputeBindGroup sets a bind group for a compute pass.
+func (b *Backend) SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
+	// Not implemented yet
+}
+
+// DispatchWorkgroups dispatches compute work.
+func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
+	// Not implemented yet
+}
+
+// MapBufferRead maps a buffer for reading and returns its contents.
+func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
+	return nil, gpu.ErrNotImplemented
+}
+
+// UnmapBuffer unmaps a previously mapped buffer.
+func (b *Backend) UnmapBuffer(buffer types.Buffer) {
+	// Not implemented yet
+}
+
 // --- Resource release ---
 
 func (b *Backend) ReleaseTexture(texture types.Texture) {
@@ -632,6 +679,25 @@ func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder) {
 func (b *Backend) ReleaseRenderPass(pass types.RenderPass) {
 	// Render passes are ended, not destroyed
 	b.registry.UnregisterRenderPass(pass)
+}
+
+// ReleaseComputePipeline releases a compute pipeline.
+func (b *Backend) ReleaseComputePipeline(pipeline types.ComputePipeline) {
+	// Not implemented yet
+}
+
+// ReleaseComputePass releases a compute pass.
+func (b *Backend) ReleaseComputePass(pass types.ComputePass) {
+	// Not implemented yet
+}
+
+// ReleaseShaderModule releases a shader module.
+func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
+	halModule, err := b.registry.GetShaderModule(module)
+	if err == nil && halModule != nil {
+		halModule.Destroy()
+	}
+	b.registry.UnregisterShaderModule(module)
 }
 
 // Ensure Backend implements gpu.Backend.

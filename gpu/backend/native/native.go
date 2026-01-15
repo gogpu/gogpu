@@ -184,6 +184,53 @@ func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, 
 	// Not implemented
 }
 
+// --- Compute shader operations ---
+
+// CreateShaderModuleSPIRV creates a shader module from SPIR-V bytecode.
+func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// CreateComputePipeline creates a compute pipeline.
+func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// BeginComputePass begins a compute pass.
+func (b *Backend) BeginComputePass(encoder types.CommandEncoder) types.ComputePass {
+	return 0
+}
+
+// EndComputePass ends a compute pass.
+func (b *Backend) EndComputePass(pass types.ComputePass) {
+	// Not implemented
+}
+
+// SetComputePipeline sets the compute pipeline for a compute pass.
+func (b *Backend) SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline) {
+	// Not implemented
+}
+
+// SetComputeBindGroup sets a bind group for a compute pass.
+func (b *Backend) SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
+	// Not implemented
+}
+
+// DispatchWorkgroups dispatches compute work.
+func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
+	// Not implemented
+}
+
+// MapBufferRead maps a buffer for reading and returns its contents.
+func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
+	return nil, gpu.ErrNotImplemented
+}
+
+// UnmapBuffer unmaps a previously mapped buffer.
+func (b *Backend) UnmapBuffer(buffer types.Buffer) {
+	// Not implemented
+}
+
 // ReleaseTexture releases a texture.
 func (b *Backend) ReleaseTexture(texture types.Texture) {
 	// Not implemented
@@ -231,6 +278,21 @@ func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder) {
 
 // ReleaseRenderPass releases a render pass.
 func (b *Backend) ReleaseRenderPass(pass types.RenderPass) {
+	// Not implemented
+}
+
+// ReleaseComputePipeline releases a compute pipeline.
+func (b *Backend) ReleaseComputePipeline(pipeline types.ComputePipeline) {
+	// Not implemented
+}
+
+// ReleaseComputePass releases a compute pass.
+func (b *Backend) ReleaseComputePass(pass types.ComputePass) {
+	// Not implemented
+}
+
+// ReleaseShaderModule releases a shader module.
+func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 	// Not implemented
 }
 

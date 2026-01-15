@@ -152,5 +152,37 @@ func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer)     {}
 func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder)  {}
 func (b *Backend) ReleaseRenderPass(pass types.RenderPass)             {}
 
+// Compute shader operations (stubs)
+func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
+	return 0, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) BeginComputePass(encoder types.CommandEncoder) types.ComputePass {
+	return 0
+}
+
+func (b *Backend) EndComputePass(pass types.ComputePass) {}
+
+func (b *Backend) SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline) {}
+
+func (b *Backend) SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
+}
+
+func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {}
+
+func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
+	return nil, gpu.ErrBackendNotAvailable
+}
+
+func (b *Backend) UnmapBuffer(buffer types.Buffer) {}
+
+func (b *Backend) ReleaseComputePipeline(pipeline types.ComputePipeline) {}
+func (b *Backend) ReleaseComputePass(pass types.ComputePass)             {}
+func (b *Backend) ReleaseShaderModule(module types.ShaderModule)         {}
+
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)

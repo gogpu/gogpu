@@ -304,6 +304,14 @@ type PipelineLayoutDescriptor struct {
 	BindGroupLayouts []BindGroupLayout
 }
 
+// ComputePipelineDescriptor describes a compute pipeline.
+type ComputePipelineDescriptor struct {
+	Label      string
+	Layout     PipelineLayout
+	Module     ShaderModule
+	EntryPoint string
+}
+
 // ImageCopyTexture identifies a texture subresource for copy operations.
 type ImageCopyTexture struct {
 	Texture  Texture

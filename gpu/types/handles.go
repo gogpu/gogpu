@@ -74,6 +74,14 @@ type (
 	// PipelineLayout defines the layout of bind groups for a pipeline.
 	// Created via Backend.CreatePipelineLayout().
 	PipelineLayout uintptr
+
+	// ComputePipeline represents a compute pipeline state.
+	// Created via Backend.CreateComputePipeline().
+	ComputePipeline uintptr
+
+	// ComputePass represents an active compute pass.
+	// Created via Backend.BeginComputePass().
+	ComputePass uintptr
 )
 
 // SurfaceTexture is returned by GetCurrentTexture.

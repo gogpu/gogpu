@@ -45,20 +45,29 @@ type Backend interface {
 
 	// Shader operations
 	CreateShaderModuleWGSL(device types.Device, code string) (types.ShaderModule, error)
+	CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error)
 
 	// Pipeline operations
 	CreateRenderPipeline(device types.Device, desc *types.RenderPipelineDescriptor) (types.RenderPipeline, error)
+	CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error)
 
 	// Command operations
 	CreateCommandEncoder(device types.Device) types.CommandEncoder
 	BeginRenderPass(encoder types.CommandEncoder, desc *types.RenderPassDescriptor) types.RenderPass
 	EndRenderPass(pass types.RenderPass)
+	BeginComputePass(encoder types.CommandEncoder) types.ComputePass
+	EndComputePass(pass types.ComputePass)
 	FinishEncoder(encoder types.CommandEncoder) types.CommandBuffer
 	Submit(queue types.Queue, commands types.CommandBuffer)
 
 	// Render pass operations
 	SetPipeline(pass types.RenderPass, pipeline types.RenderPipeline)
 	Draw(pass types.RenderPass, vertexCount, instanceCount, firstVertex, firstInstance uint32)
+
+	// Compute pass operations
+	SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline)
+	SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32)
+	DispatchWorkgroups(pass types.ComputePass, x, y, z uint32)
 
 	// Texture operations
 	CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error)
@@ -71,6 +80,8 @@ type Backend interface {
 	// Buffer operations
 	CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error)
 	WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte)
+	MapBufferRead(buffer types.Buffer) ([]byte, error)
+	UnmapBuffer(buffer types.Buffer)
 
 	// Bind group operations
 	CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error)
@@ -94,6 +105,9 @@ type Backend interface {
 	ReleaseCommandBuffer(buffer types.CommandBuffer)
 	ReleaseCommandEncoder(encoder types.CommandEncoder)
 	ReleaseRenderPass(pass types.RenderPass)
+	ReleaseComputePipeline(pipeline types.ComputePipeline)
+	ReleaseComputePass(pass types.ComputePass)
+	ReleaseShaderModule(module types.ShaderModule)
 }
 
 // activeBackend is the currently selected backend.

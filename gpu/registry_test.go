@@ -87,6 +87,24 @@ func (m *mockBackend) ReleasePipelineLayout(types.PipelineLayout)               
 func (m *mockBackend) ReleaseCommandBuffer(types.CommandBuffer)                            {}
 func (m *mockBackend) ReleaseCommandEncoder(types.CommandEncoder)                          {}
 func (m *mockBackend) ReleaseRenderPass(types.RenderPass)                                  {}
+func (m *mockBackend) CreateShaderModuleSPIRV(types.Device, []uint32) (types.ShaderModule, error) {
+	return 1, nil
+}
+func (m *mockBackend) CreateComputePipeline(types.Device, *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
+	return 1, nil
+}
+func (m *mockBackend) BeginComputePass(types.CommandEncoder) types.ComputePass { return 1 }
+func (m *mockBackend) EndComputePass(types.ComputePass)                        {}
+func (m *mockBackend) SetComputePipeline(types.ComputePass, types.ComputePipeline) {
+}
+func (m *mockBackend) SetComputeBindGroup(types.ComputePass, uint32, types.BindGroup, []uint32) {
+}
+func (m *mockBackend) DispatchWorkgroups(types.ComputePass, uint32, uint32, uint32) {}
+func (m *mockBackend) MapBufferRead(types.Buffer) ([]byte, error)                   { return nil, nil }
+func (m *mockBackend) UnmapBuffer(types.Buffer)                                     {}
+func (m *mockBackend) ReleaseComputePipeline(types.ComputePipeline)                 {}
+func (m *mockBackend) ReleaseComputePass(types.ComputePass)                         {}
+func (m *mockBackend) ReleaseShaderModule(types.ShaderModule)                       {}
 
 func TestRegisterBackend(t *testing.T) {
 	// Clean up any existing backends first
