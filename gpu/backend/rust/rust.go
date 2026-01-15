@@ -1,8 +1,10 @@
-//go:build windows && !purego
+//go:build rust && windows
 
 // Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
 // This backend offers maximum performance and is battle-tested in production.
 // Currently only available on Windows due to go-webgpu/goffi limitations.
+//
+// Build with: go build -tags rust
 package rust
 
 import (

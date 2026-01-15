@@ -69,6 +69,7 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ DeviceProvider interface — Standardized GPU resource access for external libraries (v0.10.0)
 - ✅ Compute shader support — Full compute pipeline in both Rust and Native backends (v0.10.0)
 - ✅ Pure Go build tags fix — `-tags purego` correctly excludes Rust backend (v0.10.1)
+- ✅ **Pure Go default** — Unified build tags: Pure Go default, Rust opt-in with `-tags rust` (v0.11.0)
 
 ### In Progress
 

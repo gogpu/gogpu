@@ -4,8 +4,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gogpu/gpu"
-	"github.com/gogpu/gogpu/gpu/backend/native"
-	"github.com/gogpu/gogpu/gpu/backend/rust"
+	_ "github.com/gogpu/gogpu/gpu/backend/native" // Register native backend
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
 )
@@ -62,27 +61,36 @@ func newRenderer(plat platform.Platform, backendType types.BackendType) (*Render
 	return r, nil
 }
 
-// createBackend creates a backend of the specified type.
+// createBackend creates a backend of the specified type using the registry.
+// Backends are registered via init() in their respective packages.
+// Build with -tags rust to enable the Rust backend.
 func createBackend(typ types.BackendType) (gpu.Backend, error) {
 	switch typ {
 	case types.BackendRust:
-		if !rust.IsAvailable() {
-			return nil, fmt.Errorf("rust backend not available on this platform")
+		if !gpu.IsBackendRegistered("rust") {
+			return nil, fmt.Errorf("rust backend not available (build with -tags rust)")
 		}
-		return rust.New(), nil
+		return gpu.CreateBackend("rust"), nil
+
 	case types.BackendGo:
-		return native.New(), nil
+		if !gpu.IsBackendRegistered("native") {
+			return nil, fmt.Errorf("native backend not available")
+		}
+		return gpu.CreateBackend("native"), nil
+
 	case types.BackendAuto:
-		// Auto: prefer Rust backend if available, fallback to native
-		if rust.IsAvailable() {
-			return rust.New(), nil
+		// Auto: use best available backend (rust > native)
+		if b := gpu.SelectBestBackend(); b != nil {
+			return b, nil
 		}
-		return native.New(), nil
+		return nil, gpu.ErrNoBackendRegistered
+
 	default:
-		if rust.IsAvailable() {
-			return rust.New(), nil
+		// Default: same as Auto
+		if b := gpu.SelectBestBackend(); b != nil {
+			return b, nil
 		}
-		return native.New(), nil
+		return nil, gpu.ErrNoBackendRegistered
 	}
 }
 

@@ -1,11 +1,7 @@
-//go:build purego || !rust
-
 // Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
+// This is the default backend, always available without external dependencies.
 //
-// Build tags:
-//   - Default (no tags): included on all platforms
-//   - -tags purego: force include (use native backend only)
-//   - -tags rust: exclude on non-Windows (rust backend takes priority)
+// Supports: Windows (Vulkan), Linux (Vulkan), macOS (Metal)
 package native
 
 import (

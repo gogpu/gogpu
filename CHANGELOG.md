@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-01-16
+
+### Changed
+- **BREAKING: Pure Go is now the default backend** ([#40])
+  - No build tags needed for Pure Go — just `go build ./...`
+  - Rust backend now opt-in with `-tags rust`
+  - Unified approach across gogpu ecosystem (same as gg)
+
+### Removed
+- `-tags purego` — no longer needed, Pure Go is default
+- `rust_stub.go` — no longer needed with opt-in approach
+
+### Refactored
+- `renderer.go` — uses registry pattern instead of direct rust import
+- Build tags simplified: `rust && windows` for Rust backend files
+
 ## [0.10.1] - 2026-01-16
 
 ### Fixed

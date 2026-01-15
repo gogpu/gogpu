@@ -47,11 +47,10 @@ go get github.com/gogpu/gogpu
 
 **Requirements:**
 - Go 1.25+
-- For Rust backend: [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) library
 
-**Quick start without external dependencies:**
+**Zero dependencies — just works:**
 ```bash
-go run -tags purego .
+go run .
 ```
 
 ---
@@ -90,14 +89,11 @@ GoGPU supports two WebGPU implementations, selectable at compile time or runtime
 ### Build Tags
 
 ```bash
-# Both backends available (default)
+# Pure Go backend (default, zero dependencies)
 go build ./...
 
-# Rust backend only (maximum performance)
+# Enable Rust backend (requires wgpu-native DLL, Windows only)
 go build -tags rust ./...
-
-# Pure Go backend only (zero dependencies)
-go build -tags purego ./...
 ```
 
 ### Runtime Selection
@@ -113,12 +109,12 @@ app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
 app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
 ```
 
-| Backend | Library | Use Case |
-|---------|---------|----------|
-| **Rust** | wgpu-native via FFI | Production apps, maximum performance |
-| **Native Go** | gogpu/wgpu | Zero dependencies, simple deployment |
+| Backend | Build Tag | Library | Use Case |
+|---------|-----------|---------|----------|
+| **Native Go** | (default) | gogpu/wgpu | Zero dependencies, simple deployment |
+| **Rust** | `-tags rust` | wgpu-native via FFI | Maximum performance (Windows only) |
 
-> **Tip:** If you see `Failed to load wgpu_native.dll`, use `-tags purego` to skip the Rust backend.
+> **Note:** Rust backend requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) DLL.
 
 ---
 
