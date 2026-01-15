@@ -49,6 +49,11 @@ go get github.com/gogpu/gogpu
 - Go 1.25+
 - For Rust backend: [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) library
 
+**Quick start without external dependencies:**
+```bash
+go run -tags purego .
+```
+
 ---
 
 ## Quick Start
@@ -112,6 +117,8 @@ app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
 |---------|---------|----------|
 | **Rust** | wgpu-native via FFI | Production apps, maximum performance |
 | **Native Go** | gogpu/wgpu | Zero dependencies, simple deployment |
+
+> **Tip:** If you see `Failed to load wgpu_native.dll`, use `-tags purego` to skip the Rust backend.
 
 ---
 

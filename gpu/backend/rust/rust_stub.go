@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows || purego
 
 // Package rust provides the WebGPU backend using wgpu-native (Rust).
 // This stub is used on non-Windows platforms where go-webgpu/goffi is not yet supported.

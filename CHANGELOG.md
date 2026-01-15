@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-01-16
+
+### Fixed
+- **Pure Go Build Tags** — `-tags purego` now correctly excludes Rust backend ([#40])
+  - `rust.go`: `windows` → `windows && !purego`
+  - `rust_stub.go`: `!windows` → `!windows || purego`
+
+### Documentation
+- Added quick start tip for `-tags purego` in README
+- Added troubleshooting note for `wgpu_native.dll` error
+
 ## [0.10.0] - 2026-01-15
 
 ### Added

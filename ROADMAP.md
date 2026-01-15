@@ -68,6 +68,7 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ CI Metal test fixes (v0.8.9) — Skip Metal tests on GitHub Actions
 - ✅ DeviceProvider interface — Standardized GPU resource access for external libraries (v0.10.0)
 - ✅ Compute shader support — Full compute pipeline in both Rust and Native backends (v0.10.0)
+- ✅ Pure Go build tags fix — `-tags purego` correctly excludes Rust backend (v0.10.1)
 
 ### In Progress
 
