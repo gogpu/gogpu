@@ -136,20 +136,21 @@ func TestLoadStoreOpValues(t *testing.T) {
 }
 
 func TestPrimitiveTopologyValues(t *testing.T) {
-	if PrimitiveTopologyPointList != 0x00 {
-		t.Errorf("PrimitiveTopologyPointList = 0x%x, want 0x00", PrimitiveTopologyPointList)
+	// NOTE: TriangleList is 0x00 so uninitialized structs default to triangles
+	if PrimitiveTopologyTriangleList != 0x00 {
+		t.Errorf("PrimitiveTopologyTriangleList = 0x%x, want 0x00 (default)", PrimitiveTopologyTriangleList)
 	}
-	if PrimitiveTopologyLineList != 0x01 {
-		t.Errorf("PrimitiveTopologyLineList = 0x%x, want 0x01", PrimitiveTopologyLineList)
+	if PrimitiveTopologyTriangleStrip != 0x01 {
+		t.Errorf("PrimitiveTopologyTriangleStrip = 0x%x, want 0x01", PrimitiveTopologyTriangleStrip)
 	}
-	if PrimitiveTopologyLineStrip != 0x02 {
-		t.Errorf("PrimitiveTopologyLineStrip = 0x%x, want 0x02", PrimitiveTopologyLineStrip)
+	if PrimitiveTopologyPointList != 0x02 {
+		t.Errorf("PrimitiveTopologyPointList = 0x%x, want 0x02", PrimitiveTopologyPointList)
 	}
-	if PrimitiveTopologyTriangleList != 0x03 {
-		t.Errorf("PrimitiveTopologyTriangleList = 0x%x, want 0x03", PrimitiveTopologyTriangleList)
+	if PrimitiveTopologyLineList != 0x03 {
+		t.Errorf("PrimitiveTopologyLineList = 0x%x, want 0x03", PrimitiveTopologyLineList)
 	}
-	if PrimitiveTopologyTriangleStrip != 0x04 {
-		t.Errorf("PrimitiveTopologyTriangleStrip = 0x%x, want 0x04", PrimitiveTopologyTriangleStrip)
+	if PrimitiveTopologyLineStrip != 0x04 {
+		t.Errorf("PrimitiveTopologyLineStrip = 0x%x, want 0x04", PrimitiveTopologyLineStrip)
 	}
 }
 

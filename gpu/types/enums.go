@@ -95,14 +95,16 @@ const (
 )
 
 // PrimitiveTopology specifies how vertices are assembled.
+// NOTE: TriangleList is 0x00 so that uninitialized structs default to triangles,
+// which is by far the most common primitive type.
 type PrimitiveTopology uint32
 
 const (
-	PrimitiveTopologyPointList     PrimitiveTopology = 0x00
-	PrimitiveTopologyLineList      PrimitiveTopology = 0x01
-	PrimitiveTopologyLineStrip     PrimitiveTopology = 0x02
-	PrimitiveTopologyTriangleList  PrimitiveTopology = 0x03
-	PrimitiveTopologyTriangleStrip PrimitiveTopology = 0x04
+	PrimitiveTopologyTriangleList  PrimitiveTopology = 0x00 // Default (zero value)
+	PrimitiveTopologyTriangleStrip PrimitiveTopology = 0x01
+	PrimitiveTopologyPointList     PrimitiveTopology = 0x02
+	PrimitiveTopologyLineList      PrimitiveTopology = 0x03
+	PrimitiveTopologyLineStrip     PrimitiveTopology = 0x04
 )
 
 // FrontFace specifies which triangle winding is front-facing.

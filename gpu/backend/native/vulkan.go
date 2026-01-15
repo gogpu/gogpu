@@ -150,6 +150,9 @@ func (b *Backend) ConfigureSurface(surface types.Surface, device types.Device, c
 		return
 	}
 
+	// Store surface → device mapping for Present()
+	b.registry.RegisterSurfaceDevice(surface, device)
+
 	// Convert config
 	halConfig := &hal.SurfaceConfiguration{
 		Format:      convertTextureFormat(config.Format),
@@ -178,8 +181,17 @@ func (b *Backend) GetCurrentTexture(surface types.Surface) (types.SurfaceTexture
 		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
 	}
 
-	// Register texture and return
-	textureHandle := b.registry.RegisterTexture(acquired.Texture)
+	// Store the SurfaceTexture for Present() to use later
+	b.registry.SetCurrentSurfaceTexture(surface, acquired.Texture)
+
+	// Get device for this surface (stored in ConfigureSurface)
+	device, err := b.registry.GetDeviceForSurface(surface)
+	if err != nil {
+		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
+	}
+
+	// Register texture WITH device (required for CreateTextureView)
+	textureHandle := b.registry.RegisterTextureForDevice(acquired.Texture, device)
 
 	return types.SurfaceTexture{
 		Texture: textureHandle,
@@ -189,10 +201,40 @@ func (b *Backend) GetCurrentTexture(surface types.Surface) (types.SurfaceTexture
 
 // Present presents the surface.
 func (b *Backend) Present(surface types.Surface) {
-	// Presentation happens via Queue.Present in HAL
-	// We need to get the queue and call Present on it
-	// For now, this is a no-op - presentation will happen in Submit
-	// TODO: Proper presentation flow
+	// Get the HAL surface
+	halSurface, err := b.registry.GetSurface(surface)
+	if err != nil {
+		return
+	}
+
+	// Get the SurfaceTexture stored in GetCurrentTexture
+	surfaceTexture := b.registry.GetCurrentSurfaceTexture(surface)
+	if surfaceTexture == nil {
+		return
+	}
+
+	// Get the device for this surface (stored in ConfigureSurface)
+	device, err := b.registry.GetDeviceForSurface(surface)
+	if err != nil {
+		return
+	}
+
+	// Get the queue for this device
+	queueHandle, err := b.registry.GetQueueForDevice(device)
+	if err != nil {
+		return
+	}
+
+	halQueue, err := b.registry.GetQueue(queueHandle)
+	if err != nil {
+		return
+	}
+
+	// Present the surface texture via HAL queue
+	_ = halQueue.Present(halSurface, surfaceTexture)
+
+	// Clear the stored texture (it's consumed after Present)
+	b.registry.ClearCurrentSurfaceTexture(surface)
 }
 
 // CreateShaderModuleWGSL creates a shader module from WGSL code.
@@ -285,6 +327,12 @@ func (b *Backend) CreateCommandEncoder(device types.Device) types.CommandEncoder
 
 	encoder, err := halDevice.CreateCommandEncoder(desc)
 	if err != nil {
+		return 0
+	}
+
+	// IMPORTANT: HAL requires BeginEncoding before any commands can be recorded.
+	// This must be called before BeginRenderPass, BeginComputePass, etc.
+	if err := encoder.BeginEncoding("frame"); err != nil {
 		return 0
 	}
 
@@ -406,20 +454,29 @@ func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureVi
 		return 0
 	}
 
-	halDevice, err := b.registry.GetDevice(types.Device(1)) // HACK: assume device handle is 1
+	// Get device for this texture (stored in RegisterTextureForDevice)
+	deviceHandle, err := b.registry.GetDeviceForTexture(texture)
 	if err != nil {
 		return 0
 	}
 
-	// Convert descriptor
-	halDesc := &hal.TextureViewDescriptor{
-		Format:          convertTextureFormat(desc.Format),
-		Dimension:       convertTextureViewDimension(desc.Dimension),
-		Aspect:          convertTextureAspect(desc.Aspect),
-		BaseMipLevel:    desc.BaseMipLevel,
-		MipLevelCount:   desc.MipLevelCount,
-		BaseArrayLayer:  desc.BaseArrayLayer,
-		ArrayLayerCount: desc.ArrayLayerCount,
+	halDevice, err := b.registry.GetDevice(deviceHandle)
+	if err != nil {
+		return 0
+	}
+
+	// Convert descriptor (nil is allowed - HAL will use defaults)
+	var halDesc *hal.TextureViewDescriptor
+	if desc != nil {
+		halDesc = &hal.TextureViewDescriptor{
+			Format:          convertTextureFormat(desc.Format),
+			Dimension:       convertTextureViewDimension(desc.Dimension),
+			Aspect:          convertTextureAspect(desc.Aspect),
+			BaseMipLevel:    desc.BaseMipLevel,
+			MipLevelCount:   desc.MipLevelCount,
+			BaseArrayLayer:  desc.BaseArrayLayer,
+			ArrayLayerCount: desc.ArrayLayerCount,
+		}
 	}
 
 	view, err := halDevice.CreateTextureView(halTexture, halDesc)

@@ -1,37 +1,21 @@
 package gogpu
 
-// coloredTriangleShaderSource is the WGSL shader for a vertex-colored triangle.
+// coloredTriangleShaderSource is the WGSL shader for a simple red triangle.
+// Uses the same pattern as vulkan-triangle example for maximum compatibility.
 const coloredTriangleShaderSource = `
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec3<f32>,
-}
-
 @vertex
-fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-    // Triangle vertices in clip space
+fn vs_main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
     var positions = array<vec2<f32>, 3>(
-        vec2<f32>( 0.0,  0.5),  // top
-        vec2<f32>(-0.5, -0.5),  // bottom left
-        vec2<f32>( 0.5, -0.5)   // bottom right
+        vec2<f32>(0.0, 0.5),    // Top center
+        vec2<f32>(-0.5, -0.5),  // Bottom left
+        vec2<f32>(0.5, -0.5)    // Bottom right
     );
-
-    // Vertex colors (RGB)
-    var colors = array<vec3<f32>, 3>(
-        vec3<f32>(1.0, 0.0, 0.0),  // red
-        vec3<f32>(0.0, 1.0, 0.0),  // green
-        vec3<f32>(0.0, 0.0, 1.0)   // blue
-    );
-
-    var output: VertexOutput;
-    output.position = vec4<f32>(positions[vertexIndex], 0.0, 1.0);
-    output.color = colors[vertexIndex];
-    return output;
+    return vec4<f32>(positions[idx], 0.0, 1.0);
 }
 
 @fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(input.color, 1.0);
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);  // Red
 }
 `
 
