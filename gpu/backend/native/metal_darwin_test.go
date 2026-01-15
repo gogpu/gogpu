@@ -3,12 +3,23 @@
 package native
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform/darwin"
 )
+
+func TestMain(m *testing.M) {
+	// Skip on CI - Metal is not available on GitHub Actions macOS runners
+	// due to Apple Virtualization Framework limitations.
+	// See: https://github.com/actions/runner-images/discussions/6138
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func TestMetalBackendSurfaceLifecycleDarwin(t *testing.T) {
 	backend := New()
