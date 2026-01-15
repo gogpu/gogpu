@@ -6,17 +6,18 @@ import (
 )
 
 // DeviceProvider provides access to GPU resources for external libraries.
-// This interface enables dependency injection of GPU capabilities into
-// libraries like gg without creating circular dependencies.
+// This interface enables dependency injection of GPU capabilities without
+// creating circular dependencies between packages.
 //
-// Example usage with gg:
+// Example:
 //
 //	app := gogpu.NewApp(gogpu.Config{Title: "My App"})
 //	provider := app.DeviceProvider()
 //
-//	// Pass to gg's GPU renderer
-//	gpuRenderer := ggrender.New(provider)
-//	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+//	// Access GPU resources for custom rendering
+//	device := provider.Device()
+//	queue := provider.Queue()
+//	format := provider.SurfaceFormat()
 //
 // This pattern follows enterprise DI best practices, similar to
 // database/sql.DB or http.Client with custom Transport.

@@ -34,7 +34,7 @@
 | **Platforms** | Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal) |
 | **Graphics** | Windowing, input handling, texture loading |
 | **Compute** | Full compute shader support |
-| **Integration** | DeviceProvider for gg 2D graphics |
+| **Integration** | DeviceProvider for external libraries |
 | **Build** | Zero CGO with Pure Go backend |
 
 ---
@@ -136,13 +136,9 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
-## gg Integration (2D Graphics)
+## DeviceProvider Interface
 
-GoGPU provides seamless integration with [gogpu/gg](https://github.com/gogpu/gg) for 2D graphics through the `ggrender` package and `DeviceProvider` interface.
-
-### DeviceProvider Interface
-
-The `DeviceProvider` interface enables dependency injection of GPU resources:
+GoGPU exposes GPU resources through the `DeviceProvider` interface for integration with external libraries:
 
 ```go
 type DeviceProvider interface {
@@ -151,51 +147,14 @@ type DeviceProvider interface {
     Queue() types.Queue          // Command queue
     SurfaceFormat() types.TextureFormat
 }
+
+// Usage
+provider := app.DeviceProvider()
+device := provider.Device()
+queue := provider.Queue()
 ```
 
-### GPU-Accelerated 2D Drawing
-
-```go
-package main
-
-import (
-    "github.com/gogpu/gogpu"
-    "github.com/gogpu/gogpu/ggrender"
-    "github.com/gogpu/gg"
-)
-
-func main() {
-    app := gogpu.NewApp(gogpu.DefaultConfig().
-        WithTitle("gg + GoGPU").
-        WithSize(800, 600))
-
-    var gpuRenderer *ggrender.Renderer
-    var dc *gg.Context
-
-    app.OnDraw(func(ctx *gogpu.Context) {
-        // Initialize on first frame
-        if gpuRenderer == nil {
-            gpuRenderer = ggrender.New(app.DeviceProvider())
-            dc = gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
-        }
-
-        dc.Clear()
-
-        // Draw with gg API
-        dc.SetHexColor("#3498db")
-        dc.DrawCircle(400, 300, 100)
-        dc.Fill()
-
-        dc.SetHexColor("#e74c3c")
-        dc.DrawRoundedRectangle(200, 200, 200, 200, 20)
-        dc.Fill()
-    })
-
-    app.Run()
-}
-```
-
-The `ggrender.Renderer` implements the `gg.Renderer` interface, enabling GPU-accelerated rendering while maintaining gg's familiar API.
+For 2D graphics with GPU acceleration, see [gogpu/gg](https://github.com/gogpu/gg) which has its own native GPU backend using gogpu/wgpu.
 
 ---
 
@@ -267,7 +226,6 @@ User Application
 | `gpu/types/` | WebGPU type definitions |
 | `gpu/backend/rust/` | Rust backend via wgpu-native FFI |
 | `gpu/backend/native/` | Pure Go backend via gogpu/wgpu |
-| `ggrender/` | gg integration via DeviceProvider |
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
 | `window/` | Window configuration |
 | `input/` | Keyboard and mouse input |

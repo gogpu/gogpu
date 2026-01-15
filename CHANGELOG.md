@@ -17,12 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SurfaceFormat()` — Texture format for surface rendering
 - **App.DeviceProvider()** — Access GPU resources from App instance
 
-#### ggrender Package
-- **ggrender.Renderer** — GPU-accelerated renderer implementing `gg.Renderer` interface
-  - `New(provider)` — Create renderer from DeviceProvider
-  - `NewWithSize(provider, width, height)` — Create with specific dimensions
-  - Software fallback while GPU pipeline is in development
-
 #### Compute Shader Support
 - **gpu.Backend.CreateComputePipeline()** — Compute pipeline creation
 - **gpu.Backend.CreateBindGroupLayout()** — Bind group layout for compute
@@ -33,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated dependency: `github.com/gogpu/wgpu` v0.9.3 → v0.10.0
   - HAL Backend Integration layer
+
+### Removed
+- **ggrender package** — Removed to eliminate circular dependency with gg
+  - gogpu/gg has its own native GPU backend (`backend/native/`) using gogpu/wgpu
+  - Use gg's built-in GPU backend directly instead
 
 ## [0.9.3] - 2026-01-10
 

@@ -10,14 +10,5 @@ require (
 
 require (
 	github.com/go-webgpu/goffi v0.3.7
-	github.com/gogpu/gg v0.17.1
-)
-
-require (
 	github.com/gogpu/naga v0.8.4 // indirect
-	golang.org/x/image v0.34.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
 )
-
-// Use local version for development
-replace github.com/gogpu/gg => ../gg

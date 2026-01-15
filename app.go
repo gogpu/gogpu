@@ -163,16 +163,16 @@ func (a *App) Config() Config {
 
 // DeviceProvider returns a provider for GPU resources.
 // This enables dependency injection of GPU capabilities into external
-// libraries like gg without circular dependencies.
+// libraries without circular dependencies.
 //
 // Example:
 //
 //	app := gogpu.NewApp(gogpu.Config{Title: "My App"})
 //	provider := app.DeviceProvider()
 //
-//	// Pass to gg's GPU renderer
-//	gpuRenderer := ggrender.New(provider)
-//	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+//	// Access GPU resources
+//	device := provider.Device()
+//	queue := provider.Queue()
 //
 // Note: DeviceProvider is only valid after Run() has initialized
 // the renderer. Calling before Run() returns nil.
