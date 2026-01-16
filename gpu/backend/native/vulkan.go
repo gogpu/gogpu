@@ -208,9 +208,13 @@ func (b *Backend) GetCurrentTexture(surface types.Surface) (types.SurfaceTexture
 		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
 	}
 
-	// Acquire texture (fence=nil for now)
+	// Acquire texture (non-blocking)
 	acquired, err := halSurface.AcquireTexture(nil)
 	if err != nil {
+		// Check for "not ready" - this means skip frame, not an error
+		if err == hal.ErrNotReady {
+			return types.SurfaceTexture{Status: types.SurfaceStatusTimeout}, nil
+		}
 		// Map HAL errors to surface status
 		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
 	}

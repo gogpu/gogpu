@@ -204,7 +204,19 @@ func (r *Renderer) BeginFrame() bool {
 	}
 
 	surfTex, err := r.backend.GetCurrentTexture(r.surface)
-	if err != nil || surfTex.Status != types.SurfaceStatusSuccess {
+	if err != nil {
+		return false
+	}
+
+	// Handle different surface statuses
+	switch surfTex.Status {
+	case types.SurfaceStatusSuccess:
+		// OK, continue
+	case types.SurfaceStatusTimeout:
+		// Frame not available yet - skip without reconfiguring.
+		// This keeps the window responsive.
+		return false
+	default:
 		// Surface needs reconfiguration.
 		// Only attempt if we have valid dimensions.
 		if r.width > 0 && r.height > 0 {
