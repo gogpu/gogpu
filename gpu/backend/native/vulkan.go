@@ -8,6 +8,7 @@ package native
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/types"
@@ -44,9 +45,11 @@ func (b *Backend) Init() error {
 
 // Destroy releases all backend resources.
 func (b *Backend) Destroy() {
-	// Note: This does NOT destroy HAL resources!
-	// Caller must explicitly release all handles before calling Destroy.
-	// This just clears the registry.
+	// Wait for all GPU operations to complete before destroying resources.
+	// This prevents hangs/crashes when closing the window.
+	b.registry.WaitAllDevicesIdle()
+
+	// Clear the registry (does not destroy HAL resources, but they will be GC'd)
 	b.registry.Clear()
 }
 
@@ -81,13 +84,44 @@ func (b *Backend) RequestAdapter(instance types.Instance, opts *types.AdapterOpt
 		return 0, fmt.Errorf("native: no adapters found")
 	}
 
-	// Pick first adapter for now
-	// TODO: Support power preference from opts
+	// Sort adapters based on power preference (matches wgpu-core behavior)
+	preferIntegrated := opts != nil && opts.PowerPreference == types.PowerPreferenceLowPower
+	sort.SliceStable(adapters, func(i, j int) bool {
+		return adapterOrder(adapters[i].Info.DeviceType, preferIntegrated) <
+			adapterOrder(adapters[j].Info.DeviceType, preferIntegrated)
+	})
+
+	// Pick best adapter (first after sorting)
 	exposed := adapters[0]
 
 	// Register and return handle
 	handle := b.registry.RegisterAdapter(exposed.Adapter)
 	return handle, nil
+}
+
+// adapterOrder returns the priority order for adapter selection.
+// Lower values = higher priority. Matches wgpu-core's request_adapter behavior.
+func adapterOrder(deviceType wgputypes.DeviceType, preferIntegrated bool) int {
+	switch deviceType {
+	case wgputypes.DeviceTypeDiscreteGPU:
+		if preferIntegrated {
+			return 2
+		}
+		return 1 // Best for high performance
+	case wgputypes.DeviceTypeIntegratedGPU:
+		if preferIntegrated {
+			return 1 // Best for low power
+		}
+		return 2
+	case wgputypes.DeviceTypeOther:
+		return 3 // Unknown (could be OpenGL)
+	case wgputypes.DeviceTypeVirtualGPU:
+		return 4
+	case wgputypes.DeviceTypeCPU:
+		return 5 // Software fallback (worst)
+	default:
+		return 6
+	}
 }
 
 // RequestDevice requests a GPU device.

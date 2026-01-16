@@ -720,6 +720,25 @@ func (r *ResourceRegistry) UnregisterPipelineLayout(handle types.PipelineLayout)
 	r.mu.Unlock()
 }
 
+// WaitAllDevicesIdle waits for all registered devices to complete their GPU operations.
+// This should be called before destroying resources to prevent hangs.
+func (r *ResourceRegistry) WaitAllDevicesIdle() {
+	r.mu.RLock()
+	devices := make([]hal.Device, 0, len(r.devices))
+	for _, device := range r.devices {
+		devices = append(devices, device)
+	}
+	r.mu.RUnlock()
+
+	// Wait for each device to become idle
+	for _, device := range devices {
+		// Type assert to concrete vulkan.Device to access WaitIdle
+		if waiter, ok := device.(interface{ WaitIdle() error }); ok {
+			_ = waiter.WaitIdle()
+		}
+	}
+}
+
 // Clear releases all registered resources and clears all maps.
 // WARNING: Does NOT destroy HAL objects - caller must destroy them first!
 func (r *ResourceRegistry) Clear() {
