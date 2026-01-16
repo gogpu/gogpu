@@ -52,7 +52,7 @@ var (
 	procPostQuitMessage    = user32.NewProc("PostQuitMessage")
 	procLoadCursorW        = user32.NewProc("LoadCursorW")
 	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
-	procGetCurrentThreadId = kernel32.NewProc("GetCurrentThreadId")
+	procGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 	procDestroyWindow      = user32.NewProc("DestroyWindow")
 	procGetClientRect      = user32.NewProc("GetClientRect")
 )

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-01-16
+
+Window responsiveness fix for Pure Go Vulkan backend.
+
+### Added
+- **GPU Timing Example** (`examples/gpu_timing`) — Diagnostic tool for frame timing analysis
+  - Measures BeginFrame and Draw phases separately
+  - Shows avg/max timing per second for performance debugging
+
+### Changed
+- **Non-blocking GPU acquire** — Improved window responsiveness
+  - Handle `SurfaceStatusTimeout` separately in renderer (skip frame, no reconfigure)
+  - Works with wgpu v0.10.1 non-blocking swapchain acquire
+
+### Fixed
+- Window lag during resize/drag operations on Windows
+- "Not responding" window state during GPU-bound rendering
+
+### Dependencies
+- Update `github.com/gogpu/wgpu` v0.10.0 → v0.10.1
+
 ## [0.11.0] - 2026-01-16
 
 ### Changed
