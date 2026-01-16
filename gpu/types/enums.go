@@ -5,16 +5,20 @@ type BackendType uint8
 
 const (
 	// BackendAuto automatically selects the best available backend.
-	// Currently defaults to Rust, will prefer Pure Go when stable.
+	// Pure Go is default, Rust is opt-in with -tags rust.
 	BackendAuto BackendType = iota
 
 	// BackendRust uses wgpu-native (Rust) via go-webgpu/webgpu.
-	// Maximum performance, battle-tested, requires native library.
+	// Maximum performance, requires native library. Windows only.
 	BackendRust
 
-	// BackendGo uses pure Go WebGPU implementation (gogpu/wgpu).
-	// Zero dependencies, just `go build`, may be slower.
-	BackendGo
+	// BackendNative uses pure Go WebGPU implementation (gogpu/wgpu).
+	// Zero dependencies, just `go build`. Default backend.
+	BackendNative
+
+	// BackendGo is an alias for BackendNative.
+	// Provided for user convenience ("I want the Go backend").
+	BackendGo = BackendNative
 )
 
 // String returns the backend name.
@@ -22,8 +26,8 @@ func (b BackendType) String() string {
 	switch b {
 	case BackendRust:
 		return "Rust (wgpu-native)"
-	case BackendGo:
-		return "Pure Go"
+	case BackendNative:
+		return "Native (Pure Go)"
 	default:
 		return "Auto"
 	}

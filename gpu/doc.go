@@ -17,15 +17,15 @@
 //	// Explicit Rust backend
 //	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendRust)
 //
-//	// Explicit Pure Go backend
-//	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendGo)
+//	// Explicit Pure Go backend (BackendGo is an alias)
+//	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendNative)
 //
 // # Architecture
 //
 // The gpu package defines:
 //
 //   - Backend: Interface for WebGPU operations
-//   - BackendType: Enum for backend selection (Auto, Rust, Go)
+//   - BackendType: Enum for backend selection (Auto, Rust, Native)
 //   - Handle types: Opaque references to GPU objects (Instance, Device, etc.)
 //   - Configuration types: Options for adapters, devices, surfaces, pipelines
 //

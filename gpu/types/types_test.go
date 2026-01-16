@@ -11,8 +11,9 @@ func TestBackendTypeString(t *testing.T) {
 	}{
 		{BackendAuto, "Auto"},
 		{BackendRust, "Rust (wgpu-native)"},
-		{BackendGo, "Pure Go"},
-		{BackendType(99), "Auto"}, // Unknown defaults to Auto
+		{BackendNative, "Native (Pure Go)"},
+		{BackendGo, "Native (Pure Go)"}, // Alias should return same string
+		{BackendType(99), "Auto"},       // Unknown defaults to Auto
 	}
 
 	for _, tt := range tests {
@@ -33,8 +34,12 @@ func TestBackendTypeValues(t *testing.T) {
 	if BackendRust != 1 {
 		t.Errorf("BackendRust = %d, want 1", BackendRust)
 	}
-	if BackendGo != 2 {
-		t.Errorf("BackendGo = %d, want 2", BackendGo)
+	if BackendNative != 2 {
+		t.Errorf("BackendNative = %d, want 2", BackendNative)
+	}
+	// BackendGo is an alias for BackendNative
+	if BackendGo != BackendNative {
+		t.Errorf("BackendGo = %d, want %d (BackendNative)", BackendGo, BackendNative)
 	}
 }
 

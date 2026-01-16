@@ -72,7 +72,7 @@ func createBackend(typ types.BackendType) (gpu.Backend, error) {
 		}
 		return gpu.CreateBackend("rust"), nil
 
-	case types.BackendGo:
+	case types.BackendNative:
 		if !gpu.IsBackendRegistered("native") {
 			return nil, fmt.Errorf("native backend not available")
 		}
