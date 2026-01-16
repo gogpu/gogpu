@@ -225,6 +225,20 @@ func (p *windowsPlatform) Destroy() {
 func (p *windowsPlatform) queueEvent(event Event) {
 	p.eventMu.Lock()
 	defer p.eventMu.Unlock()
+
+	// Coalesce resize events to avoid swapchain recreation storm.
+	// During drag resize, Windows sends hundreds of WM_SIZE messages.
+	// We only care about the final size.
+	if event.Type == EventResize && len(p.events) > 0 {
+		last := &p.events[len(p.events)-1]
+		if last.Type == EventResize {
+			// Update existing resize event with new dimensions
+			last.Width = event.Width
+			last.Height = event.Height
+			return
+		}
+	}
+
 	p.events = append(p.events, event)
 }
 

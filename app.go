@@ -101,20 +101,35 @@ func (a *App) Run() error {
 
 // processEvents handles platform events.
 func (a *App) processEvents() {
+	// Collect all events first, then process.
+	// This allows us to coalesce resize events.
+	var lastResize *platform.Event
+	var events []platform.Event
+
 	for {
 		event := a.platform.PollEvents()
 		if event.Type == platform.EventNone {
 			break
 		}
+		events = append(events, event)
+	}
 
+	// Process all events, but track only the last resize
+	for i := range events {
+		event := &events[i]
 		switch event.Type {
 		case platform.EventResize:
-			a.renderer.Resize(event.Width, event.Height)
-			if a.onResize != nil {
-				a.onResize(event.Width, event.Height)
-			}
+			lastResize = event
 		case platform.EventClose:
 			a.running = false
+		}
+	}
+
+	// Handle the final resize event (coalesced)
+	if lastResize != nil {
+		a.renderer.Resize(lastResize.Width, lastResize.Height)
+		if a.onResize != nil {
+			a.onResize(lastResize.Width, lastResize.Height)
 		}
 	}
 }
