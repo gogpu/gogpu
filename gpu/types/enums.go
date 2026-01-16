@@ -8,13 +8,13 @@ const (
 	// Pure Go is default, Rust is opt-in with -tags rust.
 	BackendAuto BackendType = iota
 
-	// BackendRust uses wgpu-native (Rust) via go-webgpu/webgpu.
-	// Maximum performance, requires native library. Windows only.
-	BackendRust
-
 	// BackendNative uses pure Go WebGPU implementation (gogpu/wgpu).
 	// Zero dependencies, just `go build`. Default backend.
 	BackendNative
+
+	// BackendRust uses wgpu-native (Rust) via go-webgpu/webgpu.
+	// Maximum performance, requires native library. Windows only.
+	BackendRust
 
 	// BackendGo is an alias for BackendNative.
 	// Provided for user convenience ("I want the Go backend").

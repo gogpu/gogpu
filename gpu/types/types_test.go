@@ -27,15 +27,15 @@ func TestBackendTypeString(t *testing.T) {
 }
 
 func TestBackendTypeValues(t *testing.T) {
-	// Verify iota ordering
+	// Verify iota ordering: Auto=0, Native=1 (default), Rust=2 (opt-in)
 	if BackendAuto != 0 {
 		t.Errorf("BackendAuto = %d, want 0", BackendAuto)
 	}
-	if BackendRust != 1 {
-		t.Errorf("BackendRust = %d, want 1", BackendRust)
+	if BackendNative != 1 {
+		t.Errorf("BackendNative = %d, want 1", BackendNative)
 	}
-	if BackendNative != 2 {
-		t.Errorf("BackendNative = %d, want 2", BackendNative)
+	if BackendRust != 2 {
+		t.Errorf("BackendRust = %d, want 2", BackendRust)
 	}
 	// BackendGo is an alias for BackendNative
 	if BackendGo != BackendNative {
