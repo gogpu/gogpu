@@ -278,6 +278,7 @@ internal/platform/darwin/
 
 ## Documentation
 
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture
 - **[ROADMAP.md](ROADMAP.md)** — Development milestones
 - **[CHANGELOG.md](CHANGELOG.md)** — Release notes
 - **[pkg.go.dev](https://pkg.go.dev/github.com/gogpu/gogpu)** — API reference
