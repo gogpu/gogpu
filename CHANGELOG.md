@@ -446,8 +446,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Simple API** — ~20 lines vs 480+ lines of raw WebGPU
   ```go
   app := gogpu.NewApp(gogpu.DefaultConfig())
-  app.OnDraw(func(ctx *gogpu.Context) {
-      ctx.DrawTriangleColor(gmath.DarkGray)
+  app.OnDraw(func(dc *gogpu.Context) {
+      dc.DrawTriangleColor(gmath.DarkGray)
   })
   app.Run()
   ```

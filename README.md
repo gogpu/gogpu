@@ -70,8 +70,8 @@ func main() {
         WithTitle("Hello GoGPU").
         WithSize(800, 600))
 
-    app.OnDraw(func(ctx *gogpu.Context) {
-        ctx.DrawTriangleColor(gmath.DarkGray)
+    app.OnDraw(func(dc *gogpu.Context) {
+        dc.DrawTriangleColor(gmath.DarkGray)
     })
 
     app.Run()

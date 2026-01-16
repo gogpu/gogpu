@@ -20,9 +20,9 @@ func main() {
 		WithSize(800, 600))
 
 	// Set draw callback - called every frame
-	app.OnDraw(func(ctx *gogpu.Context) {
+	app.OnDraw(func(dc *gogpu.Context) {
 		// Draw RGB triangle on dark background
-		err := ctx.DrawTriangleColor(gmath.DarkGray)
+		err := dc.DrawTriangleColor(gmath.DarkGray)
 
 		if err != nil {
 			println("DrawTriangle failed:", err.Error())

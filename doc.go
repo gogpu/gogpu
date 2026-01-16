@@ -18,8 +18,8 @@
 //	func main() {
 //	    app := gogpu.NewApp(gogpu.DefaultConfig())
 //
-//	    app.OnDraw(func(ctx *gogpu.Context) {
-//	        ctx.Clear(0.2, 0.3, 0.4, 1.0)
+//	    app.OnDraw(func(dc *gogpu.Context) {
+//	        dc.Clear(0.2, 0.3, 0.4, 1.0)
 //	    })
 //
 //	    if err := app.Run(); err != nil {
@@ -56,10 +56,10 @@
 //
 // For advanced rendering, access the underlying WebGPU objects:
 //
-//	app.OnDraw(func(ctx *gogpu.Context) {
-//	    device := ctx.Device()  // *wgpu.Device
-//	    queue := ctx.Queue()    // *wgpu.Queue
-//	    view := ctx.TextureView() // Current render target
+//	app.OnDraw(func(dc *gogpu.Context) {
+//	    device := dc.Device()  // *wgpu.Device
+//	    queue := dc.Queue()    // *wgpu.Queue
+//	    view := dc.TextureView() // Current render target
 //	    // Create custom pipelines, shaders, etc.
 //	})
 //

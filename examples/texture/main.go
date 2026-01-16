@@ -28,10 +28,10 @@ func main() {
 		WithSize(800, 600))
 
 	// Set draw callback
-	app.OnDraw(func(ctx *gogpu.Context) {
+	app.OnDraw(func(dc *gogpu.Context) {
 		// For now, just clear with a color
 		// Full texture rendering will be in v0.3.0-alpha
-		ctx.ClearColor(gmath.Hex(0x2D2D2D))
+		dc.ClearColor(gmath.Hex(0x2D2D2D))
 	})
 
 	// Run the application

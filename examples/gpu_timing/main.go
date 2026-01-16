@@ -33,7 +33,7 @@ func main() {
 		updateTime = time.Now()
 	})
 
-	app.OnDraw(func(ctx *gogpu.Context) {
+	app.OnDraw(func(dc *gogpu.Context) {
 		// Time from Update to Draw = includes BeginFrame (where fence waits happen)
 		beginFrameTime := time.Since(updateTime)
 		totalUpdateTime += beginFrameTime
@@ -44,7 +44,7 @@ func main() {
 		// Draw timing
 		drawStart := time.Now()
 		c := gmath.CornflowerBlue
-		ctx.Clear(c.R, c.G, c.B, c.A)
+		dc.Clear(c.R, c.G, c.B, c.A)
 		drawTime := time.Since(drawStart)
 		totalDrawTime += drawTime
 		if drawTime > maxDrawTime {

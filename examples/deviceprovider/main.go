@@ -28,7 +28,7 @@ func main() {
 	var printed bool
 
 	// Set draw callback
-	app.OnDraw(func(ctx *gogpu.Context) {
+	app.OnDraw(func(dc *gogpu.Context) {
 		// Get DeviceProvider (available after first frame initialization)
 		provider := app.DeviceProvider()
 		if provider == nil {
@@ -55,7 +55,7 @@ func main() {
 		// direct GPU access without creating circular dependencies.
 
 		// Draw something to show the window works
-		if err := ctx.DrawTriangleColor(gmath.CornflowerBlue); err != nil {
+		if err := dc.DrawTriangleColor(gmath.CornflowerBlue); err != nil {
 			log.Println("DrawTriangle:", err)
 		}
 	})
