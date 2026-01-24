@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-01-24
+
+### Changed
+
+- **wgpu v0.10.2** — FFI build tag fix
+  - Clear error message when CGO enabled: `undefined: GOFFI_REQUIRES_CGO_ENABLED_0`
+  - See [wgpu v0.10.2 release](https://github.com/gogpu/wgpu/releases/tag/v0.10.2)
+
+### Dependencies
+- Update `github.com/gogpu/wgpu` v0.10.1 → v0.10.2
+- Update `github.com/go-webgpu/goffi` v0.3.7 → v0.3.8
+
 ## [0.11.1] - 2026-01-16
 
 Window responsiveness fix for Pure Go Vulkan backend.
