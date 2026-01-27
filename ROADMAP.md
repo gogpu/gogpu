@@ -21,6 +21,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 | Component | Description |
 |-----------|-------------|
 | **gogpu/gogpu** | GPU abstraction, windowing, input |
+| **gogpu/gpucontext** | Shared interfaces (DeviceProvider, EventSource, Registry) |
+| **gogpu/gputypes** | Shared WebGPU types *(planned)* |
 | **gogpu/wgpu** | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
 | **gogpu/naga** | WGSL shader compiler (SPIR-V, MSL, GLSL, HLSL) |
 | **gogpu/gg** | 2D graphics library with GPU acceleration |
@@ -70,6 +72,7 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ Compute shader support — Full compute pipeline in both Rust and Native backends (v0.10.0)
 - ✅ Pure Go build tags fix — `-tags purego` correctly excludes Rust backend (v0.10.1)
 - ✅ **Pure Go default** — Unified build tags: Pure Go default, Rust opt-in with `-tags rust` (v0.11.0)
+- ✅ **gpucontext integration** — Implements `gpucontext.DeviceProvider` and `gpucontext.EventSource` for cross-package integration (v0.12.0)
 
 ### In Progress
 
@@ -111,6 +114,9 @@ All platforms use Pure Go FFI (no CGO required).
 │     gogpu/gg          │     gogpu/gogpu      │   Custom     │
 │   2D Graphics         │    GPU Framework     │    Apps      │
 ├─────────────────────────────────────────────────────────────┤
+│               gogpu/gpucontext (shared interfaces)          │
+│           DeviceProvider, EventSource, Registry             │
+├─────────────────────────────────────────────────────────────┤
 │   Rust Backend        │     Pure Go Backend                 │
 │  (go-webgpu/webgpu)   │       (gogpu/wgpu)                  │
 ├─────────────────────────────────────────────────────────────┤
@@ -136,6 +142,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## Links
 
 - [GitHub Organization](https://github.com/gogpu)
+- [gogpu/gpucontext](https://github.com/gogpu/gpucontext) — Shared interfaces
+- [gogpu/gputypes](https://github.com/gogpu/gputypes) — Shared WebGPU types *(planned)*
 - [gogpu/wgpu](https://github.com/gogpu/wgpu) — Pure Go WebGPU
 - [gogpu/naga](https://github.com/gogpu/naga) — Shader Compiler
 - [gogpu/gg](https://github.com/gogpu/gg) — 2D Graphics

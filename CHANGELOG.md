@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### gpucontext Integration
+- **GPUContextProvider()** — Returns `gpucontext.DeviceProvider` for cross-package integration
+  - `Device()` — Returns `gpucontext.Device` interface
+  - `Queue()` — Returns `gpucontext.Queue` interface
+  - `Adapter()` — Returns `gpucontext.Adapter` interface
+  - `SurfaceFormat()` — Returns `gpucontext.TextureFormat`
+- **EventSource()** — Returns `gpucontext.EventSource` for UI framework integration
+  - `OnKeyPress/OnKeyRelease` — Keyboard events
+  - `OnMouseMove/OnMousePress/OnMouseRelease` — Mouse events
+  - `OnScroll` — Scroll wheel events
+  - `OnResize` — Window resize events
+  - `OnFocus` — Focus change events
+  - `OnIME*` — Input Method Editor events for international text input
+- **Example** (`examples/gpucontext_integration/`) — Demonstrates cross-package integration
+
+### Dependencies
+- Add `github.com/gogpu/gpucontext` v0.2.0
+
 ## [0.11.2] - 2026-01-24
 
 ### Changed

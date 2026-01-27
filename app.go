@@ -21,6 +21,9 @@ type App struct {
 	// State
 	running   bool
 	lastFrame time.Time
+
+	// Event source for gpucontext integration
+	eventSource *eventSourceAdapter
 }
 
 // NewApp creates a new application with the given configuration.

@@ -9,6 +9,9 @@ import (
 // This interface enables dependency injection of GPU capabilities without
 // creating circular dependencies between packages.
 //
+// For cross-package integration (e.g., with gg), prefer using
+// gpucontext.DeviceProvider via App.GPUContextProvider().
+//
 // Example:
 //
 //	app := gogpu.NewApp(gogpu.Config{Title: "My App"})

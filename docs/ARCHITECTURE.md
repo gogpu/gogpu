@@ -56,12 +56,14 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
 
 ## Projects
 
-| Project    | Description                      | Repository                                     |
-|------------|----------------------------------|------------------------------------------------|
-| **gogpu**  | GPU graphics framework           | [gogpu/gogpu](https://github.com/gogpu/gogpu)  |
-| **gg**     | 2D graphics library (Canvas API) | [gogpu/gg](https://github.com/gogpu/gg)        |
-| **wgpu**   | Pure Go WebGPU implementation    | [gogpu/wgpu](https://github.com/gogpu/wgpu)    |
-| **naga**   | WGSL shader compiler             | [gogpu/naga](https://github.com/gogpu/naga)    |
+| Project       | Description                          | Repository                                           |
+|---------------|--------------------------------------|------------------------------------------------------|
+| **gogpu**     | GPU graphics framework               | [gogpu/gogpu](https://github.com/gogpu/gogpu)        |
+| **gpucontext**| Shared interfaces (DeviceProvider)   | [gogpu/gpucontext](https://github.com/gogpu/gpucontext) |
+| **gputypes**  | Shared WebGPU types *(planned)*      | [gogpu/gputypes](https://github.com/gogpu/gputypes)  |
+| **gg**        | 2D graphics library (Canvas API)     | [gogpu/gg](https://github.com/gogpu/gg)              |
+| **wgpu**      | Pure Go WebGPU implementation        | [gogpu/wgpu](https://github.com/gogpu/wgpu)          |
+| **naga**      | WGSL shader compiler                 | [gogpu/naga](https://github.com/gogpu/naga)          |
 
 ## Backend System
 
@@ -150,16 +152,22 @@ When multiple backends are available:
 ## Dependency Graph
 
 ```
-naga (shader compiler)
-  │
-  └──► wgpu (Pure Go WebGPU)
-         │
-         ├──► gogpu (framework)
-         │
-         └──► gg (2D graphics)
+                    gpucontext (shared interfaces)
+                    gputypes (shared types) [planned]
+                           │
+naga (shader compiler)     │
+  │                        │
+  └──► wgpu ◄──────────────┤
+         │                 │
+         ├──► gogpu ───────┤ (implements DeviceProvider)
+         │                 │
+         └──► gg ──────────┘ (consumes DeviceProvider)
 ```
 
-**Important:** gogpu and gg do NOT depend on each other.
+**Key relationships:**
+- gogpu and gg do NOT depend on each other
+- Both implement/consume gpucontext interfaces for interoperability
+- gg can receive GPU device from gogpu via DeviceProvider pattern
 
 ## Package Structure
 

@@ -157,7 +157,30 @@ device := provider.Device()
 queue := provider.Queue()
 ```
 
-For 2D graphics with GPU acceleration, see [gogpu/gg](https://github.com/gogpu/gg) which has its own native GPU backend using gogpu/wgpu.
+### Cross-Package Integration (gpucontext)
+
+For integration with external libraries like [gogpu/gg](https://github.com/gogpu/gg), use the standard [gpucontext](https://github.com/gogpu/gpucontext) interfaces:
+
+```go
+import "github.com/gogpu/gpucontext"
+
+// Get gpucontext.DeviceProvider for external libraries
+provider := app.GPUContextProvider()
+device := provider.Device()   // gpucontext.Device interface
+queue := provider.Queue()     // gpucontext.Queue interface
+format := provider.SurfaceFormat() // gpucontext.TextureFormat
+
+// Get gpucontext.EventSource for UI frameworks
+events := app.EventSource()
+events.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+    // Handle keyboard input
+})
+events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
+    // Handle mouse click
+})
+```
+
+This enables enterprise-grade dependency injection between packages without circular imports.
 
 ---
 
@@ -267,6 +290,8 @@ internal/platform/darwin/
 | Project | Description |
 |---------|-------------|
 | **gogpu/gogpu** | **GPU framework (this repo)** |
+| [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces (DeviceProvider, EventSource) |
+| [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU types (TextureFormat, BufferUsage, Limits) — *planned* |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |
