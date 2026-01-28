@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 - Add `github.com/gogpu/gputypes` v0.1.0
 - Update `github.com/gogpu/gpucontext` v0.2.0 → v0.3.0
-- Update `github.com/gogpu/wgpu` v0.10.2 → v0.11.0
+- Update `github.com/gogpu/wgpu` v0.10.2 → v0.11.1
 
 ## [0.12.0] - 2026-01-27
 
