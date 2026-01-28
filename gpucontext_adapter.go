@@ -3,6 +3,7 @@ package gogpu
 import (
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 // gpuContextAdapter bridges gogpu to gpucontext.DeviceProvider interface.
@@ -29,11 +30,11 @@ func (a *gpuContextAdapter) Queue() gpucontext.Queue {
 }
 
 // SurfaceFormat returns the preferred texture format for the surface.
-func (a *gpuContextAdapter) SurfaceFormat() gpucontext.TextureFormat {
+func (a *gpuContextAdapter) SurfaceFormat() gputypes.TextureFormat {
 	if a.renderer == nil {
-		return gpucontext.TextureFormatUndefined
+		return gputypes.TextureFormatUndefined
 	}
-	// Map gogpu format to gpucontext format.
+	// Map gogpu format to gputypes format.
 	// Both use the same values (WebGPU spec), but we convert for type safety.
 	return mapTextureFormat(a.renderer.format)
 }
@@ -86,15 +87,15 @@ type adapterAdapter struct {
 // Ensure adapterAdapter implements gpucontext.Adapter.
 var _ gpucontext.Adapter = (*adapterAdapter)(nil)
 
-// mapTextureFormat converts gogpu TextureFormat to gpucontext TextureFormat.
-func mapTextureFormat(format types.TextureFormat) gpucontext.TextureFormat {
+// mapTextureFormat converts gogpu TextureFormat to gputypes TextureFormat.
+func mapTextureFormat(format types.TextureFormat) gputypes.TextureFormat {
 	switch format {
 	case types.TextureFormatRGBA8Unorm:
-		return gpucontext.TextureFormatRGBA8Unorm
+		return gputypes.TextureFormatRGBA8Unorm
 	case types.TextureFormatBGRA8Unorm:
-		return gpucontext.TextureFormatBGRA8Unorm
+		return gputypes.TextureFormatBGRA8Unorm
 	default:
-		return gpucontext.TextureFormatUndefined
+		return gputypes.TextureFormatUndefined
 	}
 }
 

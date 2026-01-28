@@ -5,9 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.13.0] - 2026-01-28
+## [0.13.0] - 2026-01-29
 
 ### Added
+
+#### DrawTexture API
+- **Context.DrawTexture()** — Draw textures directly to the screen
+- **Texture.UpdateData()** — Update texture data from CPU
+- **Textured quad pipeline** — GPU rendering for textures
 
 #### Multi-Thread Architecture
 - **Enterprise-level multi-thread rendering** (Ebiten/Gio pattern)
@@ -15,15 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Render thread: All GPU operations (device, swapchain, commands)
   - Deferred resize: `RequestResize()` / `ConsumePendingResize()` pattern
 - **internal/thread package** — Thread management for GPU operations
-  - `Thread` — OS thread abstraction with `runtime.LockOSThread()`
-  - `RenderLoop` — Render thread with deferred resize support
-- **Platform.InSizeMove()** — Track modal resize loop (Windows)
-- **Thread-safe platform access** — `sync.RWMutex` for size access
+
+### Changed
+
+#### gputypes Migration
+- **Unified WebGPU types** via `github.com/gogpu/gputypes` v0.1.0
+- **No more type converters** — HAL uses gputypes directly
+- Delete redundant `convert.go` and `convert_darwin.go`
+- `gpu/types/` now re-exports gputypes for backward compatibility
 
 ### Fixed
 - **Window "Not Responding"** during resize/move on Windows
-- **Resize cursor stuck** for 5-10 seconds after resize ends (WM_SETCURSOR handling)
-- Window responsiveness during heavy GPU operations (vkDeviceWaitIdle)
+- **Resize cursor stuck** for 5-10 seconds after resize ends
+
+### Dependencies
+- Add `github.com/gogpu/gputypes` v0.1.0
+- Update `github.com/gogpu/gpucontext` v0.2.0 → v0.3.0
+- Update `github.com/gogpu/wgpu` v0.10.2 → v0.11.0
 
 ## [0.12.0] - 2026-01-27
 

@@ -13,9 +13,9 @@ import (
 
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/vulkan"
-	wgputypes "github.com/gogpu/wgpu/types"
 )
 
 // Backend implements gpu.Backend using pure Go wgpu HAL.
@@ -58,8 +58,8 @@ func (b *Backend) Destroy() {
 func (b *Backend) CreateInstance() (types.Instance, error) {
 	// Create HAL instance with default config
 	desc := &hal.InstanceDescriptor{
-		Backends: wgputypes.Backends(1 << wgputypes.BackendVulkan), // Vulkan backend
-		Flags:    0,                                                // No debug for now
+		Backends: gputypes.Backends(1 << gputypes.BackendVulkan), // Vulkan backend
+		Flags:    0,                                              // No debug for now
 	}
 
 	halInstance, err := b.backend.CreateInstance(desc)
@@ -102,23 +102,23 @@ func (b *Backend) RequestAdapter(instance types.Instance, opts *types.AdapterOpt
 
 // adapterOrder returns the priority order for adapter selection.
 // Lower values = higher priority. Matches wgpu-core's request_adapter behavior.
-func adapterOrder(deviceType wgputypes.DeviceType, preferIntegrated bool) int {
+func adapterOrder(deviceType gputypes.DeviceType, preferIntegrated bool) int {
 	switch deviceType {
-	case wgputypes.DeviceTypeDiscreteGPU:
+	case gputypes.DeviceTypeDiscreteGPU:
 		if preferIntegrated {
 			return 2
 		}
 		return 1 // Best for high performance
-	case wgputypes.DeviceTypeIntegratedGPU:
+	case gputypes.DeviceTypeIntegratedGPU:
 		if preferIntegrated {
 			return 1 // Best for low power
 		}
 		return 2
-	case wgputypes.DeviceTypeOther:
+	case gputypes.DeviceTypeOther:
 		return 3 // Unknown (could be OpenGL)
-	case wgputypes.DeviceTypeVirtualGPU:
+	case gputypes.DeviceTypeVirtualGPU:
 		return 4
-	case wgputypes.DeviceTypeCPU:
+	case gputypes.DeviceTypeCPU:
 		return 5 // Software fallback (worst)
 	default:
 		return 6
@@ -133,7 +133,7 @@ func (b *Backend) RequestDevice(adapter types.Adapter, opts *types.DeviceOptions
 	}
 
 	// Open device with default features and limits
-	openDevice, err := halAdapter.Open(wgputypes.Features(0), wgputypes.DefaultLimits())
+	openDevice, err := halAdapter.Open(gputypes.Features(0), gputypes.DefaultLimits())
 	if err != nil {
 		return 0, fmt.Errorf("native: failed to open device: %w", err)
 	}
@@ -188,14 +188,14 @@ func (b *Backend) ConfigureSurface(surface types.Surface, device types.Device, c
 	// Store surface → device mapping for Present()
 	b.registry.RegisterSurfaceDevice(surface, device)
 
-	// Convert config
+	// Convert config - all types are now gputypes aliases, no conversion needed
 	halConfig := &hal.SurfaceConfiguration{
-		Format:      convertTextureFormat(config.Format),
+		Format:      config.Format,
 		Width:       config.Width,
 		Height:      config.Height,
-		PresentMode: convertPresentMode(config.PresentMode),
-		Usage:       convertTextureUsage(config.Usage),
-		AlphaMode:   hal.CompositeAlphaMode(config.AlphaMode), //nolint:gosec // G115: AlphaMode values are 0-3
+		PresentMode: config.PresentMode,
+		Usage:       config.Usage,
+		AlphaMode:   config.AlphaMode,
 	}
 
 	// Configure surface
@@ -315,7 +315,7 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 		return 0, err
 	}
 
-	// Build HAL descriptor
+	// Build HAL descriptor - types are now gputypes aliases, no conversion needed
 	halDesc := &hal.RenderPipelineDescriptor{
 		Label:  desc.Label,
 		Layout: nil, // Auto layout
@@ -324,21 +324,21 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 			EntryPoint: desc.VertexEntryPoint,
 			Buffers:    nil, // No vertex buffers for triangle
 		},
-		Primitive: wgputypes.PrimitiveState{
-			Topology:  convertPrimitiveTopology(desc.Topology),
-			FrontFace: convertFrontFace(desc.FrontFace),
-			CullMode:  convertCullMode(desc.CullMode),
+		Primitive: gputypes.PrimitiveState{
+			Topology:  desc.Topology,
+			FrontFace: desc.FrontFace,
+			CullMode:  desc.CullMode,
 		},
 		DepthStencil: nil, // No depth/stencil for triangle
-		Multisample:  wgputypes.MultisampleState{Count: 1, Mask: 0xFFFFFFFF},
+		Multisample:  gputypes.MultisampleState{Count: 1, Mask: 0xFFFFFFFF},
 		Fragment: &hal.FragmentState{
 			Module:     fragmentShader,
 			EntryPoint: desc.FragmentEntry,
-			Targets: []wgputypes.ColorTargetState{
+			Targets: []gputypes.ColorTargetState{
 				{
-					Format:    convertTextureFormat(desc.TargetFormat),
+					Format:    desc.TargetFormat,
 					Blend:     nil, // No blending for now
-					WriteMask: wgputypes.ColorWriteMaskAll,
+					WriteMask: gputypes.ColorWriteMaskAll,
 				},
 			},
 		},
@@ -386,7 +386,7 @@ func (b *Backend) BeginRenderPass(encoder types.CommandEncoder, desc *types.Rend
 		return 0
 	}
 
-	// Convert color attachments
+	// Convert color attachments - types are gputypes aliases now
 	colorAttachments := make([]hal.RenderPassColorAttachment, 0, len(desc.ColorAttachments))
 	for _, ca := range desc.ColorAttachments {
 		view, err := b.registry.GetTextureView(ca.View)
@@ -396,9 +396,9 @@ func (b *Backend) BeginRenderPass(encoder types.CommandEncoder, desc *types.Rend
 
 		colorAttachments = append(colorAttachments, hal.RenderPassColorAttachment{
 			View:       view,
-			LoadOp:     convertLoadOp(ca.LoadOp),
-			StoreOp:    convertStoreOp(ca.StoreOp),
-			ClearValue: wgputypes.Color{R: ca.ClearValue.R, G: ca.ClearValue.G, B: ca.ClearValue.B, A: ca.ClearValue.A},
+			LoadOp:     ca.LoadOp,
+			StoreOp:    ca.StoreOp,
+			ClearValue: ca.ClearValue,
 		})
 	}
 
@@ -508,9 +508,9 @@ func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureVi
 	var halDesc *hal.TextureViewDescriptor
 	if desc != nil {
 		halDesc = &hal.TextureViewDescriptor{
-			Format:          convertTextureFormat(desc.Format),
-			Dimension:       convertTextureViewDimension(desc.Dimension),
-			Aspect:          convertTextureAspect(desc.Aspect),
+			Format:          desc.Format,
+			Dimension:       desc.Dimension,
+			Aspect:          desc.Aspect,
 			BaseMipLevel:    desc.BaseMipLevel,
 			MipLevelCount:   desc.MipLevelCount,
 			BaseArrayLayer:  desc.BaseArrayLayer,

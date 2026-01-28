@@ -1,34 +1,46 @@
-// Package types provides WebGPU type definitions for the gogpu ecosystem.
+// Package types defines GPU types and handles used throughout gogpu.
 //
-// This package is designed to be standalone with no external dependencies,
-// following the pattern of wgpu-types in the Rust wgpu ecosystem.
-// It can be imported by any package without causing circular dependencies.
+// # Architecture
 //
-// # Organization
+// This package provides:
+//   - Handle types: Opaque references to GPU resources (Instance, Device, Texture, etc.)
+//   - BackendType: Enum for selecting Rust vs Pure Go backend
+//   - Re-exports of gputypes: WebGPU types for backward compatibility
 //
-// Types are organized into several categories:
+// # Type Sources
 //
-//   - Handles: Opaque references to GPU objects (Instance, Device, Texture, etc.)
-//   - Enums: Enumeration types (TextureFormat, PresentMode, LoadOp, etc.)
-//   - Descriptors: Configuration structs (SurfaceConfig, RenderPipelineDescriptor, etc.)
+// Types in this package come from two sources:
 //
-// # Usage
+// 1. Gogpu-specific (defined here):
+//   - All Handle types (Instance, Adapter, Device, Queue, Surface, etc.)
+//   - BackendType (Auto, Native, Rust)
+//   - SurfaceHandle, SurfaceTexture, SurfaceStatus
+//   - Gogpu-specific descriptors that use handles
 //
-// Import this package to use WebGPU types:
+// 2. WebGPU standard (re-exported from gputypes):
+//   - TextureFormat, TextureUsage, TextureDimension, etc.
+//   - BufferUsage, BufferDescriptor, etc.
+//   - BlendState, BlendComponent, BlendFactor, etc.
+//   - All WebGPU spec constants and types
+//
+// # Migration to gputypes
+//
+// For new code, prefer importing gputypes directly:
+//
+//	import "github.com/gogpu/gputypes"
+//
+// This package re-exports all gputypes types for backward compatibility
+// with existing code that imports github.com/gogpu/gogpu/gpu/types.
+//
+// # Usage Example
 //
 //	import "github.com/gogpu/gogpu/gpu/types"
 //
-//	config := &types.SurfaceConfig{
-//	    Format:      types.TextureFormatBGRA8Unorm,
-//	    Usage:       types.TextureUsageRenderAttachment,
-//	    Width:       800,
-//	    Height:      600,
-//	    PresentMode: types.PresentModeFifo,
-//	}
+//	// Using handle types (gogpu-specific)
+//	var device types.Device
+//	var texture types.Texture
 //
-// # WebGPU Alignment
-//
-// All types and constants are aligned with the WebGPU specification
-// (https://www.w3.org/TR/webgpu/). Numeric values for enums match
-// the WebGPU C header (webgpu.h) for compatibility with wgpu-native.
+//	// Using WebGPU types (from gputypes)
+//	format := types.TextureFormatRGBA8Unorm
+//	usage := types.TextureUsageTextureBinding | types.TextureUsageCopyDst
 package types

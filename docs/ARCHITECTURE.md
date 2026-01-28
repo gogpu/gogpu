@@ -59,11 +59,32 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
 | Project       | Description                          | Repository                                           |
 |---------------|--------------------------------------|------------------------------------------------------|
 | **gogpu**     | GPU graphics framework               | [gogpu/gogpu](https://github.com/gogpu/gogpu)        |
-| **gpucontext**| Shared interfaces (DeviceProvider)   | [gogpu/gpucontext](https://github.com/gogpu/gpucontext) |
-| **gputypes**  | Shared WebGPU types *(planned)*      | [gogpu/gputypes](https://github.com/gogpu/gputypes)  |
+| **gputypes**  | Shared WebGPU types (ZERO deps)      | [gogpu/gputypes](https://github.com/gogpu/gputypes)  |
+| **gpucontext**| Shared interfaces (imports gputypes) | [gogpu/gpucontext](https://github.com/gogpu/gpucontext) |
 | **gg**        | 2D graphics library (Canvas API)     | [gogpu/gg](https://github.com/gogpu/gg)              |
 | **wgpu**      | Pure Go WebGPU implementation        | [gogpu/wgpu](https://github.com/gogpu/wgpu)          |
 | **naga**      | WGSL shader compiler                 | [gogpu/naga](https://github.com/gogpu/naga)          |
+
+### Shared Infrastructure: gputypes + gpucontext
+
+The ecosystem uses two shared packages to ensure type compatibility:
+
+| Package | Role | Dependencies |
+|---------|------|--------------|
+| `gputypes` | All WebGPU types (TextureFormat, BufferUsage, etc.) | **ZERO** |
+| `gpucontext` | Integration interfaces (DeviceProvider, Texture, etc.) | imports gputypes |
+
+**Why two packages?**
+- **gputypes** = Data definitions (stable, follows WebGPU spec)
+- **gpucontext** = Behavioral contracts (evolves with API)
+- Separation of concerns: types vs interfaces
+
+**Why gpucontext imports gputypes?**
+- Interfaces need types in method signatures
+- Ensures type compatibility across all implementations
+- No type conversion needed between projects
+
+See [GPUCONTEXT_GPUTYPES_DECISION.md](dev/research/GPUCONTEXT_GPUTYPES_DECISION.md) for full rationale.
 
 ## Backend System
 
@@ -152,22 +173,33 @@ When multiple backends are available:
 ## Dependency Graph
 
 ```
-                    gpucontext (shared interfaces)
-                    gputypes (shared types) [planned]
-                           │
-naga (shader compiler)     │
-  │                        │
-  └──► wgpu ◄──────────────┤
-         │                 │
-         ├──► gogpu ───────┤ (implements DeviceProvider)
-         │                 │
-         └──► gg ──────────┘ (consumes DeviceProvider)
+                         gputypes (ZERO deps)
+                    All WebGPU types (100+)
+                              │
+                              ▼
+                    gpucontext (imports gputypes)
+                    Integration interfaces
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+         ▼                    ▼                    ▼
+naga (shader)              wgpu              go-webgpu/webgpu
+         │                    │                    │
+         └────────►───────────┤                    │
+                              │                    │
+              ┌───────────────┼───────────────┐    │
+              │               │               │    │
+              ▼               ▼               ▼    │
+           gogpu             gg           born-ml ◄┘
 ```
 
 **Key relationships:**
+- `gputypes` is the foundation — ZERO dependencies, all WebGPU types
+- `gpucontext` imports `gputypes` — interfaces use shared types
 - gogpu and gg do NOT depend on each other
 - Both implement/consume gpucontext interfaces for interoperability
 - gg can receive GPU device from gogpu via DeviceProvider pattern
+- All projects use compatible `gputypes.TextureFormat` etc.
 
 ## Package Structure
 

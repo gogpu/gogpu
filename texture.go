@@ -260,3 +260,101 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		renderer: r,
 	}, nil
 }
+
+// UpdateData uploads new pixel data to the entire texture.
+// Data must be exactly width * height * 4 bytes (RGBA8).
+// This is more efficient than recreating the texture for dynamic content
+// such as gg canvas rendering or video frames.
+func (t *Texture) UpdateData(data []byte) error {
+	if t.renderer == nil || t.renderer.backend == nil {
+		return fmt.Errorf("gogpu: cannot update destroyed texture")
+	}
+
+	expectedSize := t.width * t.height * 4
+	if len(data) != expectedSize {
+		return fmt.Errorf("gogpu: invalid data size: expected %d bytes, got %d", expectedSize, len(data))
+	}
+
+	t.renderer.backend.WriteTexture(
+		t.renderer.queue,
+		&types.ImageCopyTexture{
+			Texture:  t.texture,
+			MipLevel: 0,
+			Origin:   types.Origin3D{X: 0, Y: 0, Z: 0},
+			Aspect:   types.TextureAspectAll,
+		},
+		data,
+		&types.ImageDataLayout{
+			Offset:       0,
+			BytesPerRow:  uint32(t.width * 4), //nolint:gosec // G115: width validated in constructor
+			RowsPerImage: uint32(t.height),    //nolint:gosec // G115: height validated in constructor
+		},
+		&types.Extent3D{
+			Width:              uint32(t.width),  //nolint:gosec // G115: width validated in constructor
+			Height:             uint32(t.height), //nolint:gosec // G115: height validated in constructor
+			DepthOrArrayLayers: 1,
+		},
+	)
+
+	return nil
+}
+
+// UpdateRegion uploads pixel data to a rectangular region of the texture.
+// This is optimal for partial updates (dirty rectangles) where only a portion
+// of the texture content has changed.
+//
+// Parameters:
+//   - x, y: Top-left corner of the region in pixels (0,0 is top-left of texture)
+//   - w, h: Width and height of the region in pixels
+//   - data: Pixel data, must be exactly w * h * 4 bytes (RGBA8)
+//
+// The region must be within texture bounds.
+func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
+	if t.renderer == nil || t.renderer.backend == nil {
+		return fmt.Errorf("gogpu: cannot update destroyed texture")
+	}
+
+	// Validate region bounds
+	if x < 0 || y < 0 || w <= 0 || h <= 0 {
+		return fmt.Errorf("gogpu: invalid region: x=%d, y=%d, w=%d, h=%d (must be non-negative, w/h must be positive)", x, y, w, h)
+	}
+
+	if x+w > t.width || y+h > t.height {
+		return fmt.Errorf("gogpu: region out of bounds: region (%d,%d)+(%d,%d) exceeds texture size (%d,%d)",
+			x, y, w, h, t.width, t.height)
+	}
+
+	// Validate data size
+	expectedSize := w * h * 4
+	if len(data) != expectedSize {
+		return fmt.Errorf("gogpu: invalid data size for region: expected %d bytes (w=%d * h=%d * 4), got %d",
+			expectedSize, w, h, len(data))
+	}
+
+	t.renderer.backend.WriteTexture(
+		t.renderer.queue,
+		&types.ImageCopyTexture{
+			Texture:  t.texture,
+			MipLevel: 0,
+			Origin: types.Origin3D{
+				X: uint32(x), //nolint:gosec // G115: x validated non-negative above
+				Y: uint32(y), //nolint:gosec // G115: y validated non-negative above
+				Z: 0,
+			},
+			Aspect: types.TextureAspectAll,
+		},
+		data,
+		&types.ImageDataLayout{
+			Offset:       0,
+			BytesPerRow:  uint32(w * 4), //nolint:gosec // G115: w validated positive above
+			RowsPerImage: uint32(h),     //nolint:gosec // G115: h validated positive above
+		},
+		&types.Extent3D{
+			Width:              uint32(w), //nolint:gosec // G115: w validated positive above
+			Height:             uint32(h), //nolint:gosec // G115: h validated positive above
+			DepthOrArrayLayers: 1,
+		},
+	)
+
+	return nil
+}

@@ -84,3 +84,10 @@ func (c *Context) DrawTriangleColor(bg gmath.Color) error {
 	err := c.DrawTriangle(bg.R, bg.G, bg.B, bg.A)
 	return err
 }
+
+// Renderer returns the underlying Renderer for texture creation.
+// This allows creating textures from within the OnDraw callback.
+// Note: Textures should be created once and reused, not every frame.
+func (c *Context) Renderer() *Renderer {
+	return c.renderer
+}

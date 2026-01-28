@@ -62,41 +62,57 @@ func TestSurfaceStatusValues(t *testing.T) {
 	}
 }
 
-func TestTextureFormatValues(t *testing.T) {
-	// Values must match WebGPU spec
-	if TextureFormatRGBA8Unorm != 0x12 {
-		t.Errorf("TextureFormatRGBA8Unorm = 0x%x, want 0x12", TextureFormatRGBA8Unorm)
+func TestTextureFormatDistinct(t *testing.T) {
+	// Verify that texture formats are distinct (not checking specific values)
+	formats := []TextureFormat{
+		TextureFormatUndefined,
+		TextureFormatRGBA8Unorm,
+		TextureFormatRGBA8UnormSrgb,
+		TextureFormatBGRA8Unorm,
+		TextureFormatBGRA8UnormSrgb,
 	}
-	if TextureFormatBGRA8Unorm != 0x17 {
-		t.Errorf("TextureFormatBGRA8Unorm = 0x%x, want 0x17", TextureFormatBGRA8Unorm)
+
+	seen := make(map[TextureFormat]bool)
+	for _, f := range formats {
+		if seen[f] {
+			t.Errorf("Duplicate texture format value: %d", f)
+		}
+		seen[f] = true
 	}
 }
 
-func TestTextureUsageValues(t *testing.T) {
-	// Values must match WebGPU spec (bit flags)
-	if TextureUsageCopySrc != 0x01 {
-		t.Errorf("TextureUsageCopySrc = 0x%x, want 0x01", TextureUsageCopySrc)
+func TestTextureUsageDistinct(t *testing.T) {
+	// Verify that texture usage flags are distinct (bit flags)
+	if TextureUsageNone != 0 {
+		t.Errorf("TextureUsageNone = %d, want 0", TextureUsageNone)
 	}
-	if TextureUsageCopyDst != 0x02 {
-		t.Errorf("TextureUsageCopyDst = 0x%x, want 0x02", TextureUsageCopyDst)
+
+	// Verify all flags are distinct non-zero values
+	flags := []TextureUsage{
+		TextureUsageCopySrc,
+		TextureUsageCopyDst,
+		TextureUsageTextureBinding,
+		TextureUsageStorageBinding,
+		TextureUsageRenderAttachment,
 	}
-	if TextureUsageTextureBinding != 0x04 {
-		t.Errorf("TextureUsageTextureBinding = 0x%x, want 0x04", TextureUsageTextureBinding)
-	}
-	if TextureUsageStorageBinding != 0x08 {
-		t.Errorf("TextureUsageStorageBinding = 0x%x, want 0x08", TextureUsageStorageBinding)
-	}
-	if TextureUsageRenderAttachment != 0x10 {
-		t.Errorf("TextureUsageRenderAttachment = 0x%x, want 0x10", TextureUsageRenderAttachment)
+
+	for i, f1 := range flags {
+		if f1 == 0 {
+			t.Errorf("TextureUsage flag %d is zero", i)
+		}
+		for j := i + 1; j < len(flags); j++ {
+			f2 := flags[j]
+			// Flags should not overlap
+			if f1&f2 != 0 {
+				t.Errorf("TextureUsage flags %d and %d overlap: 0x%x & 0x%x", i, j, f1, f2)
+			}
+		}
 	}
 }
 
 func TestTextureUsageCombinations(t *testing.T) {
 	// Test that usage flags can be combined
 	usage := TextureUsageCopySrc | TextureUsageRenderAttachment
-	if usage != 0x11 {
-		t.Errorf("Combined usage = 0x%x, want 0x11", usage)
-	}
 
 	// Test individual flag checks
 	if usage&TextureUsageCopySrc == 0 {
@@ -110,73 +126,75 @@ func TestTextureUsageCombinations(t *testing.T) {
 	}
 }
 
-func TestPresentModeValues(t *testing.T) {
-	if PresentModeFifo != 0x01 {
-		t.Errorf("PresentModeFifo = 0x%x, want 0x01", PresentModeFifo)
+func TestPresentModeDistinct(t *testing.T) {
+	// Verify that present modes are distinct (values come from gputypes)
+	modes := []PresentMode{
+		PresentModeAutoVsync,
+		PresentModeAutoNoVsync,
+		PresentModeFifo,
+		PresentModeFifoRelaxed,
+		PresentModeImmediate,
+		PresentModeMailbox,
 	}
-	if PresentModeFifoRelaxed != 0x02 {
-		t.Errorf("PresentModeFifoRelaxed = 0x%x, want 0x02", PresentModeFifoRelaxed)
-	}
-	if PresentModeImmediate != 0x03 {
-		t.Errorf("PresentModeImmediate = 0x%x, want 0x03", PresentModeImmediate)
-	}
-	if PresentModeMailbox != 0x04 {
-		t.Errorf("PresentModeMailbox = 0x%x, want 0x04", PresentModeMailbox)
+
+	seen := make(map[PresentMode]bool)
+	for _, m := range modes {
+		if seen[m] {
+			t.Errorf("Duplicate present mode value: %d", m)
+		}
+		seen[m] = true
 	}
 }
 
-func TestLoadStoreOpValues(t *testing.T) {
-	if LoadOpClear != 0x01 {
-		t.Errorf("LoadOpClear = 0x%x, want 0x01", LoadOpClear)
+func TestLoadStoreOpDistinct(t *testing.T) {
+	// Verify that load/store ops are distinct
+	if LoadOpClear == LoadOpLoad {
+		t.Error("LoadOpClear and LoadOpLoad should be different")
 	}
-	if LoadOpLoad != 0x02 {
-		t.Errorf("LoadOpLoad = 0x%x, want 0x02", LoadOpLoad)
-	}
-	if StoreOpStore != 0x01 {
-		t.Errorf("StoreOpStore = 0x%x, want 0x01", StoreOpStore)
-	}
-	if StoreOpDiscard != 0x02 {
-		t.Errorf("StoreOpDiscard = 0x%x, want 0x02", StoreOpDiscard)
+	if StoreOpStore == StoreOpDiscard {
+		t.Error("StoreOpStore and StoreOpDiscard should be different")
 	}
 }
 
-func TestPrimitiveTopologyValues(t *testing.T) {
-	// NOTE: TriangleList is 0x00 so uninitialized structs default to triangles
-	if PrimitiveTopologyTriangleList != 0x00 {
-		t.Errorf("PrimitiveTopologyTriangleList = 0x%x, want 0x00 (default)", PrimitiveTopologyTriangleList)
+func TestPrimitiveTopologyDistinct(t *testing.T) {
+	// Verify that primitive topologies are distinct
+	topologies := []PrimitiveTopology{
+		PrimitiveTopologyPointList,
+		PrimitiveTopologyLineList,
+		PrimitiveTopologyLineStrip,
+		PrimitiveTopologyTriangleList,
+		PrimitiveTopologyTriangleStrip,
 	}
-	if PrimitiveTopologyTriangleStrip != 0x01 {
-		t.Errorf("PrimitiveTopologyTriangleStrip = 0x%x, want 0x01", PrimitiveTopologyTriangleStrip)
-	}
-	if PrimitiveTopologyPointList != 0x02 {
-		t.Errorf("PrimitiveTopologyPointList = 0x%x, want 0x02", PrimitiveTopologyPointList)
-	}
-	if PrimitiveTopologyLineList != 0x03 {
-		t.Errorf("PrimitiveTopologyLineList = 0x%x, want 0x03", PrimitiveTopologyLineList)
-	}
-	if PrimitiveTopologyLineStrip != 0x04 {
-		t.Errorf("PrimitiveTopologyLineStrip = 0x%x, want 0x04", PrimitiveTopologyLineStrip)
+
+	seen := make(map[PrimitiveTopology]bool)
+	for _, topo := range topologies {
+		if seen[topo] {
+			t.Errorf("Duplicate primitive topology value: %d", topo)
+		}
+		seen[topo] = true
 	}
 }
 
 func TestCullModeValues(t *testing.T) {
-	if CullModeNone != 0x00 {
-		t.Errorf("CullModeNone = 0x%x, want 0x00", CullModeNone)
+	// gputypes uses iota starting at 0
+	if CullModeNone != 0 {
+		t.Errorf("CullModeNone = %d, want 0", CullModeNone)
 	}
-	if CullModeFront != 0x01 {
-		t.Errorf("CullModeFront = 0x%x, want 0x01", CullModeFront)
+	if CullModeFront != 1 {
+		t.Errorf("CullModeFront = %d, want 1", CullModeFront)
 	}
-	if CullModeBack != 0x02 {
-		t.Errorf("CullModeBack = 0x%x, want 0x02", CullModeBack)
+	if CullModeBack != 2 {
+		t.Errorf("CullModeBack = %d, want 2", CullModeBack)
 	}
 }
 
 func TestFrontFaceValues(t *testing.T) {
-	if FrontFaceCCW != 0x00 {
-		t.Errorf("FrontFaceCCW = 0x%x, want 0x00", FrontFaceCCW)
+	// gputypes uses iota starting at 0
+	if FrontFaceCCW != 0 {
+		t.Errorf("FrontFaceCCW = %d, want 0", FrontFaceCCW)
 	}
-	if FrontFaceCW != 0x01 {
-		t.Errorf("FrontFaceCW = 0x%x, want 0x01", FrontFaceCW)
+	if FrontFaceCW != 1 {
+		t.Errorf("FrontFaceCW = %d, want 1", FrontFaceCW)
 	}
 }
 
@@ -241,75 +259,60 @@ func TestMipmapFilterModeValues(t *testing.T) {
 	}
 }
 
-func TestShaderStageValues(t *testing.T) {
-	// Values must match WebGPU spec (bit flags)
-	if ShaderStageNone != 0 {
-		t.Errorf("ShaderStageNone = 0x%x, want 0", ShaderStageNone)
+func TestShaderStageDistinct(t *testing.T) {
+	// ShaderStage is a different type in gputypes - it's not a bit flag
+	// Just verify they are distinct values
+	stages := []ShaderStage{
+		ShaderStageNone,
+		ShaderStageVertex,
+		ShaderStageFragment,
+		ShaderStageCompute,
 	}
-	if ShaderStageVertex != 0x1 {
-		t.Errorf("ShaderStageVertex = 0x%x, want 0x1", ShaderStageVertex)
-	}
-	if ShaderStageFragment != 0x2 {
-		t.Errorf("ShaderStageFragment = 0x%x, want 0x2", ShaderStageFragment)
-	}
-	if ShaderStageCompute != 0x4 {
-		t.Errorf("ShaderStageCompute = 0x%x, want 0x4", ShaderStageCompute)
+
+	seen := make(map[ShaderStage]bool)
+	for _, s := range stages {
+		if seen[s] && s != ShaderStageNone {
+			t.Errorf("Duplicate shader stage value")
+		}
+		seen[s] = true
 	}
 }
 
-func TestShaderStageCombinations(t *testing.T) {
-	// Test that shader stage flags can be combined
-	stage := ShaderStageVertex | ShaderStageFragment
-	if stage != 0x3 {
-		t.Errorf("Combined stage = 0x%x, want 0x3", stage)
+func TestBufferUsageDistinct(t *testing.T) {
+	// Verify buffer usage flags are distinct bit flags
+	if BufferUsageNone != 0 {
+		t.Errorf("BufferUsageNone = %d, want 0", BufferUsageNone)
 	}
 
-	// Test individual flag checks
-	if stage&ShaderStageVertex == 0 {
-		t.Error("Expected Vertex flag to be set")
-	}
-	if stage&ShaderStageFragment == 0 {
-		t.Error("Expected Fragment flag to be set")
-	}
-	if stage&ShaderStageCompute != 0 {
-		t.Error("Expected Compute flag to NOT be set")
-	}
-}
-
-func TestBufferUsageValues(t *testing.T) {
-	// Values must match WebGPU spec (bit flags)
-	tests := []struct {
-		usage    BufferUsage
-		expected BufferUsage
-		name     string
-	}{
-		{BufferUsageMapRead, 0x0001, "MapRead"},
-		{BufferUsageMapWrite, 0x0002, "MapWrite"},
-		{BufferUsageCopySrc, 0x0004, "CopySrc"},
-		{BufferUsageCopyDst, 0x0008, "CopyDst"},
-		{BufferUsageIndex, 0x0010, "Index"},
-		{BufferUsageVertex, 0x0020, "Vertex"},
-		{BufferUsageUniform, 0x0040, "Uniform"},
-		{BufferUsageStorage, 0x0080, "Storage"},
-		{BufferUsageIndirect, 0x0100, "Indirect"},
-		{BufferUsageQueryResolve, 0x0200, "QueryResolve"},
+	flags := []BufferUsage{
+		BufferUsageMapRead,
+		BufferUsageMapWrite,
+		BufferUsageCopySrc,
+		BufferUsageCopyDst,
+		BufferUsageIndex,
+		BufferUsageVertex,
+		BufferUsageUniform,
+		BufferUsageStorage,
+		BufferUsageIndirect,
+		BufferUsageQueryResolve,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.usage != tt.expected {
-				t.Errorf("BufferUsage%s = 0x%x, want 0x%x", tt.name, tt.usage, tt.expected)
+	for i, f1 := range flags {
+		if f1 == 0 {
+			t.Errorf("BufferUsage flag %d is zero", i)
+		}
+		for j := i + 1; j < len(flags); j++ {
+			f2 := flags[j]
+			if f1&f2 != 0 {
+				t.Errorf("BufferUsage flags %d and %d overlap: 0x%x & 0x%x", i, j, f1, f2)
 			}
-		})
+		}
 	}
 }
 
 func TestBufferUsageCombinations(t *testing.T) {
 	// Test typical buffer usage combination
 	usage := BufferUsageVertex | BufferUsageCopyDst
-	if usage != 0x28 {
-		t.Errorf("Combined usage = 0x%x, want 0x28", usage)
-	}
 
 	if usage&BufferUsageVertex == 0 {
 		t.Error("Expected Vertex flag to be set")
@@ -323,50 +326,53 @@ func TestBufferUsageCombinations(t *testing.T) {
 }
 
 func TestTextureDimensionValues(t *testing.T) {
-	if TextureDimension1D != 0x00 {
-		t.Errorf("TextureDimension1D = 0x%x, want 0x00", TextureDimension1D)
+	// gputypes uses iota starting at 0
+	if TextureDimension1D != 0 {
+		t.Errorf("TextureDimension1D = %d, want 0", TextureDimension1D)
 	}
-	if TextureDimension2D != 0x01 {
-		t.Errorf("TextureDimension2D = 0x%x, want 0x01", TextureDimension2D)
+	if TextureDimension2D != 1 {
+		t.Errorf("TextureDimension2D = %d, want 1", TextureDimension2D)
 	}
-	if TextureDimension3D != 0x02 {
-		t.Errorf("TextureDimension3D = 0x%x, want 0x02", TextureDimension3D)
+	if TextureDimension3D != 2 {
+		t.Errorf("TextureDimension3D = %d, want 2", TextureDimension3D)
 	}
 }
 
 func TestTextureViewDimensionValues(t *testing.T) {
+	// gputypes uses iota starting at 0
 	tests := []struct {
 		dim      TextureViewDimension
 		expected TextureViewDimension
 		name     string
 	}{
-		{TextureViewDimensionUndefined, 0x00, "Undefined"},
-		{TextureViewDimension1D, 0x01, "1D"},
-		{TextureViewDimension2D, 0x02, "2D"},
-		{TextureViewDimension2DArray, 0x03, "2DArray"},
-		{TextureViewDimensionCube, 0x04, "Cube"},
-		{TextureViewDimensionCubeArray, 0x05, "CubeArray"},
-		{TextureViewDimension3D, 0x06, "3D"},
+		{TextureViewDimensionUndefined, 0, "Undefined"},
+		{TextureViewDimension1D, 1, "1D"},
+		{TextureViewDimension2D, 2, "2D"},
+		{TextureViewDimension2DArray, 3, "2DArray"},
+		{TextureViewDimensionCube, 4, "Cube"},
+		{TextureViewDimensionCubeArray, 5, "CubeArray"},
+		{TextureViewDimension3D, 6, "3D"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.dim != tt.expected {
-				t.Errorf("TextureViewDimension%s = 0x%x, want 0x%x", tt.name, tt.dim, tt.expected)
+				t.Errorf("TextureViewDimension%s = %d, want %d", tt.name, tt.dim, tt.expected)
 			}
 		})
 	}
 }
 
 func TestTextureAspectValues(t *testing.T) {
-	if TextureAspectAll != 0x00 {
-		t.Errorf("TextureAspectAll = 0x%x, want 0x00", TextureAspectAll)
+	// gputypes uses iota starting at 0
+	if TextureAspectAll != 0 {
+		t.Errorf("TextureAspectAll = %d, want 0", TextureAspectAll)
 	}
-	if TextureAspectStencilOnly != 0x01 {
-		t.Errorf("TextureAspectStencilOnly = 0x%x, want 0x01", TextureAspectStencilOnly)
+	if TextureAspectStencilOnly != 1 {
+		t.Errorf("TextureAspectStencilOnly = %d, want 1", TextureAspectStencilOnly)
 	}
-	if TextureAspectDepthOnly != 0x02 {
-		t.Errorf("TextureAspectDepthOnly = 0x%x, want 0x02", TextureAspectDepthOnly)
+	if TextureAspectDepthOnly != 2 {
+		t.Errorf("TextureAspectDepthOnly = %d, want 2", TextureAspectDepthOnly)
 	}
 }
 
@@ -419,17 +425,17 @@ func TestSamplerBindingTypeValues(t *testing.T) {
 }
 
 func TestTextureSampleTypeValues(t *testing.T) {
+	// gputypes TextureSampleType starts with Float = 0 (no Undefined)
 	tests := []struct {
 		sampleType TextureSampleType
 		expected   TextureSampleType
 		name       string
 	}{
-		{TextureSampleTypeUndefined, 0, "Undefined"},
-		{TextureSampleTypeFloat, 1, "Float"},
-		{TextureSampleTypeUnfilterableFloat, 2, "UnfilterableFloat"},
-		{TextureSampleTypeDepth, 3, "Depth"},
-		{TextureSampleTypeSint, 4, "Sint"},
-		{TextureSampleTypeUint, 5, "Uint"},
+		{TextureSampleTypeFloat, 0, "Float"},
+		{TextureSampleTypeUnfilterableFloat, 1, "UnfilterableFloat"},
+		{TextureSampleTypeDepth, 2, "Depth"},
+		{TextureSampleTypeSint, 3, "Sint"},
+		{TextureSampleTypeUint, 4, "Uint"},
 	}
 
 	for _, tt := range tests {

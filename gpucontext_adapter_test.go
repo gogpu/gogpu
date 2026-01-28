@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 // TestGPUContextAdapterInterface verifies the gpuContextAdapter implements gpucontext.DeviceProvider.
@@ -58,8 +59,8 @@ func TestGPUContextAdapterMethods(t *testing.T) {
 
 	t.Run("SurfaceFormat", func(t *testing.T) {
 		format := adapter.SurfaceFormat()
-		if format != gpucontext.TextureFormatBGRA8Unorm {
-			t.Errorf("SurfaceFormat() = %v, want %v", format, gpucontext.TextureFormatBGRA8Unorm)
+		if format != gputypes.TextureFormatBGRA8Unorm {
+			t.Errorf("SurfaceFormat() = %v, want %v", format, gputypes.TextureFormatBGRA8Unorm)
 		}
 	})
 }
@@ -87,7 +88,7 @@ func TestGPUContextAdapterNilRenderer(t *testing.T) {
 	})
 
 	t.Run("SurfaceFormat", func(t *testing.T) {
-		if adapter.SurfaceFormat() != gpucontext.TextureFormatUndefined {
+		if adapter.SurfaceFormat() != gputypes.TextureFormatUndefined {
 			t.Errorf("SurfaceFormat() should return Undefined with nil renderer")
 		}
 	})
@@ -98,11 +99,11 @@ func TestMapTextureFormat(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  types.TextureFormat
-		output gpucontext.TextureFormat
+		output gputypes.TextureFormat
 	}{
-		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm, gpucontext.TextureFormatRGBA8Unorm},
-		{"BGRA8Unorm", types.TextureFormatBGRA8Unorm, gpucontext.TextureFormatBGRA8Unorm},
-		{"Unknown", types.TextureFormat(0x99), gpucontext.TextureFormatUndefined},
+		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA8Unorm},
+		{"BGRA8Unorm", types.TextureFormatBGRA8Unorm, gputypes.TextureFormatBGRA8Unorm},
+		{"Unknown", types.TextureFormat(0x99), gputypes.TextureFormatUndefined},
 	}
 
 	for _, tt := range tests {

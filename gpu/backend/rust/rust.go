@@ -281,6 +281,7 @@ func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (
 }
 
 // CreateRenderPipeline creates a render pipeline.
+// Supports optional pipeline layout and blend state for alpha blending.
 func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPipelineDescriptor) (types.RenderPipeline, error) {
 	dev := b.devices[device]
 	if dev == nil {
@@ -293,12 +294,59 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 		return 0, fmt.Errorf("rust backend: invalid shader module")
 	}
 
-	pipeline := dev.CreateRenderPipelineSimple(
-		nil,
-		vertShader, desc.VertexEntryPoint,
-		fragShader, desc.FragmentEntry,
-		wgpu.TextureFormat(desc.TargetFormat),
-	)
+	// Get pipeline layout if specified
+	var pipelineLayout *wgpu.PipelineLayout
+	if desc.Layout != 0 {
+		pipelineLayout = b.pipelineLayouts[desc.Layout]
+		if pipelineLayout == nil {
+			return 0, fmt.Errorf("rust backend: invalid pipeline layout")
+		}
+	}
+
+	// Build color target with optional blend state
+	colorTarget := wgpu.ColorTargetState{
+		Format:    wgpu.TextureFormat(desc.TargetFormat),
+		WriteMask: wgpu.ColorWriteMaskAll,
+	}
+
+	if desc.Blend != nil {
+		colorTarget.Blend = &wgpu.BlendState{
+			Color: wgpu.BlendComponent{
+				Operation: wgpu.BlendOperation(desc.Blend.Color.Operation),
+				SrcFactor: wgpu.BlendFactor(desc.Blend.Color.SrcFactor),
+				DstFactor: wgpu.BlendFactor(desc.Blend.Color.DstFactor),
+			},
+			Alpha: wgpu.BlendComponent{
+				Operation: wgpu.BlendOperation(desc.Blend.Alpha.Operation),
+				SrcFactor: wgpu.BlendFactor(desc.Blend.Alpha.SrcFactor),
+				DstFactor: wgpu.BlendFactor(desc.Blend.Alpha.DstFactor),
+			},
+		}
+	}
+
+	pipeline := dev.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  desc.Label,
+		Layout: pipelineLayout,
+		Vertex: wgpu.VertexState{
+			Module:     vertShader,
+			EntryPoint: desc.VertexEntryPoint,
+			// No vertex buffers - we use vertex-less rendering with indices in shader
+		},
+		Primitive: wgpu.PrimitiveState{
+			Topology:  wgpu.PrimitiveTopology(desc.Topology),
+			FrontFace: wgpu.FrontFace(desc.FrontFace),
+			CullMode:  wgpu.CullMode(desc.CullMode),
+		},
+		Multisample: wgpu.MultisampleState{
+			Count: 1,
+			Mask:  0xFFFFFFFF,
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     fragShader,
+			EntryPoint: desc.FragmentEntry,
+			Targets:    []wgpu.ColorTargetState{colorTarget},
+		},
+	})
 	if pipeline == nil {
 		return 0, fmt.Errorf("rust backend: failed to create pipeline")
 	}

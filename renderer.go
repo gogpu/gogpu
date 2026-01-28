@@ -1,13 +1,19 @@
 package gogpu
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/gogpu/gogpu/gpu"
 	_ "github.com/gogpu/gogpu/gpu/backend/native" // Register native backend
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
 )
+
+// texQuadUniformSize is the size of the uniform buffer for textured quads.
+// Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + pad(1 float) = 32 bytes
+const texQuadUniformSize = 32
 
 // Renderer manages the GPU rendering pipeline.
 // It handles device initialization, surface management, and frame presentation.
@@ -31,10 +37,21 @@ type Renderer struct {
 	// Current frame state
 	currentTexture types.Texture
 	currentView    types.TextureView
+	frameCleared   bool // Whether the frame has been cleared (for LoadOp selection)
 
 	// Built-in pipelines
 	trianglePipeline types.RenderPipeline
 	triangleShader   types.ShaderModule
+
+	// Textured quad pipeline resources
+	texQuadPipeline       types.RenderPipeline
+	texQuadShader         types.ShaderModule
+	texQuadUniformLayout  types.BindGroupLayout
+	texQuadTextureLayout  types.BindGroupLayout
+	texQuadPipelineLayout types.PipelineLayout
+	texQuadUniformBuffer  types.Buffer
+	texQuadUniformBindGrp types.BindGroup
+	texQuadPipelineInited bool
 
 	// Platform reference
 	platform platform.Platform
@@ -236,6 +253,10 @@ func (r *Renderer) BeginFrame() bool {
 
 	// Create texture view for rendering
 	r.currentView = r.backend.CreateTextureView(r.currentTexture, nil)
+
+	// Reset frame state for new frame
+	r.frameCleared = false
+
 	return r.currentView != 0
 }
 
@@ -287,6 +308,9 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 
 	r.backend.Submit(r.queue, commands)
 	r.backend.ReleaseCommandBuffer(commands)
+
+	// Mark frame as cleared for subsequent draw calls
+	r.frameCleared = true
 }
 
 // Size returns the current render target size.
@@ -377,6 +401,231 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	return nil
 }
 
+// initTexturedQuadPipeline creates the GPU resources for textured quad rendering.
+// This is called lazily on the first DrawTexture call.
+func (r *Renderer) initTexturedQuadPipeline() error {
+	if r.texQuadPipelineInited {
+		return nil
+	}
+
+	var err error
+
+	// Create shader module
+	r.texQuadShader, err = r.backend.CreateShaderModuleWGSL(r.device, positionedQuadShaderSource)
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create textured quad shader: %w", err)
+	}
+
+	// Create bind group layout for uniforms (group 0)
+	r.texQuadUniformLayout, err = r.backend.CreateBindGroupLayout(r.device, &types.BindGroupLayoutDescriptor{
+		Label: "Textured Quad Uniform Layout",
+		Entries: []types.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: types.ShaderStageVertex | types.ShaderStageFragment,
+				Buffer: &types.BufferBindingLayout{
+					Type:           types.BufferBindingTypeUniform,
+					MinBindingSize: texQuadUniformSize,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create uniform bind group layout: %w", err)
+	}
+
+	// Create bind group layout for texture+sampler (group 1)
+	r.texQuadTextureLayout, err = r.backend.CreateBindGroupLayout(r.device, &types.BindGroupLayoutDescriptor{
+		Label: "Textured Quad Texture Layout",
+		Entries: []types.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: types.ShaderStageFragment,
+				Sampler: &types.SamplerBindingLayout{
+					Type: types.SamplerBindingTypeFiltering,
+				},
+			},
+			{
+				Binding:    1,
+				Visibility: types.ShaderStageFragment,
+				Texture: &types.TextureBindingLayout{
+					SampleType:    types.TextureSampleTypeFloat,
+					ViewDimension: types.TextureViewDimension2D,
+					Multisampled:  false,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create texture bind group layout: %w", err)
+	}
+
+	// Create pipeline layout with both bind group layouts
+	r.texQuadPipelineLayout, err = r.backend.CreatePipelineLayout(r.device, &types.PipelineLayoutDescriptor{
+		Label:            "Textured Quad Pipeline Layout",
+		BindGroupLayouts: []types.BindGroupLayout{r.texQuadUniformLayout, r.texQuadTextureLayout},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create pipeline layout: %w", err)
+	}
+
+	// Create render pipeline with alpha blending
+	r.texQuadPipeline, err = r.backend.CreateRenderPipeline(r.device, &types.RenderPipelineDescriptor{
+		Label:            "Textured Quad Pipeline",
+		VertexShader:     r.texQuadShader,
+		VertexEntryPoint: "vs_main",
+		FragmentShader:   r.texQuadShader,
+		FragmentEntry:    "fs_main",
+		TargetFormat:     r.format,
+		Topology:         types.PrimitiveTopologyTriangleList,
+		CullMode:         types.CullModeNone,
+		Layout:           r.texQuadPipelineLayout,
+		Blend: &types.BlendState{
+			Color: types.BlendComponent{
+				Operation: types.BlendOperationAdd,
+				SrcFactor: types.BlendFactorSrcAlpha,
+				DstFactor: types.BlendFactorOneMinusSrcAlpha,
+			},
+			Alpha: types.BlendComponent{
+				Operation: types.BlendOperationAdd,
+				SrcFactor: types.BlendFactorOne,
+				DstFactor: types.BlendFactorOneMinusSrcAlpha,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create render pipeline: %w", err)
+	}
+
+	// Create uniform buffer
+	r.texQuadUniformBuffer, err = r.backend.CreateBuffer(r.device, &types.BufferDescriptor{
+		Label: "Textured Quad Uniforms",
+		Size:  texQuadUniformSize,
+		Usage: types.BufferUsageUniform | types.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create uniform buffer: %w", err)
+	}
+
+	// Create bind group for uniforms (group 0)
+	r.texQuadUniformBindGrp, err = r.backend.CreateBindGroup(r.device, &types.BindGroupDescriptor{
+		Label:  "Textured Quad Uniform Bind Group",
+		Layout: r.texQuadUniformLayout,
+		Entries: []types.BindGroupEntry{
+			{
+				Binding: 0,
+				Buffer:  r.texQuadUniformBuffer,
+				Offset:  0,
+				Size:    texQuadUniformSize,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create uniform bind group: %w", err)
+	}
+
+	r.texQuadPipelineInited = true
+	return nil
+}
+
+// drawTexturedQuad draws a textured quad with the given options.
+// This is an internal method called by Context.DrawTextureEx.
+func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
+	if r.currentView == 0 {
+		return nil // No frame in progress
+	}
+
+	// Initialize pipeline on first use
+	if !r.texQuadPipelineInited {
+		if err := r.initTexturedQuadPipeline(); err != nil {
+			return err
+		}
+	}
+
+	// Prepare uniform data
+	// Layout: rect(x,y,w,h) + screen(w,h) + alpha + pad
+	uniformData := make([]byte, texQuadUniformSize)
+	binary.LittleEndian.PutUint32(uniformData[0:4], math.Float32bits(opts.X))
+	binary.LittleEndian.PutUint32(uniformData[4:8], math.Float32bits(opts.Y))
+	binary.LittleEndian.PutUint32(uniformData[8:12], math.Float32bits(opts.Width))
+	binary.LittleEndian.PutUint32(uniformData[12:16], math.Float32bits(opts.Height))
+	binary.LittleEndian.PutUint32(uniformData[16:20], math.Float32bits(float32(r.width)))
+	binary.LittleEndian.PutUint32(uniformData[20:24], math.Float32bits(float32(r.height)))
+	binary.LittleEndian.PutUint32(uniformData[24:28], math.Float32bits(opts.Alpha))
+	binary.LittleEndian.PutUint32(uniformData[28:32], 0) // padding
+
+	// Upload uniform data
+	r.backend.WriteBuffer(r.queue, r.texQuadUniformBuffer, 0, uniformData)
+
+	// Create bind group for texture (group 1) - per-draw resource
+	texBindGroup, err := r.backend.CreateBindGroup(r.device, &types.BindGroupDescriptor{
+		Label:  "Textured Quad Texture Bind Group",
+		Layout: r.texQuadTextureLayout,
+		Entries: []types.BindGroupEntry{
+			{
+				Binding: 0,
+				Sampler: tex.sampler,
+			},
+			{
+				Binding:     1,
+				TextureView: tex.view,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create texture bind group: %w", err)
+	}
+	defer r.backend.ReleaseBindGroup(texBindGroup)
+
+	// Create command encoder
+	encoder := r.backend.CreateCommandEncoder(r.device)
+	if encoder == 0 {
+		return fmt.Errorf("gogpu: failed to create command encoder")
+	}
+
+	// Determine LoadOp based on whether frame was already cleared
+	loadOp := types.LoadOpClear
+	if r.frameCleared {
+		loadOp = types.LoadOpLoad
+	}
+
+	// Begin render pass
+	renderPass := r.backend.BeginRenderPass(encoder, &types.RenderPassDescriptor{
+		ColorAttachments: []types.ColorAttachment{
+			{
+				View:       r.currentView,
+				LoadOp:     loadOp,
+				StoreOp:    types.StoreOpStore,
+				ClearValue: types.Color{R: 0, G: 0, B: 0, A: 1}, // Only used if LoadOpClear
+			},
+		},
+	})
+
+	// Set pipeline and bind groups
+	r.backend.SetPipeline(renderPass, r.texQuadPipeline)
+	r.backend.SetBindGroup(renderPass, 0, r.texQuadUniformBindGrp, nil)
+	r.backend.SetBindGroup(renderPass, 1, texBindGroup, nil)
+
+	// Draw 6 vertices (2 triangles for quad)
+	r.backend.Draw(renderPass, 6, 1, 0, 0)
+
+	// End render pass
+	r.backend.EndRenderPass(renderPass)
+	r.backend.ReleaseRenderPass(renderPass)
+
+	// Finish and submit
+	commands := r.backend.FinishEncoder(encoder)
+	r.backend.ReleaseCommandEncoder(encoder)
+
+	r.backend.Submit(r.queue, commands)
+	r.backend.ReleaseCommandBuffer(commands)
+
+	// Mark frame as having content (for subsequent LoadOp)
+	r.frameCleared = true
+
+	return nil
+}
+
 // Destroy releases all GPU resources.
 func (r *Renderer) Destroy() {
 	if r.currentView != 0 {
@@ -387,6 +636,33 @@ func (r *Renderer) Destroy() {
 		r.backend.ReleaseTexture(r.currentTexture)
 		r.currentTexture = 0
 	}
+
+	// Release textured quad pipeline resources
+	if r.texQuadUniformBindGrp != 0 {
+		r.backend.ReleaseBindGroup(r.texQuadUniformBindGrp)
+		r.texQuadUniformBindGrp = 0
+	}
+	if r.texQuadUniformBuffer != 0 {
+		r.backend.ReleaseBuffer(r.texQuadUniformBuffer)
+		r.texQuadUniformBuffer = 0
+	}
+	if r.texQuadPipelineLayout != 0 {
+		r.backend.ReleasePipelineLayout(r.texQuadPipelineLayout)
+		r.texQuadPipelineLayout = 0
+	}
+	if r.texQuadTextureLayout != 0 {
+		r.backend.ReleaseBindGroupLayout(r.texQuadTextureLayout)
+		r.texQuadTextureLayout = 0
+	}
+	if r.texQuadUniformLayout != 0 {
+		r.backend.ReleaseBindGroupLayout(r.texQuadUniformLayout)
+		r.texQuadUniformLayout = 0
+	}
+	if r.texQuadShader != 0 {
+		r.backend.ReleaseShaderModule(r.texQuadShader)
+		r.texQuadShader = 0
+	}
+	// Note: texQuadPipeline is not released separately as it's managed by backend
 
 	// Backend handles cleanup of all resources
 	if r.backend != nil {
