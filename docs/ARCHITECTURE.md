@@ -208,10 +208,33 @@ wgpu/
     └── noop/           # No-op (testing)
 ```
 
+## Multi-Thread Architecture
+
+GoGPU uses enterprise-level multi-thread architecture (Ebiten/Gio pattern):
+
+```
+Main Thread (OS Thread 0)       Render Thread (Dedicated)
+├─ runtime.LockOSThread()       ├─ runtime.LockOSThread()
+├─ Win32/Cocoa/X11 Messages     ├─ GPU Initialization
+├─ Window Events                ├─ ConsumePendingResize()
+├─ RequestResize()              ├─ Surface.Configure()
+└─ User Input                   └─ Acquire → Render → Present
+```
+
+**Benefits:**
+- Window never shows "Not Responding" during heavy GPU operations
+- Smooth resize without blocking on `vkDeviceWaitIdle`
+- Professional responsiveness matching native applications
+
+**Key Components:**
+- `internal/thread.Thread` — OS thread abstraction with `runtime.LockOSThread()`
+- `internal/thread.RenderLoop` — Deferred resize pattern
+- `Platform.InSizeMove()` — Tracks modal resize loop (Windows)
+
 ## Renderer Pipeline
 
 ```
-1. newRenderer()   → Create backend (Auto/Rust/Native)
+1. newRenderer()   → Create backend (Auto/Rust/Native) [on render thread]
 2. init()          → Instance → Surface → Adapter → Device → Queue
 3. BeginFrame()    → Acquire surface texture
 4. User draws      → Via Context in OnDraw callback

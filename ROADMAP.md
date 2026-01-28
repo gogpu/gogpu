@@ -73,6 +73,10 @@ All platforms use Pure Go FFI (no CGO required).
 - ✅ Pure Go build tags fix — `-tags purego` correctly excludes Rust backend (v0.10.1)
 - ✅ **Pure Go default** — Unified build tags: Pure Go default, Rust opt-in with `-tags rust` (v0.11.0)
 - ✅ **gpucontext integration** — Implements `gpucontext.DeviceProvider` and `gpucontext.EventSource` for cross-package integration (v0.12.0)
+- ✅ **Multi-thread architecture** — Enterprise-level Ebiten/Gio pattern for window responsiveness (v0.13.0)
+  - Main thread: Window events only
+  - Render thread: All GPU operations
+  - Deferred resize pattern
 
 ### In Progress
 

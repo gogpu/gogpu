@@ -219,13 +219,19 @@ computePass.Dispatch(workgroupsX, 1, 1)
 
 ## Architecture
 
+GoGPU uses **multi-thread architecture** (Ebiten/Gio pattern) for professional responsiveness:
+- **Main thread:** Window events only (Win32/Cocoa/X11 message pump)
+- **Render thread:** All GPU operations (device, swapchain, commands)
+
+This ensures windows never show "Not Responding" during heavy GPU operations.
+
 ```
 User Application
        │
        ▼
 ┌─────────────────────────────────────────────────────────┐
 │                      gogpu.App                          │
-│    Config, Lifecycle, Event Loop                        │
+│    Multi-Thread: Events (main) + Render (dedicated)     │
 └─────────────────────────────────────────────────────────┘
        │
        ▼
@@ -256,6 +262,7 @@ User Application
 | `window/` | Window configuration |
 | `input/` | Keyboard and mouse input |
 | `internal/platform/` | Platform-specific windowing |
+| `internal/thread/` | Multi-thread rendering (RenderLoop) |
 
 ---
 
