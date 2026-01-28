@@ -47,6 +47,11 @@ type Platform interface {
 	// On Linux: (display, window)
 	GetHandle() (instance, window uintptr)
 
+	// InSizeMove returns true if the window is currently being resized/moved.
+	// During modal resize (Windows) or live resize (macOS), this returns true.
+	// Used to defer swapchain recreation until resize ends.
+	InSizeMove() bool
+
 	// Destroy closes the window and releases resources.
 	Destroy()
 }

@@ -1,17 +1,29 @@
 package gogpu
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/gogpu/internal/thread"
 )
 
 // App is the main application type.
 // It manages the window, rendering, and application lifecycle.
+//
+// The App uses a multi-thread architecture for maximum responsiveness:
+//   - Main thread: Window events (Win32/Cocoa/X11 message pump)
+//   - Render thread: All GPU operations (device, swapchain, commands)
+//
+// This separation ensures the window stays responsive during heavy GPU
+// operations like swapchain recreation.
 type App struct {
 	config   Config
 	platform platform.Platform
 	renderer *Renderer
+
+	// Multi-thread rendering
+	renderLoop *thread.RenderLoop
 
 	// User callbacks
 	onDraw   func(*Context)
@@ -53,10 +65,22 @@ func (a *App) OnResize(fn func(width, height int)) *App {
 	return a
 }
 
-// Run starts the application main loop.
+// Run starts the application main loop with multi-thread architecture.
 // This function blocks until the application quits.
+//
+// The main loop uses a professional multi-thread pattern (Ebiten/Gio):
+//   - Main thread: Window events only (keeps window responsive)
+//   - Render thread: All GPU operations (device, swapchain, commands)
+//
+// This ensures the window never shows "Not Responding" during heavy
+// GPU operations like swapchain recreation (vkDeviceWaitIdle).
 func (a *App) Run() error {
-	// Initialize platform (window)
+	// Lock main goroutine to OS main thread.
+	// Required for Win32/Cocoa window operations.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Initialize platform (window) - must be on main thread
 	a.platform = platform.New()
 	if err := a.platform.Init(platform.Config{
 		Title:      a.config.Title,
@@ -69,41 +93,52 @@ func (a *App) Run() error {
 	}
 	defer a.platform.Destroy()
 
-	// Initialize renderer with selected backend
-	var err error
-	a.renderer, err = newRenderer(a.platform, a.config.Backend)
-	if err != nil {
-		return err
+	// Create render loop with dedicated render thread
+	a.renderLoop = thread.NewRenderLoop()
+	defer a.renderLoop.Stop()
+
+	// Initialize renderer on render thread (all GPU operations must be on same thread)
+	var initErr error
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer, initErr = newRenderer(a.platform, a.config.Backend)
+	})
+	if initErr != nil {
+		return initErr
 	}
-	defer a.renderer.Destroy()
+	defer func() {
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.Destroy()
+		})
+	}()
 
 	// Main loop
 	a.running = true
 	a.lastFrame = time.Now()
 
 	for a.running && !a.platform.ShouldClose() {
-		// Process platform events
-		a.processEvents()
+		// Process platform events (main thread)
+		a.processEventsMultiThread()
 
 		// Calculate delta time
 		now := time.Now()
 		deltaTime := now.Sub(a.lastFrame).Seconds()
 		a.lastFrame = now
 
-		// Call update callback
+		// Call update callback (main thread - logic updates)
 		if a.onUpdate != nil {
 			a.onUpdate(deltaTime)
 		}
 
-		// Render frame
-		a.renderFrame()
+		// Render frame on render thread
+		a.renderFrameMultiThread()
 	}
 
 	return nil
 }
 
-// processEvents handles platform events.
-func (a *App) processEvents() {
+// processEventsMultiThread handles platform events with multi-thread pattern.
+// Resize events are deferred to the render thread via RequestResize.
+func (a *App) processEventsMultiThread() {
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
 	var lastResize *platform.Event
@@ -128,36 +163,54 @@ func (a *App) processEvents() {
 		}
 	}
 
-	// Handle the final resize event (coalesced)
-	if lastResize != nil {
-		a.renderer.Resize(lastResize.Width, lastResize.Height)
+	// Queue resize for render thread (deferred pattern)
+	// Don't apply resize during modal resize loop (Windows)
+	if lastResize != nil && !a.platform.InSizeMove() {
+		// Queue resize for render thread
+		if lastResize.Width > 0 && lastResize.Height > 0 {
+			a.renderLoop.RequestResize(uint32(lastResize.Width), uint32(lastResize.Height)) //nolint:gosec // G115: validated positive
+		}
+
+		// Call user callback immediately (for UI updates)
 		if a.onResize != nil {
 			a.onResize(lastResize.Width, lastResize.Height)
 		}
 	}
 }
 
-// renderFrame renders a single frame.
-func (a *App) renderFrame() {
+// renderFrameMultiThread renders a frame using the render thread.
+// All GPU operations happen on the render thread to keep main thread responsive.
+func (a *App) renderFrameMultiThread() {
 	// Skip rendering if window is minimized (zero dimensions)
 	width, height := a.platform.GetSize()
 	if width <= 0 || height <= 0 {
 		return // Window minimized, skip frame
 	}
 
-	// Acquire frame
-	if !a.renderer.BeginFrame() {
-		return // Frame not available
-	}
+	// Capture callback for render thread
+	onDraw := a.onDraw
 
-	// Create context and call draw callback
-	if a.onDraw != nil {
-		ctx := newContext(a.renderer)
-		a.onDraw(ctx)
-	}
+	// Execute GPU operations on render thread
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		// Apply pending resize (deferred from main thread)
+		if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
+			a.renderer.Resize(int(w), int(h))
+		}
 
-	// Present frame
-	a.renderer.EndFrame()
+		// Acquire frame
+		if !a.renderer.BeginFrame() {
+			return // Frame not available
+		}
+
+		// Create context and call draw callback
+		if onDraw != nil {
+			ctx := newContext(a.renderer)
+			onDraw(ctx)
+		}
+
+		// Present frame
+		a.renderer.EndFrame()
+	})
 }
 
 // Quit requests the application to quit.

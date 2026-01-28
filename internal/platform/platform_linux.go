@@ -106,6 +106,12 @@ func (p *x11Platform) Destroy() {
 	p.inner.Destroy()
 }
 
+// InSizeMove returns true during live resize on X11.
+// X11 doesn't have modal resize loops like Windows.
+func (p *x11Platform) InSizeMove() bool {
+	return false
+}
+
 // Init creates the Wayland window.
 func (p *waylandPlatform) Init(config Config) error {
 	// Check if Wayland is available
@@ -476,4 +482,10 @@ func (p *waylandPlatform) Destroy() {
 		_ = p.display.Close()
 		p.display = nil
 	}
+}
+
+// InSizeMove returns true during live resize on Wayland.
+// Wayland uses async configure events, so resize is never blocking.
+func (p *waylandPlatform) InSizeMove() bool {
+	return false
 }

@@ -162,6 +162,15 @@ func (p *darwinPlatform) GetHandle() (instance, window uintptr) {
 	return 0, 0
 }
 
+// InSizeMove returns true during live resize on macOS.
+// macOS handles live resize smoothly via CAMetalLayer, so this
+// returns false. The window remains responsive during resize.
+func (p *darwinPlatform) InSizeMove() bool {
+	// macOS doesn't have the same modal resize loop problem as Windows.
+	// CAMetalLayer handles resize smoothly without blocking.
+	return false
+}
+
 func (p *darwinPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()

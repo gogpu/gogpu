@@ -102,6 +102,7 @@ type windowsPlatform struct {
 	inSizeMove  bool // True during modal resize/move loop
 	events      []Event
 	eventMu     sync.Mutex
+	sizeMu      sync.RWMutex // Protects width, height, inSizeMove for thread-safe access
 }
 
 // Global instance for window procedure callback
@@ -185,8 +186,11 @@ func (p *windowsPlatform) Init(config Config) error {
 func (p *windowsPlatform) updateSize() {
 	var r rect
 	procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+
+	p.sizeMu.Lock()
 	p.width = int(r.right - r.left)
 	p.height = int(r.bottom - r.top)
+	p.sizeMu.Unlock()
 }
 
 func (p *windowsPlatform) PollEvents() Event {
@@ -223,7 +227,18 @@ func (p *windowsPlatform) ShouldClose() bool {
 }
 
 func (p *windowsPlatform) GetSize() (width, height int) {
+	p.sizeMu.RLock()
+	defer p.sizeMu.RUnlock()
 	return p.width, p.height
+}
+
+// InSizeMove returns true if the window is in a modal resize/move loop.
+// During this time, rendering should continue but swapchain recreation
+// should be deferred to prevent hangs.
+func (p *windowsPlatform) InSizeMove() bool {
+	p.sizeMu.RLock()
+	defer p.sizeMu.RUnlock()
+	return p.inSizeMove
 }
 
 func (p *windowsPlatform) GetHandle() (instance, window uintptr) {
@@ -279,32 +294,44 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	case wmSize:
 		newWidth := int(lParam & 0xFFFF)
 		newHeight := int((lParam >> 16) & 0xFFFF)
-		if newWidth > 0 && newHeight > 0 && (newWidth != p.width || newHeight != p.height) {
+
+		p.sizeMu.Lock()
+		sizeChanged := newWidth > 0 && newHeight > 0 && (newWidth != p.width || newHeight != p.height)
+		inSizeMove := p.inSizeMove
+		if sizeChanged {
 			p.width = newWidth
 			p.height = newHeight
-			// During modal resize loop, don't queue events - wait for WM_EXITSIZEMOVE
-			if !p.inSizeMove {
-				p.queueEvent(Event{
-					Type:   EventResize,
-					Width:  newWidth,
-					Height: newHeight,
-				})
-			}
+		}
+		p.sizeMu.Unlock()
+
+		// During modal resize loop, don't queue events - wait for WM_EXITSIZEMOVE
+		if sizeChanged && !inSizeMove {
+			p.queueEvent(Event{
+				Type:   EventResize,
+				Width:  newWidth,
+				Height: newHeight,
+			})
 		}
 		return 0
 
 	case wmEnterSizeMove:
+		p.sizeMu.Lock()
 		p.inSizeMove = true
+		p.sizeMu.Unlock()
 		return 0
 
 	case wmExitSizeMove:
+		p.sizeMu.Lock()
 		p.inSizeMove = false
+		p.sizeMu.Unlock()
+
 		// Queue final resize event when resize ends
 		p.updateSize()
+		width, height := p.GetSize()
 		p.queueEvent(Event{
 			Type:   EventResize,
-			Width:  p.width,
-			Height: p.height,
+			Width:  width,
+			Height: height,
 		})
 		return 0
 
