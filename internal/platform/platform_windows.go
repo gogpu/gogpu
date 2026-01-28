@@ -18,10 +18,12 @@ const (
 	wmDestroy          = 0x0002
 	wmSize             = 0x0005
 	wmClose            = 0x0010
+	wmSetCursor        = 0x0020
 	wmEnterSizeMove    = 0x0231 // Start of resize/move modal loop
 	wmExitSizeMove     = 0x0232 // End of resize/move modal loop
 	wmKeydown          = 0x0100
 	wmKeyup            = 0x0101
+	htClient           = 1 // WM_SETCURSOR hit test code for client area
 	idcArrow           = 32512
 	swShowNormal       = 1
 	swShow             = 5
@@ -51,6 +53,7 @@ var (
 	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
 	procPostQuitMessage    = user32.NewProc("PostQuitMessage")
 	procLoadCursorW        = user32.NewProc("LoadCursorW")
+	procSetCursor          = user32.NewProc("SetCursor")
 	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
 	procGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 	procDestroyWindow      = user32.NewProc("DestroyWindow")
@@ -92,6 +95,7 @@ type rect struct {
 type windowsPlatform struct {
 	hwnd        windows.HWND
 	hinstance   windows.Handle
+	cursor      uintptr // Default arrow cursor for WM_SETCURSOR
 	width       int
 	height      int
 	shouldClose bool
@@ -132,6 +136,7 @@ func (p *windowsPlatform) Init(config Config) error {
 	// Load default cursor
 	cursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	wndClass.hCursor = windows.Handle(cursor)
+	p.cursor = cursor // Store for WM_SETCURSOR handling
 
 	ret, _, _ = procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass)))
 	if ret == 0 {
@@ -310,6 +315,18 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			p.queueEvent(Event{Type: EventClose})
 		}
 		return 0
+
+	case wmSetCursor:
+		// Restore cursor to arrow when in client area.
+		// This fixes resize cursor staying after resize ends.
+		hitTest := lParam & 0xFFFF
+		if hitTest == htClient {
+			_, _, _ = procSetCursor.Call(p.cursor)
+			return 1 // Cursor was set
+		}
+		// Let Windows handle non-client area cursors
+		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		return ret
 	}
 
 	ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
