@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/gputypes"
 
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/types"

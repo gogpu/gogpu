@@ -1,20 +1,23 @@
-// Example: gg + gogpu integration
+// Example: gg + gogpu integration via ggcanvas
 //
 // This example demonstrates rendering 2D graphics with gg
-// directly into a gogpu window. This is the foundation for UI systems.
+// directly into a gogpu window using the ggcanvas integration package.
 //
 // Architecture:
 //
-//	gg (2D) → Context.Image() (CPU) → gogpu.Texture (GPU) → Window
+//	gg.Context (draw) → ggcanvas.Canvas → gogpu.Context (GPU) → Window
+//
+// Requirements:
+//   - gogpu v0.13.3+
+//   - gg v0.21.4+
 package main
 
 import (
-	"image"
 	"log"
 	"math"
-	"time"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gogpu/gmath"
 )
@@ -24,58 +27,64 @@ func main() {
 
 	// Create gogpu application
 	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithTitle("GoGPU + gg Integration Demo").
+		WithTitle("GoGPU + gg Integration via ggcanvas").
 		WithSize(width, height))
 
-	// gg rendering resources
-	var (
-		ctx     *gg.Context
-		texture *gogpu.Texture
-		frame   int
-	)
+	// Canvas for 2D rendering (created lazily)
+	var canvas *ggcanvas.Canvas
+	var frame int
 
 	app.OnDraw(func(dc *gogpu.Context) {
-		// Initialize gg context and texture on first frame
-		if ctx == nil {
-			ctx = gg.NewContext(width, height)
+		// Clear window background
+		dc.ClearColor(gmath.Hex(0x1a1a2e))
+
+		// Lazy canvas initialization (needs GPUContextProvider)
+		if canvas == nil {
+			provider := app.GPUContextProvider()
+			if provider == nil {
+				return // Not ready yet
+			}
 
 			var err error
-			texture, err = dc.Renderer().NewTextureFromRGBA(width, height, make([]byte, width*height*4))
+			canvas, err = ggcanvas.New(provider, width, height)
 			if err != nil {
-				log.Fatalf("Failed to create texture: %v", err)
+				log.Fatalf("Failed to create canvas: %v", err)
 			}
 		}
 
-		// Clear gogpu window
-		dc.ClearColor(gmath.Hex(0x1a1a2e))
-
-		// Render 2D graphics with gg
-		renderWithGG(ctx, frame)
+		// Draw 2D graphics using gg API
+		ctx := canvas.Context()
+		renderFrame(ctx, frame)
 		frame++
 
-		// Get rendered image and upload to GPU texture
-		img := ctx.Image()
-		if rgba, ok := img.(*image.RGBA); ok {
-			texture.UpdateData(rgba.Pix)
-		}
-
-		// Draw gg output to gogpu window
-		if err := dc.DrawTexture(texture, 0, 0); err != nil {
-			log.Printf("DrawTexture error: %v", err)
+		// Render canvas to gogpu window (handles texture upload automatically)
+		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
+			log.Printf("RenderTo error: %v", err)
 		}
 	})
 
+	// Handle window resize
+	app.EventSource().OnResize(func(w, h int) {
+		if canvas != nil {
+			if err := canvas.Resize(w, h); err != nil {
+				log.Printf("Resize error: %v", err)
+			}
+		}
+	})
+
+	// Run application
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
 
-	if texture != nil {
-		texture.Destroy()
+	// Clean up
+	if canvas != nil {
+		canvas.Close()
 	}
 }
 
-// renderWithGG draws 2D graphics using gg library
-func renderWithGG(ctx *gg.Context, frame int) {
+// renderFrame draws animated 2D graphics using gg
+func renderFrame(ctx *gg.Context, frame int) {
 	// Clear with transparent background
 	ctx.SetRGBA(0, 0, 0, 0)
 	ctx.Clear()
@@ -105,10 +114,6 @@ func renderWithGG(ctx *gg.Context, frame int) {
 	// Draw center text
 	ctx.SetRGB(1, 1, 1)
 	ctx.DrawStringAnchored("gg + gogpu", centerX, centerY, 0.5, 0.5)
-
-	// Draw FPS counter
-	ctx.SetRGB(0.5, 1, 0.5)
-	ctx.DrawString("Frame: "+itoa(frame), 10, 20)
 }
 
 // hsvToRGB converts HSV to RGB
@@ -138,32 +143,4 @@ func hsvToRGB(h, s, v float64) (r, g, b float64) {
 	default:
 		return v, p, q
 	}
-}
-
-// itoa converts int to string without importing strconv
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
-
-func init() {
-	// Suppress unused import warning
-	_ = time.Second
 }

@@ -2,6 +2,8 @@ package gogpu
 
 import (
 	"errors"
+
+	"github.com/gogpu/gpucontext"
 )
 
 // DrawTextureOptions configures texture drawing with full transform control.
@@ -159,4 +161,60 @@ func validateTexture(tex *Texture) error {
 	}
 
 	return nil
+}
+
+// ErrInvalidTextureType is returned when a texture has an unexpected type.
+var ErrInvalidTextureType = errors.New("gogpu: texture must be *Texture")
+
+// Compile-time interface compliance checks.
+var (
+	_ gpucontext.TextureDrawer  = (*contextTextureDrawer)(nil)
+	_ gpucontext.TextureCreator = (*rendererTextureCreator)(nil)
+	_ gpucontext.Texture        = (*Texture)(nil)
+)
+
+// contextTextureDrawer adapts Context to gpucontext.TextureDrawer interface.
+// This follows the GoF Adapter pattern for clean interface implementation.
+type contextTextureDrawer struct {
+	ctx     *Context
+	creator *rendererTextureCreator
+}
+
+// DrawTexture implements gpucontext.TextureDrawer.
+func (a *contextTextureDrawer) DrawTexture(tex gpucontext.Texture, x, y float32) error {
+	t, ok := tex.(*Texture)
+	if !ok {
+		return ErrInvalidTextureType
+	}
+	return a.ctx.DrawTexture(t, x, y)
+}
+
+// TextureCreator implements gpucontext.TextureDrawer.
+func (a *contextTextureDrawer) TextureCreator() gpucontext.TextureCreator {
+	return a.creator
+}
+
+// rendererTextureCreator adapts Renderer to gpucontext.TextureCreator interface.
+type rendererTextureCreator struct {
+	renderer *Renderer
+}
+
+// NewTextureFromRGBA implements gpucontext.TextureCreator.
+func (c *rendererTextureCreator) NewTextureFromRGBA(width, height int, data []byte) (gpucontext.Texture, error) {
+	return c.renderer.NewTextureFromRGBA(width, height, data)
+}
+
+// AsTextureDrawer returns an adapter implementing gpucontext.TextureDrawer.
+// This enables integration with packages like ggcanvas without circular deps.
+//
+// Example:
+//
+//	drawer := dc.AsTextureDrawer()
+//	tex, _ := drawer.TextureCreator().NewTextureFromRGBA(800, 600, data)
+//	drawer.DrawTexture(tex, 0, 0)
+func (c *Context) AsTextureDrawer() gpucontext.TextureDrawer {
+	return &contextTextureDrawer{
+		ctx:     c,
+		creator: &rendererTextureCreator{renderer: c.renderer},
+	}
 }
