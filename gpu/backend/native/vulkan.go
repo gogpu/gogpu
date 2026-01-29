@@ -620,11 +620,46 @@ func (b *Backend) CreateSampler(device types.Device, desc *types.SamplerDescript
 }
 
 func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error) {
-	return 0, gpu.ErrNotImplemented
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return 0, fmt.Errorf("native: invalid device: %w", err)
+	}
+
+	// For uniform/copy-dst buffers, we need mapped memory for WriteBuffer to work
+	// Native HAL doesn't have staging buffer support yet, so we use host-visible memory
+	mappedAtCreation := desc.MappedAtCreation
+	if desc.Usage&gputypes.BufferUsageCopyDst != 0 {
+		mappedAtCreation = true
+	}
+
+	halDesc := &hal.BufferDescriptor{
+		Label:            desc.Label,
+		Size:             desc.Size,
+		Usage:            desc.Usage,
+		MappedAtCreation: mappedAtCreation,
+	}
+
+	buffer, err := halDevice.CreateBuffer(halDesc)
+	if err != nil {
+		return 0, fmt.Errorf("native: failed to create buffer: %w", err)
+	}
+
+	handle := b.registry.RegisterBuffer(buffer)
+	return handle, nil
 }
 
 func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte) {
-	// Not implemented yet
+	halQueue, err := b.registry.GetQueue(queue)
+	if err != nil {
+		return // Silent fail, matching Rust backend behavior
+	}
+
+	halBuffer, err := b.registry.GetBuffer(buffer)
+	if err != nil {
+		return
+	}
+
+	halQueue.WriteBuffer(halBuffer, offset, data)
 }
 
 func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
