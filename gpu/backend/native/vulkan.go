@@ -315,21 +315,30 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 		return 0, err
 	}
 
+	// Get pipeline layout if provided
+	var halLayout hal.PipelineLayout
+	if desc.Layout != 0 {
+		halLayout, err = b.registry.GetPipelineLayout(desc.Layout)
+		if err != nil {
+			return 0, fmt.Errorf("native: invalid pipeline layout: %w", err)
+		}
+	}
+
 	// Build HAL descriptor - types are now gputypes aliases, no conversion needed
 	halDesc := &hal.RenderPipelineDescriptor{
 		Label:  desc.Label,
-		Layout: nil, // Auto layout
+		Layout: halLayout,
 		Vertex: hal.VertexState{
 			Module:     vertexShader,
 			EntryPoint: desc.VertexEntryPoint,
-			Buffers:    nil, // No vertex buffers for triangle
+			Buffers:    nil, // No vertex buffers for fullscreen quad
 		},
 		Primitive: gputypes.PrimitiveState{
 			Topology:  desc.Topology,
 			FrontFace: desc.FrontFace,
 			CullMode:  desc.CullMode,
 		},
-		DepthStencil: nil, // No depth/stencil for triangle
+		DepthStencil: nil, // No depth/stencil
 		Multisample:  gputypes.MultisampleState{Count: 1, Mask: 0xFFFFFFFF},
 		Fragment: &hal.FragmentState{
 			Module:     fragmentShader,
@@ -337,7 +346,7 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    desc.TargetFormat,
-					Blend:     nil, // No blending for now
+					Blend:     desc.Blend,
 					WriteMask: gputypes.ColorWriteMaskAll,
 				},
 			},
@@ -651,15 +660,112 @@ func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGro
 }
 
 func (b *Backend) CreateBindGroup(device types.Device, desc *types.BindGroupDescriptor) (types.BindGroup, error) {
-	return 0, gpu.ErrNotImplemented
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return 0, fmt.Errorf("native: invalid device: %w", err)
+	}
+
+	halLayout, err := b.registry.GetBindGroupLayout(desc.Layout)
+	if err != nil {
+		return 0, fmt.Errorf("native: invalid bind group layout: %w", err)
+	}
+
+	// Convert entries - need to resolve handles to native handles
+	halEntries := make([]gputypes.BindGroupEntry, len(desc.Entries))
+	for i, entry := range desc.Entries {
+		halEntries[i] = gputypes.BindGroupEntry{
+			Binding: entry.Binding,
+		}
+
+		// Determine which resource is set and convert using NativeHandle
+		if entry.Buffer != 0 {
+			halBuffer, bufErr := b.registry.GetBuffer(entry.Buffer)
+			if bufErr != nil {
+				return 0, fmt.Errorf("native: invalid buffer in bind group entry %d: %w", i, bufErr)
+			}
+			halEntries[i].Resource = gputypes.BufferBinding{
+				Buffer: uintptr(halBuffer.NativeHandle()),
+				Offset: entry.Offset,
+				Size:   entry.Size,
+			}
+		} else if entry.Sampler != 0 {
+			halSampler, sampErr := b.registry.GetSampler(entry.Sampler)
+			if sampErr != nil {
+				return 0, fmt.Errorf("native: invalid sampler in bind group entry %d: %w", i, sampErr)
+			}
+			halEntries[i].Resource = gputypes.SamplerBinding{
+				Sampler: uintptr(halSampler.NativeHandle()),
+			}
+		} else if entry.TextureView != 0 {
+			halView, viewErr := b.registry.GetTextureView(entry.TextureView)
+			if viewErr != nil {
+				return 0, fmt.Errorf("native: invalid texture view in bind group entry %d: %w", i, viewErr)
+			}
+			halEntries[i].Resource = gputypes.TextureViewBinding{
+				TextureView: uintptr(halView.NativeHandle()),
+			}
+		} else {
+			return 0, fmt.Errorf("native: bind group entry %d has no resource", i)
+		}
+	}
+
+	halDesc := &hal.BindGroupDescriptor{
+		Label:   desc.Label,
+		Layout:  halLayout,
+		Entries: halEntries,
+	}
+
+	group, err := halDevice.CreateBindGroup(halDesc)
+	if err != nil {
+		return 0, fmt.Errorf("native: failed to create bind group: %w", err)
+	}
+
+	handle := b.registry.RegisterBindGroup(group)
+	return handle, nil
 }
 
 func (b *Backend) CreatePipelineLayout(device types.Device, desc *types.PipelineLayoutDescriptor) (types.PipelineLayout, error) {
-	return 0, gpu.ErrNotImplemented
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return 0, fmt.Errorf("native: invalid device: %w", err)
+	}
+
+	// Convert bind group layouts
+	halLayouts := make([]hal.BindGroupLayout, len(desc.BindGroupLayouts))
+	for i, layout := range desc.BindGroupLayouts {
+		halLayout, layoutErr := b.registry.GetBindGroupLayout(layout)
+		if layoutErr != nil {
+			return 0, fmt.Errorf("native: invalid bind group layout at index %d: %w", i, layoutErr)
+		}
+		halLayouts[i] = halLayout
+	}
+
+	halDesc := &hal.PipelineLayoutDescriptor{
+		Label:            desc.Label,
+		BindGroupLayouts: halLayouts,
+	}
+
+	layout, err := halDevice.CreatePipelineLayout(halDesc)
+	if err != nil {
+		return 0, fmt.Errorf("native: failed to create pipeline layout: %w", err)
+	}
+
+	handle := b.registry.RegisterPipelineLayout(layout)
+	return handle, nil
 }
 
 func (b *Backend) SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
-	// Not implemented yet
+	halPass, err := b.registry.GetRenderPass(pass)
+	if err != nil {
+		return
+	}
+
+	halGroup, err := b.registry.GetBindGroup(bindGroup)
+	if err != nil {
+		return
+	}
+
+	halPass.SetBindGroup(index, halGroup, dynamicOffsets)
 }
 
 func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64) {
