@@ -148,7 +148,7 @@ func (b *Backend) RequestAdapter(instance types.Instance, opts *types.AdapterOpt
 	var wgpuOpts *wgpu.RequestAdapterOptions
 	if opts != nil {
 		wgpuOpts = &wgpu.RequestAdapterOptions{
-			PowerPreference: wgpu.PowerPreference(opts.PowerPreference),
+			PowerPreference: opts.PowerPreference,
 		}
 	}
 
@@ -218,12 +218,12 @@ func (b *Backend) ConfigureSurface(surface types.Surface, device types.Device, c
 
 	surf.Configure(&wgpu.SurfaceConfiguration{
 		Device:      dev,
-		Format:      wgpu.TextureFormat(config.Format),
-		Usage:       wgpu.TextureUsage(config.Usage),
+		Format:      config.Format,
+		Usage:       config.Usage,
 		Width:       config.Width,
 		Height:      config.Height,
-		PresentMode: wgpu.PresentMode(config.PresentMode),
-		AlphaMode:   wgpu.CompositeAlphaMode(config.AlphaMode),
+		PresentMode: config.PresentMode,
+		AlphaMode:   config.AlphaMode,
 	})
 }
 
@@ -306,21 +306,21 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 
 	// Build color target with optional blend state
 	colorTarget := wgpu.ColorTargetState{
-		Format:    wgpu.TextureFormat(desc.TargetFormat),
-		WriteMask: wgpu.ColorWriteMaskAll,
+		Format:    desc.TargetFormat,
+		WriteMask: gputypes.ColorWriteMaskAll,
 	}
 
 	if desc.Blend != nil {
 		colorTarget.Blend = &wgpu.BlendState{
 			Color: wgpu.BlendComponent{
-				Operation: wgpu.BlendOperation(desc.Blend.Color.Operation),
-				SrcFactor: wgpu.BlendFactor(desc.Blend.Color.SrcFactor),
-				DstFactor: wgpu.BlendFactor(desc.Blend.Color.DstFactor),
+				Operation: desc.Blend.Color.Operation,
+				SrcFactor: desc.Blend.Color.SrcFactor,
+				DstFactor: desc.Blend.Color.DstFactor,
 			},
 			Alpha: wgpu.BlendComponent{
-				Operation: wgpu.BlendOperation(desc.Blend.Alpha.Operation),
-				SrcFactor: wgpu.BlendFactor(desc.Blend.Alpha.SrcFactor),
-				DstFactor: wgpu.BlendFactor(desc.Blend.Alpha.DstFactor),
+				Operation: desc.Blend.Alpha.Operation,
+				SrcFactor: desc.Blend.Alpha.SrcFactor,
+				DstFactor: desc.Blend.Alpha.DstFactor,
 			},
 		}
 	}
@@ -334,9 +334,9 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 			// No vertex buffers - we use vertex-less rendering with indices in shader
 		},
 		Primitive: wgpu.PrimitiveState{
-			Topology:  wgpu.PrimitiveTopology(desc.Topology),
-			FrontFace: wgpu.FrontFace(desc.FrontFace),
-			CullMode:  wgpu.CullMode(desc.CullMode),
+			Topology:  desc.Topology,
+			FrontFace: desc.FrontFace,
+			CullMode:  desc.CullMode,
 		},
 		Multisample: wgpu.MultisampleState{
 			Count: 1,
@@ -391,8 +391,8 @@ func (b *Backend) BeginRenderPass(encoder types.CommandEncoder, desc *types.Rend
 		view := b.views[att.View]
 		attachments[i] = wgpu.RenderPassColorAttachment{
 			View:       view,
-			LoadOp:     wgpu.LoadOp(att.LoadOp),
-			StoreOp:    wgpu.StoreOp(att.StoreOp),
+			LoadOp:     att.LoadOp,
+			StoreOp:    att.StoreOp,
 			ClearValue: wgpu.Color{R: att.ClearValue.R, G: att.ClearValue.G, B: att.ClearValue.B, A: att.ClearValue.A},
 		}
 	}
@@ -492,16 +492,16 @@ func (b *Backend) CreateTexture(device types.Device, desc *types.TextureDescript
 
 	wgpuDesc := &wgpu.TextureDescriptor{
 		Label: wgpu.EmptyStringView(),
-		Size: wgpu.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              desc.Size.Width,
 			Height:             desc.Size.Height,
 			DepthOrArrayLayers: desc.Size.DepthOrArrayLayers,
 		},
 		MipLevelCount: desc.MipLevelCount,
 		SampleCount:   desc.SampleCount,
-		Dimension:     wgpu.TextureDimension(desc.Dimension),
-		Format:        wgpu.TextureFormat(desc.Format),
-		Usage:         wgpu.TextureUsage(desc.Usage),
+		Dimension:     desc.Dimension,
+		Format:        desc.Format,
+		Usage:         desc.Usage,
 	}
 
 	texture := dev.CreateTexture(wgpuDesc)
@@ -538,7 +538,7 @@ func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, d
 	wgpuDst := &wgpu.TexelCopyTextureInfo{
 		Texture:  tex.Handle(),
 		MipLevel: dst.MipLevel,
-		Origin: wgpu.Origin3D{
+		Origin: gputypes.Origin3D{
 			X: dst.Origin.X,
 			Y: dst.Origin.Y,
 			Z: dst.Origin.Z,
@@ -552,7 +552,7 @@ func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, d
 		RowsPerImage: layout.RowsPerImage,
 	}
 
-	wgpuSize := &wgpu.Extent3D{
+	wgpuSize := &gputypes.Extent3D{
 		Width:              size.Width,
 		Height:             size.Height,
 		DepthOrArrayLayers: size.DepthOrArrayLayers,
@@ -570,15 +570,15 @@ func (b *Backend) CreateSampler(device types.Device, desc *types.SamplerDescript
 
 	wgpuDesc := &wgpu.SamplerDescriptor{
 		Label:         wgpu.EmptyStringView(),
-		AddressModeU:  wgpu.AddressMode(desc.AddressModeU),
-		AddressModeV:  wgpu.AddressMode(desc.AddressModeV),
-		AddressModeW:  wgpu.AddressMode(desc.AddressModeW),
-		MagFilter:     wgpu.FilterMode(desc.MagFilter),
-		MinFilter:     wgpu.FilterMode(desc.MinFilter),
-		MipmapFilter:  wgpu.MipmapFilterMode(desc.MipmapFilter),
+		AddressModeU:  desc.AddressModeU,
+		AddressModeV:  desc.AddressModeV,
+		AddressModeW:  desc.AddressModeW,
+		MagFilter:     desc.MagFilter,
+		MinFilter:     desc.MinFilter,
+		MipmapFilter:  desc.MipmapFilter,
 		LodMinClamp:   desc.LodMinClamp,
 		LodMaxClamp:   desc.LodMaxClamp,
-		Compare:       wgpu.CompareFunction(desc.Compare),
+		Compare:       desc.Compare,
 		MaxAnisotropy: desc.MaxAnisotropy,
 	}
 
@@ -609,7 +609,7 @@ func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor
 	wgpuDesc := &wgpu.BufferDescriptor{
 		Label:            wgpu.EmptyStringView(),
 		Size:             desc.Size,
-		Usage:            wgpu.BufferUsage(desc.Usage),
+		Usage:            desc.Usage,
 		MappedAtCreation: mappedAtCreation,
 	}
 
@@ -659,7 +659,7 @@ func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGro
 	for i, entry := range desc.Entries {
 		wgpuEntry := wgpu.BindGroupLayoutEntry{
 			Binding:    entry.Binding,
-			Visibility: wgpu.ShaderStage(entry.Visibility),
+			Visibility: entry.Visibility,
 		}
 
 		if entry.Buffer != nil {
@@ -670,7 +670,7 @@ func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGro
 				hasDynamicOffset = wgpu.False
 			}
 			wgpuEntry.Buffer = wgpu.BufferBindingLayout{
-				Type:             wgpu.BufferBindingType(entry.Buffer.Type),
+				Type:             entry.Buffer.Type,
 				HasDynamicOffset: hasDynamicOffset,
 				MinBindingSize:   entry.Buffer.MinBindingSize,
 			}
@@ -678,7 +678,7 @@ func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGro
 
 		if entry.Sampler != nil {
 			wgpuEntry.Sampler = wgpu.SamplerBindingLayout{
-				Type: wgpu.SamplerBindingType(entry.Sampler.Type),
+				Type: entry.Sampler.Type,
 			}
 		}
 
@@ -690,8 +690,8 @@ func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGro
 				multisampled = wgpu.False
 			}
 			wgpuEntry.Texture = wgpu.TextureBindingLayout{
-				SampleType:    wgpu.TextureSampleType(entry.Texture.SampleType),
-				ViewDimension: wgpu.TextureViewDimension(entry.Texture.ViewDimension),
+				SampleType:    entry.Texture.SampleType,
+				ViewDimension: entry.Texture.ViewDimension,
 				Multisampled:  multisampled,
 			}
 		}
@@ -819,7 +819,7 @@ func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, for
 		return
 	}
 
-	p.SetIndexBuffer(buf, wgpu.IndexFormat(format), offset, size)
+	p.SetIndexBuffer(buf, format, offset, size)
 }
 
 // DrawIndexed issues an indexed draw call.
