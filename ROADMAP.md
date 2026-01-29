@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.13.x
+## Current State: v0.13.3
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
@@ -33,6 +33,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - DeviceProvider/EventSource for UI integration
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Clean architecture with shared gputypes
+- webgpu.h spec-compliant enum values
 
 ---
 

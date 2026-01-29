@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.3] - 2026-01-29
+
+### Changed
+
+- **Update dependencies** for webgpu.h spec compliance
+  - `github.com/gogpu/gpucontext` v0.3.0 → v0.3.1
+  - `github.com/gogpu/gputypes` v0.2.0 (webgpu.h spec-compliant enum values)
+  - `github.com/gogpu/wgpu` v0.11.1 → v0.11.2 (CompositeAlphaMode naming fix)
+
+### Added
+
+- **gg integration example** (`examples/gg_integration/`) — Demonstrates gg 2D → gogpu GPU pipeline
+
 ## [0.13.2] - 2026-01-29
 
 ### Changed
@@ -564,7 +577,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/gogpu/gogpu/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/gogpu/gogpu/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/gogpu/gogpu/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/gogpu/gogpu/compare/v0.12.0...v0.13.0
