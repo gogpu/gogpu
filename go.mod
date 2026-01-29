@@ -4,12 +4,12 @@ go 1.25
 
 require (
 	github.com/go-webgpu/goffi v0.3.8
-	github.com/go-webgpu/webgpu v0.2.0
+	github.com/go-webgpu/webgpu v0.2.1
 	github.com/gogpu/gg v0.21.4
 	github.com/gogpu/gpucontext v0.3.1
 	github.com/gogpu/gputypes v0.2.0
 	github.com/gogpu/wgpu v0.11.2
-	golang.org/x/sys v0.39.0
+	golang.org/x/sys v0.40.0
 )
 
 require (
