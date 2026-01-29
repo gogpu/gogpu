@@ -513,7 +513,7 @@ func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureVi
 	return handle
 }
 
-func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D) {
+func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *gputypes.Extent3D) {
 	// Not implemented yet
 }
 
@@ -549,7 +549,7 @@ func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer typ
 	// Not implemented yet
 }
 
-func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64) {
+func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format gputypes.IndexFormat, offset, size uint64) {
 	// Not implemented yet
 }
 

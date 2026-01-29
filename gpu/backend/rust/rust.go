@@ -527,7 +527,7 @@ func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureVi
 }
 
 // WriteTexture writes data to a texture.
-func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D) {
+func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *gputypes.Extent3D) {
 	q := b.queues[queue]
 	tex := b.textures[dst.Texture]
 	if q == nil || tex == nil {
@@ -811,7 +811,7 @@ func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer typ
 }
 
 // SetIndexBuffer sets an index buffer for rendering.
-func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64) {
+func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format gputypes.IndexFormat, offset, size uint64) {
 	p := b.passes[pass]
 	buf := b.gpuBuffers[buffer]
 	if p == nil || buf == nil {

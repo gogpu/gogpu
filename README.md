@@ -131,8 +131,8 @@ tex, err := renderer.NewTextureFromImage(img)
 
 // With custom filtering options
 opts := gogpu.TextureOptions{
-    MagFilter:    types.FilterModeNearest,  // Crisp pixels
-    AddressModeU: types.AddressModeRepeat,  // Tiling
+    MagFilter:    gputypes.FilterModeNearest,  // Crisp pixels
+    AddressModeU: gputypes.AddressModeRepeat,  // Tiling
 }
 tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 ```
@@ -255,7 +255,7 @@ User Application
 |---------|---------|
 | `gogpu` (root) | App, Config, Context, Renderer, Texture |
 | `gpu/` | Backend interface, registry, auto-selection |
-| `gpu/types/` | WebGPU type definitions |
+| `gpu/types/` | GoGPU-specific types (handles, descriptors) |
 | `gpu/backend/rust/` | Rust backend via wgpu-native FFI |
 | `gpu/backend/native/` | Pure Go backend via gogpu/wgpu |
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
@@ -298,7 +298,7 @@ internal/platform/darwin/
 |---------|-------------|
 | **gogpu/gogpu** | **GPU framework (this repo)** |
 | [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces (DeviceProvider, EventSource) |
-| [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU types (TextureFormat, BufferUsage, Limits) — *planned* |
+| [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU types (TextureFormat, BufferUsage, Limits) |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |

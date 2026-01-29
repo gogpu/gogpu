@@ -1,12 +1,14 @@
 # GoGPU Roadmap
 
-> **Updated:** January 2026
+> **Pure Go GPU Computing Ecosystem**
+>
+> Designed to power professional graphics applications, game engines, and IDEs.
 
 ---
 
 ## Vision
 
-**GoGPU** is a Pure Go GPU Computing Ecosystem designed for:
+**GoGPU** is a Pure Go GPU computing ecosystem designed for:
 - Professional graphics applications
 - IDEs and development tools
 - Game engines and simulations
@@ -14,26 +16,109 @@
 
 Our goal is to become the **reference graphics ecosystem** for Go — comparable to the Rust ecosystem (wgpu, naga, vello).
 
+### Core Principles
+
+1. **Pure Go** — No CGO, easy cross-compilation, single binary deployment
+2. **WebGPU-First** — Follow W3C WebGPU specification
+3. **Dual Backend** — Rust (wgpu-native) or Pure Go (gogpu/wgpu)
+4. **Enterprise-Ready** — Production-grade error handling and patterns
+
 ---
 
-## Current State
+## Current State: v0.13.x
+
+✅ **Production-ready** with full feature set:
+- Dual backend (Rust/Pure Go)
+- Multi-thread architecture (Ebiten/Gio pattern)
+- DeviceProvider/EventSource for UI integration
+- Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
+- Clean architecture with shared gputypes
+
+---
+
+## Upcoming
+
+### v0.14.0 — Integration & Polish
+- [ ] GGCanvas integration type
+- [ ] RenderTo method for offscreen rendering
+- [ ] Adapter.GetInfo() API
+
+### v1.0.0 — Production Release
+- [ ] API stability guarantee
+- [ ] Semantic versioning commitment
+- [ ] Long-term support plan
+- [ ] Enterprise deployment guide
+- [ ] Comprehensive documentation
+
+---
+
+## Future Ideas
+
+| Theme | Description |
+|-------|-------------|
+| **gogpu/ui** | GUI toolkit based on gg |
+| **WebAssembly** | WASM target for browser |
+| **Mobile** | Android/iOS support |
+| **Ray Tracing** | RT extensions when available |
+
+---
+
+## Architecture
+
+```
+                    User Application
+                          │
+          ┌───────────────┼───────────────┐
+          │               │               │
+      gogpu/gg        gogpu/gogpu      Custom
+    2D Graphics       GPU Framework     Apps
+          │               │               │
+          └───────────────┼───────────────┘
+                          │
+             gogpu/gpucontext (shared interfaces)
+                          │
+          ┌───────────────┼───────────────┐
+          │                               │
+     Rust Backend                  Pure Go Backend
+   (go-webgpu/webgpu)               (gogpu/wgpu)
+          │                               │
+          └───────────────┼───────────────┘
+                          │
+    ┌─────────┬─────────┬─────────┬─────────┬─────────┐
+    │ Vulkan  │  DX12   │  Metal  │  GLES   │ Software│
+    │ Win+Lin │ Windows │  macOS  │ Win+Lin │ Headless│
+    └─────────┴─────────┴─────────┴─────────┴─────────┘
+```
+
+---
+
+## Ecosystem
 
 | Component | Description |
 |-----------|-------------|
 | **gogpu/gogpu** | GPU abstraction, windowing, input |
-| **gogpu/gpucontext** | Shared interfaces (DeviceProvider, EventSource, Registry) |
-| **gogpu/gputypes** | Shared WebGPU types *(planned)* |
+| **gogpu/gpucontext** | Shared interfaces (DeviceProvider, EventSource) |
+| **gogpu/gputypes** | Shared WebGPU types (TextureFormat, BufferUsage) |
 | **gogpu/wgpu** | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
 | **gogpu/naga** | WGSL shader compiler (SPIR-V, MSL, GLSL, HLSL) |
 | **gogpu/gg** | 2D graphics library with GPU acceleration |
 
-**Key Features:**
-- Zero CGO — Pure Go, easy cross-compilation
-- Dual backend — Rust (wgpu-native) or Pure Go
-- **Cross-platform Pure Go backend** — Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
-- **All 4 shader backends** — SPIR-V, MSL, GLSL, HLSL
-- **5 HAL backends** — Vulkan, Metal, DX12, GLES, Software
-- WebGPU-first API design
+---
+
+## Released Versions
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| **v0.13.x** | 2026-01 | Multi-thread architecture, gputypes integration |
+| v0.12.x | 2026-01 | gpucontext integration (DeviceProvider, EventSource) |
+| v0.11.x | 2026-01 | Pure Go default, non-blocking GPU acquire |
+| v0.10.x | 2026-01 | DeviceProvider interface, compute shaders |
+| v0.9.x | 2026-01 | Intel Vulkan compatibility, CI fixes |
+| v0.8.x | 2025-12 | macOS ARM64 fixes, Metal backend |
+| v0.7.x | 2025-12 | Cross-platform Pure Go backend |
+| v0.1-6 | 2025-12 | Core features, Wayland, X11, Cocoa |
+
+> **See [CHANGELOG.md](CHANGELOG.md) for detailed release notes**
 
 ---
 
@@ -50,108 +135,28 @@ All platforms use Pure Go FFI (no CGO required).
 
 ---
 
-## Roadmap
-
-### Completed ✅
-
-**Platform Expansion:**
-- ✅ Linux Wayland windowing (Pure Go)
-- ✅ macOS Cocoa windowing (Pure Go)
-- ✅ Metal backend for macOS
-- ✅ MSL shader backend
-- ✅ Linux X11 windowing (Pure Go)
-- ✅ Cross-platform Pure Go backend integration
-- ✅ Metal backend — Present, WGSL→MSL, CreateRenderPipeline
-- ✅ GLSL shader backend — OpenGL 3.3+, ES 3.0+
-- ✅ DX12 backend complete — Pure Go COM via syscall
-- ✅ HLSL shader backend — DirectX 11/12
-- ✅ Metal macOS fixes — Issue #24
-- ✅ ARM64 ObjC typed arguments (v0.8.8, @ppoage)
-- ✅ CI Metal test fixes (v0.8.9) — Skip Metal tests on GitHub Actions
-- ✅ DeviceProvider interface — Standardized GPU resource access for external libraries (v0.10.0)
-- ✅ Compute shader support — Full compute pipeline in both Rust and Native backends (v0.10.0)
-- ✅ Pure Go build tags fix — `-tags purego` correctly excludes Rust backend (v0.10.1)
-- ✅ **Pure Go default** — Unified build tags: Pure Go default, Rust opt-in with `-tags rust` (v0.11.0)
-- ✅ **gpucontext integration** — Implements `gpucontext.DeviceProvider` and `gpucontext.EventSource` for cross-package integration (v0.12.0)
-- ✅ **Multi-thread architecture** — Enterprise-level Ebiten/Gio pattern for window responsiveness (v0.13.0)
-  - Main thread: Window events only
-  - Render thread: All GPU operations
-  - Deferred resize pattern
-
-### In Progress
-
-**Performance & Stability:**
-- SIMD optimization for 2D rendering (gg)
-- Parallel rendering pipeline
-- Platform testing and bug fixes
-
-**GPU Backends:**
-- GLES improvements for Linux
-- Compute shader pipeline
-
-**Shader Compiler:**
-- Shader optimization passes (dead code elimination, constant folding)
-- Source maps for debugging
-
-### Q3 2026
-
-**Ecosystem Maturity:**
-- gg v1.0.0 — Production-ready 2D graphics
-- GPU-accelerated text rendering
-- Scene graph (retained mode)
-
-### 2027+
-
-**Future Vision:**
-- gogpu/ui — GUI toolkit
-- Full cross-platform support
-- Production-ready ecosystem
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Application                         │
-├─────────────────────────────────────────────────────────────┤
-│     gogpu/gg          │     gogpu/gogpu      │   Custom     │
-│   2D Graphics         │    GPU Framework     │    Apps      │
-├─────────────────────────────────────────────────────────────┤
-│               gogpu/gpucontext (shared interfaces)          │
-│           DeviceProvider, EventSource, Registry             │
-├─────────────────────────────────────────────────────────────┤
-│   Rust Backend        │     Pure Go Backend                 │
-│  (go-webgpu/webgpu)   │       (gogpu/wgpu)                  │
-├─────────────────────────────────────────────────────────────┤
-│ Vulkan ✅ │ DX12 ✅ │ Metal ✅ │ OpenGL ES │ Software │
-│ Win+Lin   │ Windows │  macOS   │  Win+Lin  │ Headless │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Contributing
 
 We welcome contributions! Priority areas:
-- Linux/macOS platform support
-- GPU backend improvements
-- Documentation and examples
-- Performance optimization
+
+1. **Platform Testing** — macOS, Linux X11/Wayland
+2. **API Feedback** — Try the library and report pain points
+3. **Test Cases** — Expand test coverage
+4. **Examples** — Real-world usage examples
+5. **Documentation** — Improve docs and guides
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-## Links
+## Non-Goals
 
-- [GitHub Organization](https://github.com/gogpu)
-- [gogpu/gpucontext](https://github.com/gogpu/gpucontext) — Shared interfaces
-- [gogpu/gputypes](https://github.com/gogpu/gputypes) — Shared WebGPU types *(planned)*
-- [gogpu/wgpu](https://github.com/gogpu/wgpu) — Pure Go WebGPU
-- [gogpu/naga](https://github.com/gogpu/naga) — Shader Compiler
-- [gogpu/gg](https://github.com/gogpu/gg) — 2D Graphics
+- **2D graphics library** — See gogpu/gg
+- **Shader language design** — Follow WGSL spec
+- **Browser embedding** — WebGPU for native only
 
 ---
 
-*This roadmap is updated as the project evolves.*
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.

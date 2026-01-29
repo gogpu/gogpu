@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2026-01-29
+
+### Changed
+
+#### Clean Architecture: Remove gputypes Re-export Layer
+- **BREAKING:** `gpu/types/` no longer re-exports `gputypes` types
+- **Direct imports required:** Use `github.com/gogpu/gputypes` directly for WebGPU types
+- `gpu/types/` now contains only gogpu-specific types: `BackendType`, handles, `SurfaceStatus`, descriptors
+- Deleted `gpu/types/gputypes.go` (~20KB re-export layer)
+- Created `gpu/types/descriptors.go` with gogpu-specific descriptors importing gputypes
+
+#### Migration Guide
+```go
+// Before (v0.13.1)
+import "github.com/gogpu/gogpu/gpu/types"
+format := types.TextureFormatRGBA8Unorm
+
+// After (v0.13.2)
+import "github.com/gogpu/gputypes"
+format := gputypes.TextureFormatRGBA8Unorm
+```
+
+### Fixed
+- **gputypes webgpu.h compliance** — All enum values now match webgpu.h specification exactly
+  - TextureFormat values corrected (BC formats 0x32-0x3F, depth/stencil 0x2C-0x31)
+  - Added missing formats: R16Unorm, R16Snorm, RG16Unorm, RG16Snorm, RGBA16Unorm, RGBA16Snorm
+
+### Dependencies
+- Update `github.com/gogpu/gputypes` v0.1.0 → v0.2.0 (webgpu.h compliance)
+
 ## [0.13.1] - 2026-01-29
 
 **Note:** v0.13.0 was cached by Go module proxy without gputypes migration. Use v0.13.1.
@@ -534,7 +564,9 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/gogpu/gogpu/compare/v0.13.1...v0.13.2
+[0.13.1]: https://github.com/gogpu/gogpu/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/gogpu/gogpu/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/gogpu/gogpu/compare/v0.11.2...v0.12.0
 [0.11.2]: https://github.com/gogpu/gogpu/compare/v0.11.1...v0.11.2

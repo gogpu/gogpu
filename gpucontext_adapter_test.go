@@ -31,7 +31,7 @@ func TestGPUContextAdapterMethods(t *testing.T) {
 		adapter: types.Adapter(41),
 		device:  types.Device(42),
 		queue:   types.Queue(43),
-		format:  types.TextureFormatBGRA8Unorm,
+		format:  gputypes.TextureFormatBGRA8Unorm,
 	}
 
 	adapter := &gpuContextAdapter{renderer: renderer}
@@ -98,12 +98,12 @@ func TestGPUContextAdapterNilRenderer(t *testing.T) {
 func TestMapTextureFormat(t *testing.T) {
 	tests := []struct {
 		name   string
-		input  types.TextureFormat
+		input  gputypes.TextureFormat
 		output gputypes.TextureFormat
 	}{
-		{"RGBA8Unorm", types.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA8Unorm},
-		{"BGRA8Unorm", types.TextureFormatBGRA8Unorm, gputypes.TextureFormatBGRA8Unorm},
-		{"Unknown", types.TextureFormat(0x99), gputypes.TextureFormatUndefined},
+		{"RGBA8Unorm", gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA8Unorm},
+		{"BGRA8Unorm", gputypes.TextureFormatBGRA8Unorm, gputypes.TextureFormatBGRA8Unorm},
+		{"Unknown", gputypes.TextureFormat(0x99), gputypes.TextureFormatUndefined},
 	}
 
 	for _, tt := range tests {

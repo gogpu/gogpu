@@ -1,7 +1,6 @@
 package gogpu
 
 import (
-	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 )
@@ -88,11 +87,11 @@ type adapterAdapter struct {
 var _ gpucontext.Adapter = (*adapterAdapter)(nil)
 
 // mapTextureFormat converts gogpu TextureFormat to gputypes TextureFormat.
-func mapTextureFormat(format types.TextureFormat) gputypes.TextureFormat {
+func mapTextureFormat(format gputypes.TextureFormat) gputypes.TextureFormat {
 	switch format {
-	case types.TextureFormatRGBA8Unorm:
+	case gputypes.TextureFormatRGBA8Unorm:
 		return gputypes.TextureFormatRGBA8Unorm
-	case types.TextureFormatBGRA8Unorm:
+	case gputypes.TextureFormatBGRA8Unorm:
 		return gputypes.TextureFormatBGRA8Unorm
 	default:
 		return gputypes.TextureFormatUndefined

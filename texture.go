@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Texture represents a GPU texture resource with its associated view and sampler.
@@ -23,7 +24,7 @@ type Texture struct {
 	// Metadata
 	width  int
 	height int
-	format types.TextureFormat
+	format gputypes.TextureFormat
 
 	// Reference to renderer for resource management
 	renderer *Renderer
@@ -45,7 +46,7 @@ func (t *Texture) Size() (width, height int) {
 }
 
 // Format returns the texture format.
-func (t *Texture) Format() types.TextureFormat {
+func (t *Texture) Format() gputypes.TextureFormat {
 	return t.format
 }
 
@@ -92,25 +93,25 @@ type TextureOptions struct {
 	Label string
 
 	// Filter mode for magnification (default: Linear)
-	MagFilter types.FilterMode
+	MagFilter gputypes.FilterMode
 
 	// Filter mode for minification (default: Linear)
-	MinFilter types.FilterMode
+	MinFilter gputypes.FilterMode
 
 	// Address mode for U coordinate (default: ClampToEdge)
-	AddressModeU types.AddressMode
+	AddressModeU gputypes.AddressMode
 
 	// Address mode for V coordinate (default: ClampToEdge)
-	AddressModeV types.AddressMode
+	AddressModeV gputypes.AddressMode
 }
 
 // DefaultTextureOptions returns sensible defaults for texture creation.
 func DefaultTextureOptions() TextureOptions {
 	return TextureOptions{
-		MagFilter:    types.FilterModeLinear,
-		MinFilter:    types.FilterModeLinear,
-		AddressModeU: types.AddressModeClampToEdge,
-		AddressModeV: types.AddressModeClampToEdge,
+		MagFilter:    gputypes.FilterModeLinear,
+		MinFilter:    gputypes.FilterModeLinear,
+		AddressModeU: gputypes.AddressModeClampToEdge,
+		AddressModeV: gputypes.AddressModeClampToEdge,
 	}
 }
 
@@ -188,16 +189,16 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 	// Note: width/height validated above (expectedSize check ensures they are positive)
 	texture, err := r.backend.CreateTexture(r.device, &types.TextureDescriptor{
 		Label: opts.Label,
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gogpu: failed to create texture: %w", err)
@@ -209,8 +210,8 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		&types.ImageCopyTexture{
 			Texture:  texture,
 			MipLevel: 0,
-			Origin:   types.Origin3D{X: 0, Y: 0, Z: 0},
-			Aspect:   types.TextureAspectAll,
+			Origin:   gputypes.Origin3D{X: 0, Y: 0, Z: 0},
+			Aspect:   gputypes.TextureAspectAll,
 		},
 		data,
 		&types.ImageDataLayout{
@@ -218,7 +219,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 			BytesPerRow:  uint32(width * 4), //nolint:gosec // G115: width validated positive above
 			RowsPerImage: uint32(height),    //nolint:gosec // G115: height validated positive above
 		},
-		&types.Extent3D{
+		&gputypes.Extent3D{
 			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
@@ -237,10 +238,10 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		Label:        opts.Label,
 		AddressModeU: opts.AddressModeU,
 		AddressModeV: opts.AddressModeV,
-		AddressModeW: types.AddressModeClampToEdge,
+		AddressModeW: gputypes.AddressModeClampToEdge,
 		MagFilter:    opts.MagFilter,
 		MinFilter:    opts.MinFilter,
-		MipmapFilter: types.MipmapFilterModeNearest,
+		MipmapFilter: gputypes.MipmapFilterModeNearest,
 		LodMinClamp:  0,
 		LodMaxClamp:  32,
 	})
@@ -256,7 +257,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		sampler:  sampler,
 		width:    width,
 		height:   height,
-		format:   types.TextureFormatRGBA8Unorm,
+		format:   gputypes.TextureFormatRGBA8Unorm,
 		renderer: r,
 	}, nil
 }
@@ -280,8 +281,8 @@ func (t *Texture) UpdateData(data []byte) error {
 		&types.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
-			Origin:   types.Origin3D{X: 0, Y: 0, Z: 0},
-			Aspect:   types.TextureAspectAll,
+			Origin:   gputypes.Origin3D{X: 0, Y: 0, Z: 0},
+			Aspect:   gputypes.TextureAspectAll,
 		},
 		data,
 		&types.ImageDataLayout{
@@ -289,7 +290,7 @@ func (t *Texture) UpdateData(data []byte) error {
 			BytesPerRow:  uint32(t.width * 4), //nolint:gosec // G115: width validated in constructor
 			RowsPerImage: uint32(t.height),    //nolint:gosec // G115: height validated in constructor
 		},
-		&types.Extent3D{
+		&gputypes.Extent3D{
 			Width:              uint32(t.width),  //nolint:gosec // G115: width validated in constructor
 			Height:             uint32(t.height), //nolint:gosec // G115: height validated in constructor
 			DepthOrArrayLayers: 1,
@@ -336,12 +337,12 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 		&types.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
-			Origin: types.Origin3D{
+			Origin: gputypes.Origin3D{
 				X: uint32(x), //nolint:gosec // G115: x validated non-negative above
 				Y: uint32(y), //nolint:gosec // G115: y validated non-negative above
 				Z: 0,
 			},
-			Aspect: types.TextureAspectAll,
+			Aspect: gputypes.TextureAspectAll,
 		},
 		data,
 		&types.ImageDataLayout{
@@ -349,7 +350,7 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 			BytesPerRow:  uint32(w * 4), //nolint:gosec // G115: w validated positive above
 			RowsPerImage: uint32(h),     //nolint:gosec // G115: h validated positive above
 		},
-		&types.Extent3D{
+		&gputypes.Extent3D{
 			Width:              uint32(w), //nolint:gosec // G115: w validated positive above
 			Height:             uint32(h), //nolint:gosec // G115: h validated positive above
 			DepthOrArrayLayers: 1,

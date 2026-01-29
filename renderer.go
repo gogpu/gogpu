@@ -9,6 +9,7 @@ import (
 	_ "github.com/gogpu/gogpu/gpu/backend/native" // Register native backend
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/gputypes"
 )
 
 // texQuadUniformSize is the size of the uniform buffer for textured quads.
@@ -29,7 +30,7 @@ type Renderer struct {
 	surface  types.Surface
 
 	// Surface configuration
-	format            types.TextureFormat
+	format            gputypes.TextureFormat
 	width             uint32
 	height            uint32
 	surfaceConfigured bool // Whether surface has been configured with valid dimensions
@@ -140,7 +141,7 @@ func (r *Renderer) init() error {
 
 	// Request adapter
 	r.adapter, err = r.backend.RequestAdapter(r.instance, &types.AdapterOptions{
-		PowerPreference: types.PowerPreferenceHighPerformance,
+		PowerPreference: gputypes.PowerPreferenceHighPerformance,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
@@ -162,7 +163,7 @@ func (r *Renderer) init() error {
 	width, height := r.platform.GetSize()
 
 	// Use BGRA8Unorm which is common across platforms
-	r.format = types.TextureFormatBGRA8Unorm
+	r.format = gputypes.TextureFormatBGRA8Unorm
 
 	// Only configure surface if dimensions are valid.
 	// If dimensions are zero (window not yet visible, minimized, or timing issue),
@@ -174,11 +175,11 @@ func (r *Renderer) init() error {
 
 		r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 			Format:      r.format,
-			Usage:       types.TextureUsageRenderAttachment,
+			Usage:       gputypes.TextureUsageRenderAttachment,
 			Width:       r.width,
 			Height:      r.height,
-			AlphaMode:   types.AlphaModeOpaque,
-			PresentMode: types.PresentModeFifo, // VSync
+			AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+			PresentMode: gputypes.PresentModeFifo, // VSync
 		})
 		r.surfaceConfigured = true
 	}
@@ -202,11 +203,11 @@ func (r *Renderer) Resize(width, height int) {
 
 	r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 		Format:      r.format,
-		Usage:       types.TextureUsageRenderAttachment,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       r.width,
 		Height:      r.height,
-		AlphaMode:   types.AlphaModeOpaque,
-		PresentMode: types.PresentModeFifo,
+		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+		PresentMode: gputypes.PresentModeFifo,
 	})
 	r.surfaceConfigured = true
 }
@@ -239,11 +240,11 @@ func (r *Renderer) BeginFrame() bool {
 		if r.width > 0 && r.height > 0 {
 			r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
 				Format:      r.format,
-				Usage:       types.TextureUsageRenderAttachment,
+				Usage:       gputypes.TextureUsageRenderAttachment,
 				Width:       r.width,
 				Height:      r.height,
-				AlphaMode:   types.AlphaModeOpaque,
-				PresentMode: types.PresentModeFifo,
+				AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+				PresentMode: gputypes.PresentModeFifo,
 			})
 		}
 		return false
@@ -293,9 +294,9 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 		ColorAttachments: []types.ColorAttachment{
 			{
 				View:       r.currentView,
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: red, G: green, B: blue, A: alpha},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: red, G: green, B: blue, A: alpha},
 			},
 		},
 	})
@@ -319,7 +320,7 @@ func (r *Renderer) Size() (width, height int) {
 }
 
 // Format returns the surface texture format.
-func (r *Renderer) Format() types.TextureFormat {
+func (r *Renderer) Format() gputypes.TextureFormat {
 	return r.format
 }
 
@@ -379,9 +380,9 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 		ColorAttachments: []types.ColorAttachment{
 			{
 				View:       r.currentView,
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: clearR, G: clearG, B: clearB, A: clearA},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: clearR, G: clearG, B: clearB, A: clearA},
 			},
 		},
 	})
@@ -422,9 +423,9 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		Entries: []types.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageVertex | types.ShaderStageFragment,
-				Buffer: &types.BufferBindingLayout{
-					Type:           types.BufferBindingTypeUniform,
+				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:           gputypes.BufferBindingTypeUniform,
 					MinBindingSize: texQuadUniformSize,
 				},
 			},
@@ -440,17 +441,17 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		Entries: []types.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageFragment,
-				Sampler: &types.SamplerBindingLayout{
-					Type: types.SamplerBindingTypeFiltering,
+				Visibility: gputypes.ShaderStageFragment,
+				Sampler: &gputypes.SamplerBindingLayout{
+					Type: gputypes.SamplerBindingTypeFiltering,
 				},
 			},
 			{
 				Binding:    1,
-				Visibility: types.ShaderStageFragment,
-				Texture: &types.TextureBindingLayout{
-					SampleType:    types.TextureSampleTypeFloat,
-					ViewDimension: types.TextureViewDimension2D,
+				Visibility: gputypes.ShaderStageFragment,
+				Texture: &gputypes.TextureBindingLayout{
+					SampleType:    gputypes.TextureSampleTypeFloat,
+					ViewDimension: gputypes.TextureViewDimension2D,
 					Multisampled:  false,
 				},
 			},
@@ -477,19 +478,19 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		FragmentShader:   r.texQuadShader,
 		FragmentEntry:    "fs_main",
 		TargetFormat:     r.format,
-		Topology:         types.PrimitiveTopologyTriangleList,
-		CullMode:         types.CullModeNone,
+		Topology:         gputypes.PrimitiveTopologyTriangleList,
+		CullMode:         gputypes.CullModeNone,
 		Layout:           r.texQuadPipelineLayout,
-		Blend: &types.BlendState{
-			Color: types.BlendComponent{
-				Operation: types.BlendOperationAdd,
-				SrcFactor: types.BlendFactorSrcAlpha,
-				DstFactor: types.BlendFactorOneMinusSrcAlpha,
+		Blend: &gputypes.BlendState{
+			Color: gputypes.BlendComponent{
+				Operation: gputypes.BlendOperationAdd,
+				SrcFactor: gputypes.BlendFactorSrcAlpha,
+				DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
 			},
-			Alpha: types.BlendComponent{
-				Operation: types.BlendOperationAdd,
-				SrcFactor: types.BlendFactorOne,
-				DstFactor: types.BlendFactorOneMinusSrcAlpha,
+			Alpha: gputypes.BlendComponent{
+				Operation: gputypes.BlendOperationAdd,
+				SrcFactor: gputypes.BlendFactorOne,
+				DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
 			},
 		},
 	})
@@ -501,7 +502,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	r.texQuadUniformBuffer, err = r.backend.CreateBuffer(r.device, &types.BufferDescriptor{
 		Label: "Textured Quad Uniforms",
 		Size:  texQuadUniformSize,
-		Usage: types.BufferUsageUniform | types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create uniform buffer: %w", err)
@@ -584,9 +585,9 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	}
 
 	// Determine LoadOp based on whether frame was already cleared
-	loadOp := types.LoadOpClear
+	loadOp := gputypes.LoadOpClear
 	if r.frameCleared {
-		loadOp = types.LoadOpLoad
+		loadOp = gputypes.LoadOpLoad
 	}
 
 	// Begin render pass
@@ -595,8 +596,8 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 			{
 				View:       r.currentView,
 				LoadOp:     loadOp,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: 0, G: 0, B: 0, A: 1}, // Only used if LoadOpClear
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1}, // Only used if LoadOpClear
 			},
 		},
 	})

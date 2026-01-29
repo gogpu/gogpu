@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"github.com/gogpu/gputypes"
 	"image"
 	"image/color"
 	"testing"
@@ -11,16 +12,16 @@ import (
 func TestDefaultTextureOptions(t *testing.T) {
 	opts := DefaultTextureOptions()
 
-	if opts.MagFilter != types.FilterModeLinear {
+	if opts.MagFilter != gputypes.FilterModeLinear {
 		t.Errorf("MagFilter = %v, want FilterModeLinear", opts.MagFilter)
 	}
-	if opts.MinFilter != types.FilterModeLinear {
+	if opts.MinFilter != gputypes.FilterModeLinear {
 		t.Errorf("MinFilter = %v, want FilterModeLinear", opts.MinFilter)
 	}
-	if opts.AddressModeU != types.AddressModeClampToEdge {
+	if opts.AddressModeU != gputypes.AddressModeClampToEdge {
 		t.Errorf("AddressModeU = %v, want AddressModeClampToEdge", opts.AddressModeU)
 	}
-	if opts.AddressModeV != types.AddressModeClampToEdge {
+	if opts.AddressModeV != gputypes.AddressModeClampToEdge {
 		t.Errorf("AddressModeV = %v, want AddressModeClampToEdge", opts.AddressModeV)
 	}
 }
@@ -30,7 +31,7 @@ func TestTextureMetadata(t *testing.T) {
 	tex := &Texture{
 		width:  128,
 		height: 256,
-		format: types.TextureFormatRGBA8Unorm,
+		format: gputypes.TextureFormatRGBA8Unorm,
 	}
 
 	if tex.Width() != 128 {
@@ -45,7 +46,7 @@ func TestTextureMetadata(t *testing.T) {
 		t.Errorf("Size() = (%d, %d), want (128, 256)", w, h)
 	}
 
-	if tex.Format() != types.TextureFormatRGBA8Unorm {
+	if tex.Format() != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format() = %v, want TextureFormatRGBA8Unorm", tex.Format())
 	}
 }
@@ -97,25 +98,25 @@ func TestTextureDestroyWithNilBackend(t *testing.T) {
 func TestTextureOptionsLabel(t *testing.T) {
 	opts := TextureOptions{
 		Label:        "test-texture",
-		MagFilter:    types.FilterModeNearest,
-		MinFilter:    types.FilterModeNearest,
-		AddressModeU: types.AddressModeRepeat,
-		AddressModeV: types.AddressModeMirrorRepeat,
+		MagFilter:    gputypes.FilterModeNearest,
+		MinFilter:    gputypes.FilterModeNearest,
+		AddressModeU: gputypes.AddressModeRepeat,
+		AddressModeV: gputypes.AddressModeMirrorRepeat,
 	}
 
 	if opts.Label != "test-texture" {
 		t.Errorf("Label = %q, want %q", opts.Label, "test-texture")
 	}
-	if opts.MagFilter != types.FilterModeNearest {
+	if opts.MagFilter != gputypes.FilterModeNearest {
 		t.Errorf("MagFilter = %v, want FilterModeNearest", opts.MagFilter)
 	}
-	if opts.MinFilter != types.FilterModeNearest {
+	if opts.MinFilter != gputypes.FilterModeNearest {
 		t.Errorf("MinFilter = %v, want FilterModeNearest", opts.MinFilter)
 	}
-	if opts.AddressModeU != types.AddressModeRepeat {
+	if opts.AddressModeU != gputypes.AddressModeRepeat {
 		t.Errorf("AddressModeU = %v, want AddressModeRepeat", opts.AddressModeU)
 	}
-	if opts.AddressModeV != types.AddressModeMirrorRepeat {
+	if opts.AddressModeV != gputypes.AddressModeMirrorRepeat {
 		t.Errorf("AddressModeV = %v, want AddressModeMirrorRepeat", opts.AddressModeV)
 	}
 }

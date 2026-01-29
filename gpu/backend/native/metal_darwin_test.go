@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform/darwin"
+	"github.com/gogpu/gputypes"
 )
 
 func TestMain(m *testing.M) {
@@ -63,12 +64,12 @@ func TestMetalBackendSurfaceLifecycleDarwin(t *testing.T) {
 	}
 
 	backend.ConfigureSurface(surface, device, &types.SurfaceConfig{
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       64,
 		Height:      64,
-		AlphaMode:   types.AlphaModeOpaque,
-		PresentMode: types.PresentModeFifo,
+		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+		PresentMode: gputypes.PresentModeFifo,
 	})
 
 	surfTex := acquireSurfaceTexture(t, backend, surface)

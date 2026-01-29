@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform/darwin"
+	"github.com/gogpu/gputypes"
 )
 
 func TestMain(m *testing.M) {
@@ -71,7 +72,7 @@ func TestNativeBackendInterfaceDarwin(t *testing.T) {
 	}
 
 	adapter, err := backend.RequestAdapter(instance, &types.AdapterOptions{
-		PowerPreference: types.PowerPreferenceHighPerformance,
+		PowerPreference: gputypes.PowerPreferenceHighPerformance,
 	})
 	if err != nil {
 		t.Fatalf("RequestAdapter failed: %v", err)
@@ -88,12 +89,12 @@ func TestNativeBackendInterfaceDarwin(t *testing.T) {
 	}
 
 	backend.ConfigureSurface(surface, device, &types.SurfaceConfig{
-		Format:      types.TextureFormatBGRA8Unorm,
-		Usage:       types.TextureUsageRenderAttachment,
+		Format:      gputypes.TextureFormatBGRA8Unorm,
+		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       64,
 		Height:      64,
-		AlphaMode:   types.AlphaModeOpaque,
-		PresentMode: types.PresentModeFifo,
+		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+		PresentMode: gputypes.PresentModeFifo,
 	})
 
 	surfTex := acquireSurfaceTexture(t, backend, surface)
@@ -116,7 +117,7 @@ func TestNativeBackendInterfaceDarwin(t *testing.T) {
 		VertexEntryPoint: "vs_main",
 		FragmentShader:   shader,
 		FragmentEntry:    "fs_main",
-		TargetFormat:     types.TextureFormatBGRA8Unorm,
+		TargetFormat:     gputypes.TextureFormatBGRA8Unorm,
 	})
 	if err != nil {
 		t.Fatalf("CreateRenderPipeline failed: %v", err)
@@ -131,9 +132,9 @@ func TestNativeBackendInterfaceDarwin(t *testing.T) {
 		ColorAttachments: []types.ColorAttachment{
 			{
 				View:       view,
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: 0.1, G: 0.2, B: 0.3, A: 1.0},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0.1, G: 0.2, B: 0.3, A: 1.0},
 			},
 		},
 	})
@@ -145,7 +146,7 @@ func TestNativeBackendInterfaceDarwin(t *testing.T) {
 	backend.Draw(pass, 3, 1, 0, 0)
 	backend.SetBindGroup(pass, 0, 0, nil)
 	backend.SetVertexBuffer(pass, 0, 0, 0, 0)
-	backend.SetIndexBuffer(pass, 0, types.IndexFormatUint16, 0, 0)
+	backend.SetIndexBuffer(pass, 0, gputypes.IndexFormatUint16, 0, 0)
 	backend.DrawIndexed(pass, 0, 1, 0, 0, 0)
 
 	backend.EndRenderPass(pass)

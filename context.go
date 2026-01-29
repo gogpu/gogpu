@@ -2,7 +2,7 @@ package gogpu
 
 import (
 	"github.com/gogpu/gogpu/gmath"
-	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Context provides drawing operations for a single frame.
@@ -59,7 +59,7 @@ func (c *Context) AspectRatio() float32 {
 
 // Format returns the surface texture format.
 // Useful for creating compatible pipelines.
-func (c *Context) Format() types.TextureFormat {
+func (c *Context) Format() gputypes.TextureFormat {
 	return c.renderer.Format()
 }
 

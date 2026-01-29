@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Common backend errors.
@@ -72,7 +73,7 @@ type Backend interface {
 	// Texture operations
 	CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error)
 	CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView
-	WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *types.Extent3D)
+	WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *gputypes.Extent3D)
 
 	// Sampler operations
 	CreateSampler(device types.Device, desc *types.SamplerDescriptor) (types.Sampler, error)
@@ -91,7 +92,7 @@ type Backend interface {
 	// Render pass operations (extended)
 	SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32)
 	SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64)
-	SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format types.IndexFormat, offset, size uint64)
+	SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format gputypes.IndexFormat, offset, size uint64)
 	DrawIndexed(pass types.RenderPass, indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32)
 
 	// Resource release

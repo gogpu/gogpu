@@ -215,7 +215,7 @@ gogpu/
 ├── gpu/
 │   ├── backend.go      # Backend interface (120+ methods)
 │   ├── registry.go     # Auto-registration
-│   ├── types/          # WebGPU types
+│   ├── types/          # GoGPU-specific types (handles, descriptors)
 │   └── backend/
 │       ├── native/     # Pure Go backend
 │       └── rust/       # Rust FFI backend
@@ -224,6 +224,8 @@ gogpu/
 ├── input/              # Input types
 └── internal/platform/  # OS windowing (Win32, Cocoa, X11)
 ```
+
+**Note:** WebGPU types (TextureFormat, BufferUsage, etc.) are imported directly from `github.com/gogpu/gputypes`.
 
 ### wgpu
 

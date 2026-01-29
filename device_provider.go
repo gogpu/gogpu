@@ -3,6 +3,7 @@ package gogpu
 import (
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // DeviceProvider provides access to GPU resources for external libraries.
@@ -35,7 +36,7 @@ type DeviceProvider interface {
 	Queue() types.Queue
 
 	// SurfaceFormat returns the preferred texture format for rendering.
-	SurfaceFormat() types.TextureFormat
+	SurfaceFormat() gputypes.TextureFormat
 }
 
 // rendererDeviceProvider wraps Renderer to implement DeviceProvider.
@@ -59,7 +60,7 @@ func (p *rendererDeviceProvider) Queue() types.Queue {
 }
 
 // SurfaceFormat returns the preferred texture format.
-func (p *rendererDeviceProvider) SurfaceFormat() types.TextureFormat {
+func (p *rendererDeviceProvider) SurfaceFormat() gputypes.TextureFormat {
 	return p.renderer.format
 }
 

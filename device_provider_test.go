@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"github.com/gogpu/gputypes"
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu"
@@ -14,7 +15,7 @@ func TestDeviceProviderInterface(t *testing.T) {
 		Backend() gpu.Backend
 		Device() types.Device
 		Queue() types.Queue
-		SurfaceFormat() types.TextureFormat
+		SurfaceFormat() gputypes.TextureFormat
 	} = DeviceProvider(nil)
 }
 
@@ -41,7 +42,7 @@ func TestRendererDeviceProviderMethods(t *testing.T) {
 		backend: nil, // We test nil handling
 		device:  types.Device(42),
 		queue:   types.Queue(43),
-		format:  types.TextureFormatBGRA8Unorm,
+		format:  gputypes.TextureFormatBGRA8Unorm,
 	}
 
 	provider := &rendererDeviceProvider{renderer: renderer}
@@ -64,8 +65,8 @@ func TestRendererDeviceProviderMethods(t *testing.T) {
 	})
 
 	t.Run("SurfaceFormat", func(t *testing.T) {
-		if provider.SurfaceFormat() != types.TextureFormatBGRA8Unorm {
-			t.Errorf("SurfaceFormat() = %v, want %v", provider.SurfaceFormat(), types.TextureFormatBGRA8Unorm)
+		if provider.SurfaceFormat() != gputypes.TextureFormatBGRA8Unorm {
+			t.Errorf("SurfaceFormat() = %v, want %v", provider.SurfaceFormat(), gputypes.TextureFormatBGRA8Unorm)
 		}
 	})
 }

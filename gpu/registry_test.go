@@ -1,6 +1,7 @@
 package gpu
 
 import (
+	"github.com/gogpu/gputypes"
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu/types"
@@ -54,7 +55,7 @@ func (m *mockBackend) CreateTexture(types.Device, *types.TextureDescriptor) (typ
 func (m *mockBackend) CreateTextureView(types.Texture, *types.TextureViewDescriptor) types.TextureView {
 	return 1
 }
-func (m *mockBackend) WriteTexture(types.Queue, *types.ImageCopyTexture, []byte, *types.ImageDataLayout, *types.Extent3D) {
+func (m *mockBackend) WriteTexture(types.Queue, *types.ImageCopyTexture, []byte, *types.ImageDataLayout, *gputypes.Extent3D) {
 }
 func (m *mockBackend) CreateSampler(types.Device, *types.SamplerDescriptor) (types.Sampler, error) {
 	return 1, nil
@@ -74,7 +75,7 @@ func (m *mockBackend) CreatePipelineLayout(types.Device, *types.PipelineLayoutDe
 }
 func (m *mockBackend) SetBindGroup(types.RenderPass, uint32, types.BindGroup, []uint32)       {}
 func (m *mockBackend) SetVertexBuffer(types.RenderPass, uint32, types.Buffer, uint64, uint64) {}
-func (m *mockBackend) SetIndexBuffer(types.RenderPass, types.Buffer, types.IndexFormat, uint64, uint64) {
+func (m *mockBackend) SetIndexBuffer(types.RenderPass, types.Buffer, gputypes.IndexFormat, uint64, uint64) {
 }
 func (m *mockBackend) DrawIndexed(types.RenderPass, uint32, uint32, uint32, int32, uint32) {}
 func (m *mockBackend) ReleaseTexture(types.Texture)                                        {}
