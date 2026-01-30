@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-01-30
+
+### Added
+
+- **gpucontext.TextureDrawer implementation** — Cross-package texture rendering
+  - `Context.AsTextureDrawer()` — Returns adapter for gpucontext.TextureDrawer interface
+  - `TextureCreator.NewTextureFromRGBA()` — Create textures from RGBA pixel data
+  - Enables gg/ggcanvas integration without direct gogpu imports
+
+### Changed
+
+- **Update gpucontext v0.3.1 → v0.4.0** — Texture, Touch interfaces
+- **Update wgpu v0.11.2 → v0.12.0** — BufferRowLength fix (aspect ratio)
+- **Update naga v0.8.4 → v0.9.0** — Shader compiler improvements
+
 ## [0.13.3] - 2026-01-29
 
 ### Changed

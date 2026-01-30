@@ -25,12 +25,13 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.13.3
+## Current State: v0.14.0
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - DeviceProvider/EventSource for UI integration
+- **gpucontext.TextureDrawer** — Cross-package texture rendering
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Clean architecture with shared gputypes
 - webgpu.h spec-compliant enum values
@@ -39,10 +40,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Upcoming
 
-### v0.14.0 — Integration & Polish
-- [ ] GGCanvas integration type
-- [ ] RenderTo method for offscreen rendering
+### v0.15.0 — API Polish
 - [ ] Adapter.GetInfo() API
+- [ ] RenderTo method for offscreen rendering
+- [ ] Performance optimizations
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee
@@ -110,7 +111,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.13.x** | 2026-01 | Multi-thread architecture, gputypes integration |
+| **v0.14.x** | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |
+| v0.13.x | 2026-01 | Multi-thread architecture, gputypes integration |
 | v0.12.x | 2026-01 | gpucontext integration (DeviceProvider, EventSource) |
 | v0.11.x | 2026-01 | Pure Go default, non-blocking GPU acquire |
 | v0.10.x | 2026-01 | DeviceProvider interface, compute shaders |

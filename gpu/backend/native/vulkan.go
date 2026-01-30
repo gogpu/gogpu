@@ -713,33 +713,34 @@ func (b *Backend) CreateBindGroup(device types.Device, desc *types.BindGroupDesc
 		}
 
 		// Determine which resource is set and convert using NativeHandle
-		if entry.Buffer != 0 {
+		switch {
+		case entry.Buffer != 0:
 			halBuffer, bufErr := b.registry.GetBuffer(entry.Buffer)
 			if bufErr != nil {
 				return 0, fmt.Errorf("native: invalid buffer in bind group entry %d: %w", i, bufErr)
 			}
 			halEntries[i].Resource = gputypes.BufferBinding{
-				Buffer: uintptr(halBuffer.NativeHandle()),
+				Buffer: halBuffer.NativeHandle(),
 				Offset: entry.Offset,
 				Size:   entry.Size,
 			}
-		} else if entry.Sampler != 0 {
+		case entry.Sampler != 0:
 			halSampler, sampErr := b.registry.GetSampler(entry.Sampler)
 			if sampErr != nil {
 				return 0, fmt.Errorf("native: invalid sampler in bind group entry %d: %w", i, sampErr)
 			}
 			halEntries[i].Resource = gputypes.SamplerBinding{
-				Sampler: uintptr(halSampler.NativeHandle()),
+				Sampler: halSampler.NativeHandle(),
 			}
-		} else if entry.TextureView != 0 {
+		case entry.TextureView != 0:
 			halView, viewErr := b.registry.GetTextureView(entry.TextureView)
 			if viewErr != nil {
 				return 0, fmt.Errorf("native: invalid texture view in bind group entry %d: %w", i, viewErr)
 			}
 			halEntries[i].Resource = gputypes.TextureViewBinding{
-				TextureView: uintptr(halView.NativeHandle()),
+				TextureView: halView.NativeHandle(),
 			}
-		} else {
+		default:
 			return 0, fmt.Errorf("native: bind group entry %d has no resource", i)
 		}
 	}
