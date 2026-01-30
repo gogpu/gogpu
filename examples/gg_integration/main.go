@@ -65,13 +65,13 @@ func main() {
 		}
 
 		// Draw 2D graphics using gg API
-		ctx := canvas.Context()
+		cc := canvas.Context()
 		cw, ch := canvas.Size()
-		renderFrame(ctx, frame, cw, ch)
+		renderFrame(cc, frame, cw, ch)
 
 		// Debug: save first frame to PNG
 		if frame == 0 {
-			_ = ctx.SavePNG("debug_canvas.png")
+			_ = cc.SavePNG("debug_canvas.png")
 			log.Printf("Saved debug_canvas.png (%dx%d)", cw, ch)
 		}
 		frame++
@@ -103,10 +103,10 @@ func main() {
 }
 
 // renderFrame draws animated 2D graphics using gg
-func renderFrame(ctx *gg.Context, frame int, width, height int) {
+func renderFrame(cc *gg.Context, frame int, width, height int) {
 	// Clear with transparent background
-	ctx.SetRGBA(0, 0, 0, 0)
-	ctx.Clear()
+	cc.SetRGBA(0, 0, 0, 0)
+	cc.Clear()
 
 	// Animation parameters
 	t := float64(frame) * 0.02
@@ -122,17 +122,17 @@ func renderFrame(ctx *gg.Context, frame int, width, height int) {
 		// Gradient color based on angle
 		hue := float64(i) / 12.0
 		r, g, b := hsvToRGB(hue, 0.8, 1.0)
-		ctx.SetRGB(r, g, b)
+		cc.SetRGB(r, g, b)
 
 		// Draw filled circle
 		circleRadius := 30 + 10*math.Sin(t*2+float64(i))
-		ctx.DrawCircle(x, y, circleRadius)
-		ctx.Fill()
+		cc.DrawCircle(x, y, circleRadius)
+		cc.Fill()
 	}
 
 	// Draw center text
-	ctx.SetRGB(1, 1, 1)
-	ctx.DrawStringAnchored("gg + gogpu", centerX, centerY, 0.5, 0.5)
+	cc.SetRGB(1, 1, 1)
+	cc.DrawStringAnchored("gg + gogpu", centerX, centerY, 0.5, 0.5)
 }
 
 // hsvToRGB converts HSV to RGB

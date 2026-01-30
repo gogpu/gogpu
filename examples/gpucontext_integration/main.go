@@ -86,10 +86,10 @@ func main() {
 		//     import "github.com/gogpu/gg/integration/ggcanvas"
 		//
 		//     canvas, _ := ggcanvas.New(provider, 800, 600)
-		//     ctx := canvas.Context()
-		//     ctx.SetRGB(1, 0, 0)
-		//     ctx.DrawCircle(400, 300, 100)
-		//     ctx.Fill()
+		//     cc := canvas.Context()
+		//     cc.SetRGB(1, 0, 0)
+		//     cc.DrawCircle(400, 300, 100)
+		//     cc.Fill()
 		//     canvas.RenderTo(dc)
 		//
 		// See examples/gg_integration for a complete working example.
