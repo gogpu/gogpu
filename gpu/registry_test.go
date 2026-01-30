@@ -106,6 +106,7 @@ func (m *mockBackend) UnmapBuffer(types.Buffer)                                 
 func (m *mockBackend) ReleaseComputePipeline(types.ComputePipeline)                 {}
 func (m *mockBackend) ReleaseComputePass(types.ComputePass)                         {}
 func (m *mockBackend) ReleaseShaderModule(types.ShaderModule)                       {}
+func (m *mockBackend) ResetCommandPool(types.Device)                                {}
 
 func TestRegisterBackend(t *testing.T) {
 	// Clean up any existing backends first

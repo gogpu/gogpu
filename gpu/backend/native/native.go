@@ -296,5 +296,10 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 	// Not implemented
 }
 
+// ResetCommandPool resets the command pool to reclaim command buffer memory.
+func (b *Backend) ResetCommandPool(device types.Device) {
+	// Not implemented - platform-specific backends override this
+}
+
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)

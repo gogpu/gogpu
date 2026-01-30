@@ -268,6 +268,11 @@ func (r *Renderer) EndFrame() {
 	// can invalidate the drawable, causing blank frames.
 	r.backend.Present(r.surface)
 
+	// Reset command pool to reclaim memory from submitted command buffers.
+	// This is a temporary solution that blocks on GPU completion.
+	// TODO: Implement per-frame command pools for non-blocking cleanup.
+	r.backend.ResetCommandPool(r.device)
+
 	// Release resources after presentation
 	if r.currentView != 0 {
 		r.backend.ReleaseTextureView(r.currentView)

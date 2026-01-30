@@ -109,6 +109,12 @@ type Backend interface {
 	ReleaseComputePipeline(pipeline types.ComputePipeline)
 	ReleaseComputePass(pass types.ComputePass)
 	ReleaseShaderModule(module types.ShaderModule)
+
+	// Maintenance operations
+	// ResetCommandPool resets the command pool to reclaim command buffer memory.
+	// This should be called periodically (e.g., after Present) when GPU is idle.
+	// Note: This is a temporary solution; proper fix requires per-frame command pools.
+	ResetCommandPool(device types.Device)
 }
 
 // activeBackend is the currently selected backend.

@@ -35,6 +35,17 @@ func main() {
 	var frame int
 
 	app.OnDraw(func(dc *gogpu.Context) {
+		// Print backend on first frame
+		if frame == 0 {
+			log.Printf("Backend: %s", dc.Backend())
+		}
+
+		// Get actual window size
+		w, h := dc.Width(), dc.Height()
+		if w <= 0 || h <= 0 {
+			return
+		}
+
 		// Clear window background
 		dc.ClearColor(gmath.Hex(0x1a1a2e))
 
@@ -46,15 +57,23 @@ func main() {
 			}
 
 			var err error
-			canvas, err = ggcanvas.New(provider, width, height)
+			canvas, err = ggcanvas.New(provider, w, h)
 			if err != nil {
 				log.Fatalf("Failed to create canvas: %v", err)
 			}
+			log.Printf("Canvas created: %dx%d", w, h)
 		}
 
 		// Draw 2D graphics using gg API
 		ctx := canvas.Context()
-		renderFrame(ctx, frame)
+		cw, ch := canvas.Size()
+		renderFrame(ctx, frame, cw, ch)
+
+		// Debug: save first frame to PNG
+		if frame == 0 {
+			_ = ctx.SavePNG("debug_canvas.png")
+			log.Printf("Saved debug_canvas.png (%dx%d)", cw, ch)
+		}
 		frame++
 
 		// Render canvas to gogpu window (handles texture upload automatically)
@@ -84,14 +103,14 @@ func main() {
 }
 
 // renderFrame draws animated 2D graphics using gg
-func renderFrame(ctx *gg.Context, frame int) {
+func renderFrame(ctx *gg.Context, frame int, width, height int) {
 	// Clear with transparent background
 	ctx.SetRGBA(0, 0, 0, 0)
 	ctx.Clear()
 
 	// Animation parameters
 	t := float64(frame) * 0.02
-	centerX, centerY := 400.0, 300.0
+	centerX, centerY := float64(width)/2, float64(height)/2
 
 	// Draw animated circles
 	for i := 0; i < 12; i++ {

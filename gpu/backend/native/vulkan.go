@@ -958,5 +958,26 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 	b.registry.UnregisterShaderModule(module)
 }
 
+// ResetCommandPool resets the command pool to reclaim command buffer memory.
+// This waits for GPU to finish all operations first (blocking).
+func (b *Backend) ResetCommandPool(device types.Device) {
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return
+	}
+
+	// Type assert to vulkan.Device to access ResetCommandPool
+	type commandPoolResetter interface {
+		WaitIdle() error
+		ResetCommandPool() error
+	}
+	if resetter, ok := halDevice.(commandPoolResetter); ok {
+		// Wait for GPU to finish using command buffers
+		_ = resetter.WaitIdle()
+		// Reset the pool to reclaim memory
+		_ = resetter.ResetCommandPool()
+	}
+}
+
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)

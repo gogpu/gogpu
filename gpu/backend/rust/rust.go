@@ -943,5 +943,12 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 	}
 }
 
+// ResetCommandPool resets the command pool to reclaim command buffer memory.
+// wgpu-native handles command buffer lifecycle automatically, so this is a no-op.
+func (b *Backend) ResetCommandPool(device types.Device) {
+	// wgpu-native manages command buffer memory internally.
+	// No explicit reset needed.
+}
+
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)

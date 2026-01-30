@@ -700,5 +700,12 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 	b.registry.UnregisterShaderModule(module)
 }
 
+// ResetCommandPool resets the command pool to reclaim command buffer memory.
+// Metal uses automatic command buffer management, so this is a no-op.
+func (b *Backend) ResetCommandPool(device types.Device) {
+	// Metal manages command buffers automatically through MTLCommandQueue.
+	// No explicit reset needed.
+}
+
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)
