@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/gogpu/gogpu/gpu"
 	"github.com/gogpu/gogpu/gpu/types"
@@ -463,21 +464,36 @@ func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence 
 		return 0
 	}
 
-	// TODO: Pass fence to HAL when fence support is implemented.
-	// For now, submit without fence signaling.
-	_ = halQueue.Submit([]hal.CommandBuffer{halCmdBuffer}, nil, 0)
+	// Get HAL fence if provided
+	var halFence hal.Fence
+	if fence != 0 {
+		halFence, _ = b.registry.GetFence(fence)
+	}
+
+	// Submit with fence signaling
+	_ = halQueue.Submit([]hal.CommandBuffer{halCmdBuffer}, halFence, fenceValue)
 
 	return types.SubmissionIndex(fenceValue)
 }
 
-// GetFenceValue returns the current signaled value of a fence.
-// Use this for non-blocking completion checks in the submission tracking pattern.
-// Returns 0 if fence is invalid or not yet signaled.
-func (b *Backend) GetFenceValue(fence types.Fence) (uint64, error) {
-	// TODO: Implement fence value query using HAL when available.
-	// For now, return the highest possible value to indicate all work is complete.
-	// This is a safe default that won't block.
-	return ^uint64(0), nil
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (b *Backend) GetFenceStatus(fence types.Fence) (bool, error) {
+	halFence, err := b.registry.GetFence(fence)
+	if err != nil {
+		return false, err
+	}
+
+	deviceHandle, err := b.registry.GetFenceDevice(fence)
+	if err != nil {
+		return false, err
+	}
+
+	halDevice, err := b.registry.GetDevice(deviceHandle)
+	if err != nil {
+		return false, err
+	}
+
+	return halDevice.GetFenceStatus(halFence)
 }
 
 // SetPipeline sets the render pipeline.
@@ -997,25 +1013,66 @@ func (b *Backend) ResetCommandPool(device types.Device) {
 
 // CreateFence creates a new fence in the unsignaled state.
 func (b *Backend) CreateFence(device types.Device) (types.Fence, error) {
-	// TODO: Implement fence creation using HAL when available
-	return 0, gpu.ErrNotImplemented
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return 0, fmt.Errorf("native: invalid device: %w", err)
+	}
+
+	halFence, err := halDevice.CreateFence()
+	if err != nil {
+		return 0, fmt.Errorf("native: failed to create fence: %w", err)
+	}
+
+	handle := b.registry.RegisterFence(halFence, device)
+	return handle, nil
 }
 
 // WaitFence waits for a fence to be signaled.
 func (b *Backend) WaitFence(device types.Device, fence types.Fence, timeout uint64) (bool, error) {
-	// TODO: Implement fence waiting using HAL when available
-	return true, nil // Always "signaled" for now
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return false, fmt.Errorf("native: invalid device: %w", err)
+	}
+
+	halFence, err := b.registry.GetFence(fence)
+	if err != nil {
+		return false, fmt.Errorf("native: invalid fence: %w", err)
+	}
+
+	// Convert timeout from nanoseconds to time.Duration.
+	// Max int64 is ~292 years in nanoseconds - any practical timeout is safe.
+	return halDevice.Wait(halFence, 0, time.Duration(timeout)) //nolint:gosec // G115: practical timeouts won't overflow
 }
 
 // ResetFence resets a fence to the unsignaled state.
 func (b *Backend) ResetFence(device types.Device, fence types.Fence) error {
-	// TODO: Implement fence reset using HAL when available
-	return nil
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return fmt.Errorf("native: invalid device: %w", err)
+	}
+
+	halFence, err := b.registry.GetFence(fence)
+	if err != nil {
+		return fmt.Errorf("native: invalid fence: %w", err)
+	}
+
+	return halDevice.ResetFence(halFence)
 }
 
 // DestroyFence destroys a fence.
 func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
-	// TODO: Implement fence destruction using HAL when available
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return
+	}
+
+	halFence, err := b.registry.GetFence(fence)
+	if err != nil {
+		return
+	}
+
+	halDevice.DestroyFence(halFence)
+	b.registry.UnregisterFence(fence)
 }
 
 // Ensure Backend implements gpu.Backend.

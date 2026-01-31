@@ -112,11 +112,9 @@ func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence 
 	return 0
 }
 
-// GetFenceValue returns the current signaled value of a fence.
-// Use this for non-blocking completion checks in the submission tracking pattern.
-// Returns 0 if fence is invalid or not yet signaled.
-func (b *Backend) GetFenceValue(fence types.Fence) (uint64, error) {
-	return 0, gpu.ErrNotImplemented
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (b *Backend) GetFenceStatus(fence types.Fence) (bool, error) {
+	return true, nil // Always signaled for stub
 }
 
 // SetPipeline sets the render pipeline.

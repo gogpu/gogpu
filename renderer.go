@@ -40,11 +40,11 @@ type Renderer struct {
 	currentView    types.TextureView
 	frameCleared   bool // Whether the frame has been cleared (for LoadOp selection)
 
-	// Submission tracking (wgpu-rs pattern)
-	// Uses a single fence that is signaled with increasing values.
-	// Non-blocking: check fence value to determine completed submissions.
-	fence             types.Fence
-	submissionTracker *SubmissionTracker
+	// FencePool for non-blocking submission tracking (wgpu-rs pattern).
+	// Each submission gets its own fence from the pool.
+	// Non-blocking: poll fence status to determine completed submissions.
+	fencePool         *FencePool
+	nextSubmissionIdx types.SubmissionIndex
 
 	// Built-in pipelines
 	trianglePipeline types.RenderPipeline
@@ -166,16 +166,9 @@ func (r *Renderer) init() error {
 	// Get queue
 	r.queue = r.backend.GetQueue(r.device)
 
-	// Create fence and submission tracker for non-blocking frame completion.
-	// This follows the wgpu-rs pattern where Submit signals the fence with
-	// incrementing values, allowing non-blocking completion checks.
-	r.fence, err = r.backend.CreateFence(r.device)
-	if err != nil {
-		// Fence creation is optional - not all backends support it yet.
-		// The renderer will work without it, just without submission tracking.
-		r.fence = 0
-	}
-	r.submissionTracker = NewSubmissionTracker()
+	// Create fence pool for non-blocking submission tracking (wgpu-rs pattern).
+	// Each submission gets its own fence, enabling true non-blocking completion checks.
+	r.fencePool = NewFencePool(r.backend, r.device)
 
 	// Configure surface
 	// Get current window dimensions. On some platforms (especially macOS),
@@ -289,19 +282,15 @@ func (r *Renderer) EndFrame() {
 	// can invalidate the drawable, causing blank frames.
 	r.backend.Present(r.surface)
 
-	// Non-blocking submission tracking: check what's completed.
-	// This is the wgpu-rs pattern where we triage completed submissions
-	// without blocking on the GPU.
-	if r.fence != 0 {
-		fenceValue, _ := r.backend.GetFenceValue(r.fence)
-		r.submissionTracker.Triage(fenceValue)
-	}
-
-	// Reset command pool only if we have completed submissions to recycle.
-	// This reduces unnecessary blocking when GPU is still processing.
-	// TODO: Implement per-frame command pools for fully non-blocking cleanup.
-	if r.submissionTracker.CompletedIndex() > 0 {
-		r.backend.ResetCommandPool(r.device)
+	// Non-blocking submission tracking: poll completed submissions.
+	// This is the wgpu-rs FencePool pattern where each submission has its own fence.
+	// PollCompleted checks all active fences and recycles completed ones.
+	if r.fencePool != nil {
+		completedIdx := r.fencePool.PollCompleted()
+		// Reset command pool only if we have completed submissions to recycle.
+		if completedIdx > 0 {
+			r.backend.ResetCommandPool(r.device)
+		}
 	}
 
 	// Release resources after presentation
@@ -343,14 +332,39 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 	commands := r.backend.FinishEncoder(encoder)
 	r.backend.ReleaseCommandEncoder(encoder)
 
-	// Submit with submission tracking
-	subIdx := r.submissionTracker.NextIndex()
-	r.backend.Submit(r.queue, commands, r.fence, uint64(subIdx))
-	r.submissionTracker.Track(subIdx)
+	// Submit with fence tracking
+	r.submitWithFence(commands)
 	r.backend.ReleaseCommandBuffer(commands)
 
 	// Mark frame as cleared for subsequent draw calls
 	r.frameCleared = true
+}
+
+// submitWithFence submits commands with a fence for non-blocking tracking.
+func (r *Renderer) submitWithFence(commands types.CommandBuffer) {
+	if r.fencePool == nil {
+		// No fence pool - submit without tracking
+		r.backend.Submit(r.queue, commands, 0, 0)
+		return
+	}
+
+	// Acquire fence from pool
+	fence, err := r.fencePool.AcquireFence()
+	if err != nil {
+		// Fence acquisition failed - submit without tracking
+		r.backend.Submit(r.queue, commands, 0, 0)
+		return
+	}
+
+	// Increment submission index
+	r.nextSubmissionIdx++
+	subIdx := r.nextSubmissionIdx
+
+	// Submit with fence signaling
+	r.backend.Submit(r.queue, commands, fence, uint64(subIdx))
+
+	// Track the submission
+	r.fencePool.TrackSubmission(subIdx, fence)
 }
 
 // Size returns the current render target size.
@@ -435,10 +449,8 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	commands := r.backend.FinishEncoder(encoder)
 	r.backend.ReleaseCommandEncoder(encoder)
 
-	// Submit with submission tracking
-	subIdx := r.submissionTracker.NextIndex()
-	r.backend.Submit(r.queue, commands, r.fence, uint64(subIdx))
-	r.submissionTracker.Track(subIdx)
+	// Submit with fence tracking
+	r.submitWithFence(commands)
 	r.backend.ReleaseCommandBuffer(commands)
 
 	return nil
@@ -685,10 +697,8 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	commands := r.backend.FinishEncoder(encoder)
 	r.backend.ReleaseCommandEncoder(encoder)
 
-	// Submit with submission tracking
-	subIdx := r.submissionTracker.NextIndex()
-	r.backend.Submit(r.queue, commands, r.fence, uint64(subIdx))
-	r.submissionTracker.Track(subIdx)
+	// Submit with fence tracking
+	r.submitWithFence(commands)
 	r.backend.ReleaseCommandBuffer(commands)
 
 	// Mark frame as having content (for subsequent LoadOp)
@@ -701,11 +711,10 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 func (r *Renderer) Destroy() {
 	// Wait for all GPU work to complete before destroying resources.
 	// This prevents crashes from destroying resources that are still in use.
-	if r.fence != 0 {
-		latestIdx := r.submissionTracker.LatestIndex()
-		// Wait up to 1 second for GPU to finish (should be nearly instant)
-		_, _ = r.backend.WaitFence(r.device, r.fence, 1_000_000_000)
-		r.submissionTracker.Triage(uint64(latestIdx))
+	// FencePool.Destroy() waits for all active submissions to complete.
+	if r.fencePool != nil {
+		r.fencePool.Destroy()
+		r.fencePool = nil
 	}
 
 	if r.currentView != 0 {
@@ -749,12 +758,6 @@ func (r *Renderer) Destroy() {
 		r.texQuadShader = 0
 	}
 	// Note: texQuadPipeline is not released separately as it's managed by backend
-
-	// Destroy fence used for submission tracking
-	if r.fence != 0 {
-		r.backend.DestroyFence(r.device, r.fence)
-		r.fence = 0
-	}
 
 	// Backend handles cleanup of all resources
 	if r.backend != nil {

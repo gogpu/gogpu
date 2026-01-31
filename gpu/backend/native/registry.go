@@ -41,6 +41,8 @@ type ResourceRegistry struct {
 	bindGroupLayouts map[types.BindGroupLayout]hal.BindGroupLayout
 	bindGroups       map[types.BindGroup]hal.BindGroup
 	pipelineLayouts  map[types.PipelineLayout]hal.PipelineLayout
+	fences           map[types.Fence]hal.Fence
+	fenceDevices     map[types.Fence]types.Device // Track device for fence operations
 
 	// Device → Queue mapping (one queue per device in WebGPU)
 	deviceQueues map[types.Device]types.Queue
@@ -69,6 +71,7 @@ type ResourceRegistry struct {
 	bindGroupLayoutHandles map[hal.BindGroupLayout]types.BindGroupLayout
 	bindGroupHandles       map[hal.BindGroup]types.BindGroup
 	pipelineLayoutHandles  map[hal.PipelineLayout]types.PipelineLayout
+	fenceHandles           map[hal.Fence]types.Fence
 }
 
 // NewResourceRegistry creates a new empty registry.
@@ -92,6 +95,8 @@ func NewResourceRegistry() *ResourceRegistry {
 		bindGroupLayouts: make(map[types.BindGroupLayout]hal.BindGroupLayout),
 		bindGroups:       make(map[types.BindGroup]hal.BindGroup),
 		pipelineLayouts:  make(map[types.PipelineLayout]hal.PipelineLayout),
+		fences:           make(map[types.Fence]hal.Fence),
+		fenceDevices:     make(map[types.Fence]types.Device),
 
 		deviceQueues:           make(map[types.Device]types.Queue),
 		surfaceDevices:         make(map[types.Surface]types.Device),
@@ -114,6 +119,7 @@ func NewResourceRegistry() *ResourceRegistry {
 		bindGroupLayoutHandles: make(map[hal.BindGroupLayout]types.BindGroupLayout),
 		bindGroupHandles:       make(map[hal.BindGroup]types.BindGroup),
 		pipelineLayoutHandles:  make(map[hal.PipelineLayout]types.PipelineLayout),
+		fenceHandles:           make(map[hal.Fence]types.Fence),
 	}
 	// Start handles at 1 to avoid zero confusion
 	r.nextHandle.Store(1)
@@ -788,4 +794,53 @@ func (r *ResourceRegistry) Clear() {
 	r.bindGroupLayoutHandles = make(map[hal.BindGroupLayout]types.BindGroupLayout)
 	r.bindGroupHandles = make(map[hal.BindGroup]types.BindGroup)
 	r.pipelineLayoutHandles = make(map[hal.PipelineLayout]types.PipelineLayout)
+	r.fenceHandles = make(map[hal.Fence]types.Fence)
+	r.fences = make(map[types.Fence]hal.Fence)
+	r.fenceDevices = make(map[types.Fence]types.Device)
+}
+
+// --- Fence ---
+
+// RegisterFence registers a fence with its associated device.
+func (r *ResourceRegistry) RegisterFence(fence hal.Fence, device types.Device) types.Fence {
+	handle := types.Fence(r.newHandle())
+	r.mu.Lock()
+	r.fences[handle] = fence
+	r.fenceDevices[handle] = device
+	r.fenceHandles[fence] = handle
+	r.mu.Unlock()
+	return handle
+}
+
+// GetFence returns the HAL fence for a handle.
+func (r *ResourceRegistry) GetFence(handle types.Fence) (hal.Fence, error) {
+	r.mu.RLock()
+	fence, ok := r.fences[handle]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("invalid fence handle: %d", handle)
+	}
+	return fence, nil
+}
+
+// GetFenceDevice returns the device associated with a fence.
+func (r *ResourceRegistry) GetFenceDevice(handle types.Fence) (types.Device, error) {
+	r.mu.RLock()
+	device, ok := r.fenceDevices[handle]
+	r.mu.RUnlock()
+	if !ok {
+		return 0, fmt.Errorf("invalid fence handle: %d", handle)
+	}
+	return device, nil
+}
+
+// UnregisterFence removes a fence from the registry.
+func (r *ResourceRegistry) UnregisterFence(handle types.Fence) {
+	r.mu.Lock()
+	if fence, ok := r.fences[handle]; ok {
+		delete(r.fences, handle)
+		delete(r.fenceDevices, handle)
+		delete(r.fenceHandles, fence)
+	}
+	r.mu.Unlock()
 }

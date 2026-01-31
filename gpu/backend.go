@@ -125,10 +125,9 @@ type Backend interface {
 	// CreateFence creates a new fence in the unsignaled state.
 	CreateFence(device types.Device) (types.Fence, error)
 
-	// GetFenceValue returns the current signaled value of a fence.
-	// Use this for non-blocking completion checks in the submission tracking pattern.
-	// Returns 0 if fence is invalid or not yet signaled.
-	GetFenceValue(fence types.Fence) (uint64, error)
+	// GetFenceStatus returns true if the fence is signaled (non-blocking).
+	// Use this for polling completion without blocking.
+	GetFenceStatus(fence types.Fence) (bool, error)
 
 	// WaitFence waits for a fence to be signaled.
 	// Returns true if signaled, false if timed out.

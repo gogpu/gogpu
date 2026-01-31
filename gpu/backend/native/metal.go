@@ -419,14 +419,10 @@ func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence 
 	return types.SubmissionIndex(fenceValue)
 }
 
-// GetFenceValue returns the current signaled value of a fence.
-// Use this for non-blocking completion checks in the submission tracking pattern.
-// Returns 0 if fence is invalid or not yet signaled.
-func (b *Backend) GetFenceValue(fence types.Fence) (uint64, error) {
-	// TODO: Implement fence value query using Metal events when available.
-	// For now, return the highest possible value to indicate all work is complete.
-	// This is a safe default that won't block.
-	return ^uint64(0), nil
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (b *Backend) GetFenceStatus(fence types.Fence) (bool, error) {
+	// TODO: Implement fence status using Metal events when available.
+	return true, nil // Always signaled for now
 }
 
 // attachDrawableToCommandBuffer attaches the current drawable to a command buffer.

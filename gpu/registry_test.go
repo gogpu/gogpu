@@ -49,7 +49,7 @@ func (m *mockBackend) FinishEncoder(types.CommandEncoder) types.CommandBuffer { 
 func (m *mockBackend) Submit(types.Queue, types.CommandBuffer, types.Fence, uint64) types.SubmissionIndex {
 	return 1
 }
-func (m *mockBackend) GetFenceValue(types.Fence) (uint64, error)             { return 1, nil }
+func (m *mockBackend) GetFenceStatus(types.Fence) (bool, error)              { return true, nil }
 func (m *mockBackend) SetPipeline(types.RenderPass, types.RenderPipeline)    {}
 func (m *mockBackend) Draw(types.RenderPass, uint32, uint32, uint32, uint32) {}
 func (m *mockBackend) CreateTexture(types.Device, *types.TextureDescriptor) (types.Texture, error) {

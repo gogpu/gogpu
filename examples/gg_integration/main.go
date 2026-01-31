@@ -69,10 +69,10 @@ func main() {
 		cw, ch := canvas.Size()
 		renderFrame(cc, frame, cw, ch)
 
-		// Debug: save first frame to PNG
+		// Debug: save first frame to PNG (in tmp/ to avoid polluting repo)
 		if frame == 0 {
-			_ = cc.SavePNG("debug_canvas.png")
-			log.Printf("Saved debug_canvas.png (%dx%d)", cw, ch)
+			_ = cc.SavePNG("tmp/debug_canvas.png")
+			log.Printf("Saved tmp/debug_canvas.png (%dx%d)", cw, ch)
 		}
 		frame++
 
