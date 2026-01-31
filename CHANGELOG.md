@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fence-based GPU Synchronization** (EVENT-002)
+  - `Fence` and `SubmissionIndex` types in `gpu/types`
+  - Backend interface extended with fence operations:
+    - `CreateFence`, `WaitFence`, `ResetFence`, `DestroyFence`
+    - `GetFenceValue` for non-blocking completion check
+  - `SubmissionTracker` following wgpu-rs LifetimeTracker pattern
+  - Non-blocking `EndFrame` with submission-indexed fence signaling
+
+- **Renderer Memory Optimizations** (EVENT-002)
+  - Pre-allocated uniform buffer for texture rendering (eliminates 32 bytes/frame GC)
+  - Bind group caching per texture (eliminates per-draw GPU allocations)
+
 - **Unified Event System** — Complete input handling overhaul
   - **W3C Pointer Events Level 3** — Unified mouse/touch/pen input
   - **Gesture Recognition** — Vello-style pinch, rotate, pan detection
