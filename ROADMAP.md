@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.14.0 → v0.15.0 (in development)
+## Current State: v0.15.0
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
@@ -36,7 +36,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Clean architecture with shared gputypes
 - webgpu.h spec-compliant enum values
 
-### v0.15.0 Features (in development)
+### v0.15.0 Features
 - ✅ **Render-on-Demand Mode** — Power-efficient UI (8% GPU vs 100%)
 - ✅ **Unified Event System** — W3C Pointer Events, Gesture Recognition
 - ✅ **Fence-based GPU Sync** — Non-blocking frame completion
@@ -117,7 +117,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.14.x** | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |
+| **v0.15.x** | 2026-02 | Render-on-demand, Event System, Fence sync, Texture.BytesPerPixel |
+| v0.14.x | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |
 | v0.13.x | 2026-01 | Multi-thread architecture, gputypes integration |
 | v0.12.x | 2026-01 | gpucontext integration (DeviceProvider, EventSource) |
 | v0.11.x | 2026-01 | Pure Go default, non-blocking GPU acquire |
