@@ -767,6 +767,273 @@ func (id ID) GetRect(sel SEL) NSRect {
 	}
 }
 
+// GetPoint receives an NSPoint return value from a method like locationInWindow.
+// On x86_64 and ARM64, NSPoint (two doubles) is returned in registers.
+func (id ID) GetPoint(sel SEL) NSPoint {
+	if id == 0 || sel == 0 {
+		return NSPoint{}
+	}
+
+	if err := initRuntime(); err != nil {
+		return NSPoint{}
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		nsSizeType, // NSPoint and NSSize have the same layout (two doubles)
+		argTypes,
+	)
+	if err != nil {
+		return NSPoint{}
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+	}
+
+	// Result buffer for the struct
+	var result [2]float64
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return NSPoint{}
+	}
+
+	return NSPoint{X: result[0], Y: result[1]}
+}
+
+// GetUint64 receives a uint64 return value from a method.
+func (id ID) GetUint64(sel SEL) uint64 {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.UInt64TypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+	}
+
+	var result uint64
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return result
+}
+
+// GetInt64 receives an int64 return value from a method.
+func (id ID) GetInt64(sel SEL) int64 {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.SInt64TypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+	}
+
+	var result int64
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return result
+}
+
+// GetDouble receives a float64 return value from a method.
+func (id ID) GetDouble(sel SEL) float64 {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.DoubleTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+	}
+
+	var result float64
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSendFpret,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return result
+}
+
+// GetBool receives a bool return value from a method.
+func (id ID) GetBool(sel SEL) bool {
+	if id == 0 || sel == 0 {
+		return false
+	}
+
+	if err := initRuntime(); err != nil {
+		return false
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.UInt8TypeDescriptor, // BOOL is char (uint8)
+		argTypes,
+	)
+	if err != nil {
+		return false
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+	}
+
+	var result uint8
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return false
+	}
+
+	return result != 0
+}
+
 // SendSize sends a message with an NSSize argument.
 func (id ID) SendSize(sel SEL, size NSSize) ID {
 	if id == 0 || sel == 0 {

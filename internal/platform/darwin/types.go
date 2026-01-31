@@ -103,15 +103,40 @@ type NSEventType NSUInteger
 
 // Event types.
 const (
-	NSEventTypeLeftMouseDown  NSEventType = 1
-	NSEventTypeLeftMouseUp    NSEventType = 2
-	NSEventTypeRightMouseDown NSEventType = 3
-	NSEventTypeRightMouseUp   NSEventType = 4
-	NSEventTypeMouseMoved     NSEventType = 5
-	NSEventTypeKeyDown        NSEventType = 10
-	NSEventTypeKeyUp          NSEventType = 11
-	NSEventTypeFlagsChanged   NSEventType = 12
-	NSEventTypeScrollWheel    NSEventType = 22
+	NSEventTypeLeftMouseDown      NSEventType = 1
+	NSEventTypeLeftMouseUp        NSEventType = 2
+	NSEventTypeRightMouseDown     NSEventType = 3
+	NSEventTypeRightMouseUp       NSEventType = 4
+	NSEventTypeMouseMoved         NSEventType = 5
+	NSEventTypeLeftMouseDragged   NSEventType = 6
+	NSEventTypeRightMouseDragged  NSEventType = 7
+	NSEventTypeMouseEntered       NSEventType = 8
+	NSEventTypeMouseExited        NSEventType = 9
+	NSEventTypeKeyDown            NSEventType = 10
+	NSEventTypeKeyUp              NSEventType = 11
+	NSEventTypeFlagsChanged       NSEventType = 12
+	NSEventTypeScrollWheel        NSEventType = 22
+	NSEventTypeOtherMouseDown     NSEventType = 25
+	NSEventTypeOtherMouseUp       NSEventType = 26
+	NSEventTypeOtherMouseDragged  NSEventType = 27
+)
+
+// NSEventModifierFlags are the modifier key flags in an NSEvent.
+type NSEventModifierFlags NSUInteger
+
+// Modifier flags.
+const (
+	// NSEventModifierFlagShift indicates Shift key is pressed.
+	NSEventModifierFlagShift NSEventModifierFlags = 1 << 17
+
+	// NSEventModifierFlagControl indicates Control key is pressed.
+	NSEventModifierFlagControl NSEventModifierFlags = 1 << 18
+
+	// NSEventModifierFlagOption indicates Option (Alt) key is pressed.
+	NSEventModifierFlagOption NSEventModifierFlags = 1 << 19
+
+	// NSEventModifierFlagCommand indicates Command (Super) key is pressed.
+	NSEventModifierFlagCommand NSEventModifierFlags = 1 << 20
 )
 
 // NSApplicationActivationPolicy specifies how an app is activated.

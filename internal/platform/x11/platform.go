@@ -5,6 +5,9 @@ package x11
 import (
 	"fmt"
 	"sync"
+	"time"
+
+	"github.com/gogpu/gpucontext"
 )
 
 // Config holds configuration for creating a platform window.
@@ -60,11 +63,28 @@ type Platform struct {
 	pendingWidth  int
 	pendingHeight int
 	hasResize     bool
+
+	// Mouse state tracking
+	mouseX        float64
+	mouseY        float64
+	buttons       gpucontext.Buttons
+	modifiers     gpucontext.Modifiers
+	mouseInWindow bool
+
+	// Callbacks for pointer and scroll events
+	pointerCallback func(gpucontext.PointerEvent)
+	scrollCallback  func(gpucontext.ScrollEvent)
+	callbackMu      sync.RWMutex
+
+	// Timestamp reference for event timing
+	startTime time.Time
 }
 
 // NewPlatform creates a new X11 platform instance.
 func NewPlatform() *Platform {
-	return &Platform{}
+	return &Platform{
+		startTime: time.Now(),
+	}
 }
 
 // Init creates the X11 window.
@@ -234,6 +254,8 @@ func (p *Platform) PollEvents() PlatformEvent {
 }
 
 // handleEvent processes a single X11 event.
+//
+//nolint:maintidx // Event dispatch functions inherently have high complexity
 func (p *Platform) handleEvent(event Event) PlatformEvent {
 	switch e := event.(type) {
 	case *ConfigureNotifyEvent:
@@ -281,9 +303,209 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		p.mu.Lock()
 		p.configured = true
 		p.mu.Unlock()
+
+	case *MotionNotifyEvent:
+		p.handleMotionNotify(e)
+
+	case *ButtonPressEvent:
+		p.handleButtonPress(e)
+
+	case *ButtonReleaseEvent:
+		p.handleButtonRelease(e)
+
+	case *EnterNotifyEvent:
+		p.handleEnterNotify(e)
+
+	case *LeaveNotifyEvent:
+		p.handleLeaveNotify(e)
 	}
 
 	return PlatformEvent{Type: EventTypeNone}
+}
+
+// handleMotionNotify processes mouse movement events.
+func (p *Platform) handleMotionNotify(e *MotionNotifyEvent) {
+	x := float64(e.EventX)
+	y := float64(e.EventY)
+
+	p.mu.Lock()
+	p.mouseX = x
+	p.mouseY = y
+	p.buttons = extractButtons(e.State)
+	p.modifiers = extractModifiers(e.State)
+	p.mu.Unlock()
+
+	ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
+	p.dispatchPointerEvent(ev)
+}
+
+// handleButtonPress processes mouse button press events.
+func (p *Platform) handleButtonPress(e *ButtonPressEvent) {
+	x := float64(e.EventX)
+	y := float64(e.EventY)
+
+	// Scroll buttons (4-7) are emulated as button presses in X11
+	if isScrollButton(e.Detail) {
+		p.handleScrollButton(e.Detail, x, y, e.State)
+		return
+	}
+
+	// Regular button press
+	button := x11ButtonToButton(e.Detail)
+	if button == gpucontext.ButtonNone {
+		return // Unknown button
+	}
+
+	p.mu.Lock()
+	p.mouseX = x
+	p.mouseY = y
+	// Update button state - button is now pressed
+	switch button {
+	case gpucontext.ButtonLeft:
+		p.buttons |= gpucontext.ButtonsLeft
+	case gpucontext.ButtonMiddle:
+		p.buttons |= gpucontext.ButtonsMiddle
+	case gpucontext.ButtonRight:
+		p.buttons |= gpucontext.ButtonsRight
+	case gpucontext.ButtonX1:
+		p.buttons |= gpucontext.ButtonsX1
+	case gpucontext.ButtonX2:
+		p.buttons |= gpucontext.ButtonsX2
+	}
+	p.modifiers = extractModifiers(e.State)
+	p.mu.Unlock()
+
+	ev := p.createPointerEvent(gpucontext.PointerDown, button, x, y, e.State)
+	// Add the pressed button to the buttons mask for PointerDown
+	switch button {
+	case gpucontext.ButtonLeft:
+		ev.Buttons |= gpucontext.ButtonsLeft
+	case gpucontext.ButtonMiddle:
+		ev.Buttons |= gpucontext.ButtonsMiddle
+	case gpucontext.ButtonRight:
+		ev.Buttons |= gpucontext.ButtonsRight
+	case gpucontext.ButtonX1:
+		ev.Buttons |= gpucontext.ButtonsX1
+	case gpucontext.ButtonX2:
+		ev.Buttons |= gpucontext.ButtonsX2
+	}
+	p.dispatchPointerEvent(ev)
+}
+
+// handleButtonRelease processes mouse button release events.
+func (p *Platform) handleButtonRelease(e *ButtonReleaseEvent) {
+	x := float64(e.EventX)
+	y := float64(e.EventY)
+
+	// Scroll button releases are ignored (scroll is handled on press)
+	if isScrollButton(e.Detail) {
+		return
+	}
+
+	// Regular button release
+	button := x11ButtonToButton(e.Detail)
+	if button == gpucontext.ButtonNone {
+		return // Unknown button
+	}
+
+	p.mu.Lock()
+	p.mouseX = x
+	p.mouseY = y
+	// Update button state - button is now released
+	switch button {
+	case gpucontext.ButtonLeft:
+		p.buttons &^= gpucontext.ButtonsLeft
+	case gpucontext.ButtonMiddle:
+		p.buttons &^= gpucontext.ButtonsMiddle
+	case gpucontext.ButtonRight:
+		p.buttons &^= gpucontext.ButtonsRight
+	case gpucontext.ButtonX1:
+		p.buttons &^= gpucontext.ButtonsX1
+	case gpucontext.ButtonX2:
+		p.buttons &^= gpucontext.ButtonsX2
+	}
+	p.modifiers = extractModifiers(e.State)
+	p.mu.Unlock()
+
+	ev := p.createPointerEvent(gpucontext.PointerUp, button, x, y, e.State)
+	p.dispatchPointerEvent(ev)
+}
+
+// handleScrollButton processes X11 scroll button events (buttons 4-7).
+func (p *Platform) handleScrollButton(detail uint8, x, y float64, state uint16) {
+	var deltaX, deltaY float64
+
+	switch detail {
+	case x11ButtonScrollUp:
+		deltaY = -1.0 // Scroll up = negative deltaY (content moves up)
+	case x11ButtonScrollDown:
+		deltaY = 1.0 // Scroll down = positive deltaY (content moves down)
+	case x11ButtonScrollLeft:
+		deltaX = -1.0 // Scroll left = negative deltaX
+	case x11ButtonScrollRight:
+		deltaX = 1.0 // Scroll right = positive deltaX
+	default:
+		return
+	}
+
+	ev := gpucontext.ScrollEvent{
+		X:         x,
+		Y:         y,
+		DeltaX:    deltaX,
+		DeltaY:    deltaY,
+		DeltaMode: gpucontext.ScrollDeltaLine,
+		Modifiers: extractModifiers(state),
+		Timestamp: p.eventTimestamp(),
+	}
+	p.dispatchScrollEvent(ev)
+}
+
+// handleEnterNotify processes pointer enter events.
+func (p *Platform) handleEnterNotify(e *EnterNotifyEvent) {
+	x := float64(e.EventX)
+	y := float64(e.EventY)
+
+	p.mu.Lock()
+	p.mouseX = x
+	p.mouseY = y
+	p.buttons = extractButtons(e.State)
+	p.modifiers = extractModifiers(e.State)
+	p.mouseInWindow = true
+	p.mu.Unlock()
+
+	ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, x, y, e.State)
+	p.dispatchPointerEvent(ev)
+}
+
+// handleLeaveNotify processes pointer leave events.
+func (p *Platform) handleLeaveNotify(e *LeaveNotifyEvent) {
+	x := float64(e.EventX)
+	y := float64(e.EventY)
+
+	p.mu.Lock()
+	p.mouseX = x
+	p.mouseY = y
+	p.buttons = extractButtons(e.State)
+	p.modifiers = extractModifiers(e.State)
+	p.mouseInWindow = false
+	p.mu.Unlock()
+
+	ev := gpucontext.PointerEvent{
+		Type:        gpucontext.PointerLeave,
+		PointerID:   1,
+		X:           x,
+		Y:           y,
+		Pressure:    0,
+		Width:       1,
+		Height:      1,
+		PointerType: gpucontext.PointerTypeMouse,
+		IsPrimary:   true,
+		Button:      gpucontext.ButtonNone,
+		Buttons:     extractButtons(e.State),
+		Modifiers:   extractModifiers(e.State),
+		Timestamp:   p.eventTimestamp(),
+	}
+	p.dispatchPointerEvent(ev)
 }
 
 // ShouldClose returns true if window close was requested.
@@ -329,4 +551,171 @@ func (p *Platform) Destroy() {
 
 	p.atoms = nil
 	p.keymap = nil
+}
+
+// SetPointerCallback registers a callback for pointer events.
+func (p *Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	p.callbackMu.Lock()
+	p.pointerCallback = fn
+	p.callbackMu.Unlock()
+}
+
+// SetScrollCallback registers a callback for scroll events.
+func (p *Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	p.callbackMu.Lock()
+	p.scrollCallback = fn
+	p.callbackMu.Unlock()
+}
+
+// dispatchPointerEvent dispatches a pointer event to the registered callback.
+func (p *Platform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
+	p.callbackMu.RLock()
+	callback := p.pointerCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(ev)
+	}
+}
+
+// dispatchScrollEvent dispatches a scroll event to the registered callback.
+func (p *Platform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
+	p.callbackMu.RLock()
+	callback := p.scrollCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(ev)
+	}
+}
+
+// eventTimestamp returns the event timestamp as duration since start.
+func (p *Platform) eventTimestamp() time.Duration {
+	return time.Since(p.startTime)
+}
+
+// X11 button constants.
+const (
+	x11ButtonLeft       = 1
+	x11ButtonMiddle     = 2
+	x11ButtonRight      = 3
+	x11ButtonScrollUp   = 4
+	x11ButtonScrollDown = 5
+	x11ButtonScrollLeft = 6
+	x11ButtonScrollRight = 7
+	x11ButtonX1         = 8
+	x11ButtonX2         = 9
+)
+
+// X11 modifier mask constants.
+const (
+	x11ModShift   = 1 << 0 // Bit 0: Shift
+	x11ModLock    = 1 << 1 // Bit 1: Caps Lock
+	x11ModControl = 1 << 2 // Bit 2: Control
+	x11ModMod1    = 1 << 3 // Bit 3: Mod1 (Alt)
+	x11ModMod2    = 1 << 4 // Bit 4: Mod2 (Num Lock)
+	x11ModMod3    = 1 << 5 // Bit 5: Mod3
+	x11ModMod4    = 1 << 6 // Bit 6: Mod4 (Super/Windows)
+	x11ModMod5    = 1 << 7 // Bit 7: Mod5
+	x11ModButton1 = 1 << 8 // Button1 (left) pressed
+	x11ModButton2 = 1 << 9 // Button2 (middle) pressed
+	x11ModButton3 = 1 << 10 // Button3 (right) pressed
+)
+
+// extractModifiers extracts keyboard modifiers from X11 state.
+func extractModifiers(state uint16) gpucontext.Modifiers {
+	var mods gpucontext.Modifiers
+	if state&x11ModShift != 0 {
+		mods |= gpucontext.ModShift
+	}
+	if state&x11ModControl != 0 {
+		mods |= gpucontext.ModControl
+	}
+	if state&x11ModMod1 != 0 {
+		mods |= gpucontext.ModAlt
+	}
+	if state&x11ModMod4 != 0 {
+		mods |= gpucontext.ModSuper
+	}
+	if state&x11ModLock != 0 {
+		mods |= gpucontext.ModCapsLock
+	}
+	if state&x11ModMod2 != 0 {
+		mods |= gpucontext.ModNumLock
+	}
+	return mods
+}
+
+// extractButtons extracts button state from X11 state.
+func extractButtons(state uint16) gpucontext.Buttons {
+	var btns gpucontext.Buttons
+	if state&x11ModButton1 != 0 {
+		btns |= gpucontext.ButtonsLeft
+	}
+	if state&x11ModButton2 != 0 {
+		btns |= gpucontext.ButtonsMiddle
+	}
+	if state&x11ModButton3 != 0 {
+		btns |= gpucontext.ButtonsRight
+	}
+	return btns
+}
+
+// x11ButtonToButton converts X11 button number to gpucontext.Button.
+func x11ButtonToButton(detail uint8) gpucontext.Button {
+	switch detail {
+	case x11ButtonLeft:
+		return gpucontext.ButtonLeft
+	case x11ButtonMiddle:
+		return gpucontext.ButtonMiddle
+	case x11ButtonRight:
+		return gpucontext.ButtonRight
+	case x11ButtonX1:
+		return gpucontext.ButtonX1
+	case x11ButtonX2:
+		return gpucontext.ButtonX2
+	default:
+		return gpucontext.ButtonNone
+	}
+}
+
+// isScrollButton returns true if the X11 button is a scroll button (4-7).
+func isScrollButton(detail uint8) bool {
+	return detail >= x11ButtonScrollUp && detail <= x11ButtonScrollRight
+}
+
+// createPointerEvent creates a PointerEvent with common fields filled in.
+func (p *Platform) createPointerEvent(
+	eventType gpucontext.PointerEventType,
+	button gpucontext.Button,
+	x, y float64,
+	state uint16,
+) gpucontext.PointerEvent {
+	buttons := extractButtons(state)
+	modifiers := extractModifiers(state)
+
+	// For button down/up, set pressure based on button state
+	var pressure float32
+	if eventType == gpucontext.PointerDown || buttons != gpucontext.ButtonsNone {
+		pressure = 0.5 // Default pressure for mouse
+	}
+
+	return gpucontext.PointerEvent{
+		Type:        eventType,
+		PointerID:   1, // Mouse always has ID 1
+		X:           x,
+		Y:           y,
+		Pressure:    pressure,
+		TiltX:       0,
+		TiltY:       0,
+		Twist:       0,
+		Width:       1,
+		Height:      1,
+		PointerType: gpucontext.PointerTypeMouse,
+		IsPrimary:   true,
+		Button:      button,
+		Buttons:     buttons,
+		Modifiers:   modifiers,
+		Timestamp:   p.eventTimestamp(),
+	}
 }

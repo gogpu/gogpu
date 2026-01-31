@@ -109,6 +109,8 @@ var selectors struct {
 	scrollingDeltaX             SEL
 	scrollingDeltaY             SEL
 	hasPreciseScrollingDeltas   SEL
+	deltaX                      SEL
+	deltaY                      SEL
 
 	// NSNotificationCenter
 	defaultCenter                 SEL
@@ -244,6 +246,8 @@ func initSelectors() {
 		selectors.scrollingDeltaX = RegisterSelector("scrollingDeltaX")
 		selectors.scrollingDeltaY = RegisterSelector("scrollingDeltaY")
 		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
+		selectors.deltaX = RegisterSelector("deltaX")
+		selectors.deltaY = RegisterSelector("deltaY")
 
 		// NSNotificationCenter
 		selectors.defaultCenter = RegisterSelector("defaultCenter")

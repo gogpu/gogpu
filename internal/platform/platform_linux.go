@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gogpu/gogpu/internal/platform/wayland"
 	"github.com/gogpu/gogpu/internal/platform/x11"
@@ -40,6 +41,20 @@ type waylandPlatform struct {
 	pendingWidth  int
 	pendingHeight int
 	hasResize     bool
+
+	// Pointer state tracking
+	pointerX  float64
+	pointerY  float64
+	buttons   gpucontext.Buttons
+	modifiers gpucontext.Modifiers
+	pointerMu sync.RWMutex
+	pointerIn bool // True when pointer is inside our surface
+	startTime time.Time
+
+	// Callbacks for pointer and scroll events
+	pointerCallback func(gpucontext.PointerEvent)
+	scrollCallback  func(gpucontext.ScrollEvent)
+	callbackMu      sync.RWMutex
 }
 
 // x11Platform wraps x11.Platform to implement the Platform interface.
@@ -52,14 +67,18 @@ type x11Platform struct {
 func newPlatform() Platform {
 	// Prefer Wayland if WAYLAND_DISPLAY is set
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		return &waylandPlatform{}
+		return &waylandPlatform{
+			startTime: time.Now(),
+		}
 	}
 	// Fall back to X11 if DISPLAY is set
 	if os.Getenv("DISPLAY") != "" {
 		return &x11Platform{inner: x11.NewPlatform()}
 	}
 	// Default to Wayland (will fail in Init if not available)
-	return &waylandPlatform{}
+	return &waylandPlatform{
+		startTime: time.Now(),
+	}
 }
 
 // Init creates the X11 window.
@@ -114,15 +133,13 @@ func (p *x11Platform) InSizeMove() bool {
 }
 
 // SetPointerCallback registers a callback for pointer events.
-// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
 func (p *x11Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	// No-op stub - X11 implementation in Phase 4
+	p.inner.SetPointerCallback(fn)
 }
 
 // SetScrollCallback registers a callback for scroll events.
-// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
 func (p *x11Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	// No-op stub - X11 implementation in Phase 4
+	p.inner.SetScrollCallback(fn)
 }
 
 // Init creates the Wayland window.
@@ -355,10 +372,280 @@ func (p *waylandPlatform) bindSeat() error {
 		pointer, err := p.seat.GetPointer()
 		if err == nil {
 			p.pointer = pointer
+			p.setupPointerHandlers()
 		}
 	}
 
 	return nil
+}
+
+// setupPointerHandlers configures Wayland pointer event handlers.
+func (p *waylandPlatform) setupPointerHandlers() {
+	if p.pointer == nil {
+		return
+	}
+
+	// Handle pointer enter (mouse enters our surface)
+	p.pointer.SetEnterHandler(func(event *wayland.PointerEnterEvent) {
+		// Check if this is our surface
+		if p.surface == nil || event.Surface != p.surface.ID() {
+			return
+		}
+
+		p.pointerMu.Lock()
+		p.pointerX = event.SurfaceX
+		p.pointerY = event.SurfaceY
+		p.pointerIn = true
+		p.pointerMu.Unlock()
+
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerEnter,
+			PointerID:   1, // Mouse always has ID 1
+			X:           event.SurfaceX,
+			Y:           event.SurfaceY,
+			Pressure:    0,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeMouse,
+			IsPrimary:   true,
+			Button:      gpucontext.ButtonNone,
+			Buttons:     p.getButtons(),
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	// Handle pointer leave (mouse leaves our surface)
+	p.pointer.SetLeaveHandler(func(event *wayland.PointerLeaveEvent) {
+		// Check if this is our surface
+		if p.surface == nil || event.Surface != p.surface.ID() {
+			return
+		}
+
+		p.pointerMu.Lock()
+		x := p.pointerX
+		y := p.pointerY
+		p.pointerIn = false
+		p.pointerMu.Unlock()
+
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerLeave,
+			PointerID:   1,
+			X:           x,
+			Y:           y,
+			Pressure:    0,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeMouse,
+			IsPrimary:   true,
+			Button:      gpucontext.ButtonNone,
+			Buttons:     p.getButtons(),
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	// Handle pointer motion
+	p.pointer.SetMotionHandler(func(event *wayland.PointerMotionEvent) {
+		p.pointerMu.Lock()
+		if !p.pointerIn {
+			p.pointerMu.Unlock()
+			return
+		}
+		p.pointerX = event.SurfaceX
+		p.pointerY = event.SurfaceY
+		buttons := p.buttons
+		p.pointerMu.Unlock()
+
+		// Pressure is 0.5 if any button is pressed, 0 otherwise
+		var pressure float32
+		if buttons != gpucontext.ButtonsNone {
+			pressure = 0.5
+		}
+
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerMove,
+			PointerID:   1,
+			X:           event.SurfaceX,
+			Y:           event.SurfaceY,
+			Pressure:    pressure,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeMouse,
+			IsPrimary:   true,
+			Button:      gpucontext.ButtonNone,
+			Buttons:     buttons,
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	// Handle pointer button events
+	p.pointer.SetButtonHandler(func(event *wayland.PointerButtonEvent) {
+		p.pointerMu.Lock()
+		if !p.pointerIn {
+			p.pointerMu.Unlock()
+			return
+		}
+
+		// Map Linux evdev button code to gpucontext button
+		button := mapWaylandButton(event.Button)
+		buttonMask := buttonToMask(button)
+
+		// Update button state
+		if event.State == wayland.PointerButtonStatePressed {
+			p.buttons |= buttonMask
+		} else {
+			p.buttons &^= buttonMask
+		}
+
+		buttons := p.buttons
+		x := p.pointerX
+		y := p.pointerY
+		p.pointerMu.Unlock()
+
+		// Determine event type
+		var eventType gpucontext.PointerEventType
+		if event.State == wayland.PointerButtonStatePressed {
+			eventType = gpucontext.PointerDown
+		} else {
+			eventType = gpucontext.PointerUp
+		}
+
+		// Pressure is 0.5 for button down, based on button state for up
+		var pressure float32
+		if eventType == gpucontext.PointerDown || buttons != gpucontext.ButtonsNone {
+			pressure = 0.5
+		}
+
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        eventType,
+			PointerID:   1,
+			X:           x,
+			Y:           y,
+			Pressure:    pressure,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeMouse,
+			IsPrimary:   true,
+			Button:      button,
+			Buttons:     buttons,
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	// Handle scroll (axis) events
+	p.pointer.SetAxisHandler(func(event *wayland.PointerAxisEvent) {
+		p.pointerMu.Lock()
+		if !p.pointerIn {
+			p.pointerMu.Unlock()
+			return
+		}
+		x := p.pointerX
+		y := p.pointerY
+		p.pointerMu.Unlock()
+
+		var deltaX, deltaY float64
+
+		// Map Wayland axis to scroll delta
+		// Axis 0 = vertical scroll, Axis 1 = horizontal scroll
+		// Wayland: positive = down/right
+		// gpucontext ScrollEvent: positive = down/right (same convention)
+		switch event.Axis {
+		case wayland.PointerAxisVerticalScroll:
+			deltaY = event.Value
+		case wayland.PointerAxisHorizontalScroll:
+			deltaX = event.Value
+		}
+
+		p.dispatchScrollEvent(gpucontext.ScrollEvent{
+			X:         x,
+			Y:         y,
+			DeltaX:    deltaX,
+			DeltaY:    deltaY,
+			DeltaMode: gpucontext.ScrollDeltaPixel, // Wayland provides pixel values
+			Modifiers: p.getModifiers(),
+			Timestamp: p.eventTimestamp(),
+		})
+	})
+}
+
+// mapWaylandButton maps a Linux evdev button code to gpucontext.Button.
+func mapWaylandButton(button uint32) gpucontext.Button {
+	switch button {
+	case wayland.ButtonLeft: // 0x110 (BTN_LEFT)
+		return gpucontext.ButtonLeft
+	case wayland.ButtonRight: // 0x111 (BTN_RIGHT)
+		return gpucontext.ButtonRight
+	case wayland.ButtonMiddle: // 0x112 (BTN_MIDDLE)
+		return gpucontext.ButtonMiddle
+	case wayland.ButtonSide: // 0x113 (BTN_SIDE) - maps to X1 (back)
+		return gpucontext.ButtonX1
+	case wayland.ButtonExtra: // 0x114 (BTN_EXTRA) - maps to X2 (forward)
+		return gpucontext.ButtonX2
+	default:
+		return gpucontext.ButtonNone
+	}
+}
+
+// buttonToMask converts a Button to its Buttons bitmask.
+func buttonToMask(button gpucontext.Button) gpucontext.Buttons {
+	switch button {
+	case gpucontext.ButtonLeft:
+		return gpucontext.ButtonsLeft
+	case gpucontext.ButtonRight:
+		return gpucontext.ButtonsRight
+	case gpucontext.ButtonMiddle:
+		return gpucontext.ButtonsMiddle
+	case gpucontext.ButtonX1:
+		return gpucontext.ButtonsX1
+	case gpucontext.ButtonX2:
+		return gpucontext.ButtonsX2
+	default:
+		return gpucontext.ButtonsNone
+	}
+}
+
+// getButtons returns the current button state (thread-safe).
+func (p *waylandPlatform) getButtons() gpucontext.Buttons {
+	p.pointerMu.RLock()
+	defer p.pointerMu.RUnlock()
+	return p.buttons
+}
+
+// getModifiers returns the current modifier state (thread-safe).
+func (p *waylandPlatform) getModifiers() gpucontext.Modifiers {
+	p.pointerMu.RLock()
+	defer p.pointerMu.RUnlock()
+	return p.modifiers
+}
+
+// eventTimestamp returns the event timestamp as duration since start.
+func (p *waylandPlatform) eventTimestamp() time.Duration {
+	return time.Since(p.startTime)
+}
+
+// dispatchPointerEvent dispatches a pointer event to the registered callback.
+func (p *waylandPlatform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
+	p.callbackMu.RLock()
+	callback := p.pointerCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(ev)
+	}
+}
+
+// dispatchScrollEvent dispatches a scroll event to the registered callback.
+func (p *waylandPlatform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
+	p.callbackMu.RLock()
+	callback := p.scrollCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(ev)
+	}
 }
 
 // PollEvents processes pending Wayland events.
@@ -504,13 +791,15 @@ func (p *waylandPlatform) InSizeMove() bool {
 }
 
 // SetPointerCallback registers a callback for pointer events.
-// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
 func (p *waylandPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	// No-op stub - Wayland implementation in Phase 4
+	p.callbackMu.Lock()
+	p.pointerCallback = fn
+	p.callbackMu.Unlock()
 }
 
 // SetScrollCallback registers a callback for scroll events.
-// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
 func (p *waylandPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	// No-op stub - Wayland implementation in Phase 4
+	p.callbackMu.Lock()
+	p.scrollCallback = fn
+	p.callbackMu.Unlock()
 }
