@@ -7,8 +7,9 @@ import (
 // eventSourceAdapter bridges gogpu to gpucontext.EventSource interface.
 // This enables UI frameworks to receive input events from gogpu.
 //
-// It also implements PointerEventSource and ScrollEventSource for W3C-compliant
-// unified pointer events and detailed scroll events.
+// It also implements PointerEventSource, ScrollEventSource, and GestureEventSource
+// for W3C-compliant unified pointer events, detailed scroll events, and Vello-style
+// gesture events.
 type eventSourceAdapter struct {
 	app *App
 
@@ -31,6 +32,12 @@ type eventSourceAdapter struct {
 
 	// Registered callbacks for ScrollEventSource
 	onScrollEvent func(gpucontext.ScrollEvent)
+
+	// Registered callbacks for GestureEventSource
+	onGesture func(gpucontext.GestureEvent)
+
+	// Gesture recognizer for computing gesture deltas from pointer events
+	gestureRecognizer *GestureRecognizer
 }
 
 // OnKeyPress registers a callback for key press events.
@@ -120,6 +127,28 @@ func (e *eventSourceAdapter) OnScrollEvent(fn func(gpucontext.ScrollEvent)) {
 	e.onScrollEvent = fn
 }
 
+// OnGesture registers a callback for gesture events.
+// This provides Vello-style per-frame gesture recognition for multi-touch
+// interactions like pinch-to-zoom, rotation, and panning.
+//
+// Gesture events are computed once per frame from accumulated pointer events,
+// providing smooth, predictable gesture values without jitter.
+//
+// Use this when you need:
+//   - Pinch-to-zoom (ZoomDelta)
+//   - Two-finger rotation (RotationDelta)
+//   - Two-finger pan (TranslationDelta)
+//   - Pinch type classification (horizontal/vertical/proportional)
+//
+// See gpucontext.GestureEvent for event details.
+func (e *eventSourceAdapter) OnGesture(fn func(gpucontext.GestureEvent)) {
+	e.onGesture = fn
+	// Initialize gesture recognizer on first registration
+	if e.gestureRecognizer == nil {
+		e.gestureRecognizer = NewGestureRecognizer()
+	}
+}
+
 // Ensure eventSourceAdapter implements gpucontext.EventSource.
 var _ gpucontext.EventSource = (*eventSourceAdapter)(nil)
 
@@ -128,6 +157,9 @@ var _ gpucontext.PointerEventSource = (*eventSourceAdapter)(nil)
 
 // Ensure eventSourceAdapter implements gpucontext.ScrollEventSource.
 var _ gpucontext.ScrollEventSource = (*eventSourceAdapter)(nil)
+
+// Ensure eventSourceAdapter implements gpucontext.GestureEventSource.
+var _ gpucontext.GestureEventSource = (*eventSourceAdapter)(nil)
 
 // EventSource returns a gpucontext.EventSource for use with UI frameworks.
 // This enables UI frameworks to receive input events from the gogpu application.
@@ -217,11 +249,17 @@ func (e *eventSourceAdapter) dispatchFocus(focused bool) {
 }
 
 // dispatchPointerEvent dispatches a pointer event to registered callbacks.
-// It also dispatches to legacy mouse handlers for backward compatibility.
+// It also dispatches to legacy mouse handlers for backward compatibility,
+// and feeds the gesture recognizer for multi-touch gesture computation.
 func (e *eventSourceAdapter) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	// Dispatch to new pointer event handler
 	if e.onPointer != nil {
 		e.onPointer(ev)
+	}
+
+	// Feed gesture recognizer if initialized
+	if e.gestureRecognizer != nil {
+		e.gestureRecognizer.HandlePointer(ev)
 	}
 
 	// Also dispatch to legacy mouse handlers for backward compatibility
@@ -257,6 +295,32 @@ func (e *eventSourceAdapter) dispatchScrollEventDetailed(ev gpucontext.ScrollEve
 	// Also dispatch to legacy scroll handler for backward compatibility
 	if e.onScroll != nil {
 		e.onScroll(ev.DeltaX, ev.DeltaY)
+	}
+}
+
+// dispatchEndFrame dispatches end-of-frame events like gestures.
+// This should be called at the end of each frame after all pointer events
+// have been processed.
+//
+//nolint:unused // Will be called by platform handlers in EVENT-006
+func (e *eventSourceAdapter) dispatchEndFrame() {
+	// Compute and dispatch gesture event if recognizer is active
+	if e.gestureRecognizer != nil && e.onGesture != nil {
+		gesture := e.gestureRecognizer.EndFrame()
+		// Only dispatch if there are enough pointers for a gesture
+		if gesture.NumPointers >= 2 {
+			e.onGesture(gesture)
+		}
+	}
+}
+
+// resetGestureRecognizer resets the gesture recognizer state.
+// Call this when gestures should be canceled (e.g., on window blur).
+//
+//nolint:unused // Will be called by platform handlers in EVENT-006
+func (e *eventSourceAdapter) resetGestureRecognizer() {
+	if e.gestureRecognizer != nil {
+		e.gestureRecognizer.Reset()
 	}
 }
 
