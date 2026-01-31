@@ -385,7 +385,8 @@ func (b *Backend) CreateCommandEncoder(device types.Device) types.CommandEncoder
 		return 0
 	}
 
-	handle := b.registry.RegisterCommandEncoder(encoder)
+	// Register encoder with device so we can free the command buffer to correct pool
+	handle := b.registry.RegisterCommandEncoderForDevice(encoder, device)
 	return handle
 }
 
@@ -441,12 +442,16 @@ func (b *Backend) FinishEncoder(encoder types.CommandEncoder) types.CommandBuffe
 		return 0
 	}
 
+	// Get the device this encoder was created from (for proper command buffer freeing)
+	device := b.registry.GetCommandEncoderDevice(encoder)
+
 	cmdBuffer, err := halEncoder.EndEncoding()
 	if err != nil {
 		return 0
 	}
 
-	handle := b.registry.RegisterCommandBuffer(cmdBuffer)
+	// Register command buffer with device so it can be freed to correct pool
+	handle := b.registry.RegisterCommandBufferForDevice(cmdBuffer, device)
 	return handle
 }
 
@@ -955,7 +960,14 @@ func (b *Backend) ReleasePipelineLayout(layout types.PipelineLayout) {
 func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer) {
 	halBuffer, err := b.registry.GetCommandBuffer(buffer)
 	if err == nil && halBuffer != nil {
-		halBuffer.Destroy()
+		// Get device to free command buffer back to pool
+		deviceHandle := b.registry.GetCommandBufferDevice(buffer)
+		if deviceHandle != 0 {
+			halDevice, devErr := b.registry.GetDevice(deviceHandle)
+			if devErr == nil {
+				halDevice.FreeCommandBuffer(halBuffer)
+			}
+		}
 	}
 	b.registry.UnregisterCommandBuffer(buffer)
 }

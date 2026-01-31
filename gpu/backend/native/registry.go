@@ -23,26 +23,28 @@ type ResourceRegistry struct {
 	nextHandle atomic.Uint64
 
 	// Resource maps - uintptr handles → HAL objects
-	instances        map[types.Instance]hal.Instance
-	adapters         map[types.Adapter]hal.Adapter
-	devices          map[types.Device]hal.Device
-	queues           map[types.Queue]hal.Queue
-	surfaces         map[types.Surface]hal.Surface
-	textures         map[types.Texture]hal.Texture
-	textureDevices   map[types.Texture]types.Device
-	textureViews     map[types.TextureView]hal.TextureView
-	shaderModules    map[types.ShaderModule]hal.ShaderModule
-	renderPipelines  map[types.RenderPipeline]hal.RenderPipeline
-	commandEncoders  map[types.CommandEncoder]hal.CommandEncoder
-	commandBuffers   map[types.CommandBuffer]hal.CommandBuffer
-	renderPasses     map[types.RenderPass]hal.RenderPassEncoder
-	buffers          map[types.Buffer]hal.Buffer
-	samplers         map[types.Sampler]hal.Sampler
-	bindGroupLayouts map[types.BindGroupLayout]hal.BindGroupLayout
-	bindGroups       map[types.BindGroup]hal.BindGroup
-	pipelineLayouts  map[types.PipelineLayout]hal.PipelineLayout
-	fences           map[types.Fence]hal.Fence
-	fenceDevices     map[types.Fence]types.Device // Track device for fence operations
+	instances             map[types.Instance]hal.Instance
+	adapters              map[types.Adapter]hal.Adapter
+	devices               map[types.Device]hal.Device
+	queues                map[types.Queue]hal.Queue
+	surfaces              map[types.Surface]hal.Surface
+	textures              map[types.Texture]hal.Texture
+	textureDevices        map[types.Texture]types.Device
+	textureViews          map[types.TextureView]hal.TextureView
+	shaderModules         map[types.ShaderModule]hal.ShaderModule
+	renderPipelines       map[types.RenderPipeline]hal.RenderPipeline
+	commandEncoders       map[types.CommandEncoder]hal.CommandEncoder
+	commandEncoderDevices map[types.CommandEncoder]types.Device // Track device for encoder's command buffer
+	commandBuffers        map[types.CommandBuffer]hal.CommandBuffer
+	commandBufferDevices  map[types.CommandBuffer]types.Device // Track device for command buffer freeing
+	renderPasses          map[types.RenderPass]hal.RenderPassEncoder
+	buffers               map[types.Buffer]hal.Buffer
+	samplers              map[types.Sampler]hal.Sampler
+	bindGroupLayouts      map[types.BindGroupLayout]hal.BindGroupLayout
+	bindGroups            map[types.BindGroup]hal.BindGroup
+	pipelineLayouts       map[types.PipelineLayout]hal.PipelineLayout
+	fences                map[types.Fence]hal.Fence
+	fenceDevices          map[types.Fence]types.Device // Track device for fence operations
 
 	// Device → Queue mapping (one queue per device in WebGPU)
 	deviceQueues map[types.Device]types.Queue
@@ -77,26 +79,28 @@ type ResourceRegistry struct {
 // NewResourceRegistry creates a new empty registry.
 func NewResourceRegistry() *ResourceRegistry {
 	r := &ResourceRegistry{
-		instances:        make(map[types.Instance]hal.Instance),
-		adapters:         make(map[types.Adapter]hal.Adapter),
-		devices:          make(map[types.Device]hal.Device),
-		queues:           make(map[types.Queue]hal.Queue),
-		surfaces:         make(map[types.Surface]hal.Surface),
-		textures:         make(map[types.Texture]hal.Texture),
-		textureDevices:   make(map[types.Texture]types.Device),
-		textureViews:     make(map[types.TextureView]hal.TextureView),
-		shaderModules:    make(map[types.ShaderModule]hal.ShaderModule),
-		renderPipelines:  make(map[types.RenderPipeline]hal.RenderPipeline),
-		commandEncoders:  make(map[types.CommandEncoder]hal.CommandEncoder),
-		commandBuffers:   make(map[types.CommandBuffer]hal.CommandBuffer),
-		renderPasses:     make(map[types.RenderPass]hal.RenderPassEncoder),
-		buffers:          make(map[types.Buffer]hal.Buffer),
-		samplers:         make(map[types.Sampler]hal.Sampler),
-		bindGroupLayouts: make(map[types.BindGroupLayout]hal.BindGroupLayout),
-		bindGroups:       make(map[types.BindGroup]hal.BindGroup),
-		pipelineLayouts:  make(map[types.PipelineLayout]hal.PipelineLayout),
-		fences:           make(map[types.Fence]hal.Fence),
-		fenceDevices:     make(map[types.Fence]types.Device),
+		instances:             make(map[types.Instance]hal.Instance),
+		adapters:              make(map[types.Adapter]hal.Adapter),
+		devices:               make(map[types.Device]hal.Device),
+		queues:                make(map[types.Queue]hal.Queue),
+		surfaces:              make(map[types.Surface]hal.Surface),
+		textures:              make(map[types.Texture]hal.Texture),
+		textureDevices:        make(map[types.Texture]types.Device),
+		textureViews:          make(map[types.TextureView]hal.TextureView),
+		shaderModules:         make(map[types.ShaderModule]hal.ShaderModule),
+		renderPipelines:       make(map[types.RenderPipeline]hal.RenderPipeline),
+		commandEncoders:       make(map[types.CommandEncoder]hal.CommandEncoder),
+		commandEncoderDevices: make(map[types.CommandEncoder]types.Device),
+		commandBuffers:        make(map[types.CommandBuffer]hal.CommandBuffer),
+		commandBufferDevices:  make(map[types.CommandBuffer]types.Device),
+		renderPasses:          make(map[types.RenderPass]hal.RenderPassEncoder),
+		buffers:               make(map[types.Buffer]hal.Buffer),
+		samplers:              make(map[types.Sampler]hal.Sampler),
+		bindGroupLayouts:      make(map[types.BindGroupLayout]hal.BindGroupLayout),
+		bindGroups:            make(map[types.BindGroup]hal.BindGroup),
+		pipelineLayouts:       make(map[types.PipelineLayout]hal.PipelineLayout),
+		fences:                make(map[types.Fence]hal.Fence),
+		fenceDevices:          make(map[types.Fence]types.Device),
 
 		deviceQueues:           make(map[types.Device]types.Queue),
 		surfaceDevices:         make(map[types.Surface]types.Device),
@@ -497,6 +501,29 @@ func (r *ResourceRegistry) RegisterCommandEncoder(encoder hal.CommandEncoder) ty
 	return handle
 }
 
+// RegisterCommandEncoderForDevice registers an encoder with its associated device.
+// This allows tracking which device the resulting command buffer should be freed to.
+func (r *ResourceRegistry) RegisterCommandEncoderForDevice(encoder hal.CommandEncoder, device types.Device) types.CommandEncoder {
+	handle := types.CommandEncoder(r.newHandle())
+	r.mu.Lock()
+	r.commandEncoders[handle] = encoder
+	r.commandEncoderHandles[encoder] = handle
+	if device != 0 {
+		r.commandEncoderDevices[handle] = device
+	}
+	r.mu.Unlock()
+	return handle
+}
+
+// GetCommandEncoderDevice returns the device associated with an encoder.
+// Returns 0 if no device was registered for this encoder.
+func (r *ResourceRegistry) GetCommandEncoderDevice(handle types.CommandEncoder) types.Device {
+	r.mu.RLock()
+	device := r.commandEncoderDevices[handle]
+	r.mu.RUnlock()
+	return device
+}
+
 func (r *ResourceRegistry) GetCommandEncoder(handle types.CommandEncoder) (hal.CommandEncoder, error) {
 	r.mu.RLock()
 	encoder, ok := r.commandEncoders[handle]
@@ -512,6 +539,7 @@ func (r *ResourceRegistry) UnregisterCommandEncoder(handle types.CommandEncoder)
 	if encoder, ok := r.commandEncoders[handle]; ok {
 		delete(r.commandEncoders, handle)
 		delete(r.commandEncoderHandles, encoder)
+		delete(r.commandEncoderDevices, handle)
 	}
 	r.mu.Unlock()
 }
@@ -525,6 +553,29 @@ func (r *ResourceRegistry) RegisterCommandBuffer(buffer hal.CommandBuffer) types
 	r.commandBufferHandles[buffer] = handle
 	r.mu.Unlock()
 	return handle
+}
+
+// RegisterCommandBufferForDevice registers a command buffer with its associated device.
+// This allows proper freeing of the command buffer back to the device's command pool.
+func (r *ResourceRegistry) RegisterCommandBufferForDevice(buffer hal.CommandBuffer, device types.Device) types.CommandBuffer {
+	handle := types.CommandBuffer(r.newHandle())
+	r.mu.Lock()
+	r.commandBuffers[handle] = buffer
+	r.commandBufferHandles[buffer] = handle
+	if device != 0 {
+		r.commandBufferDevices[handle] = device
+	}
+	r.mu.Unlock()
+	return handle
+}
+
+// GetCommandBufferDevice returns the device associated with a command buffer.
+// Returns 0 if no device was registered for this command buffer.
+func (r *ResourceRegistry) GetCommandBufferDevice(handle types.CommandBuffer) types.Device {
+	r.mu.RLock()
+	device := r.commandBufferDevices[handle]
+	r.mu.RUnlock()
+	return device
 }
 
 func (r *ResourceRegistry) GetCommandBuffer(handle types.CommandBuffer) (hal.CommandBuffer, error) {
@@ -542,6 +593,7 @@ func (r *ResourceRegistry) UnregisterCommandBuffer(handle types.CommandBuffer) {
 	if buffer, ok := r.commandBuffers[handle]; ok {
 		delete(r.commandBuffers, handle)
 		delete(r.commandBufferHandles, buffer)
+		delete(r.commandBufferDevices, handle)
 	}
 	r.mu.Unlock()
 }
@@ -763,7 +815,9 @@ func (r *ResourceRegistry) Clear() {
 	r.shaderModules = make(map[types.ShaderModule]hal.ShaderModule)
 	r.renderPipelines = make(map[types.RenderPipeline]hal.RenderPipeline)
 	r.commandEncoders = make(map[types.CommandEncoder]hal.CommandEncoder)
+	r.commandEncoderDevices = make(map[types.CommandEncoder]types.Device)
 	r.commandBuffers = make(map[types.CommandBuffer]hal.CommandBuffer)
+	r.commandBufferDevices = make(map[types.CommandBuffer]types.Device)
 	r.renderPasses = make(map[types.RenderPass]hal.RenderPassEncoder)
 	r.buffers = make(map[types.Buffer]hal.Buffer)
 	r.samplers = make(map[types.Sampler]hal.Sampler)
