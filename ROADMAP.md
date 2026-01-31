@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.14.0
+## Current State: v0.14.0 → v0.15.0 (in development)
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
@@ -36,11 +36,17 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Clean architecture with shared gputypes
 - webgpu.h spec-compliant enum values
 
+### v0.15.0 Features (in development)
+- ✅ **Render-on-Demand Mode** — Power-efficient UI (8% GPU vs 100%)
+- ✅ **Unified Event System** — W3C Pointer Events, Gesture Recognition
+- ✅ **Fence-based GPU Sync** — Non-blocking frame completion
+- ✅ **Texture.UpdateData** — Format-aware with BytesPerPixel
+
 ---
 
 ## Upcoming
 
-### v0.15.0 — API Polish
+### v0.16.0 — API Polish
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
 - [ ] Performance optimizations

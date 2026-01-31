@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Render-on-Demand Mode** — Power-efficient UI rendering
+  - `Config.WithRenderOnDemand(true)` — Only render on events
+  - `App.RequestRedraw()` — Explicitly request frame redraw
+  - Reduces GPU usage from ~100% to ~8% for static UI
+
+- **Texture.UpdateData Improvements** (INT-003)
+  - `Texture.BytesPerPixel()` — Format-aware size calculation
+  - Support for 20+ texture formats (1/2/4/8/16 bytes per pixel)
+  - Dedicated error types: `ErrTextureUpdateDestroyed`, `ErrInvalidDataSize`, `ErrRegionOutOfBounds`, `ErrInvalidRegion`
+
 - **Fence-based GPU Synchronization** (EVENT-002)
   - `Fence` and `SubmissionIndex` types in `gpu/types`
   - Backend interface extended with fence operations:
@@ -41,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Update gpucontext v0.4.0 → v0.6.0** — Pointer, Scroll, Gesture Events
+- **Update naga v0.9.0 → v0.10.0** — Storage textures, switch statements
+- **Update wgpu v0.12.0 → v0.13.0** — Format capabilities, array textures, render bundles
 
 ## [0.14.0] - 2026-01-30
 
