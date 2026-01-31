@@ -82,6 +82,16 @@ type (
 	// ComputePass represents an active compute pass.
 	// Created via Backend.BeginComputePass().
 	ComputePass uintptr
+
+	// Fence represents a GPU synchronization primitive.
+	// Used for CPU-GPU synchronization to track command completion.
+	// Created via Backend.CreateFence().
+	Fence uintptr
+
+	// SubmissionIndex represents a monotonically increasing submission identifier.
+	// Used to track when GPU work completes. Returned by Backend.Submit().
+	// Each call to Submit increments and returns the next index.
+	SubmissionIndex uint64
 )
 
 // SurfaceTexture is returned by GetCurrentTexture.

@@ -104,9 +104,19 @@ func (b *Backend) FinishEncoder(encoder types.CommandEncoder) types.CommandBuffe
 	return 0
 }
 
-// Submit submits commands to the queue.
-func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer) {
+// Submit submits commands to the queue with optional fence signaling.
+// If fence is non-zero, it will be signaled with fenceValue when commands complete.
+// Returns the submission index for tracking completion.
+func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence types.Fence, fenceValue uint64) types.SubmissionIndex {
 	// Not implemented
+	return 0
+}
+
+// GetFenceValue returns the current signaled value of a fence.
+// Use this for non-blocking completion checks in the submission tracking pattern.
+// Returns 0 if fence is invalid or not yet signaled.
+func (b *Backend) GetFenceValue(fence types.Fence) (uint64, error) {
+	return 0, gpu.ErrNotImplemented
 }
 
 // SetPipeline sets the render pipeline.
@@ -299,6 +309,26 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 // ResetCommandPool resets the command pool to reclaim command buffer memory.
 func (b *Backend) ResetCommandPool(device types.Device) {
 	// Not implemented - platform-specific backends override this
+}
+
+// CreateFence creates a new fence in the unsignaled state.
+func (b *Backend) CreateFence(device types.Device) (types.Fence, error) {
+	return 0, gpu.ErrNotImplemented
+}
+
+// WaitFence waits for a fence to be signaled.
+func (b *Backend) WaitFence(device types.Device, fence types.Fence, timeout uint64) (bool, error) {
+	return true, nil // Always "signaled" for stub
+}
+
+// ResetFence resets a fence to the unsignaled state.
+func (b *Backend) ResetFence(device types.Device, fence types.Fence) error {
+	return nil
+}
+
+// DestroyFence destroys a fence.
+func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
+	// Not implemented
 }
 
 // Ensure Backend implements gpu.Backend.

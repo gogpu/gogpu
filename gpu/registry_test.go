@@ -46,9 +46,12 @@ func (m *mockBackend) BeginRenderPass(types.CommandEncoder, *types.RenderPassDes
 }
 func (m *mockBackend) EndRenderPass(types.RenderPass)                         {}
 func (m *mockBackend) FinishEncoder(types.CommandEncoder) types.CommandBuffer { return 1 }
-func (m *mockBackend) Submit(types.Queue, types.CommandBuffer)                {}
-func (m *mockBackend) SetPipeline(types.RenderPass, types.RenderPipeline)     {}
-func (m *mockBackend) Draw(types.RenderPass, uint32, uint32, uint32, uint32)  {}
+func (m *mockBackend) Submit(types.Queue, types.CommandBuffer, types.Fence, uint64) types.SubmissionIndex {
+	return 1
+}
+func (m *mockBackend) GetFenceValue(types.Fence) (uint64, error)             { return 1, nil }
+func (m *mockBackend) SetPipeline(types.RenderPass, types.RenderPipeline)    {}
+func (m *mockBackend) Draw(types.RenderPass, uint32, uint32, uint32, uint32) {}
 func (m *mockBackend) CreateTexture(types.Device, *types.TextureDescriptor) (types.Texture, error) {
 	return 1, nil
 }
@@ -107,6 +110,10 @@ func (m *mockBackend) ReleaseComputePipeline(types.ComputePipeline)             
 func (m *mockBackend) ReleaseComputePass(types.ComputePass)                         {}
 func (m *mockBackend) ReleaseShaderModule(types.ShaderModule)                       {}
 func (m *mockBackend) ResetCommandPool(types.Device)                                {}
+func (m *mockBackend) CreateFence(types.Device) (types.Fence, error)                { return 1, nil }
+func (m *mockBackend) WaitFence(types.Device, types.Fence, uint64) (bool, error)    { return true, nil }
+func (m *mockBackend) ResetFence(types.Device, types.Fence) error                   { return nil }
+func (m *mockBackend) DestroyFence(types.Device, types.Fence)                       {}
 
 func TestRegisterBackend(t *testing.T) {
 	// Clean up any existing backends first

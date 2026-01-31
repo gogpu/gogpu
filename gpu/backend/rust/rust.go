@@ -439,13 +439,28 @@ func (b *Backend) FinishEncoder(encoder types.CommandEncoder) types.CommandBuffe
 	return handle
 }
 
-// Submit submits commands to the queue.
-func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer) {
+// Submit submits commands to the queue with optional fence signaling.
+// If fence is non-zero, it will be signaled with fenceValue when commands complete.
+// Returns the submission index for tracking completion.
+func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence types.Fence, fenceValue uint64) types.SubmissionIndex {
 	q := b.queues[queue]
 	buf := b.cmdBuffers[commands]
 	if q != nil && buf != nil {
+		// TODO: Pass fence to wgpu-native when fence support is implemented.
+		// wgpu-native uses device.poll() for synchronization model.
 		q.Submit(buf)
 	}
+	return types.SubmissionIndex(fenceValue)
+}
+
+// GetFenceValue returns the current signaled value of a fence.
+// Use this for non-blocking completion checks in the submission tracking pattern.
+// Returns 0 if fence is invalid or not yet signaled.
+func (b *Backend) GetFenceValue(fence types.Fence) (uint64, error) {
+	// wgpu-native uses device.poll() for synchronization, not explicit fences.
+	// For now, return the highest possible value to indicate all work is complete.
+	// This is a safe default that won't block.
+	return ^uint64(0), nil
 }
 
 // SetPipeline sets the render pipeline.
@@ -948,6 +963,31 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 func (b *Backend) ResetCommandPool(device types.Device) {
 	// wgpu-native manages command buffer memory internally.
 	// No explicit reset needed.
+}
+
+// CreateFence creates a new fence in the unsignaled state.
+// Note: wgpu-native uses a different synchronization model with device.poll().
+func (b *Backend) CreateFence(device types.Device) (types.Fence, error) {
+	// wgpu-native uses device.poll() for synchronization, not explicit fences.
+	// This will be implemented when go-webgpu/webgpu adds fence support.
+	return 0, gpu.ErrNotImplemented
+}
+
+// WaitFence waits for a fence to be signaled.
+func (b *Backend) WaitFence(device types.Device, fence types.Fence, timeout uint64) (bool, error) {
+	// wgpu-native uses device.poll() for synchronization.
+	return true, nil // Always "signaled" for now
+}
+
+// ResetFence resets a fence to the unsignaled state.
+func (b *Backend) ResetFence(device types.Device, fence types.Fence) error {
+	// wgpu-native uses device.poll() for synchronization.
+	return nil
+}
+
+// DestroyFence destroys a fence.
+func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
+	// wgpu-native manages synchronization internally.
 }
 
 // Ensure Backend implements gpu.Backend.
