@@ -126,6 +126,9 @@ type NSEventModifierFlags NSUInteger
 
 // Modifier flags.
 const (
+	// NSEventModifierFlagCapsLock indicates Caps Lock is active.
+	NSEventModifierFlagCapsLock NSEventModifierFlags = 1 << 16
+
 	// NSEventModifierFlagShift indicates Shift key is pressed.
 	NSEventModifierFlagShift NSEventModifierFlags = 1 << 17
 

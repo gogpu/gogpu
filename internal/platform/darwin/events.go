@@ -64,6 +64,7 @@ type EventInfo struct {
 	ScrollDeltaX  float64
 	ScrollDeltaY  float64
 	IsPrecise     bool
+	KeyCode       uint16 // Virtual key code for keyboard events
 }
 
 // GetEventInfo extracts pointer-relevant information from an NSEvent.
@@ -107,5 +108,20 @@ func GetEventInfo(event ID) EventInfo {
 		}
 	}
 
+	// Key code for keyboard events
+	switch info.Type {
+	case NSEventTypeKeyDown, NSEventTypeKeyUp, NSEventTypeFlagsChanged:
+		info.KeyCode = uint16(event.GetUint64(selectors.keyCode))
+	}
+
 	return info
+}
+
+// GetKeyCode returns the virtual key code from an NSEvent.
+func GetKeyCode(event ID) uint16 {
+	if event.IsNil() {
+		return 0
+	}
+	initSelectors()
+	return uint16(event.GetUint64(selectors.keyCode))
 }

@@ -538,3 +538,268 @@ func (p *darwinPlatform) createPointerEvent(
 		Timestamp:   p.eventTimestamp(),
 	}
 }
+
+// macKeyCodeToKey converts macOS virtual key codes to gpucontext.Key.
+//
+//nolint:gocyclo,cyclop,funlen // key mapping tables are inherently large
+func macKeyCodeToKey(keyCode uint16) gpucontext.Key {
+	switch keyCode {
+	// Letters (QWERTY layout)
+	case 0x00:
+		return gpucontext.KeyA
+	case 0x01:
+		return gpucontext.KeyS
+	case 0x02:
+		return gpucontext.KeyD
+	case 0x03:
+		return gpucontext.KeyF
+	case 0x04:
+		return gpucontext.KeyH
+	case 0x05:
+		return gpucontext.KeyG
+	case 0x06:
+		return gpucontext.KeyZ
+	case 0x07:
+		return gpucontext.KeyX
+	case 0x08:
+		return gpucontext.KeyC
+	case 0x09:
+		return gpucontext.KeyV
+	case 0x0B:
+		return gpucontext.KeyB
+	case 0x0C:
+		return gpucontext.KeyQ
+	case 0x0D:
+		return gpucontext.KeyW
+	case 0x0E:
+		return gpucontext.KeyE
+	case 0x0F:
+		return gpucontext.KeyR
+	case 0x10:
+		return gpucontext.KeyY
+	case 0x11:
+		return gpucontext.KeyT
+	case 0x12:
+		return gpucontext.Key1
+	case 0x13:
+		return gpucontext.Key2
+	case 0x14:
+		return gpucontext.Key3
+	case 0x15:
+		return gpucontext.Key4
+	case 0x16:
+		return gpucontext.Key6
+	case 0x17:
+		return gpucontext.Key5
+	case 0x18:
+		return gpucontext.KeyEqual
+	case 0x19:
+		return gpucontext.Key9
+	case 0x1A:
+		return gpucontext.Key7
+	case 0x1B:
+		return gpucontext.KeyMinus
+	case 0x1C:
+		return gpucontext.Key8
+	case 0x1D:
+		return gpucontext.Key0
+	case 0x1E:
+		return gpucontext.KeyRightBracket
+	case 0x1F:
+		return gpucontext.KeyO
+	case 0x20:
+		return gpucontext.KeyU
+	case 0x21:
+		return gpucontext.KeyLeftBracket
+	case 0x22:
+		return gpucontext.KeyI
+	case 0x23:
+		return gpucontext.KeyP
+	case 0x25:
+		return gpucontext.KeyL
+	case 0x26:
+		return gpucontext.KeyJ
+	case 0x27:
+		return gpucontext.KeyApostrophe
+	case 0x28:
+		return gpucontext.KeyK
+	case 0x29:
+		return gpucontext.KeySemicolon
+	case 0x2A:
+		return gpucontext.KeyBackslash
+	case 0x2B:
+		return gpucontext.KeyComma
+	case 0x2C:
+		return gpucontext.KeySlash
+	case 0x2D:
+		return gpucontext.KeyN
+	case 0x2E:
+		return gpucontext.KeyM
+	case 0x2F:
+		return gpucontext.KeyPeriod
+	case 0x32:
+		return gpucontext.KeyGrave
+
+	// Special keys
+	case 0x24:
+		return gpucontext.KeyEnter
+	case 0x30:
+		return gpucontext.KeyTab
+	case 0x31:
+		return gpucontext.KeySpace
+	case 0x33:
+		return gpucontext.KeyBackspace
+	case 0x35:
+		return gpucontext.KeyEscape
+	case 0x37:
+		return gpucontext.KeyLeftSuper // Command
+	case 0x38:
+		return gpucontext.KeyLeftShift
+	case 0x39:
+		return gpucontext.KeyCapsLock
+	case 0x3A:
+		return gpucontext.KeyLeftAlt // Option
+	case 0x3B:
+		return gpucontext.KeyLeftControl
+	case 0x3C:
+		return gpucontext.KeyRightShift
+	case 0x3D:
+		return gpucontext.KeyRightAlt
+	case 0x3E:
+		return gpucontext.KeyRightControl
+	case 0x36:
+		return gpucontext.KeyRightSuper
+
+	// Function keys
+	case 0x7A:
+		return gpucontext.KeyF1
+	case 0x78:
+		return gpucontext.KeyF2
+	case 0x63:
+		return gpucontext.KeyF3
+	case 0x76:
+		return gpucontext.KeyF4
+	case 0x60:
+		return gpucontext.KeyF5
+	case 0x61:
+		return gpucontext.KeyF6
+	case 0x62:
+		return gpucontext.KeyF7
+	case 0x64:
+		return gpucontext.KeyF8
+	case 0x65:
+		return gpucontext.KeyF9
+	case 0x6D:
+		return gpucontext.KeyF10
+	case 0x67:
+		return gpucontext.KeyF11
+	case 0x6F:
+		return gpucontext.KeyF12
+
+	// Navigation
+	case 0x73:
+		return gpucontext.KeyHome
+	case 0x77:
+		return gpucontext.KeyEnd
+	case 0x74:
+		return gpucontext.KeyPageUp
+	case 0x79:
+		return gpucontext.KeyPageDown
+	case 0x75:
+		return gpucontext.KeyDelete
+	case 0x72:
+		return gpucontext.KeyInsert
+
+	// Arrow keys
+	case 0x7B:
+		return gpucontext.KeyLeft
+	case 0x7C:
+		return gpucontext.KeyRight
+	case 0x7D:
+		return gpucontext.KeyDown
+	case 0x7E:
+		return gpucontext.KeyUp
+
+	// Numpad
+	case 0x52:
+		return gpucontext.KeyNumpad0
+	case 0x53:
+		return gpucontext.KeyNumpad1
+	case 0x54:
+		return gpucontext.KeyNumpad2
+	case 0x55:
+		return gpucontext.KeyNumpad3
+	case 0x56:
+		return gpucontext.KeyNumpad4
+	case 0x57:
+		return gpucontext.KeyNumpad5
+	case 0x58:
+		return gpucontext.KeyNumpad6
+	case 0x59:
+		return gpucontext.KeyNumpad7
+	case 0x5B:
+		return gpucontext.KeyNumpad8
+	case 0x5C:
+		return gpucontext.KeyNumpad9
+	case 0x41:
+		return gpucontext.KeyNumpadDecimal
+	case 0x43:
+		return gpucontext.KeyNumpadMultiply
+	case 0x45:
+		return gpucontext.KeyNumpadAdd
+	case 0x47:
+		return gpucontext.KeyNumLock
+	case 0x4B:
+		return gpucontext.KeyNumpadDivide
+	case 0x4C:
+		return gpucontext.KeyNumpadEnter
+	case 0x4E:
+		return gpucontext.KeyNumpadSubtract
+
+	default:
+		return gpucontext.KeyUnknown
+	}
+}
+
+// detectModifierKeyChange detects which modifier key was pressed/released.
+// macOS sends NSEventTypeFlagsChanged for modifier keys instead of keyDown/keyUp.
+func detectModifierKeyChange(keyCode uint16, flags darwin.NSEventModifierFlags) (gpucontext.Key, bool) {
+	var key gpucontext.Key
+	var flagMask darwin.NSEventModifierFlags
+
+	switch keyCode {
+	case 0x38: // Left Shift
+		key = gpucontext.KeyLeftShift
+		flagMask = darwin.NSEventModifierFlagShift
+	case 0x3C: // Right Shift
+		key = gpucontext.KeyRightShift
+		flagMask = darwin.NSEventModifierFlagShift
+	case 0x3B: // Left Control
+		key = gpucontext.KeyLeftControl
+		flagMask = darwin.NSEventModifierFlagControl
+	case 0x3E: // Right Control
+		key = gpucontext.KeyRightControl
+		flagMask = darwin.NSEventModifierFlagControl
+	case 0x3A: // Left Option (Alt)
+		key = gpucontext.KeyLeftAlt
+		flagMask = darwin.NSEventModifierFlagOption
+	case 0x3D: // Right Option (Alt)
+		key = gpucontext.KeyRightAlt
+		flagMask = darwin.NSEventModifierFlagOption
+	case 0x37: // Left Command (Super)
+		key = gpucontext.KeyLeftSuper
+		flagMask = darwin.NSEventModifierFlagCommand
+	case 0x36: // Right Command (Super)
+		key = gpucontext.KeyRightSuper
+		flagMask = darwin.NSEventModifierFlagCommand
+	case 0x39: // Caps Lock
+		key = gpucontext.KeyCapsLock
+		flagMask = darwin.NSEventModifierFlagCapsLock
+	default:
+		return gpucontext.KeyUnknown, false
+	}
+
+	// Check if the key is pressed (flag is set) or released (flag is cleared)
+	pressed := (flags & flagMask) != 0
+	return key, pressed
+}

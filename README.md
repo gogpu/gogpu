@@ -182,6 +182,34 @@ events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
 
 This enables enterprise-grade dependency injection between packages without circular imports.
 
+### Ebiten-Style Input Polling
+
+For game loops, use the polling-based Input API:
+
+```go
+import "github.com/gogpu/gogpu/input"
+
+app.OnUpdate(func(dt float64) {
+    inp := app.Input()
+
+    // Keyboard
+    if inp.Keyboard().JustPressed(input.KeySpace) {
+        player.Jump()
+    }
+    if inp.Keyboard().Pressed(input.KeyLeft) {
+        player.MoveLeft(dt)
+    }
+
+    // Mouse
+    x, y := inp.Mouse().Position()
+    if inp.Mouse().JustPressed(input.MouseButtonLeft) {
+        player.Shoot(x, y)
+    }
+})
+```
+
+All input methods are thread-safe and work with the frame-based update loop.
+
 ---
 
 ## Compute Shaders

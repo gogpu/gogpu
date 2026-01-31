@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Unified Event System** — Complete input handling overhaul
+  - **W3C Pointer Events Level 3** — Unified mouse/touch/pen input
+  - **Gesture Recognition** — Vello-style pinch, rotate, pan detection
+  - **Ebiten-style Input Polling** — `app.Input().Keyboard().JustPressed(key)`
+  - **Thread-safe InputState** — Safe for game loop polling
+
+- **Platform Keyboard Events** — All platforms
+  - Windows: WM_KEYDOWN/WM_KEYUP with full key mapping
+  - Linux (Wayland): wl_keyboard events with evdev keycodes
+  - macOS: NSEvent keyDown/keyUp with virtual keycodes
+
+- **Platform Pointer Events** — All platforms
+  - Windows: WM_MOUSE* events with button/modifier tracking
+  - Linux (Wayland): wl_pointer with scroll and button events
+  - Linux (X11): MotionNotify, ButtonPress with scroll buttons 4-7
+  - macOS: NSEvent mouse events with trackpad detection
+
+### Changed
+
+- **Update gpucontext v0.4.0 → v0.6.0** — Pointer, Scroll, Gesture Events
+
 ## [0.14.0] - 2026-01-30
 
 ### Added

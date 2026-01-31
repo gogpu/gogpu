@@ -212,6 +212,8 @@ gogpu/
 ├── context.go          # Drawing context
 ├── renderer.go         # WebGPU pipeline
 ├── texture.go          # Texture management
+├── event_source.go     # gpucontext.EventSource adapter
+├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
 │   ├── backend.go      # Backend interface (120+ methods)
 │   ├── registry.go     # Auto-registration
@@ -221,8 +223,8 @@ gogpu/
 │       └── rust/       # Rust FFI backend
 ├── gmath/              # Math (Vec2, Vec3, Mat4, Color)
 ├── window/             # Window config
-├── input/              # Input types
-└── internal/platform/  # OS windowing (Win32, Cocoa, X11)
+├── input/              # Ebiten-style input state (keyboard, mouse)
+└── internal/platform/  # OS windowing + input (Win32, Cocoa, X11, Wayland)
 ```
 
 **Note:** WebGPU types (TextureFormat, BufferUsage, etc.) are imported directly from `github.com/gogpu/gputypes`.
@@ -264,6 +266,59 @@ Main Thread (OS Thread 0)       Render Thread (Dedicated)
 - `internal/thread.Thread` — OS thread abstraction with `runtime.LockOSThread()`
 - `internal/thread.RenderLoop` — Deferred resize pattern
 - `Platform.InSizeMove()` — Tracks modal resize loop (Windows)
+
+## Event System
+
+GoGPU provides two complementary input handling patterns:
+
+### Callback-based (UI Frameworks)
+
+For UI frameworks that need discrete event handling:
+
+```
+Platform Layer          EventSource              User Code
+     │                       │                       │
+     │──PointerEvent────────►│                       │
+     │                       │──OnPointer()─────────►│
+     │──ScrollEvent─────────►│                       │
+     │                       │──OnScrollEvent()─────►│
+     │──KeyEvent────────────►│                       │
+     │                       │──OnKeyPress()────────►│
+```
+
+**Key interfaces (gpucontext):**
+- `PointerEventSource` — W3C Pointer Events Level 3 (mouse/touch/pen)
+- `ScrollEventSource` — Detailed scroll with delta mode
+- `GestureEventSource` — Vello-style gestures (pinch, rotate, pan)
+- `EventSource` — Keyboard, IME, focus events
+
+### Polling-based (Game Loops)
+
+For game loops that check input state each frame:
+
+```
+Platform Layer          InputState               Game Loop
+     │                       │                       │
+     │──PointerEvent────────►│ (update state)        │
+     │──KeyEvent────────────►│ (update state)        │
+     │                       │                       │
+     │                       │◄──JustPressed()?──────│
+     │                       │◄──Position()?─────────│
+```
+
+**Key types (input package):**
+- `input.State` — Thread-safe input state container
+- `input.KeyboardState` — JustPressed, Pressed, JustReleased
+- `input.MouseState` — Position, Delta, Button state, Scroll
+
+### Platform Implementation
+
+| Platform | Pointer Events | Keyboard | Scroll |
+|----------|---------------|----------|--------|
+| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_MOUSEWHEEL |
+| Linux (Wayland) | wl_pointer | wl_keyboard | wl_pointer.axis |
+| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | Button 4-7 |
+| macOS    | NSEvent mouse | NSEvent key | NSEvent scroll |
 
 ## Renderer Pipeline
 

@@ -144,8 +144,9 @@ func (p *x11Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 }
 
 // SetKeyCallback registers a callback for keyboard events.
-func (p *x11Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	p.inner.SetKeyCallback(fn)
+// X11 keyboard events not yet implemented - only Wayland is supported.
+func (p *x11Platform) SetKeyCallback(_ func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	// TODO: Implement X11 keyboard events
 }
 
 // Init creates the Wayland window.
@@ -735,7 +736,7 @@ func evdevModsToModifiers(depressed, locked uint32) gpucontext.Modifiers {
 
 // evdevToKey converts a Linux evdev keycode to gpucontext.Key.
 //
-//nolint:gocyclo,cyclop,funlen // key mapping requires many cases
+//nolint:maintidx // key mapping requires many cases
 func evdevToKey(keycode uint32) gpucontext.Key {
 	// Linux evdev keycodes from linux/input-event-codes.h
 	const (
