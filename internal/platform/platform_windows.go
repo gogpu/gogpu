@@ -156,10 +156,11 @@ type windowsPlatform struct {
 	mouseInWindow bool
 	mouseMu       sync.RWMutex // Protects mouse state
 
-	// Callbacks for pointer and scroll events
-	pointerCallback func(gpucontext.PointerEvent)
-	scrollCallback  func(gpucontext.ScrollEvent)
-	callbackMu      sync.RWMutex
+	// Callbacks for pointer, scroll, and keyboard events
+	pointerCallback  func(gpucontext.PointerEvent)
+	scrollCallback   func(gpucontext.ScrollEvent)
+	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
+	callbackMu       sync.RWMutex
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -321,6 +322,13 @@ func (p *windowsPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 	p.callbackMu.Unlock()
 }
 
+// SetKeyCallback registers a callback for keyboard events.
+func (p *windowsPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	p.callbackMu.Lock()
+	p.keyboardCallback = fn
+	p.callbackMu.Unlock()
+}
+
 func (p *windowsPlatform) Destroy() {
 	if p.hwnd != 0 {
 		procDestroyWindow.Call(uintptr(p.hwnd))
@@ -433,6 +441,260 @@ func (p *windowsPlatform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
 	if callback != nil {
 		callback(ev)
 	}
+}
+
+// dispatchKeyEvent dispatches a keyboard event to the registered callback.
+func (p *windowsPlatform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	p.callbackMu.RLock()
+	callback := p.keyboardCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(key, mods, pressed)
+	}
+}
+
+// Virtual key code constants for keyboard handling.
+const (
+	vkBack      = 0x08
+	vkTab       = 0x09
+	vkReturn    = 0x0D
+	vkShift     = 0x10
+	vkControl   = 0x11
+	vkMenu      = 0x12 // Alt
+	vkPause     = 0x13
+	vkCapital   = 0x14 // Caps Lock
+	vkSpace     = 0x20
+	vkPrior     = 0x21 // Page Up
+	vkNext      = 0x22 // Page Down
+	vkEnd       = 0x23
+	vkHome      = 0x24
+	vkLeftKey   = 0x25
+	vkUpKey     = 0x26
+	vkRightKey  = 0x27
+	vkDownKey   = 0x28
+	vkInsert    = 0x2D
+	vkDeleteKey = 0x2E
+	vkLWin      = 0x5B
+	vkRWin      = 0x5C
+	vkNumpad0   = 0x60
+	vkNumpad1   = 0x61
+	vkNumpad2   = 0x62
+	vkNumpad3   = 0x63
+	vkNumpad4   = 0x64
+	vkNumpad5   = 0x65
+	vkNumpad6   = 0x66
+	vkNumpad7   = 0x67
+	vkNumpad8   = 0x68
+	vkNumpad9   = 0x69
+	vkMultiply  = 0x6A
+	vkAdd       = 0x6B
+	vkSubtract  = 0x6D
+	vkDecimal   = 0x6E
+	vkDivide    = 0x6F
+	vkF1        = 0x70
+	vkF2        = 0x71
+	vkF3        = 0x72
+	vkF4        = 0x73
+	vkF5        = 0x74
+	vkF6        = 0x75
+	vkF7        = 0x76
+	vkF8        = 0x77
+	vkF9        = 0x78
+	vkF10       = 0x79
+	vkF11       = 0x7A
+	vkF12       = 0x7B
+	vkNumLock   = 0x90
+	vkScroll    = 0x91 // Scroll Lock
+	vkLShift    = 0xA0
+	vkRShift    = 0xA1
+	vkLControl  = 0xA2
+	vkRControl  = 0xA3
+	vkLMenu     = 0xA4 // Left Alt
+	vkRMenu     = 0xA5 // Right Alt
+	vkOEM1      = 0xBA // ;:
+	vkOEMPlus   = 0xBB // =+
+	vkOEMComma  = 0xBC // ,<
+	vkOEMMinus  = 0xBD // -_
+	vkOEMPeriod = 0xBE // .>
+	vkOEM2      = 0xBF // /?
+	vkOEM3      = 0xC0 // `~
+	vkOEM4      = 0xDB // [{
+	vkOEM5      = 0xDC // \|
+	vkOEM6      = 0xDD // ]}
+	vkOEM7      = 0xDE // '"
+)
+
+// getKeyState calls GetKeyState to check if a key is pressed.
+var procGetKeyState = user32.NewProc("GetKeyState")
+
+// getKeyModifiers returns the current keyboard modifier state.
+func getKeyModifiers() gpucontext.Modifiers {
+	var mods gpucontext.Modifiers
+
+	// Check shift
+	ret, _, _ := procGetKeyState.Call(uintptr(vkShift))
+	if int16(ret) < 0 {
+		mods |= gpucontext.ModShift
+	}
+
+	// Check control
+	ret, _, _ = procGetKeyState.Call(uintptr(vkControl))
+	if int16(ret) < 0 {
+		mods |= gpucontext.ModControl
+	}
+
+	// Check alt
+	ret, _, _ = procGetKeyState.Call(uintptr(vkMenu))
+	if int16(ret) < 0 {
+		mods |= gpucontext.ModAlt
+	}
+
+	// Check super (Windows key)
+	retL, _, _ := procGetKeyState.Call(uintptr(vkLWin))
+	retR, _, _ := procGetKeyState.Call(uintptr(vkRWin))
+	if int16(retL) < 0 || int16(retR) < 0 {
+		mods |= gpucontext.ModSuper
+	}
+
+	// Check caps lock (toggle state)
+	ret, _, _ = procGetKeyState.Call(uintptr(vkCapital))
+	if ret&1 != 0 {
+		mods |= gpucontext.ModCapsLock
+	}
+
+	// Check num lock (toggle state)
+	ret, _, _ = procGetKeyState.Call(uintptr(vkNumLock))
+	if ret&1 != 0 {
+		mods |= gpucontext.ModNumLock
+	}
+
+	return mods
+}
+
+// vkCodeToKey converts a Windows virtual key code to gpucontext.Key.
+//
+// vkCodeToKey converts a Windows virtual key code to gpucontext.Key.
+func vkCodeToKey(vkCode uintptr) gpucontext.Key {
+	// Letters A-Z (0x41-0x5A)
+	if vkCode >= 0x41 && vkCode <= 0x5A {
+		return gpucontext.KeyA + gpucontext.Key(vkCode-0x41)
+	}
+
+	// Numbers 0-9 (0x30-0x39)
+	if vkCode >= 0x30 && vkCode <= 0x39 {
+		return gpucontext.Key0 + gpucontext.Key(vkCode-0x30)
+	}
+
+	// Function keys F1-F12
+	if vkCode >= vkF1 && vkCode <= vkF12 {
+		return gpucontext.KeyF1 + gpucontext.Key(vkCode-vkF1)
+	}
+
+	// Numpad 0-9
+	if vkCode >= vkNumpad0 && vkCode <= vkNumpad9 {
+		return gpucontext.KeyNumpad0 + gpucontext.Key(vkCode-vkNumpad0)
+	}
+
+	switch vkCode {
+	// Navigation
+	case vkEscape:
+		return gpucontext.KeyEscape
+	case vkTab:
+		return gpucontext.KeyTab
+	case vkBack:
+		return gpucontext.KeyBackspace
+	case vkReturn:
+		return gpucontext.KeyEnter
+	case vkSpace:
+		return gpucontext.KeySpace
+	case vkInsert:
+		return gpucontext.KeyInsert
+	case vkDeleteKey:
+		return gpucontext.KeyDelete
+	case vkHome:
+		return gpucontext.KeyHome
+	case vkEnd:
+		return gpucontext.KeyEnd
+	case vkPrior:
+		return gpucontext.KeyPageUp
+	case vkNext:
+		return gpucontext.KeyPageDown
+	case vkLeftKey:
+		return gpucontext.KeyLeft
+	case vkRightKey:
+		return gpucontext.KeyRight
+	case vkUpKey:
+		return gpucontext.KeyUp
+	case vkDownKey:
+		return gpucontext.KeyDown
+
+	// Modifiers
+	case vkLShift:
+		return gpucontext.KeyLeftShift
+	case vkRShift:
+		return gpucontext.KeyRightShift
+	case vkLControl:
+		return gpucontext.KeyLeftControl
+	case vkRControl:
+		return gpucontext.KeyRightControl
+	case vkLMenu:
+		return gpucontext.KeyLeftAlt
+	case vkRMenu:
+		return gpucontext.KeyRightAlt
+	case vkLWin:
+		return gpucontext.KeyLeftSuper
+	case vkRWin:
+		return gpucontext.KeyRightSuper
+
+	// Punctuation
+	case vkOEMMinus:
+		return gpucontext.KeyMinus
+	case vkOEMPlus:
+		return gpucontext.KeyEqual
+	case vkOEM4:
+		return gpucontext.KeyLeftBracket
+	case vkOEM6:
+		return gpucontext.KeyRightBracket
+	case vkOEM5:
+		return gpucontext.KeyBackslash
+	case vkOEM1:
+		return gpucontext.KeySemicolon
+	case vkOEM7:
+		return gpucontext.KeyApostrophe
+	case vkOEM3:
+		return gpucontext.KeyGrave
+	case vkOEMComma:
+		return gpucontext.KeyComma
+	case vkOEMPeriod:
+		return gpucontext.KeyPeriod
+	case vkOEM2:
+		return gpucontext.KeySlash
+
+	// Numpad operators
+	case vkMultiply:
+		return gpucontext.KeyNumpadMultiply
+	case vkAdd:
+		return gpucontext.KeyNumpadAdd
+	case vkSubtract:
+		return gpucontext.KeyNumpadSubtract
+	case vkDecimal:
+		return gpucontext.KeyNumpadDecimal
+	case vkDivide:
+		return gpucontext.KeyNumpadDivide
+
+	// Lock keys
+	case vkCapital:
+		return gpucontext.KeyCapsLock
+	case vkScroll:
+		return gpucontext.KeyScrollLock
+	case vkNumLock:
+		return gpucontext.KeyNumLock
+	case vkPause:
+		return gpucontext.KeyPause
+	}
+
+	return gpucontext.KeyUnknown
 }
 
 // trackMouseLeave enables WM_MOUSELEAVE tracking.
@@ -553,11 +815,27 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 0
 
 	case wmKeydown:
+		// Convert vkCode to Key
+		key := vkCodeToKey(wParam)
+		mods := getKeyModifiers()
+
+		// Dispatch keyboard event
+		p.dispatchKeyEvent(key, mods, true)
+
 		// ESC to close (convenience)
 		if wParam == vkEscape {
 			p.shouldClose = true
 			p.queueEvent(Event{Type: EventClose})
 		}
+		return 0
+
+	case wmKeyup:
+		// Convert vkCode to Key
+		key := vkCodeToKey(wParam)
+		mods := getKeyModifiers()
+
+		// Dispatch keyboard event
+		p.dispatchKeyEvent(key, mods, false)
 		return 0
 
 	case wmSetCursor:

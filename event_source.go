@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"github.com/gogpu/gogpu/input"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -185,6 +186,37 @@ func (a *App) EventSource() gpucontext.EventSource {
 	return a.eventSource
 }
 
+// Input returns the input state for Ebiten-style polling.
+// This enables game-loop style input handling with KeyPressed, KeyJustPressed, etc.
+//
+// Example:
+//
+//	app := gogpu.NewApp(gogpu.Config{Title: "My Game"})
+//
+//	app.OnUpdate(func(dt float64) {
+//	    inp := app.Input()
+//
+//	    // Check if Space was just pressed this frame
+//	    if inp.Keyboard().JustPressed(input.KeySpace) {
+//	        player.Jump()
+//	    }
+//
+//	    // Check if Left is held down
+//	    if inp.Keyboard().Pressed(input.KeyLeft) {
+//	        player.MoveLeft(dt)
+//	    }
+//	})
+//
+// Note: Input state is automatically updated each frame. The "JustPressed"
+// and "JustReleased" methods work correctly across frames.
+// All methods are thread-safe.
+func (a *App) Input() *input.State {
+	if a.inputState == nil {
+		a.inputState = input.New()
+	}
+	return a.inputState
+}
+
 // dispatchKeyPress dispatches a key press event to registered callbacks.
 func (e *eventSourceAdapter) dispatchKeyPress(key gpucontext.Key, mods gpucontext.Modifiers) {
 	if e.onKeyPress != nil {
@@ -301,8 +333,6 @@ func (e *eventSourceAdapter) dispatchScrollEventDetailed(ev gpucontext.ScrollEve
 // dispatchEndFrame dispatches end-of-frame events like gestures.
 // This should be called at the end of each frame after all pointer events
 // have been processed.
-//
-//nolint:unused // Will be called by platform handlers in EVENT-006
 func (e *eventSourceAdapter) dispatchEndFrame() {
 	// Compute and dispatch gesture event if recognizer is active
 	if e.gestureRecognizer != nil && e.onGesture != nil {

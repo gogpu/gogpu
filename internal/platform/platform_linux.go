@@ -51,10 +51,11 @@ type waylandPlatform struct {
 	pointerIn bool // True when pointer is inside our surface
 	startTime time.Time
 
-	// Callbacks for pointer and scroll events
-	pointerCallback func(gpucontext.PointerEvent)
-	scrollCallback  func(gpucontext.ScrollEvent)
-	callbackMu      sync.RWMutex
+	// Callbacks for pointer, scroll, and keyboard events
+	pointerCallback  func(gpucontext.PointerEvent)
+	scrollCallback   func(gpucontext.ScrollEvent)
+	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
+	callbackMu       sync.RWMutex
 }
 
 // x11Platform wraps x11.Platform to implement the Platform interface.
@@ -140,6 +141,11 @@ func (p *x11Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
 // SetScrollCallback registers a callback for scroll events.
 func (p *x11Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 	p.inner.SetScrollCallback(fn)
+}
+
+// SetKeyCallback registers a callback for keyboard events.
+func (p *x11Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	p.inner.SetKeyCallback(fn)
 }
 
 // Init creates the Wayland window.
@@ -364,6 +370,7 @@ func (p *waylandPlatform) bindSeat() error {
 		keyboard, err := p.seat.GetKeyboard()
 		if err == nil {
 			p.keyboard = keyboard
+			p.setupKeyboardHandlers()
 		}
 	}
 
@@ -648,6 +655,417 @@ func (p *waylandPlatform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
 	}
 }
 
+// dispatchKeyEvent dispatches a keyboard event to the registered callback.
+func (p *waylandPlatform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	p.callbackMu.RLock()
+	callback := p.keyboardCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(key, mods, pressed)
+	}
+}
+
+// setupKeyboardHandlers configures Wayland keyboard event handlers.
+func (p *waylandPlatform) setupKeyboardHandlers() {
+	if p.keyboard == nil {
+		return
+	}
+
+	// Handle key events
+	p.keyboard.SetKeyHandler(func(event *wayland.KeyboardKeyEvent) {
+		// Check if we have keyboard focus on our surface
+		if p.keyboard.FocusedSurface() != p.surface.ID() {
+			return
+		}
+
+		// Convert evdev keycode to gpucontext.Key
+		// Note: Wayland uses evdev keycodes, which need +8 offset from X11 keycodes
+		key := evdevToKey(event.Key)
+		mods := p.getModifiers()
+		pressed := event.State == wayland.KeyStatePressed
+
+		p.dispatchKeyEvent(key, mods, pressed)
+	})
+
+	// Handle modifier events to update modifier state
+	p.keyboard.SetModifiersHandler(func(event *wayland.KeyboardModifiersEvent) {
+		p.pointerMu.Lock()
+		p.modifiers = evdevModsToModifiers(event.ModsDepressed, event.ModsLocked)
+		p.pointerMu.Unlock()
+	})
+}
+
+// evdevModsToModifiers converts evdev modifier bitmasks to gpucontext.Modifiers.
+func evdevModsToModifiers(depressed, locked uint32) gpucontext.Modifiers {
+	var mods gpucontext.Modifiers
+
+	// XKB modifier indices (standard layout)
+	// These may vary by keymap, but these are common defaults
+	const (
+		xkbModShift   = 1 << 0
+		xkbModLock    = 1 << 1 // Caps Lock
+		xkbModControl = 1 << 2
+		xkbModMod1    = 1 << 3 // Alt
+		xkbModMod2    = 1 << 4 // Num Lock
+		xkbModMod4    = 1 << 6 // Super
+	)
+
+	if depressed&xkbModShift != 0 {
+		mods |= gpucontext.ModShift
+	}
+	if depressed&xkbModControl != 0 {
+		mods |= gpucontext.ModControl
+	}
+	if depressed&xkbModMod1 != 0 {
+		mods |= gpucontext.ModAlt
+	}
+	if depressed&xkbModMod4 != 0 {
+		mods |= gpucontext.ModSuper
+	}
+	if locked&xkbModLock != 0 {
+		mods |= gpucontext.ModCapsLock
+	}
+	if locked&xkbModMod2 != 0 {
+		mods |= gpucontext.ModNumLock
+	}
+
+	return mods
+}
+
+// evdevToKey converts a Linux evdev keycode to gpucontext.Key.
+//
+//nolint:gocyclo,cyclop,funlen // key mapping requires many cases
+func evdevToKey(keycode uint32) gpucontext.Key {
+	// Linux evdev keycodes from linux/input-event-codes.h
+	const (
+		keyEsc        = 1
+		key1          = 2
+		key2          = 3
+		key3          = 4
+		key4          = 5
+		key5          = 6
+		key6          = 7
+		key7          = 8
+		key8          = 9
+		key9          = 10
+		key0          = 11
+		keyMinus      = 12
+		keyEqual      = 13
+		keyBackspace  = 14
+		keyTab        = 15
+		keyQ          = 16
+		keyW          = 17
+		keyE          = 18
+		keyR          = 19
+		keyT          = 20
+		keyY          = 21
+		keyU          = 22
+		keyI          = 23
+		keyO          = 24
+		keyP          = 25
+		keyLeftBrace  = 26
+		keyRightBrace = 27
+		keyEnter      = 28
+		keyLeftCtrl   = 29
+		keyA          = 30
+		keyS          = 31
+		keyD          = 32
+		keyF          = 33
+		keyG          = 34
+		keyH          = 35
+		keyJ          = 36
+		keyK          = 37
+		keyL          = 38
+		keySemicolon  = 39
+		keyApostrophe = 40
+		keyGrave      = 41
+		keyLeftShift  = 42
+		keyBackslash  = 43
+		keyZ          = 44
+		keyX          = 45
+		keyC          = 46
+		keyV          = 47
+		keyB          = 48
+		keyN          = 49
+		keyM          = 50
+		keyComma      = 51
+		keyDot        = 52
+		keySlash      = 53
+		keyRightShift = 54
+		keyKPAsterisk = 55
+		keyLeftAlt    = 56
+		keySpace      = 57
+		keyCapsLock   = 58
+		keyF1         = 59
+		keyF2         = 60
+		keyF3         = 61
+		keyF4         = 62
+		keyF5         = 63
+		keyF6         = 64
+		keyF7         = 65
+		keyF8         = 66
+		keyF9         = 67
+		keyF10        = 68
+		keyNumLock    = 69
+		keyScrollLock = 70
+		keyKP7        = 71
+		keyKP8        = 72
+		keyKP9        = 73
+		keyKPMinus    = 74
+		keyKP4        = 75
+		keyKP5        = 76
+		keyKP6        = 77
+		keyKPPlus     = 78
+		keyKP1        = 79
+		keyKP2        = 80
+		keyKP3        = 81
+		keyKP0        = 82
+		keyKPDot      = 83
+		keyF11        = 87
+		keyF12        = 88
+		keyKPEnter    = 96
+		keyRightCtrl  = 97
+		keyKPSlash    = 98
+		keyRightAlt   = 100
+		keyHome       = 102
+		keyUp         = 103
+		keyPageUp     = 104
+		keyLeft       = 105
+		keyRight      = 106
+		keyEnd        = 107
+		keyDown       = 108
+		keyPageDown   = 109
+		keyInsert     = 110
+		keyDelete     = 111
+		keyPause      = 119
+		keyLeftMeta   = 125
+		keyRightMeta  = 126
+	)
+
+	// Letters
+	switch keycode {
+	case keyA:
+		return gpucontext.KeyA
+	case keyB:
+		return gpucontext.KeyB
+	case keyC:
+		return gpucontext.KeyC
+	case keyD:
+		return gpucontext.KeyD
+	case keyE:
+		return gpucontext.KeyE
+	case keyF:
+		return gpucontext.KeyF
+	case keyG:
+		return gpucontext.KeyG
+	case keyH:
+		return gpucontext.KeyH
+	case keyI:
+		return gpucontext.KeyI
+	case keyJ:
+		return gpucontext.KeyJ
+	case keyK:
+		return gpucontext.KeyK
+	case keyL:
+		return gpucontext.KeyL
+	case keyM:
+		return gpucontext.KeyM
+	case keyN:
+		return gpucontext.KeyN
+	case keyO:
+		return gpucontext.KeyO
+	case keyP:
+		return gpucontext.KeyP
+	case keyQ:
+		return gpucontext.KeyQ
+	case keyR:
+		return gpucontext.KeyR
+	case keyS:
+		return gpucontext.KeyS
+	case keyT:
+		return gpucontext.KeyT
+	case keyU:
+		return gpucontext.KeyU
+	case keyV:
+		return gpucontext.KeyV
+	case keyW:
+		return gpucontext.KeyW
+	case keyX:
+		return gpucontext.KeyX
+	case keyY:
+		return gpucontext.KeyY
+	case keyZ:
+		return gpucontext.KeyZ
+
+	// Numbers
+	case key0:
+		return gpucontext.Key0
+	case key1:
+		return gpucontext.Key1
+	case key2:
+		return gpucontext.Key2
+	case key3:
+		return gpucontext.Key3
+	case key4:
+		return gpucontext.Key4
+	case key5:
+		return gpucontext.Key5
+	case key6:
+		return gpucontext.Key6
+	case key7:
+		return gpucontext.Key7
+	case key8:
+		return gpucontext.Key8
+	case key9:
+		return gpucontext.Key9
+
+	// Function keys
+	case keyF1:
+		return gpucontext.KeyF1
+	case keyF2:
+		return gpucontext.KeyF2
+	case keyF3:
+		return gpucontext.KeyF3
+	case keyF4:
+		return gpucontext.KeyF4
+	case keyF5:
+		return gpucontext.KeyF5
+	case keyF6:
+		return gpucontext.KeyF6
+	case keyF7:
+		return gpucontext.KeyF7
+	case keyF8:
+		return gpucontext.KeyF8
+	case keyF9:
+		return gpucontext.KeyF9
+	case keyF10:
+		return gpucontext.KeyF10
+	case keyF11:
+		return gpucontext.KeyF11
+	case keyF12:
+		return gpucontext.KeyF12
+
+	// Navigation
+	case keyEsc:
+		return gpucontext.KeyEscape
+	case keyTab:
+		return gpucontext.KeyTab
+	case keyBackspace:
+		return gpucontext.KeyBackspace
+	case keyEnter, keyKPEnter:
+		return gpucontext.KeyEnter
+	case keySpace:
+		return gpucontext.KeySpace
+	case keyInsert:
+		return gpucontext.KeyInsert
+	case keyDelete:
+		return gpucontext.KeyDelete
+	case keyHome:
+		return gpucontext.KeyHome
+	case keyEnd:
+		return gpucontext.KeyEnd
+	case keyPageUp:
+		return gpucontext.KeyPageUp
+	case keyPageDown:
+		return gpucontext.KeyPageDown
+	case keyLeft:
+		return gpucontext.KeyLeft
+	case keyRight:
+		return gpucontext.KeyRight
+	case keyUp:
+		return gpucontext.KeyUp
+	case keyDown:
+		return gpucontext.KeyDown
+
+	// Modifiers
+	case keyLeftShift:
+		return gpucontext.KeyLeftShift
+	case keyRightShift:
+		return gpucontext.KeyRightShift
+	case keyLeftCtrl:
+		return gpucontext.KeyLeftControl
+	case keyRightCtrl:
+		return gpucontext.KeyRightControl
+	case keyLeftAlt:
+		return gpucontext.KeyLeftAlt
+	case keyRightAlt:
+		return gpucontext.KeyRightAlt
+	case keyLeftMeta:
+		return gpucontext.KeyLeftSuper
+	case keyRightMeta:
+		return gpucontext.KeyRightSuper
+
+	// Punctuation
+	case keyMinus:
+		return gpucontext.KeyMinus
+	case keyEqual:
+		return gpucontext.KeyEqual
+	case keyLeftBrace:
+		return gpucontext.KeyLeftBracket
+	case keyRightBrace:
+		return gpucontext.KeyRightBracket
+	case keyBackslash:
+		return gpucontext.KeyBackslash
+	case keySemicolon:
+		return gpucontext.KeySemicolon
+	case keyApostrophe:
+		return gpucontext.KeyApostrophe
+	case keyGrave:
+		return gpucontext.KeyGrave
+	case keyComma:
+		return gpucontext.KeyComma
+	case keyDot:
+		return gpucontext.KeyPeriod
+	case keySlash:
+		return gpucontext.KeySlash
+
+	// Numpad
+	case keyKP0:
+		return gpucontext.KeyNumpad0
+	case keyKP1:
+		return gpucontext.KeyNumpad1
+	case keyKP2:
+		return gpucontext.KeyNumpad2
+	case keyKP3:
+		return gpucontext.KeyNumpad3
+	case keyKP4:
+		return gpucontext.KeyNumpad4
+	case keyKP5:
+		return gpucontext.KeyNumpad5
+	case keyKP6:
+		return gpucontext.KeyNumpad6
+	case keyKP7:
+		return gpucontext.KeyNumpad7
+	case keyKP8:
+		return gpucontext.KeyNumpad8
+	case keyKP9:
+		return gpucontext.KeyNumpad9
+	case keyKPDot:
+		return gpucontext.KeyNumpadDecimal
+	case keyKPSlash:
+		return gpucontext.KeyNumpadDivide
+	case keyKPAsterisk:
+		return gpucontext.KeyNumpadMultiply
+	case keyKPMinus:
+		return gpucontext.KeyNumpadSubtract
+	case keyKPPlus:
+		return gpucontext.KeyNumpadAdd
+
+	// Lock keys
+	case keyCapsLock:
+		return gpucontext.KeyCapsLock
+	case keyScrollLock:
+		return gpucontext.KeyScrollLock
+	case keyNumLock:
+		return gpucontext.KeyNumLock
+	case keyPause:
+		return gpucontext.KeyPause
+	}
+
+	return gpucontext.KeyUnknown
+}
+
 // PollEvents processes pending Wayland events.
 func (p *waylandPlatform) PollEvents() Event {
 	p.mu.Lock()
@@ -801,5 +1219,12 @@ func (p *waylandPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
 func (p *waylandPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 	p.callbackMu.Lock()
 	p.scrollCallback = fn
+	p.callbackMu.Unlock()
+}
+
+// SetKeyCallback registers a callback for keyboard events.
+func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	p.callbackMu.Lock()
+	p.keyboardCallback = fn
 	p.callbackMu.Unlock()
 }

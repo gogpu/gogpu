@@ -27,9 +27,10 @@ type darwinPlatform struct {
 	modifiers     gpucontext.Modifiers
 	mouseInWindow bool
 
-	// Callbacks for pointer and scroll events
-	pointerCallback func(gpucontext.PointerEvent)
-	scrollCallback  func(gpucontext.ScrollEvent)
+	// Callbacks for pointer, scroll, and keyboard events
+	pointerCallback  func(gpucontext.PointerEvent)
+	scrollCallback   func(gpucontext.ScrollEvent)
+	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -271,6 +272,26 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 			Timestamp: p.eventTimestamp(),
 		}
 		p.dispatchScrollEventUnlocked(ev)
+
+	// Keyboard events
+	case darwin.NSEventTypeKeyDown:
+		keyCode := darwin.GetKeyCode(event)
+		key := macKeyCodeToKey(keyCode)
+		p.dispatchKeyEventUnlocked(key, p.modifiers, true)
+
+	case darwin.NSEventTypeKeyUp:
+		keyCode := darwin.GetKeyCode(event)
+		key := macKeyCodeToKey(keyCode)
+		p.dispatchKeyEventUnlocked(key, p.modifiers, false)
+
+	case darwin.NSEventTypeFlagsChanged:
+		// Modifier key state changed
+		// Detect which modifier key was pressed/released by comparing flags
+		keyCode := darwin.GetKeyCode(event)
+		key, pressed := detectModifierKeyChange(keyCode, info.ModifierFlags)
+		if key != gpucontext.KeyUnknown {
+			p.dispatchKeyEventUnlocked(key, p.modifiers, pressed)
+		}
 	}
 
 	// Let all events be dispatched to the application
@@ -295,6 +316,17 @@ func (p *darwinPlatform) dispatchScrollEventUnlocked(ev gpucontext.ScrollEvent) 
 		// Release lock before calling user callback to avoid deadlocks
 		p.mu.Unlock()
 		callback(ev)
+		p.mu.Lock()
+	}
+}
+
+// dispatchKeyEventUnlocked dispatches without locking (called from handleEvent which is already in lock).
+func (p *darwinPlatform) dispatchKeyEventUnlocked(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	callback := p.keyboardCallback
+	if callback != nil {
+		// Release lock before calling user callback to avoid deadlocks
+		p.mu.Unlock()
+		callback(key, mods, pressed)
 		p.mu.Lock()
 	}
 }
@@ -383,6 +415,13 @@ func (p *darwinPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
 func (p *darwinPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 	p.mu.Lock()
 	p.scrollCallback = fn
+	p.mu.Unlock()
+}
+
+// SetKeyCallback registers a callback for keyboard events.
+func (p *darwinPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	p.mu.Lock()
+	p.keyboardCallback = fn
 	p.mu.Unlock()
 }
 

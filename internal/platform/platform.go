@@ -64,6 +64,10 @@ type Platform interface {
 	// The callback receives scroll events with position, delta, and modifiers.
 	SetScrollCallback(fn func(gpucontext.ScrollEvent))
 
+	// SetKeyCallback registers a callback for keyboard events.
+	// The callback receives the key, modifiers, and whether the key was pressed (true) or released (false).
+	SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool))
+
 	// Destroy closes the window and releases resources.
 	Destroy()
 }

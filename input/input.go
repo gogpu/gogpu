@@ -1,7 +1,10 @@
 // Package input provides keyboard, mouse, and gamepad input handling.
+// All methods are thread-safe for use with Ebiten-style polling from
+// multiple goroutines.
 package input
 
 // State holds the current input state.
+// All methods are thread-safe.
 type State struct {
 	keyboard KeyboardState
 	mouse    MouseState
@@ -17,9 +20,12 @@ func New() *State {
 }
 
 // Update should be called each frame to update input state.
+// This advances the "just pressed/released" tracking to the next frame.
+// Thread-safe.
 func (s *State) Update() {
-	s.keyboard.update()
-	s.mouse.update()
+	// Use the thread-safe UpdateFrame methods
+	s.keyboard.UpdateFrame()
+	s.mouse.UpdateFrame()
 }
 
 // Keyboard returns the keyboard state.
