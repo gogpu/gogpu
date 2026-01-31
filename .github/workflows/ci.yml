@@ -7,8 +7,7 @@ name: CI
 #
 # Branch Strategy (GitHub Flow):
 # - main branch: Production-ready code
-# - feat/** branches: Feature development
-# - fix/** branches: Bug fixes
+# - Feature branches: Tested via pull_request trigger
 # - Pull requests: Must pass all checks before merge
 
 env:
@@ -18,8 +17,6 @@ on:
   push:
     branches:
       - main
-      - 'feat/**'
-      - 'fix/**'
   pull_request:
     branches:
       - main
