@@ -27,9 +27,12 @@ type FencePool struct {
 }
 
 // activeFence tracks a fence and its associated submission index.
+// Also tracks resources that must be released when the submission completes.
+// Following wgpu-rs ActiveSubmission pattern: resources remain alive until GPU finishes.
 type activeFence struct {
-	index types.SubmissionIndex
-	fence types.Fence
+	index   types.SubmissionIndex
+	fence   types.Fence
+	cmdBufs []types.CommandBuffer // Command buffers to release when complete
 }
 
 // NewFencePool creates a new fence pool.
@@ -64,15 +67,22 @@ func (p *FencePool) AcquireFence() (types.Fence, error) {
 }
 
 // TrackSubmission records that a submission was made with the given fence.
-func (p *FencePool) TrackSubmission(index types.SubmissionIndex, fence types.Fence) {
+// Resources (command buffers) are stored and released only when the fence signals.
+// This follows wgpu-rs pattern: resources must remain alive until GPU finishes.
+func (p *FencePool) TrackSubmission(index types.SubmissionIndex, fence types.Fence, cmdBufs ...types.CommandBuffer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.active = append(p.active, activeFence{index: index, fence: fence})
+	p.active = append(p.active, activeFence{
+		index:   index,
+		fence:   fence,
+		cmdBufs: cmdBufs,
+	})
 }
 
 // PollCompleted checks all active fences and returns the highest completed submission index.
 // This is non-blocking - uses GetFenceStatus to poll without waiting.
-// Also moves completed fences back to the free pool.
+// Also moves completed fences back to the free pool and releases associated resources.
+// Following wgpu-rs pattern: resources are released only when GPU finishes using them.
 func (p *FencePool) PollCompleted() types.SubmissionIndex {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -89,7 +99,11 @@ func (p *FencePool) PollCompleted() types.SubmissionIndex {
 		}
 
 		if signaled {
-			// Submission complete - fence can be reused
+			// Submission complete - release resources that were waiting
+			for _, cmdBuf := range af.cmdBufs {
+				p.backend.ReleaseCommandBuffer(cmdBuf)
+			}
+			// Fence can be reused
 			p.free = append(p.free, af.fence)
 			if af.index > maxCompleted {
 				maxCompleted = af.index
@@ -135,7 +149,7 @@ func (p *FencePool) WaitAll(timeoutNs uint64) {
 	p.PollCompleted()
 }
 
-// Destroy waits for all GPU work to complete, then releases all fences.
+// Destroy waits for all GPU work to complete, then releases all fences and resources.
 // This is critical for proper cleanup - destroying active fences while
 // GPU work is in-flight causes undefined behavior.
 func (p *FencePool) Destroy() {
@@ -146,8 +160,12 @@ func (p *FencePool) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Destroy any remaining active fences (should be empty after WaitAll)
+	// Release any remaining resources and fences (should be minimal after WaitAll)
 	for _, af := range p.active {
+		// Release pending command buffers
+		for _, cmdBuf := range af.cmdBufs {
+			p.backend.ReleaseCommandBuffer(cmdBuf)
+		}
 		p.backend.DestroyFence(p.device, af.fence)
 	}
 	p.active = nil

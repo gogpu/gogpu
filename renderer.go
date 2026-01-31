@@ -332,27 +332,30 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 	commands := r.backend.FinishEncoder(encoder)
 	r.backend.ReleaseCommandEncoder(encoder)
 
-	// Submit with fence tracking
+	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
-	r.backend.ReleaseCommandBuffer(commands)
 
 	// Mark frame as cleared for subsequent draw calls
 	r.frameCleared = true
 }
 
 // submitWithFence submits commands with a fence for non-blocking tracking.
+// The command buffer is stored and released only when GPU finishes using it.
+// This follows wgpu-rs pattern: resources must remain alive until GPU completes.
 func (r *Renderer) submitWithFence(commands types.CommandBuffer) {
 	if r.fencePool == nil {
-		// No fence pool - submit without tracking
+		// No fence pool - submit and release immediately (legacy behavior)
 		r.backend.Submit(r.queue, commands, 0, 0)
+		r.backend.ReleaseCommandBuffer(commands)
 		return
 	}
 
 	// Acquire fence from pool
 	fence, err := r.fencePool.AcquireFence()
 	if err != nil {
-		// Fence acquisition failed - submit without tracking
+		// Fence acquisition failed - submit and release immediately
 		r.backend.Submit(r.queue, commands, 0, 0)
+		r.backend.ReleaseCommandBuffer(commands)
 		return
 	}
 
@@ -363,8 +366,9 @@ func (r *Renderer) submitWithFence(commands types.CommandBuffer) {
 	// Submit with fence signaling
 	r.backend.Submit(r.queue, commands, fence, uint64(subIdx))
 
-	// Track the submission
-	r.fencePool.TrackSubmission(subIdx, fence)
+	// Track submission WITH command buffer for deferred release.
+	// Command buffer will be released when fence signals (GPU done).
+	r.fencePool.TrackSubmission(subIdx, fence, commands)
 }
 
 // Size returns the current render target size.
@@ -449,9 +453,8 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	commands := r.backend.FinishEncoder(encoder)
 	r.backend.ReleaseCommandEncoder(encoder)
 
-	// Submit with fence tracking
+	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
-	r.backend.ReleaseCommandBuffer(commands)
 
 	return nil
 }
@@ -697,9 +700,8 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	commands := r.backend.FinishEncoder(encoder)
 	r.backend.ReleaseCommandEncoder(encoder)
 
-	// Submit with fence tracking
+	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
-	r.backend.ReleaseCommandBuffer(commands)
 
 	// Mark frame as having content (for subsequent LoadOp)
 	r.frameCleared = true
