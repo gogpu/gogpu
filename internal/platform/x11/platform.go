@@ -254,8 +254,6 @@ func (p *Platform) PollEvents() PlatformEvent {
 }
 
 // handleEvent processes a single X11 event.
-//
-//nolint:maintidx // Event dispatch functions inherently have high complexity
 func (p *Platform) handleEvent(event Event) PlatformEvent {
 	switch e := event.(type) {
 	case *ConfigureNotifyEvent:
@@ -596,29 +594,29 @@ func (p *Platform) eventTimestamp() time.Duration {
 
 // X11 button constants.
 const (
-	x11ButtonLeft       = 1
-	x11ButtonMiddle     = 2
-	x11ButtonRight      = 3
-	x11ButtonScrollUp   = 4
-	x11ButtonScrollDown = 5
-	x11ButtonScrollLeft = 6
+	x11ButtonLeft        = 1
+	x11ButtonMiddle      = 2
+	x11ButtonRight       = 3
+	x11ButtonScrollUp    = 4
+	x11ButtonScrollDown  = 5
+	x11ButtonScrollLeft  = 6
 	x11ButtonScrollRight = 7
-	x11ButtonX1         = 8
-	x11ButtonX2         = 9
+	x11ButtonX1          = 8
+	x11ButtonX2          = 9
 )
 
 // X11 modifier mask constants.
 const (
-	x11ModShift   = 1 << 0 // Bit 0: Shift
-	x11ModLock    = 1 << 1 // Bit 1: Caps Lock
-	x11ModControl = 1 << 2 // Bit 2: Control
-	x11ModMod1    = 1 << 3 // Bit 3: Mod1 (Alt)
-	x11ModMod2    = 1 << 4 // Bit 4: Mod2 (Num Lock)
-	x11ModMod3    = 1 << 5 // Bit 5: Mod3
-	x11ModMod4    = 1 << 6 // Bit 6: Mod4 (Super/Windows)
-	x11ModMod5    = 1 << 7 // Bit 7: Mod5
-	x11ModButton1 = 1 << 8 // Button1 (left) pressed
-	x11ModButton2 = 1 << 9 // Button2 (middle) pressed
+	x11ModShift   = 1 << 0  // Bit 0: Shift
+	x11ModLock    = 1 << 1  // Bit 1: Caps Lock
+	x11ModControl = 1 << 2  // Bit 2: Control
+	x11ModMod1    = 1 << 3  // Bit 3: Mod1 (Alt)
+	x11ModMod2    = 1 << 4  // Bit 4: Mod2 (Num Lock)
+	x11ModMod3    = 1 << 5  // Bit 5: Mod3
+	x11ModMod4    = 1 << 6  // Bit 6: Mod4 (Super/Windows)
+	x11ModMod5    = 1 << 7  // Bit 7: Mod5
+	x11ModButton1 = 1 << 8  // Button1 (left) pressed
+	x11ModButton2 = 1 << 9  // Button2 (middle) pressed
 	x11ModButton3 = 1 << 10 // Button3 (right) pressed
 )
 
