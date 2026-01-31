@@ -33,8 +33,9 @@ type App struct {
 	onResize func(int, int)
 
 	// State
-	running   bool
-	lastFrame time.Time
+	running     bool
+	lastFrame   time.Time
+	needsRedraw bool // For render-on-demand mode
 
 	// Event source for gpucontext integration
 	eventSource *eventSourceAdapter
@@ -122,6 +123,7 @@ func (a *App) Run() error {
 	// Main loop
 	a.running = true
 	a.lastFrame = time.Now()
+	a.needsRedraw = true // Initial draw
 
 	for a.running && !a.platform.ShouldClose() {
 		// Process platform events (main thread)
@@ -144,7 +146,16 @@ func (a *App) Run() error {
 		}
 
 		// Render frame on render thread
-		a.renderFrameMultiThread()
+		// In continuous mode: render every frame (game loop)
+		// In on-demand mode: render only when needsRedraw is set
+		if a.config.ContinuousRender || a.needsRedraw {
+			a.renderFrameMultiThread()
+			a.needsRedraw = false
+		} else {
+			// In on-demand mode, sleep to avoid busy loop.
+			// 100ms = responsive enough for UI, power-efficient when idle.
+			time.Sleep(time.Millisecond * 100)
+		}
 	}
 
 	return nil
@@ -172,8 +183,12 @@ func (a *App) processEventsMultiThread() {
 		switch event.Type {
 		case platform.EventResize:
 			lastResize = event
+			a.needsRedraw = true
 		case platform.EventClose:
 			a.running = false
+		default:
+			// Any other event (input, etc.) triggers redraw in on-demand mode
+			a.needsRedraw = true
 		}
 	}
 
@@ -236,6 +251,14 @@ func (a *App) renderFrameMultiThread() {
 // The main loop will exit after completing the current frame.
 func (a *App) Quit() {
 	a.running = false
+}
+
+// RequestRedraw requests a frame redraw.
+// In render-on-demand mode (ContinuousRender=false), this triggers a single frame render.
+// In continuous mode, this has no effect as frames are rendered continuously.
+// Call this when UI state changes and needs to be displayed.
+func (a *App) RequestRedraw() {
+	a.needsRedraw = true
 }
 
 // Size returns the current window size.

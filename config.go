@@ -25,16 +25,25 @@ type Config struct {
 	// Backend specifies which WebGPU implementation to use.
 	// BackendAuto (default) selects the best available.
 	Backend types.BackendType
+
+	// ContinuousRender enables continuous rendering (game loop style).
+	// When false (default), renders only when RequestRedraw() is called
+	// or when events occur (resize, input, etc.) - more power efficient.
+	// When true, renders every frame at VSync rate - suitable for games/animations.
+	ContinuousRender bool
 }
 
 // DefaultConfig returns sensible default configuration.
+// By default, uses continuous rendering (game loop style).
+// For power-efficient UI apps, use WithContinuousRender(false).
 func DefaultConfig() Config {
 	return Config{
-		Title:     "GoGPU Application",
-		Width:     800,
-		Height:    600,
-		Resizable: true,
-		VSync:     true,
+		Title:            "GoGPU Application",
+		Width:            800,
+		Height:           600,
+		Resizable:        true,
+		VSync:            true,
+		ContinuousRender: true, // Game loop by default for backwards compat
 	}
 }
 
@@ -57,6 +66,14 @@ func (c Config) WithSize(width, height int) Config {
 // Use types.BackendAuto (default) to automatically select the best available.
 func (c Config) WithBackend(backend types.BackendType) Config {
 	c.Backend = backend
+	return c
+}
+
+// WithContinuousRender sets the rendering mode.
+// When true (default): renders every frame at VSync rate - for games/animations.
+// When false: renders only on RequestRedraw() or events - power efficient for UI.
+func (c Config) WithContinuousRender(continuous bool) Config {
+	c.ContinuousRender = continuous
 	return c
 }
 
