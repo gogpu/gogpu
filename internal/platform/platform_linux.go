@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gogpu/internal/platform/wayland"
 	"github.com/gogpu/gogpu/internal/platform/x11"
+	"github.com/gogpu/gpucontext"
 )
 
 // waylandPlatform implements the Platform interface using Wayland.
@@ -110,6 +111,18 @@ func (p *x11Platform) Destroy() {
 // X11 doesn't have modal resize loops like Windows.
 func (p *x11Platform) InSizeMove() bool {
 	return false
+}
+
+// SetPointerCallback registers a callback for pointer events.
+// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
+func (p *x11Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	// No-op stub - X11 implementation in Phase 4
+}
+
+// SetScrollCallback registers a callback for scroll events.
+// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
+func (p *x11Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	// No-op stub - X11 implementation in Phase 4
 }
 
 // Init creates the Wayland window.
@@ -488,4 +501,16 @@ func (p *waylandPlatform) Destroy() {
 // Wayland uses async configure events, so resize is never blocking.
 func (p *waylandPlatform) InSizeMove() bool {
 	return false
+}
+
+// SetPointerCallback registers a callback for pointer events.
+// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
+func (p *waylandPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	// No-op stub - Wayland implementation in Phase 4
+}
+
+// SetScrollCallback registers a callback for scroll events.
+// TODO: Implement in EVENT-005 Phase 4 (Linux platform handlers).
+func (p *waylandPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	// No-op stub - Wayland implementation in Phase 4
 }

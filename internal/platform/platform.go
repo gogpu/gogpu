@@ -1,6 +1,10 @@
 // Package platform provides OS-specific windowing abstraction.
 package platform
 
+import (
+	"github.com/gogpu/gpucontext"
+)
+
 // Config holds platform-agnostic window configuration.
 type Config struct {
 	Title      string
@@ -51,6 +55,14 @@ type Platform interface {
 	// During modal resize (Windows) or live resize (macOS), this returns true.
 	// Used to defer swapchain recreation until resize ends.
 	InSizeMove() bool
+
+	// SetPointerCallback registers a callback for pointer events.
+	// The callback receives W3C Pointer Events Level 3 compliant events.
+	SetPointerCallback(fn func(gpucontext.PointerEvent))
+
+	// SetScrollCallback registers a callback for scroll events.
+	// The callback receives scroll events with position, delta, and modifiers.
+	SetScrollCallback(fn func(gpucontext.ScrollEvent))
 
 	// Destroy closes the window and releases resources.
 	Destroy()

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gogpu/internal/thread"
+	"github.com/gogpu/gpucontext"
 )
 
 // App is the main application type.
@@ -92,6 +93,9 @@ func (a *App) Run() error {
 		return err
 	}
 	defer a.platform.Destroy()
+
+	// Wire platform callbacks to eventSourceAdapter for pointer/scroll events
+	a.setupPointerEvents()
 
 	// Create render loop with dedicated render thread
 	a.renderLoop = thread.NewRenderLoop()
@@ -252,4 +256,24 @@ func (a *App) DeviceProvider() DeviceProvider {
 		return nil
 	}
 	return &rendererDeviceProvider{renderer: a.renderer}
+}
+
+// setupPointerEvents wires platform callbacks to eventSourceAdapter.
+// This enables W3C Pointer Events and detailed scroll events to flow
+// from the platform layer to the gpucontext event system.
+func (a *App) setupPointerEvents() {
+	// Ensure eventSource exists
+	if a.eventSource == nil {
+		a.eventSource = &eventSourceAdapter{app: a}
+	}
+
+	// Wire pointer events from platform to eventSource
+	a.platform.SetPointerCallback(func(ev gpucontext.PointerEvent) {
+		a.eventSource.dispatchPointerEvent(ev)
+	})
+
+	// Wire scroll events from platform to eventSource
+	a.platform.SetScrollCallback(func(ev gpucontext.ScrollEvent) {
+		a.eventSource.dispatchScrollEventDetailed(ev)
+	})
 }

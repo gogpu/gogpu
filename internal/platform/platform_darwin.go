@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gogpu/internal/platform/darwin"
+	"github.com/gogpu/gpucontext"
 )
 
 // darwinPlatform implements Platform for macOS using Cocoa/AppKit.
@@ -194,4 +195,16 @@ func (p *darwinPlatform) Destroy() {
 // queueEvent adds an event to the event queue.
 func (p *darwinPlatform) queueEvent(event Event) {
 	p.events = append(p.events, event)
+}
+
+// SetPointerCallback registers a callback for pointer events.
+// TODO: Implement in EVENT-005 Phase 3 (macOS platform handlers).
+func (p *darwinPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	// No-op stub - macOS implementation in Phase 3
+}
+
+// SetScrollCallback registers a callback for scroll events.
+// TODO: Implement in EVENT-005 Phase 3 (macOS platform handlers).
+func (p *darwinPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	// No-op stub - macOS implementation in Phase 3
 }
