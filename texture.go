@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -11,6 +12,21 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
+)
+
+// Texture update errors.
+var (
+	// ErrTextureUpdateDestroyed is returned when attempting to update a destroyed texture.
+	ErrTextureUpdateDestroyed = errors.New("gogpu: cannot update destroyed texture")
+
+	// ErrInvalidDataSize is returned when the data size doesn't match expected dimensions.
+	ErrInvalidDataSize = errors.New("gogpu: invalid data size")
+
+	// ErrRegionOutOfBounds is returned when the update region exceeds texture bounds.
+	ErrRegionOutOfBounds = errors.New("gogpu: region out of bounds")
+
+	// ErrInvalidRegion is returned when region parameters are invalid (negative or zero).
+	ErrInvalidRegion = errors.New("gogpu: invalid region parameters")
 )
 
 // Texture represents a GPU texture resource with its associated view and sampler.
@@ -64,6 +80,61 @@ func (t *Texture) View() types.TextureView {
 // Sampler returns the sampler handle.
 func (t *Texture) Sampler() types.Sampler {
 	return t.sampler
+}
+
+// BytesPerPixel returns the number of bytes per pixel for the texture format.
+// Returns 4 for RGBA8/BGRA8 formats (the most common), 0 for unknown formats.
+func (t *Texture) BytesPerPixel() int {
+	return bytesPerPixelForFormat(t.format)
+}
+
+// bytesPerPixelForFormat returns bytes per pixel for a given texture format.
+func bytesPerPixelForFormat(format gputypes.TextureFormat) int {
+	switch format {
+	case gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatRGBA8UnormSrgb,
+		gputypes.TextureFormatRGBA8Snorm,
+		gputypes.TextureFormatRGBA8Uint,
+		gputypes.TextureFormatRGBA8Sint,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatBGRA8UnormSrgb:
+		return 4
+	case gputypes.TextureFormatR8Unorm,
+		gputypes.TextureFormatR8Snorm,
+		gputypes.TextureFormatR8Uint,
+		gputypes.TextureFormatR8Sint:
+		return 1
+	case gputypes.TextureFormatR16Uint,
+		gputypes.TextureFormatR16Sint,
+		gputypes.TextureFormatR16Float,
+		gputypes.TextureFormatRG8Unorm,
+		gputypes.TextureFormatRG8Snorm,
+		gputypes.TextureFormatRG8Uint,
+		gputypes.TextureFormatRG8Sint:
+		return 2
+	case gputypes.TextureFormatRG16Uint,
+		gputypes.TextureFormatRG16Sint,
+		gputypes.TextureFormatRG16Float,
+		gputypes.TextureFormatRGBA16Uint,
+		gputypes.TextureFormatRGBA16Sint,
+		gputypes.TextureFormatRGBA16Float:
+		return 8
+	case gputypes.TextureFormatR32Uint,
+		gputypes.TextureFormatR32Sint,
+		gputypes.TextureFormatR32Float:
+		return 4
+	case gputypes.TextureFormatRG32Uint,
+		gputypes.TextureFormatRG32Sint,
+		gputypes.TextureFormatRG32Float:
+		return 8
+	case gputypes.TextureFormatRGBA32Uint,
+		gputypes.TextureFormatRGBA32Sint,
+		gputypes.TextureFormatRGBA32Float:
+		return 16
+	default:
+		// Unknown format, return 0 (caller should handle)
+		return 0
+	}
 }
 
 // Destroy releases all GPU resources associated with this texture.
@@ -263,17 +334,26 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 }
 
 // UpdateData uploads new pixel data to the entire texture.
-// Data must be exactly width * height * 4 bytes (RGBA8).
+// Data must be exactly width * height * bytesPerPixel bytes.
 // This is more efficient than recreating the texture for dynamic content
 // such as gg canvas rendering or video frames.
+//
+// Returns ErrTextureUpdateDestroyed if the texture has been destroyed.
+// Returns ErrInvalidDataSize if the data size doesn't match texture dimensions.
 func (t *Texture) UpdateData(data []byte) error {
-	if t.renderer == nil || t.renderer.backend == nil {
-		return fmt.Errorf("gogpu: cannot update destroyed texture")
+	if t.renderer == nil || t.renderer.backend == nil || t.texture == 0 {
+		return ErrTextureUpdateDestroyed
 	}
 
-	expectedSize := t.width * t.height * 4
+	bpp := t.BytesPerPixel()
+	if bpp == 0 {
+		return fmt.Errorf("%w: unsupported texture format", ErrInvalidDataSize)
+	}
+
+	expectedSize := t.width * t.height * bpp
 	if len(data) != expectedSize {
-		return fmt.Errorf("gogpu: invalid data size: expected %d bytes, got %d", expectedSize, len(data))
+		return fmt.Errorf("%w: expected %d bytes (%dx%dx%d), got %d",
+			ErrInvalidDataSize, expectedSize, t.width, t.height, bpp, len(data))
 	}
 
 	t.renderer.backend.WriteTexture(
@@ -287,8 +367,8 @@ func (t *Texture) UpdateData(data []byte) error {
 		data,
 		&types.ImageDataLayout{
 			Offset:       0,
-			BytesPerRow:  uint32(t.width * 4), //nolint:gosec // G115: width validated in constructor
-			RowsPerImage: uint32(t.height),    //nolint:gosec // G115: height validated in constructor
+			BytesPerRow:  uint32(t.width * bpp), //nolint:gosec // G115: width validated in constructor
+			RowsPerImage: uint32(t.height),      //nolint:gosec // G115: height validated in constructor
 		},
 		&gputypes.Extent3D{
 			Width:              uint32(t.width),  //nolint:gosec // G115: width validated in constructor
@@ -307,29 +387,41 @@ func (t *Texture) UpdateData(data []byte) error {
 // Parameters:
 //   - x, y: Top-left corner of the region in pixels (0,0 is top-left of texture)
 //   - w, h: Width and height of the region in pixels
-//   - data: Pixel data, must be exactly w * h * 4 bytes (RGBA8)
+//   - data: Pixel data, must be exactly w * h * bytesPerPixel bytes
 //
 // The region must be within texture bounds.
+//
+// Returns ErrTextureUpdateDestroyed if the texture has been destroyed.
+// Returns ErrInvalidRegion if x, y are negative or w, h are not positive.
+// Returns ErrRegionOutOfBounds if the region exceeds texture dimensions.
+// Returns ErrInvalidDataSize if the data size doesn't match region dimensions.
 func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
-	if t.renderer == nil || t.renderer.backend == nil {
-		return fmt.Errorf("gogpu: cannot update destroyed texture")
+	if t.renderer == nil || t.renderer.backend == nil || t.texture == 0 {
+		return ErrTextureUpdateDestroyed
+	}
+
+	// Validate region parameters
+	if x < 0 || y < 0 || w <= 0 || h <= 0 {
+		return fmt.Errorf("%w: x=%d, y=%d, w=%d, h=%d (x,y must be non-negative; w,h must be positive)",
+			ErrInvalidRegion, x, y, w, h)
 	}
 
 	// Validate region bounds
-	if x < 0 || y < 0 || w <= 0 || h <= 0 {
-		return fmt.Errorf("gogpu: invalid region: x=%d, y=%d, w=%d, h=%d (must be non-negative, w/h must be positive)", x, y, w, h)
+	if x+w > t.width || y+h > t.height {
+		return fmt.Errorf("%w: region (%d,%d)+(%d,%d) exceeds texture size (%d,%d)",
+			ErrRegionOutOfBounds, x, y, w, h, t.width, t.height)
 	}
 
-	if x+w > t.width || y+h > t.height {
-		return fmt.Errorf("gogpu: region out of bounds: region (%d,%d)+(%d,%d) exceeds texture size (%d,%d)",
-			x, y, w, h, t.width, t.height)
+	bpp := t.BytesPerPixel()
+	if bpp == 0 {
+		return fmt.Errorf("%w: unsupported texture format", ErrInvalidDataSize)
 	}
 
 	// Validate data size
-	expectedSize := w * h * 4
+	expectedSize := w * h * bpp
 	if len(data) != expectedSize {
-		return fmt.Errorf("gogpu: invalid data size for region: expected %d bytes (w=%d * h=%d * 4), got %d",
-			expectedSize, w, h, len(data))
+		return fmt.Errorf("%w: expected %d bytes (%dx%dx%d), got %d",
+			ErrInvalidDataSize, expectedSize, w, h, bpp, len(data))
 	}
 
 	t.renderer.backend.WriteTexture(
@@ -347,8 +439,8 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 		data,
 		&types.ImageDataLayout{
 			Offset:       0,
-			BytesPerRow:  uint32(w * 4), //nolint:gosec // G115: w validated positive above
-			RowsPerImage: uint32(h),     //nolint:gosec // G115: h validated positive above
+			BytesPerRow:  uint32(w * bpp), //nolint:gosec // G115: w validated positive above
+			RowsPerImage: uint32(h),       //nolint:gosec // G115: h validated positive above
 		},
 		&gputypes.Extent3D{
 			Width:              uint32(w), //nolint:gosec // G115: w validated positive above
