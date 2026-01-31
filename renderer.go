@@ -284,13 +284,11 @@ func (r *Renderer) EndFrame() {
 
 	// Non-blocking submission tracking: poll completed submissions.
 	// This is the wgpu-rs FencePool pattern where each submission has its own fence.
-	// PollCompleted checks all active fences and recycles completed ones.
+	// PollCompleted checks all active fences, recycles completed fences,
+	// and releases command buffers back to the pool via FreeCommandBuffer.
+	// No ResetCommandPool needed — individual buffers are freed when fences signal.
 	if r.fencePool != nil {
-		completedIdx := r.fencePool.PollCompleted()
-		// Reset command pool only if we have completed submissions to recycle.
-		if completedIdx > 0 {
-			r.backend.ResetCommandPool(r.device)
-		}
+		r.fencePool.PollCompleted()
 	}
 
 	// Release resources after presentation
