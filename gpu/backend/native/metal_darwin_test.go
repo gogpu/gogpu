@@ -88,7 +88,7 @@ func TestMetalBackendSurfaceLifecycleDarwin(t *testing.T) {
 		t.Fatal("FinishEncoder returned 0")
 	}
 
-	backend.Submit(queue, cmd)
+	backend.Submit(queue, cmd, 0, 0)
 	backend.ReleaseCommandBuffer(cmd)
 
 	if backend.registry.GetCurrentSurfaceTexture(surface) == nil {
