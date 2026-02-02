@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-02-02
+
+### Fixed
+
+- **Windows Alt Key Events** — Alt key now works correctly on Windows
+  - Added `WM_SYSKEYDOWN`/`WM_SYSKEYUP` message handlers
+  - Windows sends Alt through system key messages, not regular key messages
+  - Alt+F4 preserved, menu activation suppressed
+  - Thanks to @qq1792569310 for reporting ([#67](https://github.com/gogpu/gogpu/pull/67))
+
 ## [0.15.0] - 2026-02-01
 
 ### Added
@@ -643,7 +653,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/gogpu/gogpu/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/gogpu/gogpu/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/gogpu/gogpu/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/gogpu/gogpu/compare/v0.13.2...v0.13.3

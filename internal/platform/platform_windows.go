@@ -25,7 +25,9 @@ const (
 	wmExitSizeMove     = 0x0232 // End of resize/move modal loop
 	wmKeydown          = 0x0100
 	wmKeyup            = 0x0101
-	htClient           = 1 // WM_SETCURSOR hit test code for client area
+	wmSysKeydown       = 0x0104 // System key down (Alt, F10)
+	wmSysKeyup         = 0x0105 // System key up (Alt, F10)
+	htClient           = 1      // WM_SETCURSOR hit test code for client area
 	idcArrow           = 32512
 	swShowNormal       = 1
 	swShow             = 5
@@ -814,7 +816,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		})
 		return 0
 
-	case wmKeydown:
+	case wmKeydown, wmSysKeydown:
 		// Convert vkCode to Key
 		key := vkCodeToKey(wParam)
 		mods := getKeyModifiers()
@@ -827,15 +829,29 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			p.shouldClose = true
 			p.queueEvent(Event{Type: EventClose})
 		}
+
+		// For WM_SYSKEYDOWN: let DefWindowProc handle Alt+F4, Alt+Tab
+		// but suppress menu activation on Alt alone
+		if message == wmSysKeydown {
+			// Alt+F4 should still close the window
+			if wParam == vkF4 && mods&gpucontext.ModAlt != 0 {
+				ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+				return ret
+			}
+			// Suppress other system key behavior (menu activation)
+			return 0
+		}
 		return 0
 
-	case wmKeyup:
+	case wmKeyup, wmSysKeyup:
 		// Convert vkCode to Key
 		key := vkCodeToKey(wParam)
 		mods := getKeyModifiers()
 
 		// Dispatch keyboard event
 		p.dispatchKeyEvent(key, mods, false)
+
+		// For WM_SYSKEYUP: suppress menu activation
 		return 0
 
 	case wmSetCursor:
