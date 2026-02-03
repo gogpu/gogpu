@@ -210,8 +210,12 @@ func (a *App) EventSource() gpucontext.EventSource {
 // Note: Input state is automatically updated each frame. The "JustPressed"
 // and "JustReleased" methods work correctly across frames.
 // All methods are thread-safe.
+//
+// Input() can be called before Run(), but the state will only be populated
+// once the main loop starts processing events.
 func (a *App) Input() *input.State {
 	if a.inputState == nil {
+		// Eager initialization for calls before Run()
 		a.inputState = input.New()
 	}
 	return a.inputState

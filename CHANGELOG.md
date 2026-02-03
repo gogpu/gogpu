@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-02-03
+
+### Fixed
+
+- **Input State Initialization** — `app.Input().Keyboard().Pressed()` now works correctly in `OnUpdate`
+  - Input state is now initialized before event callbacks are registered
+  - Fixes race condition where key events were missed on first frame
+  - Follows Ebitengine/GLFW/SDL pattern for eager initialization
+  - Thanks to @qq1792569310 for reporting ([#71](https://github.com/gogpu/gogpu/issues/71))
+
 ## [0.15.1] - 2026-02-02
 
 ### Fixed

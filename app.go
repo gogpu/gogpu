@@ -99,6 +99,11 @@ func (a *App) Run() error {
 	}
 	defer a.platform.Destroy()
 
+	// Initialize input state BEFORE setting up event callbacks.
+	// This ensures keyboard/mouse state is captured from the first event.
+	// (Follows Ebitengine/GLFW/SDL pattern - state must exist before callbacks)
+	a.inputState = input.New()
+
 	// Wire platform callbacks to eventSourceAdapter for input events
 	a.setupInputEvents()
 
