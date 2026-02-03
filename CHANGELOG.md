@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-02-03
+
+### Fixed
+
+- **Windows Modifier Keys** — Ctrl, Shift, Alt now work correctly in `Pressed()` and `Modifier()`
+  - Implemented GLFW/Ebiten scancode-based pattern for accurate Left/Right detection
+  - Windows sends generic VK codes (0x10-0x12), not specific L/R codes — now handled correctly
+  - Added AltGr detection for European keyboard layouts (Ctrl+Alt sequence)
+  - Thanks to @qq1792569310 for testing and reporting ([#71](https://github.com/gogpu/gogpu/issues/71))
+
 ## [0.15.2] - 2026-02-03
 
 ### Fixed

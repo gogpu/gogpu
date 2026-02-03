@@ -71,7 +71,35 @@ const (
 
 	// TrackMouseEvent flags
 	tmeLeave = 0x0002
+
+	// Keyboard lParam flags (GLFW/Ebiten pattern)
+	kfExtended = 0x0100 // Extended key flag (bit 24 of lParam >> 16)
+
+	// PeekMessage flags
+	pmNoRemove = 0x0000
+
+	// Scancodes for modifier keys (GLFW pattern)
+	// Left-side keys use base scancode
+	// Right-side keys use base scancode | 0x100 (extended)
+	scLeftShift    = 0x2A
+	scRightShift   = 0x36
+	scLeftControl  = 0x1D
+	scRightControl = 0x11D // 0x1D | 0x100
+	scLeftAlt      = 0x38
+	scRightAlt     = 0x138 // 0x38 | 0x100
+	scLeftSuper    = 0x15B // Extended
+	scRightSuper   = 0x15C // Extended
 )
+
+// msgStruct is the Windows MSG structure for PeekMessage.
+type msgStruct struct {
+	hwnd    windows.HWND
+	message uint32
+	wParam  uintptr
+	lParam  uintptr
+	time    uint32
+	pt      struct{ x, y int32 }
+}
 
 var (
 	user32                 = windows.NewLazyDLL("user32.dll")
@@ -96,6 +124,7 @@ var (
 	procDestroyWindow      = user32.NewProc("DestroyWindow")
 	procGetClientRect      = user32.NewProc("GetClientRect")
 	procTrackMouseEvent    = user32.NewProc("TrackMouseEvent")
+	procGetMessageTime     = user32.NewProc("GetMessageTime")
 )
 
 // trackMouseEventStruct is the TRACKMOUSEEVENT structure.
@@ -699,6 +728,89 @@ func vkCodeToKey(vkCode uintptr) gpucontext.Key {
 	return gpucontext.KeyUnknown
 }
 
+// translateKey converts a Windows key event to gpucontext.Key using the GLFW/Ebiten pattern.
+// It uses scancode and KF_EXTENDED flag for accurate Left/Right modifier detection,
+// and handles AltGr (Ctrl+Alt on European keyboards) correctly.
+//
+// This is the enterprise-grade approach used by GLFW, SDL, and Ebiten.
+func translateKey(wParam, lParam uintptr) gpucontext.Key {
+	// Extract scancode with extended bit from lParam
+	// Bits 16-23: scancode, bit 24: extended flag
+	scancode := int((lParam >> 16) & (kfExtended | 0xFF))
+
+	// Special handling for modifier keys (GLFW pattern)
+	switch wParam {
+	case vkShift:
+		// Distinguish Left/Right Shift by scancode
+		if scancode == scRightShift {
+			return gpucontext.KeyRightShift
+		}
+		return gpucontext.KeyLeftShift
+
+	case vkControl:
+		// Check extended bit for Right Control
+		if scancode&kfExtended != 0 {
+			return gpucontext.KeyRightControl
+		}
+		// AltGr detection: Left Ctrl + Right Alt sent together
+		// GLFW/Ebiten hack: check if next message is Right Alt with same timestamp
+		if isAltGrSequence() {
+			return gpucontext.KeyUnknown // Skip Ctrl part of AltGr
+		}
+		return gpucontext.KeyLeftControl
+
+	case vkMenu: // Alt
+		// Check extended bit for Right Alt
+		if scancode&kfExtended != 0 {
+			return gpucontext.KeyRightAlt
+		}
+		return gpucontext.KeyLeftAlt
+	}
+
+	// For non-modifier keys, use the standard vkCode mapping
+	return vkCodeToKey(wParam)
+}
+
+// isAltGrSequence checks if the current Left Ctrl is part of an AltGr sequence.
+// AltGr on European keyboards sends Left Ctrl + Right Alt with the same timestamp.
+// We detect this by peeking at the next message in the queue.
+//
+// This is the standard GLFW/Ebiten approach for handling AltGr correctly.
+func isAltGrSequence() bool {
+	// Get current message timestamp
+	currentTime, _, _ := procGetMessageTime.Call()
+
+	// Peek at next message without removing it
+	var next msgStruct
+	ret, _, _ := procPeekMessageW.Call(
+		uintptr(unsafe.Pointer(&next)),
+		0, // NULL hwnd = all windows
+		0, // wMsgFilterMin
+		0, // wMsgFilterMax
+		uintptr(pmNoRemove),
+	)
+
+	if ret == 0 {
+		return false // No message in queue
+	}
+
+	// Check if next message is a key event
+	if next.message != wmKeydown && next.message != wmSysKeydown &&
+		next.message != wmKeyup && next.message != wmSysKeyup {
+		return false
+	}
+
+	// Check if it's Right Alt (VK_MENU with extended bit) with same timestamp
+	if next.wParam == vkMenu {
+		nextScancode := int((next.lParam >> 16) & (kfExtended | 0xFF))
+		if nextScancode&kfExtended != 0 && next.time == uint32(currentTime) {
+			return true // This is AltGr sequence
+		}
+	}
+
+	return false
+}
+
 // trackMouseLeave enables WM_MOUSELEAVE tracking.
 func (p *windowsPlatform) trackMouseLeave() {
 	tme := trackMouseEventStruct{
@@ -817,9 +929,15 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 0
 
 	case wmKeydown, wmSysKeydown:
-		// Convert vkCode to Key
-		key := vkCodeToKey(wParam)
+		// Convert to Key using scancode-based translation (GLFW/Ebiten pattern)
+		// This correctly handles Left/Right modifiers and AltGr
+		key := translateKey(wParam, lParam)
 		mods := getKeyModifiers()
+
+		// Skip if key is unknown (e.g., Ctrl part of AltGr sequence)
+		if key == gpucontext.KeyUnknown {
+			return 0
+		}
 
 		// Dispatch keyboard event
 		p.dispatchKeyEvent(key, mods, true)
@@ -844,9 +962,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 0
 
 	case wmKeyup, wmSysKeyup:
-		// Convert vkCode to Key
-		key := vkCodeToKey(wParam)
+		// Convert to Key using scancode-based translation (GLFW/Ebiten pattern)
+		key := translateKey(wParam, lParam)
 		mods := getKeyModifiers()
+
+		// Skip if key is unknown (e.g., Ctrl part of AltGr sequence)
+		if key == gpucontext.KeyUnknown {
+			return 0
+		}
 
 		// Dispatch keyboard event
 		p.dispatchKeyEvent(key, mods, false)
