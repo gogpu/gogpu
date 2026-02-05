@@ -81,7 +81,7 @@ func main() {
 			printed = true
 		}
 
-		// Example: Using the provider with gg via ggcanvas (gg v0.21.4+)
+		// Example: Using the provider with gg via ggcanvas (gg v0.23.0+)
 		//
 		//     import "github.com/gogpu/gg/integration/ggcanvas"
 		//
@@ -90,9 +90,9 @@ func main() {
 		//     cc.SetRGB(1, 0, 0)
 		//     cc.DrawCircle(400, 300, 100)
 		//     cc.Fill()
-		//     canvas.RenderTo(dc)
+		//     canvas.RenderTo(dc.AsTextureDrawer())
 		//
-		// See examples/gg_integration for a complete working example.
+		// See github.com/gogpu/gg/examples/gogpu_integration for a complete working example.
 
 		// Draw something to show the window works
 		if err := dc.DrawTriangleColor(gmath.CornflowerBlue); err != nil {
