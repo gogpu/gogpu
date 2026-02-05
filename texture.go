@@ -38,9 +38,10 @@ type Texture struct {
 	sampler types.Sampler
 
 	// Metadata
-	width  int
-	height int
-	format gputypes.TextureFormat
+	width         int
+	height        int
+	format        gputypes.TextureFormat
+	premultiplied bool // true if pixel data uses premultiplied alpha
 
 	// Reference to renderer for resource management
 	renderer *Renderer
@@ -59,6 +60,18 @@ func (t *Texture) Height() int {
 // Size returns the texture dimensions.
 func (t *Texture) Size() (width, height int) {
 	return t.width, t.height
+}
+
+// Premultiplied returns true if the texture data uses premultiplied alpha.
+// Premultiplied textures use BlendFactorOne for correct source-over compositing.
+func (t *Texture) Premultiplied() bool {
+	return t.premultiplied
+}
+
+// SetPremultiplied marks the texture as containing premultiplied alpha data.
+// This affects which GPU blend state is used when drawing the texture.
+func (t *Texture) SetPremultiplied(premultiplied bool) {
+	t.premultiplied = premultiplied
 }
 
 // Format returns the texture format.
@@ -174,6 +187,11 @@ type TextureOptions struct {
 
 	// Address mode for V coordinate (default: ClampToEdge)
 	AddressModeV gputypes.AddressMode
+
+	// Premultiplied indicates the texture data uses premultiplied alpha.
+	// When true, the texture is drawn with BlendFactorOne (industry standard).
+	// When false (default), BlendFactorSrcAlpha is used for straight alpha data.
+	Premultiplied bool
 }
 
 // DefaultTextureOptions returns sensible defaults for texture creation.
@@ -226,6 +244,8 @@ func (r *Renderer) NewTextureFromImage(img image.Image) (*Texture, error) {
 }
 
 // NewTextureFromImageWithOptions creates a texture from a Go image.Image with custom options.
+// The resulting texture is always marked as premultiplied because Go's image.RGBA
+// stores premultiplied alpha data, and draw.Draw preserves this convention.
 func (r *Renderer) NewTextureFromImageWithOptions(img image.Image, opts TextureOptions) (*Texture, error) {
 	// Convert to RGBA if needed
 	bounds := img.Bounds()
@@ -240,6 +260,9 @@ func (r *Renderer) NewTextureFromImageWithOptions(img image.Image, opts TextureO
 		draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 	}
 
+	// Go's image.RGBA stores premultiplied alpha by specification.
+	// draw.Draw with draw.Src converts any source format to premultiplied.
+	opts.Premultiplied = true
 	return r.NewTextureFromRGBAWithOptions(width, height, rgba.Pix, opts)
 }
 
@@ -323,13 +346,14 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 	}
 
 	return &Texture{
-		texture:  texture,
-		view:     view,
-		sampler:  sampler,
-		width:    width,
-		height:   height,
-		format:   gputypes.TextureFormatRGBA8Unorm,
-		renderer: r,
+		texture:       texture,
+		view:          view,
+		sampler:       sampler,
+		width:         width,
+		height:        height,
+		format:        gputypes.TextureFormatRGBA8Unorm,
+		premultiplied: opts.Premultiplied,
+		renderer:      r,
 	}, nil
 }
 

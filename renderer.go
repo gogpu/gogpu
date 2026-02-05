@@ -61,6 +61,12 @@ type Renderer struct {
 	texQuadUniformData    []byte // Pre-allocated buffer for uniform data (reduces GC pressure)
 	texQuadPipelineInited bool
 
+	// Premultiplied alpha textured quad pipeline (BlendFactorOne)
+	texQuadPremulPipeline       types.RenderPipeline
+	texQuadPremulShader         types.ShaderModule
+	texQuadPremulPipelineLayout types.PipelineLayout
+	texQuadPremulInited         bool
+
 	// Texture bind group cache - avoids creating new bind groups per draw call
 	texBindGroupCache map[types.TextureView]types.BindGroup
 
@@ -587,6 +593,71 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	return nil
 }
 
+// initTexQuadPremulPipeline creates the GPU pipeline for premultiplied alpha textures.
+// This uses BlendFactorOne for source RGB, which is the industry standard for
+// premultiplied alpha compositing (source-over: Src + Dst * (1 - SrcA)).
+func (r *Renderer) initTexQuadPremulPipeline() error {
+	if r.texQuadPremulInited {
+		return nil
+	}
+
+	// Ensure base pipeline is initialized (shares layouts and buffers)
+	if !r.texQuadPipelineInited {
+		if err := r.initTexturedQuadPipeline(); err != nil {
+			return err
+		}
+	}
+
+	var err error
+
+	// Create shader module for premultiplied alpha
+	r.texQuadPremulShader, err = r.backend.CreateShaderModuleWGSL(r.device, positionedQuadShaderPremulSource)
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create premultiplied quad shader: %w", err)
+	}
+
+	// Create pipeline layout (reuse existing bind group layouts)
+	r.texQuadPremulPipelineLayout, err = r.backend.CreatePipelineLayout(r.device, &types.PipelineLayoutDescriptor{
+		Label:            "Textured Quad Pipeline Layout (Premultiplied)",
+		BindGroupLayouts: []types.BindGroupLayout{r.texQuadUniformLayout, r.texQuadTextureLayout},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create premultiplied pipeline layout: %w", err)
+	}
+
+	// Create render pipeline with premultiplied alpha blending
+	// Source-over for premultiplied: Src * 1 + Dst * (1 - SrcA)
+	r.texQuadPremulPipeline, err = r.backend.CreateRenderPipeline(r.device, &types.RenderPipelineDescriptor{
+		Label:            "Textured Quad Pipeline (Premultiplied)",
+		VertexShader:     r.texQuadPremulShader,
+		VertexEntryPoint: "vs_main",
+		FragmentShader:   r.texQuadPremulShader,
+		FragmentEntry:    "fs_main",
+		TargetFormat:     r.format,
+		Topology:         gputypes.PrimitiveTopologyTriangleList,
+		CullMode:         gputypes.CullModeNone,
+		Layout:           r.texQuadPremulPipelineLayout,
+		Blend: &gputypes.BlendState{
+			Color: gputypes.BlendComponent{
+				Operation: gputypes.BlendOperationAdd,
+				SrcFactor: gputypes.BlendFactorOne,
+				DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+			},
+			Alpha: gputypes.BlendComponent{
+				Operation: gputypes.BlendOperationAdd,
+				SrcFactor: gputypes.BlendFactorOne,
+				DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create premultiplied render pipeline: %w", err)
+	}
+
+	r.texQuadPremulInited = true
+	return nil
+}
+
 // getOrCreateTexBindGroup returns a cached bind group for the texture, or creates one.
 // This avoids creating a new GPU bind group for every draw call with the same texture.
 func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (types.BindGroup, error) {
@@ -624,6 +695,25 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (types.BindGroup, error
 	return bg, nil
 }
 
+// getTexQuadPipeline returns the appropriate texture quad pipeline,
+// initializing it lazily if needed.
+func (r *Renderer) getTexQuadPipeline(premultiplied bool) (types.RenderPipeline, error) {
+	if premultiplied {
+		if !r.texQuadPremulInited {
+			if err := r.initTexQuadPremulPipeline(); err != nil {
+				return 0, err
+			}
+		}
+		return r.texQuadPremulPipeline, nil
+	}
+	if !r.texQuadPipelineInited {
+		if err := r.initTexturedQuadPipeline(); err != nil {
+			return 0, err
+		}
+	}
+	return r.texQuadPipeline, nil
+}
+
 // drawTexturedQuad draws a textured quad with the given options.
 // This is an internal method called by Context.DrawTextureEx.
 func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
@@ -631,11 +721,10 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		return nil // No frame in progress
 	}
 
-	// Initialize pipeline on first use
-	if !r.texQuadPipelineInited {
-		if err := r.initTexturedQuadPipeline(); err != nil {
-			return err
-		}
+	// Select pipeline based on texture alpha convention
+	pipeline, err := r.getTexQuadPipeline(tex.premultiplied)
+	if err != nil {
+		return err
 	}
 
 	// Prepare uniform data (reuse pre-allocated buffer)
@@ -683,7 +772,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	})
 
 	// Set pipeline and bind groups
-	r.backend.SetPipeline(renderPass, r.texQuadPipeline)
+	r.backend.SetPipeline(renderPass, pipeline)
 	r.backend.SetBindGroup(renderPass, 0, r.texQuadUniformBindGrp, nil)
 	r.backend.SetBindGroup(renderPass, 1, texBindGroup, nil)
 
@@ -758,6 +847,16 @@ func (r *Renderer) Destroy() {
 		r.texQuadShader = 0
 	}
 	// Note: texQuadPipeline is not released separately as it's managed by backend
+
+	// Release premultiplied pipeline resources
+	if r.texQuadPremulPipelineLayout != 0 {
+		r.backend.ReleasePipelineLayout(r.texQuadPremulPipelineLayout)
+		r.texQuadPremulPipelineLayout = 0
+	}
+	if r.texQuadPremulShader != 0 {
+		r.backend.ReleaseShaderModule(r.texQuadPremulShader)
+		r.texQuadPremulShader = 0
+	}
 
 	// Backend handles cleanup of all resources
 	if r.backend != nil {

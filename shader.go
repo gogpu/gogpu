@@ -171,6 +171,58 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 `
 
+// positionedQuadShaderPremulSource is the WGSL shader for premultiplied alpha textures.
+// For premultiplied data, alpha modulation multiplies ALL channels (RGB and A),
+// preserving the premultiplied invariant: rgb = color * alpha.
+const positionedQuadShaderPremulSource = `
+struct QuadUniforms {
+    rect: vec4<f32>,
+    screen: vec2<f32>,
+    alpha: f32,
+    _pad: f32,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: QuadUniforms;
+@group(1) @binding(0) var texSampler: sampler;
+@group(1) @binding(1) var tex: texture_2d<f32>;
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0),
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(1.0, 1.0),
+        vec2<f32>(0.0, 0.0),
+        vec2<f32>(1.0, 1.0),
+        vec2<f32>(1.0, 0.0)
+    );
+
+    let corner = corners[vertexIndex];
+    let pixelX = uniforms.rect.x + corner.x * uniforms.rect.z;
+    let pixelY = uniforms.rect.y + corner.y * uniforms.rect.w;
+    let ndcX = (pixelX / uniforms.screen.x) * 2.0 - 1.0;
+    let ndcY = 1.0 - (pixelY / uniforms.screen.y) * 2.0;
+
+    var output: VertexOutput;
+    output.position = vec4<f32>(ndcX, ndcY, 0.0, 1.0);
+    output.uv = corner;
+    return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let texColor = textureSample(tex, texSampler, input.uv);
+    // Premultiplied alpha: multiply ALL channels by uniform alpha.
+    // This preserves rgb = color * a when scaling opacity.
+    return texColor * uniforms.alpha;
+}
+`
+
 // PositionedQuadShader returns the WGSL shader for positioned textured quads.
 // This shader uses vertex-less rendering with uniforms for position and size.
 func PositionedQuadShader() string {
