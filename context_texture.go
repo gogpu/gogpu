@@ -171,6 +171,7 @@ var (
 	_ gpucontext.TextureDrawer  = (*contextTextureDrawer)(nil)
 	_ gpucontext.TextureCreator = (*rendererTextureCreator)(nil)
 	_ gpucontext.Texture        = (*Texture)(nil)
+	_ gpucontext.TextureUpdater = (*Texture)(nil)
 )
 
 // contextTextureDrawer adapts Context to gpucontext.TextureDrawer interface.

@@ -8,8 +8,8 @@
 //	gg.Context (draw) → ggcanvas.Canvas → gogpu.Context (GPU) → Window
 //
 // Requirements:
-//   - gogpu v0.13.3+
-//   - gg v0.21.4+
+//   - gogpu v0.15.4+
+//   - gg v0.23.1+
 package main
 
 import (
@@ -130,9 +130,10 @@ func renderFrame(cc *gg.Context, frame int, width, height int) {
 		cc.Fill()
 	}
 
-	// Draw center text
-	cc.SetRGB(1, 1, 1)
-	cc.DrawStringAnchored("gg + gogpu", centerX, centerY, 0.5, 0.5)
+	// Draw center indicator
+	cc.SetRGBA(1, 1, 1, 0.5)
+	cc.DrawCircle(centerX, centerY, 10)
+	cc.Fill()
 }
 
 // hsvToRGB converts HSV to RGB

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Compile-time check** for `gpucontext.TextureUpdater` on `Texture` type
+  - Ensures `Texture.UpdateData([]byte) error` satisfies the shared interface
+
+### Fixed
+
+- **gg_integration example** — replaced `DrawStringAnchored` (requires font) with circle indicator
+  - Example now works without loading external fonts
+
 ## [0.15.3] - 2026-02-03
 
 ### Fixed
