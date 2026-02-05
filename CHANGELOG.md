@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-02-05
+
+### Fixed
+
+- **Dark halos around anti-aliased shapes** — Premultiplied alpha pipeline for correct compositing
+  - `Texture.Premultiplied() bool` — Check if texture uses premultiplied alpha
+  - `Texture.SetPremultiplied(bool)` — Mark texture as premultiplied
+  - `TextureOptions.Premultiplied` — Set during texture creation
+  - Auto-set for textures created from Go `image.Image` (always premultiplied)
+  - New WGSL fragment shader: `return texColor * uniforms.alpha` (premultiplied variant)
+  - Dual render pipeline: `BlendFactorSrcAlpha` (straight) / `BlendFactorOne` (premultiplied)
+  - Pipeline selected automatically at draw time based on `texture.premultiplied` flag
+  - Fixes dark halos around anti-aliased shapes when compositing from gg/ggcanvas
+
 ## [0.15.4] - 2026-02-05
 
 ### Added
@@ -687,7 +701,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.4...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.5...HEAD
+[0.15.5]: https://github.com/gogpu/gogpu/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/gogpu/gogpu/compare/v0.15.3...v0.15.4
 [0.15.3]: https://github.com/gogpu/gogpu/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/gogpu/gogpu/compare/v0.15.1...v0.15.2
