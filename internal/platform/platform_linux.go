@@ -149,6 +149,10 @@ func (p *x11Platform) SetKeyCallback(_ func(key gpucontext.Key, mods gpucontext.
 	// TODO: Implement X11 keyboard events
 }
 
+// SetModalFrameCallback is a no-op on X11.
+// X11 doesn't have modal resize loops.
+func (p *x11Platform) SetModalFrameCallback(_ func()) {}
+
 // Init creates the Wayland window.
 func (p *waylandPlatform) Init(config Config) error {
 	// Check if Wayland is available
@@ -1229,3 +1233,7 @@ func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucon
 	p.keyboardCallback = fn
 	p.callbackMu.Unlock()
 }
+
+// SetModalFrameCallback is a no-op on Wayland.
+// Wayland uses async configure events — resize is never blocking.
+func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}

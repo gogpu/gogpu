@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.15.0
+## Current State: v0.15.6
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
@@ -36,7 +36,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Clean architecture with shared gputypes
 - webgpu.h spec-compliant enum values
 
-### v0.15.0 Features
+### v0.15.6 Features
+- ✅ **Modal Loop Rendering** — Smooth animation during Win32 drag/resize (WM_TIMER)
 - ✅ **Render-on-Demand Mode** — Power-efficient UI (8% GPU vs 100%)
 - ✅ **Unified Event System** — W3C Pointer Events, Gesture Recognition
 - ✅ **Fence-based GPU Sync** — Non-blocking frame completion
@@ -62,12 +63,13 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Future Ideas
 
-| Theme | Description |
-|-------|-------------|
-| **gogpu/ui** | GUI toolkit based on gg |
-| **WebAssembly** | WASM target for browser |
-| **Mobile** | Android/iOS support |
-| **Ray Tracing** | RT extensions when available |
+| Theme | Description | Research |
+|-------|-------------|----------|
+| **Independent Render Thread** | Decouple render loop from message pump via command-buffer pattern | [Research](docs/dev/research/INDEPENDENT_RENDER_THREAD.md) |
+| **gogpu/ui** | GUI toolkit based on gg | — |
+| **WebAssembly** | WASM target for browser | — |
+| **Mobile** | Android/iOS support | — |
+| **Ray Tracing** | RT extensions when available | — |
 
 ---
 
@@ -117,7 +119,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.15.x** | 2026-02 | Render-on-demand, Event System, Fence sync, Texture.BytesPerPixel |
+| **v0.15.6** | 2026-02 | Modal loop rendering (WM_TIMER), smooth drag/resize on Windows |
+| v0.15.x | 2026-02 | Render-on-demand, Event System, Fence sync, Texture.BytesPerPixel |
 | v0.14.x | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |
 | v0.13.x | 2026-01 | Multi-thread architecture, gputypes integration |
 | v0.12.x | 2026-01 | gpucontext integration (DeviceProvider, EventSource) |

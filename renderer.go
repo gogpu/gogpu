@@ -217,6 +217,12 @@ func (r *Renderer) Resize(width, height int) {
 		return
 	}
 
+	// Skip no-op resize. ConfigureSurface is expensive (involves device wait idle
+	// and surface reconfiguration), so avoid calling it when dimensions are unchanged.
+	if uint32(width) == r.width && uint32(height) == r.height { //nolint:gosec // G115: validated positive above
+		return
+	}
+
 	// Note: width/height validated positive above
 	r.width = uint32(width)   //nolint:gosec // G115: validated positive above
 	r.height = uint32(height) //nolint:gosec // G115: validated positive above

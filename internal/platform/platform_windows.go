@@ -18,6 +18,8 @@ const (
 	csHRedraw          = 0x0002
 	csVRedraw          = 0x0001
 	wmDestroy          = 0x0002
+	wmPaint            = 0x000F
+	wmEraseBkgnd       = 0x0014
 	wmSize             = 0x0005
 	wmClose            = 0x0010
 	wmSetCursor        = 0x0020
@@ -75,6 +77,18 @@ const (
 	// Keyboard lParam flags (GLFW/Ebiten pattern)
 	kfExtended = 0x0100 // Extended key flag (bit 24 of lParam >> 16)
 
+	// WM_TIMER for rendering during modal drag/resize loop.
+	// Timer interval is 1ms so VSync naturally paces at ~60fps.
+	// With 16ms, Windows' default 15.6ms timer resolution causes the timer
+	// to fire every ~31ms (skips the first 15.6ms interrupt because 15.6 < 16),
+	// resulting in ~30fps instead of 60fps.
+	// With 1ms, the timer fires at the first system interrupt (~15.6ms),
+	// and VSync blocks for ~16ms, giving a natural ~60fps cadence.
+	wmTimer         = 0x0113
+	wmNCLButtonDown = 0x00A1 // Non-client left button down (title bar, borders)
+	renderTimerID   = 1      // Timer ID for modal-loop rendering
+	renderTimerMS   = 1      // 1ms: fires at first system interrupt, VSync paces naturally
+
 	// PeekMessage flags
 	pmNoRemove = 0x0000
 
@@ -125,6 +139,8 @@ var (
 	procGetClientRect      = user32.NewProc("GetClientRect")
 	procTrackMouseEvent    = user32.NewProc("TrackMouseEvent")
 	procGetMessageTime     = user32.NewProc("GetMessageTime")
+	procSetTimer           = user32.NewProc("SetTimer")
+	procKillTimer          = user32.NewProc("KillTimer")
 )
 
 // trackMouseEventStruct is the TRACKMOUSEEVENT structure.
@@ -188,10 +204,11 @@ type windowsPlatform struct {
 	mouseMu       sync.RWMutex // Protects mouse state
 
 	// Callbacks for pointer, scroll, and keyboard events
-	pointerCallback  func(gpucontext.PointerEvent)
-	scrollCallback   func(gpucontext.ScrollEvent)
-	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
-	callbackMu       sync.RWMutex
+	pointerCallback    func(gpucontext.PointerEvent)
+	scrollCallback     func(gpucontext.ScrollEvent)
+	keyboardCallback   func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
+	modalFrameCallback func() // Called on WM_TIMER during modal drag/resize
+	callbackMu         sync.RWMutex
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -222,7 +239,7 @@ func (p *windowsPlatform) Init(config Config) error {
 
 	wndClass := wndClassExW{
 		cbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		style:         csHRedraw | csVRedraw,
+		style:         0, // No CS_HREDRAW|CS_VREDRAW: prevents full invalidation on resize
 		lpfnWndProc:   syscall.NewCallback(wndProc),
 		hInstance:     p.hinstance,
 		lpszClassName: className,
@@ -357,6 +374,25 @@ func (p *windowsPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 func (p *windowsPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
 	p.callbackMu.Lock()
 	p.keyboardCallback = fn
+	p.callbackMu.Unlock()
+}
+
+// SetModalFrameCallback registers a callback invoked via WM_TIMER during
+// the Win32 modal drag/resize loop to keep rendering alive.
+//
+// When the user drags or resizes a window, DefWindowProc enters a modal
+// message loop that blocks the application's main loop. A 16ms timer
+// (~60fps) fires WM_TIMER messages inside this modal loop, invoking
+// the callback to render frames and update application state.
+//
+// The callback runs on the main thread (same as the normal main loop),
+// preserving the existing serialization between onUpdate and onDraw.
+//
+// Future: An independent render thread would eliminate this mechanism
+// by decoupling the render loop from the message pump. See ROADMAP.md.
+func (p *windowsPlatform) SetModalFrameCallback(fn func()) {
+	p.callbackMu.Lock()
+	p.modalFrameCallback = fn
 	p.callbackMu.Unlock()
 }
 
@@ -866,7 +902,7 @@ func (p *windowsPlatform) createPointerEvent(
 
 // wndProc is the window procedure callback.
 //
-//nolint:maintidx // message dispatch functions inherently have high complexity
+//nolint:maintidx,gocognit // message dispatch functions inherently have high complexity
 func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr {
 	p := globalPlatform
 	if p == nil {
@@ -884,6 +920,21 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		procPostQuitMessage.Call(0)
 		return 0
 
+	case wmEraseBkgnd:
+		// Suppress background erase during resize (Ebiten/GLFW pattern).
+		// Without this, Windows fills the invalidated region with the window
+		// class background brush, causing visible flicker during resize.
+		// GPU-rendered apps handle all drawing; no GDI erase is needed.
+		return 1
+
+	case wmPaint:
+		// Validate the paint region without drawing anything via GDI.
+		// All rendering is done through the GPU pipeline (Vulkan/DX12).
+		// We must call DefWindowProc to validate the region, otherwise
+		// Windows sends WM_PAINT continuously.
+		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		return ret
+
 	case wmSize:
 		newWidth := int(lParam & 0xFFFF)
 		newHeight := int((lParam >> 16) & 0xFFFF)
@@ -897,7 +948,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 		p.sizeMu.Unlock()
 
-		// During modal resize loop, don't queue events - wait for WM_EXITSIZEMOVE
+		// During modal resize loop, don't queue events - wait for WM_EXITSIZEMOVE.
+		// DWM stretches the old swapchain content to the new window size; this is
+		// standard GPU-app behavior on Windows (Chrome, VS Code, Electron all do this).
+		// Resizing the swapchain during modal causes worse artifacts (flicker between
+		// stretched and correctly-sized frames) because DWM stretches BEFORE our
+		// render can complete.
 		if sizeChanged && !inSizeMove {
 			p.queueEvent(Event{
 				Type:   EventResize,
@@ -907,13 +963,41 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 		return 0
 
+	case wmNCLButtonDown:
+		// Start render timer BEFORE DefWindowProc enters modal drag detection.
+		// When the user clicks the title bar or resize border, DefWindowProc runs
+		// a nested modal loop to distinguish click from drag (~500ms delay).
+		// Starting the timer here keeps animation alive during that delay.
+		procSetTimer.Call(uintptr(p.hwnd), renderTimerID, renderTimerMS, 0)
+
+		// DefWindowProc handles the actual drag/resize detection (may block).
+		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+
+		// If DefWindowProc returned without entering a modal loop, kill the timer.
+		// WM_ENTERSIZEMOVE sets inSizeMove=true; if still false, no modal loop started.
+		p.sizeMu.RLock()
+		inModal := p.inSizeMove
+		p.sizeMu.RUnlock()
+		if !inModal {
+			procKillTimer.Call(uintptr(p.hwnd), renderTimerID)
+		}
+		return ret
+
 	case wmEnterSizeMove:
 		p.sizeMu.Lock()
 		p.inSizeMove = true
 		p.sizeMu.Unlock()
+
+		// Ensure render timer is running for the modal resize/move loop.
+		// Timer may already be running from WM_NCLBUTTONDOWN; SetTimer with
+		// the same ID safely replaces it (no duplicate timers).
+		procSetTimer.Call(uintptr(p.hwnd), renderTimerID, renderTimerMS, 0)
 		return 0
 
 	case wmExitSizeMove:
+		// Stop the render timer — normal main loop rendering resumes.
+		procKillTimer.Call(uintptr(p.hwnd), renderTimerID)
+
 		p.sizeMu.Lock()
 		p.inSizeMove = false
 		p.sizeMu.Unlock()
@@ -927,6 +1011,21 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			Height: height,
 		})
 		return 0
+
+	case wmTimer:
+		if wParam == renderTimerID {
+			// Invoke the modal frame callback to render a frame during
+			// the modal drag/resize loop. The callback runs on the main
+			// thread, preserving serialization with onUpdate/onDraw.
+			p.callbackMu.RLock()
+			callback := p.modalFrameCallback
+			p.callbackMu.RUnlock()
+
+			if callback != nil {
+				callback()
+			}
+			return 0
+		}
 
 	case wmKeydown, wmSysKeydown:
 		// Convert to Key using scancode-based translation (GLFW/Ebiten pattern)

@@ -68,6 +68,20 @@ type Platform interface {
 	// The callback receives the key, modifiers, and whether the key was pressed (true) or released (false).
 	SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool))
 
+	// SetModalFrameCallback registers a callback invoked during platform modal
+	// operations (e.g., Win32 drag/resize loop) to keep rendering alive.
+	//
+	// On Windows, DefWindowProc enters a modal message loop during window
+	// drag/resize that blocks the application's main loop. A WM_TIMER fires
+	// at ~60fps to invoke this callback, maintaining smooth rendering.
+	//
+	// On macOS and Linux this is a no-op — those platforms don't have modal
+	// resize loops.
+	//
+	// Future: An independent render thread running on its own schedule would
+	// eliminate the need for this callback entirely. See ROADMAP.md.
+	SetModalFrameCallback(fn func())
+
 	// Destroy closes the window and releases resources.
 	Destroy()
 }

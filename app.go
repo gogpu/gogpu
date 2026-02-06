@@ -107,6 +107,22 @@ func (a *App) Run() error {
 	// Wire platform callbacks to eventSourceAdapter for input events
 	a.setupInputEvents()
 
+	// Enable rendering during Win32 modal drag/resize loop.
+	//
+	// On Windows, DefWindowProc enters a modal message loop during window
+	// drag/resize that blocks our main loop entirely. A WM_TIMER (~60fps)
+	// fires inside the modal loop to invoke this callback, which runs the
+	// same update+render cycle as the normal main loop.
+	//
+	// This callback runs on the main thread (same as the normal loop),
+	// preserving serialization between onUpdate and onDraw — no data races.
+	//
+	// On macOS/Linux this is a no-op (those platforms have no modal loops).
+	//
+	// Future: An independent render thread running on its own schedule
+	// would eliminate this callback entirely. See ROADMAP.md for details.
+	a.platform.SetModalFrameCallback(a.modalFrameTick)
+
 	// Create render loop with dedicated render thread
 	a.renderLoop = thread.NewRenderLoop()
 	defer a.renderLoop.Stop()
@@ -250,6 +266,44 @@ func (a *App) renderFrameMultiThread() {
 		// Present frame
 		a.renderer.EndFrame()
 	})
+}
+
+// modalFrameTick executes one update+render cycle during the Win32 modal
+// drag/resize loop. Called from the WM_TIMER handler on the main thread.
+//
+// During modal resize, we propagate the current window size to the render
+// thread so the swapchain is reconfigured to match. This prevents DWM from
+// stretching the old-size frame to the new window dimensions.
+//
+// Note: only the swapchain is resized — the application's onResize callback
+// is NOT called during modal drag. This prevents content re-centering artifacts.
+// The onResize callback fires after WM_EXITSIZEMOVE via normal event processing.
+func (a *App) modalFrameTick() {
+	// Delta time
+	now := time.Now()
+	deltaTime := now.Sub(a.lastFrame).Seconds()
+	a.lastFrame = now
+
+	// Update input state
+	if a.inputState != nil {
+		a.inputState.Update()
+	}
+
+	// User logic callback
+	if a.onUpdate != nil {
+		a.onUpdate(deltaTime)
+	}
+
+	// Propagate window size to render thread for swapchain resize.
+	// During modal loop, processEventsMultiThread doesn't run, so
+	// RequestResize wouldn't be called otherwise.
+	width, height := a.platform.GetSize()
+	if width > 0 && height > 0 {
+		a.renderLoop.RequestResize(uint32(width), uint32(height)) //nolint:gosec // G115: validated positive
+	}
+
+	// Render frame on render thread (blocks until complete).
+	a.renderFrameMultiThread()
 }
 
 // Quit requests the application to quit.

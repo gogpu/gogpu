@@ -425,6 +425,10 @@ func (p *darwinPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucont
 	p.mu.Unlock()
 }
 
+// SetModalFrameCallback is a no-op on macOS.
+// macOS doesn't have modal resize loops — CAMetalLayer handles live resize smoothly.
+func (p *darwinPlatform) SetModalFrameCallback(_ func()) {}
+
 // dispatchPointerEvent dispatches a pointer event to the registered callback.
 func (p *darwinPlatform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	// Callback is read under lock, but called without lock to avoid deadlocks.

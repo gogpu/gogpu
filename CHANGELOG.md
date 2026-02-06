@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-02-06
+
+### Fixed
+
+- **Animation freeze during window drag/resize on Windows** — Rendering now continues
+  smoothly during Win32 modal resize/move loop via WM_TIMER callback at ~60fps
+  - Added `SetModalFrameCallback` to Platform interface (internal)
+  - SetTimer/KillTimer on WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE
+  - Full update+render cycle on each timer tick (onUpdate, onDraw, resize propagation)
+  - macOS/Linux unaffected (no modal loops on those platforms)
+  - Industry-standard approach used by GLFW, SDL, winit
+
 ## [0.15.5] - 2026-02-05
 
 ### Fixed
