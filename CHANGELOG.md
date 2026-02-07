@@ -7,16 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.7] - 2026-02-07
+
 ### Fixed
 
 - **Vulkan crash on NVIDIA when creating premultiplied alpha pipeline** — Eliminated the
   second GPU render pipeline entirely. Both premultiplied and straight alpha textures now
-  use a single pipeline with a uniform-based shader switch. The shader premultiplies
-  straight alpha data before output, so the blend state is always `One / OneMinusSrcAlpha`.
-  Fixes crash on NVIDIA RTX 2080 (Studio Driver 591.74) in `vkCreateGraphicsPipelines`.
+  use a single pipeline with a uniform-based shader switch (`uniforms.premultiplied`).
+  The shader premultiplies straight alpha data before output, so the blend state is always
+  `One / OneMinusSrcAlpha`. Fixes `Exception 0xc0000005` crash on NVIDIA RTX 2080
+  (Studio Driver 591.74) in `vkCreateGraphicsPipelines`.
   - Removed: `initTexQuadPremulPipeline()`, duplicate shader module, duplicate pipeline layout
   - `Texture.SetPremultiplied()` / `Texture.Premultiplied()` API unchanged
   - Reported by @amortaza in Discussion #47
+
+### Changed
+
+- **naga** dependency updated v0.10.0 → v0.11.0 — fixes SPIR-V `if/else` GPU hang, adds 55 new WGSL built-in functions
+- **wgpu** dependency updated v0.13.1 → v0.13.2
 
 ## [0.15.6] - 2026-02-06
 
@@ -724,7 +732,9 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.5...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.7...HEAD
+[0.15.7]: https://github.com/gogpu/gogpu/compare/v0.15.6...v0.15.7
+[0.15.6]: https://github.com/gogpu/gogpu/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/gogpu/gogpu/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/gogpu/gogpu/compare/v0.15.3...v0.15.4
 [0.15.3]: https://github.com/gogpu/gogpu/compare/v0.15.2...v0.15.3

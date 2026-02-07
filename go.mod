@@ -7,8 +7,8 @@ require (
 	github.com/go-webgpu/webgpu v0.2.1
 	github.com/gogpu/gpucontext v0.7.0
 	github.com/gogpu/gputypes v0.2.0
-	github.com/gogpu/wgpu v0.13.1
+	github.com/gogpu/wgpu v0.13.2
 	golang.org/x/sys v0.40.0
 )
 
-require github.com/gogpu/naga v0.10.0 // indirect
+require github.com/gogpu/naga v0.11.0 // indirect

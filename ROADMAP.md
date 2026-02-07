@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.15.6
+## Current State: v0.15.7
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
@@ -36,7 +36,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Clean architecture with shared gputypes
 - webgpu.h spec-compliant enum values
 
-### v0.15.6 Features
+### v0.15.7 Features
+- ✅ **Single Pipeline Alpha** — Unified premultiplied/straight alpha via uniform switch
+- ✅ **NVIDIA Crash Fix** — Fixed `vkCreateGraphicsPipelines` crash on RTX 2080
 - ✅ **Modal Loop Rendering** — Smooth animation during Win32 drag/resize (WM_TIMER)
 - ✅ **Render-on-Demand Mode** — Power-efficient UI (8% GPU vs 100%)
 - ✅ **Unified Event System** — W3C Pointer Events, Gesture Recognition
@@ -119,7 +121,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.15.6** | 2026-02 | Modal loop rendering (WM_TIMER), smooth drag/resize on Windows |
+| **v0.15.7** | 2026-02 | NVIDIA crash fix, single pipeline alpha, naga v0.11.0 |
+| v0.15.6 | 2026-02 | Modal loop rendering (WM_TIMER), smooth drag/resize on Windows |
 | v0.15.x | 2026-02 | Render-on-demand, Event System, Fence sync, Texture.BytesPerPixel |
 | v0.14.x | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |
 | v0.13.x | 2026-01 | Multi-thread architecture, gputypes integration |
