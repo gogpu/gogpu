@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Vulkan crash on NVIDIA when creating premultiplied alpha pipeline** — Eliminated the
+  second GPU render pipeline entirely. Both premultiplied and straight alpha textures now
+  use a single pipeline with a uniform-based shader switch. The shader premultiplies
+  straight alpha data before output, so the blend state is always `One / OneMinusSrcAlpha`.
+  Fixes crash on NVIDIA RTX 2080 (Studio Driver 591.74) in `vkCreateGraphicsPipelines`.
+  - Removed: `initTexQuadPremulPipeline()`, duplicate shader module, duplicate pipeline layout
+  - `Texture.SetPremultiplied()` / `Texture.Premultiplied()` API unchanged
+  - Reported by @amortaza in Discussion #47
+
 ## [0.15.6] - 2026-02-06
 
 ### Fixed

@@ -113,16 +113,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
 // positionedQuadShaderSource is the WGSL shader for positioned textured quads.
 // Uses a uniform buffer for position/size and vertex-less rendering.
+// Handles both premultiplied and straight alpha via uniform flag.
+// All output is premultiplied — uses BlendFactorOne / OneMinusSrcAlpha.
 // Bind group 0: uniforms (transform)
 // Bind group 1: sampler + texture
 const positionedQuadShaderSource = `
 // Uniform buffer for quad positioning
-// Layout: [x, y, width, height, screenWidth, screenHeight, alpha, _pad]
+// Layout: [x, y, width, height, screenWidth, screenHeight, alpha, premultiplied]
 struct QuadUniforms {
-    rect: vec4<f32>,      // x, y, width, height in pixels
-    screen: vec2<f32>,    // screen width, height
-    alpha: f32,
-    _pad: f32,
+    rect: vec4<f32>,          // x, y, width, height in pixels
+    screen: vec2<f32>,        // screen width, height
+    alpha: f32,               // opacity (0.0 - 1.0)
+    premultiplied: f32,       // >0.5 = premultiplied alpha, <=0.5 = straight alpha
 }
 
 @group(0) @binding(0) var<uniform> uniforms: QuadUniforms;
@@ -167,59 +169,12 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texColor = textureSample(tex, texSampler, input.uv);
-    return vec4<f32>(texColor.rgb, texColor.a * uniforms.alpha);
-}
-`
-
-// positionedQuadShaderPremulSource is the WGSL shader for premultiplied alpha textures.
-// For premultiplied data, alpha modulation multiplies ALL channels (RGB and A),
-// preserving the premultiplied invariant: rgb = color * alpha.
-const positionedQuadShaderPremulSource = `
-struct QuadUniforms {
-    rect: vec4<f32>,
-    screen: vec2<f32>,
-    alpha: f32,
-    _pad: f32,
-}
-
-@group(0) @binding(0) var<uniform> uniforms: QuadUniforms;
-@group(1) @binding(0) var texSampler: sampler;
-@group(1) @binding(1) var tex: texture_2d<f32>;
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-}
-
-@vertex
-fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-    var corners = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0),
-        vec2<f32>(0.0, 1.0),
-        vec2<f32>(1.0, 1.0),
-        vec2<f32>(0.0, 0.0),
-        vec2<f32>(1.0, 1.0),
-        vec2<f32>(1.0, 0.0)
-    );
-
-    let corner = corners[vertexIndex];
-    let pixelX = uniforms.rect.x + corner.x * uniforms.rect.z;
-    let pixelY = uniforms.rect.y + corner.y * uniforms.rect.w;
-    let ndcX = (pixelX / uniforms.screen.x) * 2.0 - 1.0;
-    let ndcY = 1.0 - (pixelY / uniforms.screen.y) * 2.0;
-
-    var output: VertexOutput;
-    output.position = vec4<f32>(ndcX, ndcY, 0.0, 1.0);
-    output.uv = corner;
-    return output;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let texColor = textureSample(tex, texSampler, input.uv);
-    // Premultiplied alpha: multiply ALL channels by uniform alpha.
-    // This preserves rgb = color * a when scaling opacity.
-    return texColor * uniforms.alpha;
+    // Output alpha is the same for both premultiplied and straight paths.
+    let a_out = texColor.a * uniforms.alpha;
+    // RGB factor: blends between texColor.a (straight) and 1.0 (premultiplied).
+    // premultiplied=1.0 → factor=1.0, premultiplied=0.0 → factor=texColor.a
+    let rgb_factor = uniforms.premultiplied + (1.0 - uniforms.premultiplied) * texColor.a;
+    return vec4<f32>(texColor.rgb * uniforms.alpha * rgb_factor, a_out);
 }
 `
 

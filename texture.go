@@ -63,13 +63,13 @@ func (t *Texture) Size() (width, height int) {
 }
 
 // Premultiplied returns true if the texture data uses premultiplied alpha.
-// Premultiplied textures use BlendFactorOne for correct source-over compositing.
 func (t *Texture) Premultiplied() bool {
 	return t.premultiplied
 }
 
 // SetPremultiplied marks the texture as containing premultiplied alpha data.
-// This affects which GPU blend state is used when drawing the texture.
+// This controls the shader behavior: premultiplied textures scale all channels
+// uniformly, while straight alpha textures are premultiplied in the shader.
 func (t *Texture) SetPremultiplied(premultiplied bool) {
 	t.premultiplied = premultiplied
 }
@@ -189,8 +189,8 @@ type TextureOptions struct {
 	AddressModeV gputypes.AddressMode
 
 	// Premultiplied indicates the texture data uses premultiplied alpha.
-	// When true, the texture is drawn with BlendFactorOne (industry standard).
-	// When false (default), BlendFactorSrcAlpha is used for straight alpha data.
+	// Controls shader behavior: premultiplied data is scaled uniformly,
+	// straight alpha data is premultiplied in the shader before blending.
 	Premultiplied bool
 }
 
