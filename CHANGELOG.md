@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-02-07
+
+### Added
+
+- **WindowProvider interface** — `App` implements `gpucontext.WindowProvider`
+  - `ScaleFactor() float64` — DPI scale factor (Windows: GetDpiForWindow, macOS/Linux: stubs)
+  - `Size()` and `RequestRedraw()` already existed
+
+- **PlatformProvider interface** — `App` implements `gpucontext.PlatformProvider`
+  - `ClipboardRead() / ClipboardWrite()` — system clipboard (Windows: full, macOS/Linux: stubs)
+  - `SetCursor(CursorShape)` — 12 standard cursor shapes (Windows: full, macOS/Linux: stubs)
+  - `DarkMode()` — system dark mode detection (Windows: registry query)
+  - `ReduceMotion()` — accessibility preference (Windows: SystemParametersInfo)
+  - `HighContrast()` — high contrast mode (Windows: SystemParametersInfo)
+  - `FontScale()` — font size multiplier (Windows: from DPI)
+
+### Changed
+
+- **gpucontext** dependency updated v0.7.0 → v0.8.0
+
 ## [0.15.7] - 2026-02-07
 
 ### Fixed

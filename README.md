@@ -34,7 +34,7 @@
 | **Platforms** | Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal) |
 | **Graphics** | Windowing, input handling, texture loading |
 | **Compute** | Full compute shader support |
-| **Integration** | DeviceProvider for external libraries |
+| **Integration** | DeviceProvider, WindowProvider, PlatformProvider for external libraries |
 | **Build** | Zero CGO with Pure Go backend |
 
 ---
@@ -182,6 +182,30 @@ events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
 
 This enables enterprise-grade dependency injection between packages without circular imports.
 
+### Window & Platform Integration
+
+`App` implements `gpucontext.WindowProvider` and `gpucontext.PlatformProvider` for UI frameworks:
+
+```go
+// Window geometry and DPI
+w, h := app.Size()              // physical pixels
+scale := app.ScaleFactor()      // 1.0 = standard, 2.0 = Retina/HiDPI
+
+// Clipboard
+text, _ := app.ClipboardRead()
+app.ClipboardWrite("copied text")
+
+// Cursor management
+app.SetCursor(gpucontext.CursorPointer)  // hand cursor
+app.SetCursor(gpucontext.CursorText)     // I-beam for text input
+
+// System preferences
+if app.DarkMode() { /* switch to dark theme */ }
+if app.ReduceMotion() { /* disable animations */ }
+if app.HighContrast() { /* increase contrast */ }
+fontMul := app.FontScale() // user's font size preference
+```
+
 ### Ebiten-Style Input Polling
 
 For game loops, use the polling-based Input API:
@@ -325,7 +349,7 @@ internal/platform/darwin/
 | Project | Description |
 |---------|-------------|
 | **gogpu/gogpu** | **GPU framework (this repo)** |
-| [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces (DeviceProvider, EventSource) |
+| [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces (DeviceProvider, WindowProvider, PlatformProvider, EventSource) |
 | [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU types (TextureFormat, BufferUsage, Limits) |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |

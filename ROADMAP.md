@@ -25,18 +25,21 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.15.7
+## Current State: v0.16.0
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
 - Multi-thread architecture (Ebiten/Gio pattern)
-- DeviceProvider/EventSource for UI integration
+- DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - **gpucontext.TextureDrawer** — Cross-package texture rendering
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Clean architecture with shared gputypes
 - webgpu.h spec-compliant enum values
 
-### v0.15.7 Features
+### v0.16.0 Features
+- ✅ **WindowProvider** — DPI scale factor, window geometry, redraw requests
+- ✅ **PlatformProvider** — Clipboard, cursor (12 shapes), dark mode, accessibility
+- ✅ **Windows Full Implementation** — Win32 API for all platform features
 - ✅ **Single Pipeline Alpha** — Unified premultiplied/straight alpha via uniform switch
 - ✅ **NVIDIA Crash Fix** — Fixed `vkCreateGraphicsPipelines` crash on RTX 2080
 - ✅ **Modal Loop Rendering** — Smooth animation during Win32 drag/resize (WM_TIMER)
@@ -49,9 +52,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Upcoming
 
-### v0.16.0 — API Polish
+### v0.17.0 — API Polish
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
+- [ ] macOS/Linux PlatformProvider native implementations
 - [ ] Performance optimizations
 
 ### v1.0.0 — Production Release

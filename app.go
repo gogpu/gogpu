@@ -328,6 +328,82 @@ func (a *App) Size() (width, height int) {
 	return a.config.Width, a.config.Height
 }
 
+// ScaleFactor returns the DPI scale factor.
+// 1.0 = standard (96 DPI on Windows, 72 on macOS), 2.0 = Retina/HiDPI.
+// Implements gpucontext.WindowProvider.
+func (a *App) ScaleFactor() float64 {
+	if a.platform != nil {
+		return a.platform.ScaleFactor()
+	}
+	return 1.0
+}
+
+// ClipboardRead reads text content from the system clipboard.
+// Implements gpucontext.PlatformProvider.
+func (a *App) ClipboardRead() (string, error) {
+	if a.platform != nil {
+		return a.platform.ClipboardRead()
+	}
+	return "", nil
+}
+
+// ClipboardWrite writes text content to the system clipboard.
+// Implements gpucontext.PlatformProvider.
+func (a *App) ClipboardWrite(text string) error {
+	if a.platform != nil {
+		return a.platform.ClipboardWrite(text)
+	}
+	return nil
+}
+
+// SetCursor changes the mouse cursor shape.
+// Implements gpucontext.PlatformProvider.
+func (a *App) SetCursor(cursor gpucontext.CursorShape) {
+	if a.platform != nil {
+		a.platform.SetCursor(int(cursor))
+	}
+}
+
+// DarkMode returns true if the system dark mode is active.
+// Implements gpucontext.PlatformProvider.
+func (a *App) DarkMode() bool {
+	if a.platform != nil {
+		return a.platform.DarkMode()
+	}
+	return false
+}
+
+// ReduceMotion returns true if the user prefers reduced animation.
+// Implements gpucontext.PlatformProvider.
+func (a *App) ReduceMotion() bool {
+	if a.platform != nil {
+		return a.platform.ReduceMotion()
+	}
+	return false
+}
+
+// HighContrast returns true if high contrast mode is active.
+// Implements gpucontext.PlatformProvider.
+func (a *App) HighContrast() bool {
+	if a.platform != nil {
+		return a.platform.HighContrast()
+	}
+	return false
+}
+
+// FontScale returns the user's font size preference multiplier.
+// Implements gpucontext.PlatformProvider.
+func (a *App) FontScale() float32 {
+	if a.platform != nil {
+		return a.platform.FontScale()
+	}
+	return 1.0
+}
+
+// Compile-time interface checks.
+var _ gpucontext.WindowProvider = (*App)(nil)
+var _ gpucontext.PlatformProvider = (*App)(nil)
+
 // Config returns the application configuration.
 func (a *App) Config() Config {
 	return a.config

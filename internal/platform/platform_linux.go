@@ -1237,3 +1237,71 @@ func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucon
 // SetModalFrameCallback is a no-op on Wayland.
 // Wayland uses async configure events — resize is never blocking.
 func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}
+
+// waylandPlatform provider stubs
+
+// ScaleFactor returns the DPI scale factor.
+// TODO: Implement using wl_output scale and fractional_scale_v1.
+func (p *waylandPlatform) ScaleFactor() float64 { return 1.0 }
+
+// ClipboardRead reads text from the system clipboard.
+// TODO: Implement using wl_data_device and wl_data_offer.
+func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
+
+// ClipboardWrite writes text to the system clipboard.
+// TODO: Implement using wl_data_device and wl_data_source.
+func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
+
+// SetCursor changes the mouse cursor shape.
+// TODO: Implement using wp_cursor_shape_manager_v1 or cursor theme.
+func (p *waylandPlatform) SetCursor(int) {}
+
+// DarkMode returns true if the system dark mode is active.
+// TODO: Implement using org.freedesktop.portal.Settings.
+func (p *waylandPlatform) DarkMode() bool { return false }
+
+// ReduceMotion returns true if the user prefers reduced animation.
+// TODO: Implement using org.freedesktop.portal.Settings.
+func (p *waylandPlatform) ReduceMotion() bool { return false }
+
+// HighContrast returns true if high contrast mode is active.
+// TODO: Implement using org.freedesktop.portal.Settings.
+func (p *waylandPlatform) HighContrast() bool { return false }
+
+// FontScale returns font size preference multiplier.
+// TODO: Implement using GSettings text-scaling-factor.
+func (p *waylandPlatform) FontScale() float32 { return 1.0 }
+
+// x11Platform provider stubs
+
+// ScaleFactor returns the DPI scale factor.
+// TODO: Implement using Xft.dpi or XRandR.
+func (p *x11Platform) ScaleFactor() float64 { return 1.0 }
+
+// ClipboardRead reads text from the system clipboard.
+// TODO: Implement using X11 selections (XA_CLIPBOARD).
+func (p *x11Platform) ClipboardRead() (string, error) { return "", nil }
+
+// ClipboardWrite writes text to the system clipboard.
+// TODO: Implement using X11 selections (XA_CLIPBOARD).
+func (p *x11Platform) ClipboardWrite(string) error { return nil }
+
+// SetCursor changes the mouse cursor shape.
+// TODO: Implement using XCreateFontCursor or Xcursor.
+func (p *x11Platform) SetCursor(int) {}
+
+// DarkMode returns true if the system dark mode is active.
+// TODO: Implement using org.freedesktop.portal.Settings.
+func (p *x11Platform) DarkMode() bool { return false }
+
+// ReduceMotion returns true if the user prefers reduced animation.
+// TODO: Implement using org.freedesktop.portal.Settings.
+func (p *x11Platform) ReduceMotion() bool { return false }
+
+// HighContrast returns true if high contrast mode is active.
+// TODO: Implement using org.freedesktop.portal.Settings.
+func (p *x11Platform) HighContrast() bool { return false }
+
+// FontScale returns font size preference multiplier.
+// TODO: Implement using Xft.dpi or GSettings text-scaling-factor.
+func (p *x11Platform) FontScale() float32 { return 1.0 }

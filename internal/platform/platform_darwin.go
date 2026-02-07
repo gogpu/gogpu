@@ -765,6 +765,38 @@ func macKeyCodeToKey(keyCode uint16) gpucontext.Key {
 	}
 }
 
+// ScaleFactor returns the DPI scale factor.
+// TODO: Implement using NSWindow backingScaleFactor.
+func (p *darwinPlatform) ScaleFactor() float64 { return 1.0 }
+
+// ClipboardRead reads text from the system clipboard.
+// TODO: Implement using NSPasteboard.
+func (p *darwinPlatform) ClipboardRead() (string, error) { return "", nil }
+
+// ClipboardWrite writes text to the system clipboard.
+// TODO: Implement using NSPasteboard.
+func (p *darwinPlatform) ClipboardWrite(string) error { return nil }
+
+// SetCursor changes the mouse cursor shape.
+// TODO: Implement using NSCursor.
+func (p *darwinPlatform) SetCursor(int) {}
+
+// DarkMode returns true if the system dark mode is active.
+// TODO: Implement using NSAppearance.
+func (p *darwinPlatform) DarkMode() bool { return false }
+
+// ReduceMotion returns true if the user prefers reduced animation.
+// TODO: Implement using NSWorkspace accessibilityDisplayShouldReduceMotion.
+func (p *darwinPlatform) ReduceMotion() bool { return false }
+
+// HighContrast returns true if high contrast mode is active.
+// TODO: Implement using NSWorkspace accessibilityDisplayShouldIncreaseContrast.
+func (p *darwinPlatform) HighContrast() bool { return false }
+
+// FontScale returns font size preference multiplier.
+// TODO: Implement using system font size preferences.
+func (p *darwinPlatform) FontScale() float32 { return 1.0 }
+
 // detectModifierKeyChange detects which modifier key was pressed/released.
 // macOS sends NSEventTypeFlagsChanged for modifier keys instead of keyDown/keyUp.
 func detectModifierKeyChange(keyCode uint16, flags darwin.NSEventModifierFlags) (gpucontext.Key, bool) {

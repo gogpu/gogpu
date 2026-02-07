@@ -103,6 +103,31 @@ const (
 	scRightAlt     = 0x138 // 0x38 | 0x100
 	scLeftSuper    = 0x15B // Extended
 	scRightSuper   = 0x15C // Extended
+
+	// Cursor IDs for LoadCursor
+	idcHand     = 32649
+	idcIBeam    = 32513
+	idcCross    = 32515
+	idcSizeAll  = 32646
+	idcSizeNS   = 32645
+	idcSizeWE   = 32644
+	idcSizeNWSE = 32642
+	idcSizeNESW = 32643
+	idcNo       = 32648
+	idcWait     = 32514
+
+	// Clipboard format
+	cfUnicodeText = 13
+	gmemMoveable  = 0x0002
+
+	// SystemParametersInfo constants
+	spiGetClientAreaAnimation = 0x1042
+	spiGetHighContrast        = 0x0042
+	hcfHighContrastOn         = 0x00000001
+
+	// Registry constants
+	hkeyCurrentUser uintptr = 0x80000001
+	keyRead         uintptr = 0x20019
 )
 
 // msgStruct is the Windows MSG structure for PeekMessage.
@@ -141,6 +166,29 @@ var (
 	procGetMessageTime     = user32.NewProc("GetMessageTime")
 	procSetTimer           = user32.NewProc("SetTimer")
 	procKillTimer          = user32.NewProc("KillTimer")
+
+	// DPI
+	procGetDpiForWindow = user32.NewProc("GetDpiForWindow")
+
+	// Clipboard
+	procOpenClipboard    = user32.NewProc("OpenClipboard")
+	procCloseClipboard   = user32.NewProc("CloseClipboard")
+	procGetClipboardData = user32.NewProc("GetClipboardData")
+	procSetClipboardData = user32.NewProc("SetClipboardData")
+	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
+	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock       = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree       = kernel32.NewProc("GlobalFree")
+
+	// System preferences
+	procSystemParametersInfoW = user32.NewProc("SystemParametersInfoW")
+
+	// Registry (for dark mode)
+	advapi32             = windows.NewLazyDLL("advapi32.dll")
+	procRegOpenKeyExW    = advapi32.NewProc("RegOpenKeyExW")
+	procRegQueryValueExW = advapi32.NewProc("RegQueryValueExW")
+	procRegCloseKey      = advapi32.NewProc("RegCloseKey")
 )
 
 // trackMouseEventStruct is the TRACKMOUSEEVENT structure.
@@ -402,6 +450,213 @@ func (p *windowsPlatform) Destroy() {
 		p.hwnd = 0
 	}
 	globalPlatform = nil
+}
+
+// ScaleFactor returns the DPI scale factor for the window.
+// 1.0 = 96 DPI (standard), 2.0 = 192 DPI (HiDPI).
+func (p *windowsPlatform) ScaleFactor() float64 {
+	dpi, _, _ := procGetDpiForWindow.Call(uintptr(p.hwnd))
+	if dpi == 0 {
+		return 1.0
+	}
+	return float64(dpi) / 96.0
+}
+
+// ClipboardRead reads text from the system clipboard.
+func (p *windowsPlatform) ClipboardRead() (string, error) {
+	ret, _, _ := procOpenClipboard.Call(uintptr(p.hwnd))
+	if ret == 0 {
+		return "", fmt.Errorf("OpenClipboard failed")
+	}
+	defer procCloseClipboard.Call()
+
+	h, _, _ := procGetClipboardData.Call(cfUnicodeText)
+	if h == 0 {
+		return "", nil // clipboard empty or not text
+	}
+
+	ptr, _, _ := procGlobalLock.Call(h)
+	if ptr == 0 {
+		return "", fmt.Errorf("GlobalLock failed")
+	}
+	defer procGlobalUnlock.Call(h)
+
+	// Read UTF-16 null-terminated string from locked global memory.
+	// ptr is a valid address returned by GlobalLock; we must convert
+	// uintptr -> unsafe.Pointer to read it.  go vet flags this pattern
+	// but it is the standard way to work with Win32 memory APIs.
+	p16 := (*uint16)(unsafe.Pointer(ptr)) //nolint:govet // syscall return value from GlobalLock
+	text := windows.UTF16PtrToString(p16)
+	return text, nil
+}
+
+// ClipboardWrite writes text to the system clipboard.
+func (p *windowsPlatform) ClipboardWrite(text string) error {
+	ret, _, _ := procOpenClipboard.Call(uintptr(p.hwnd))
+	if ret == 0 {
+		return fmt.Errorf("OpenClipboard failed")
+	}
+	defer procCloseClipboard.Call()
+
+	procEmptyClipboard.Call()
+
+	utf16, err := windows.UTF16FromString(text)
+	if err != nil {
+		return err
+	}
+
+	size := len(utf16) * 2 // UTF-16 = 2 bytes per char
+	h, _, _ := procGlobalAlloc.Call(gmemMoveable, uintptr(size))
+	if h == 0 {
+		return fmt.Errorf("GlobalAlloc failed")
+	}
+
+	ptr, _, _ := procGlobalLock.Call(h)
+	if ptr == 0 {
+		procGlobalFree.Call(h)
+		return fmt.Errorf("GlobalLock failed")
+	}
+
+	// Copy UTF-16 data to locked global memory.
+	// ptr is a valid address from GlobalLock; uintptr -> Pointer conversion
+	// is the standard pattern for Win32 memory APIs.
+	dst := unsafe.Pointer(ptr) //nolint:govet // syscall return value from GlobalLock
+	for i := 0; i < len(utf16); i++ {
+		*(*uint16)(unsafe.Add(dst, uintptr(i)*2)) = utf16[i]
+	}
+
+	procGlobalUnlock.Call(h)
+
+	ret, _, _ = procSetClipboardData.Call(cfUnicodeText, h)
+	if ret == 0 {
+		procGlobalFree.Call(h)
+		return fmt.Errorf("SetClipboardData failed")
+	}
+	// After SetClipboardData succeeds, the system owns the handle
+	return nil
+}
+
+// SetCursor changes the mouse cursor shape.
+// cursorID maps to gpucontext.CursorShape values (0-11).
+func (p *windowsPlatform) SetCursor(cursorID int) {
+	var idc uintptr
+	switch cursorID {
+	case 0:
+		idc = idcArrow // Default
+	case 1:
+		idc = idcHand // Pointer
+	case 2:
+		idc = idcIBeam // Text
+	case 3:
+		idc = idcCross // Crosshair
+	case 4:
+		idc = idcSizeAll // Move
+	case 5:
+		idc = idcSizeNS // ResizeNS
+	case 6:
+		idc = idcSizeWE // ResizeEW
+	case 7:
+		idc = idcSizeNWSE // ResizeNWSE
+	case 8:
+		idc = idcSizeNESW // ResizeNESW
+	case 9:
+		idc = idcNo // NotAllowed
+	case 10:
+		idc = idcWait // Wait
+	case 11: // None — hide cursor
+		p.cursor = 0
+		procSetCursor.Call(0)
+		return
+	default:
+		idc = idcArrow
+	}
+	cursor, _, _ := procLoadCursorW.Call(0, idc)
+	if cursor != 0 {
+		p.cursor = cursor
+		procSetCursor.Call(cursor)
+	}
+}
+
+// DarkMode returns true if the system dark mode is active.
+// Reads AppsUseLightTheme from the Windows registry.
+func (p *windowsPlatform) DarkMode() bool {
+	keyPath, _ := windows.UTF16PtrFromString(`Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`)
+	valueName, _ := windows.UTF16PtrFromString("AppsUseLightTheme")
+
+	var key uintptr
+	ret, _, _ := procRegOpenKeyExW.Call(
+		hkeyCurrentUser,
+		uintptr(unsafe.Pointer(keyPath)),
+		0,
+		keyRead,
+		uintptr(unsafe.Pointer(&key)),
+	)
+	if ret != 0 {
+		return false
+	}
+	defer procRegCloseKey.Call(key)
+
+	var value uint32
+	var valueSize uint32 = 4
+	var valueType uint32
+	ret, _, _ = procRegQueryValueExW.Call(
+		key,
+		uintptr(unsafe.Pointer(valueName)),
+		0,
+		uintptr(unsafe.Pointer(&valueType)),
+		uintptr(unsafe.Pointer(&value)),
+		uintptr(unsafe.Pointer(&valueSize)),
+	)
+	if ret != 0 {
+		return false
+	}
+
+	return value == 0 // 0 = dark mode, 1 = light mode
+}
+
+// ReduceMotion returns true if the user prefers reduced animation.
+// Checks if client area animation is disabled via SystemParametersInfo.
+func (p *windowsPlatform) ReduceMotion() bool {
+	var enabled uint32 // BOOL
+	ret, _, _ := procSystemParametersInfoW.Call(
+		spiGetClientAreaAnimation,
+		0,
+		uintptr(unsafe.Pointer(&enabled)),
+		0,
+	)
+	if ret == 0 {
+		return false
+	}
+	return enabled == 0 // animations disabled = reduce motion
+}
+
+// highContrastInfo matches the Windows HIGHCONTRAST structure layout.
+type highContrastInfo struct {
+	cbSize            uint32
+	dwFlags           uint32
+	lpszDefaultScheme *uint16
+}
+
+// HighContrast returns true if high contrast mode is active.
+func (p *windowsPlatform) HighContrast() bool {
+	var hc highContrastInfo
+	hc.cbSize = uint32(unsafe.Sizeof(hc))
+	ret, _, _ := procSystemParametersInfoW.Call(
+		spiGetHighContrast,
+		uintptr(hc.cbSize),
+		uintptr(unsafe.Pointer(&hc)),
+		0,
+	)
+	if ret == 0 {
+		return false
+	}
+	return hc.dwFlags&hcfHighContrastOn != 0
+}
+
+// FontScale returns font size preference multiplier.
+// On Windows, font scale is derived from the DPI scale factor.
+func (p *windowsPlatform) FontScale() float32 {
+	return float32(p.ScaleFactor())
 }
 
 func (p *windowsPlatform) queueEvent(event Event) {

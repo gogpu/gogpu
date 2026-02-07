@@ -84,6 +84,32 @@ type Platform interface {
 
 	// Destroy closes the window and releases resources.
 	Destroy()
+
+	// ScaleFactor returns the DPI scale factor.
+	// 1.0 = standard (96 DPI on Windows), 2.0 = HiDPI.
+	ScaleFactor() float64
+
+	// ClipboardRead reads text from system clipboard.
+	ClipboardRead() (string, error)
+
+	// ClipboardWrite writes text to system clipboard.
+	ClipboardWrite(text string) error
+
+	// SetCursor changes the mouse cursor shape.
+	// cursorID maps to gpucontext.CursorShape values (0-11).
+	SetCursor(cursorID int)
+
+	// DarkMode returns true if system dark mode is active.
+	DarkMode() bool
+
+	// ReduceMotion returns true if user prefers reduced animation.
+	ReduceMotion() bool
+
+	// HighContrast returns true if high contrast mode is active.
+	HighContrast() bool
+
+	// FontScale returns font size preference multiplier.
+	FontScale() float32
 }
 
 // New creates a platform-specific implementation.
