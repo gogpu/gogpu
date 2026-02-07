@@ -169,12 +169,15 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texColor = textureSample(tex, texSampler, input.uv);
-    // Output alpha is the same for both premultiplied and straight paths.
-    let a_out = texColor.a * uniforms.alpha;
-    // RGB factor: blends between texColor.a (straight) and 1.0 (premultiplied).
-    // premultiplied=1.0 → factor=1.0, premultiplied=0.0 → factor=texColor.a
-    let rgb_factor = uniforms.premultiplied + (1.0 - uniforms.premultiplied) * texColor.a;
-    return vec4<f32>(texColor.rgb * uniforms.alpha * rgb_factor, a_out);
+    // Output is always premultiplied (pipeline uses BlendFactorOne).
+    if (uniforms.premultiplied > 0.5) {
+        // Already premultiplied: scale all channels uniformly by opacity.
+        return texColor * uniforms.alpha;
+    } else {
+        // Straight alpha: premultiply RGB by alpha in shader.
+        let a = texColor.a * uniforms.alpha;
+        return vec4<f32>(texColor.rgb * a, a);
+    }
 }
 `
 
