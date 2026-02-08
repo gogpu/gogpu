@@ -852,51 +852,151 @@ func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, 
 	// Not implemented yet
 }
 
-// --- Compute shader operations (stubs) ---
+// --- Compute shader operations ---
 
 // CreateShaderModuleSPIRV creates a shader module from SPIR-V bytecode.
 func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
-	return 0, gpu.ErrNotImplemented
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return 0, err
+	}
+
+	desc := &hal.ShaderModuleDescriptor{
+		Label:  "shader-spirv",
+		Source: hal.ShaderSource{SPIRV: spirv},
+	}
+
+	module, err := halDevice.CreateShaderModule(desc)
+	if err != nil {
+		return 0, fmt.Errorf("native: failed to create SPIR-V shader module: %w", err)
+	}
+
+	handle := b.registry.RegisterShaderModule(module)
+	return handle, nil
 }
 
 // CreateComputePipeline creates a compute pipeline.
 func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
-	return 0, gpu.ErrNotImplemented
+	halDevice, err := b.registry.GetDevice(device)
+	if err != nil {
+		return 0, err
+	}
+
+	// Get shader module
+	halModule, err := b.registry.GetShaderModule(desc.Module)
+	if err != nil {
+		return 0, fmt.Errorf("native: invalid compute shader module: %w", err)
+	}
+
+	// Get pipeline layout if provided
+	var halLayout hal.PipelineLayout
+	if desc.Layout != 0 {
+		halLayout, err = b.registry.GetPipelineLayout(desc.Layout)
+		if err != nil {
+			return 0, fmt.Errorf("native: invalid pipeline layout: %w", err)
+		}
+	}
+
+	halDesc := &hal.ComputePipelineDescriptor{
+		Label:  desc.Label,
+		Layout: halLayout,
+		Compute: hal.ComputeState{
+			Module:     halModule,
+			EntryPoint: desc.EntryPoint,
+		},
+	}
+
+	pipeline, err := halDevice.CreateComputePipeline(halDesc)
+	if err != nil {
+		return 0, fmt.Errorf("native: failed to create compute pipeline: %w", err)
+	}
+
+	handle := b.registry.RegisterComputePipeline(pipeline)
+	return handle, nil
 }
 
 // BeginComputePass begins a compute pass.
 func (b *Backend) BeginComputePass(encoder types.CommandEncoder) types.ComputePass {
-	return 0
+	halEncoder, err := b.registry.GetCommandEncoder(encoder)
+	if err != nil {
+		return 0
+	}
+
+	halDesc := &hal.ComputePassDescriptor{
+		Label: "compute_pass",
+	}
+
+	pass := halEncoder.BeginComputePass(halDesc)
+
+	handle := b.registry.RegisterComputePass(pass)
+	return handle
 }
 
 // EndComputePass ends a compute pass.
 func (b *Backend) EndComputePass(pass types.ComputePass) {
-	// Not implemented yet
+	halPass, err := b.registry.GetComputePass(pass)
+	if err != nil {
+		return
+	}
+
+	halPass.End()
 }
 
 // SetComputePipeline sets the compute pipeline for a compute pass.
 func (b *Backend) SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline) {
-	// Not implemented yet
+	halPass, err := b.registry.GetComputePass(pass)
+	if err != nil {
+		return
+	}
+
+	halPipeline, err := b.registry.GetComputePipeline(pipeline)
+	if err != nil {
+		return
+	}
+
+	halPass.SetPipeline(halPipeline)
 }
 
 // SetComputeBindGroup sets a bind group for a compute pass.
 func (b *Backend) SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
-	// Not implemented yet
+	halPass, err := b.registry.GetComputePass(pass)
+	if err != nil {
+		return
+	}
+
+	halGroup, err := b.registry.GetBindGroup(bindGroup)
+	if err != nil {
+		return
+	}
+
+	halPass.SetBindGroup(index, halGroup, dynamicOffsets)
 }
 
 // DispatchWorkgroups dispatches compute work.
 func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
-	// Not implemented yet
+	halPass, err := b.registry.GetComputePass(pass)
+	if err != nil {
+		return
+	}
+
+	halPass.Dispatch(x, y, z)
 }
 
 // MapBufferRead maps a buffer for reading and returns its contents.
+// The buffer must have been created with BufferUsageMapRead | BufferUsageCopyDst.
+//
+// TODO: Implement proper buffer readback via hal.Queue.ReadBuffer.
+// Currently returns an error; callers should fall back to CPU rendering.
 func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
-	return nil, gpu.ErrNotImplemented
+	return nil, fmt.Errorf("native: buffer readback not yet implemented")
 }
 
 // UnmapBuffer unmaps a previously mapped buffer.
+// For the native backend, buffers with MapRead are persistently mapped,
+// so this is a no-op. The data was already copied in MapBufferRead.
 func (b *Backend) UnmapBuffer(buffer types.Buffer) {
-	// Not implemented yet
+	// No-op: data was copied in MapBufferRead.
+	// Vulkan buffers with host-visible memory are persistently mapped.
 }
 
 // --- Resource release ---
@@ -985,12 +1085,17 @@ func (b *Backend) ReleaseRenderPass(pass types.RenderPass) {
 
 // ReleaseComputePipeline releases a compute pipeline.
 func (b *Backend) ReleaseComputePipeline(pipeline types.ComputePipeline) {
-	// Not implemented yet
+	halPipeline, err := b.registry.GetComputePipeline(pipeline)
+	if err == nil && halPipeline != nil {
+		halPipeline.Destroy()
+	}
+	b.registry.UnregisterComputePipeline(pipeline)
 }
 
 // ReleaseComputePass releases a compute pass.
 func (b *Backend) ReleaseComputePass(pass types.ComputePass) {
-	// Not implemented yet
+	// Compute passes are ended, not destroyed
+	b.registry.UnregisterComputePass(pass)
 }
 
 // ReleaseShaderModule releases a shader module.

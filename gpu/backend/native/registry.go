@@ -38,6 +38,8 @@ type ResourceRegistry struct {
 	commandBuffers        map[types.CommandBuffer]hal.CommandBuffer
 	commandBufferDevices  map[types.CommandBuffer]types.Device // Track device for command buffer freeing
 	renderPasses          map[types.RenderPass]hal.RenderPassEncoder
+	computePipelines      map[types.ComputePipeline]hal.ComputePipeline
+	computePasses         map[types.ComputePass]hal.ComputePassEncoder
 	buffers               map[types.Buffer]hal.Buffer
 	samplers              map[types.Sampler]hal.Sampler
 	bindGroupLayouts      map[types.BindGroupLayout]hal.BindGroupLayout
@@ -68,6 +70,8 @@ type ResourceRegistry struct {
 	commandEncoderHandles  map[hal.CommandEncoder]types.CommandEncoder
 	commandBufferHandles   map[hal.CommandBuffer]types.CommandBuffer
 	renderPassHandles      map[hal.RenderPassEncoder]types.RenderPass
+	computePipelineHandles map[hal.ComputePipeline]types.ComputePipeline
+	computePassHandles     map[hal.ComputePassEncoder]types.ComputePass
 	bufferHandles          map[hal.Buffer]types.Buffer
 	samplerHandles         map[hal.Sampler]types.Sampler
 	bindGroupLayoutHandles map[hal.BindGroupLayout]types.BindGroupLayout
@@ -94,6 +98,8 @@ func NewResourceRegistry() *ResourceRegistry {
 		commandBuffers:        make(map[types.CommandBuffer]hal.CommandBuffer),
 		commandBufferDevices:  make(map[types.CommandBuffer]types.Device),
 		renderPasses:          make(map[types.RenderPass]hal.RenderPassEncoder),
+		computePipelines:      make(map[types.ComputePipeline]hal.ComputePipeline),
+		computePasses:         make(map[types.ComputePass]hal.ComputePassEncoder),
 		buffers:               make(map[types.Buffer]hal.Buffer),
 		samplers:              make(map[types.Sampler]hal.Sampler),
 		bindGroupLayouts:      make(map[types.BindGroupLayout]hal.BindGroupLayout),
@@ -118,6 +124,8 @@ func NewResourceRegistry() *ResourceRegistry {
 		commandEncoderHandles:  make(map[hal.CommandEncoder]types.CommandEncoder),
 		commandBufferHandles:   make(map[hal.CommandBuffer]types.CommandBuffer),
 		renderPassHandles:      make(map[hal.RenderPassEncoder]types.RenderPass),
+		computePipelineHandles: make(map[hal.ComputePipeline]types.ComputePipeline),
+		computePassHandles:     make(map[hal.ComputePassEncoder]types.ComputePass),
 		bufferHandles:          make(map[hal.Buffer]types.Buffer),
 		samplerHandles:         make(map[hal.Sampler]types.Sampler),
 		bindGroupLayoutHandles: make(map[hal.BindGroupLayout]types.BindGroupLayout),
@@ -628,6 +636,66 @@ func (r *ResourceRegistry) UnregisterRenderPass(handle types.RenderPass) {
 	r.mu.Unlock()
 }
 
+// --- ComputePipeline ---
+
+func (r *ResourceRegistry) RegisterComputePipeline(pipeline hal.ComputePipeline) types.ComputePipeline {
+	handle := types.ComputePipeline(r.newHandle())
+	r.mu.Lock()
+	r.computePipelines[handle] = pipeline
+	r.computePipelineHandles[pipeline] = handle
+	r.mu.Unlock()
+	return handle
+}
+
+func (r *ResourceRegistry) GetComputePipeline(handle types.ComputePipeline) (hal.ComputePipeline, error) {
+	r.mu.RLock()
+	pipeline, ok := r.computePipelines[handle]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("invalid compute pipeline handle: %d", handle)
+	}
+	return pipeline, nil
+}
+
+func (r *ResourceRegistry) UnregisterComputePipeline(handle types.ComputePipeline) {
+	r.mu.Lock()
+	if pipeline, ok := r.computePipelines[handle]; ok {
+		delete(r.computePipelines, handle)
+		delete(r.computePipelineHandles, pipeline)
+	}
+	r.mu.Unlock()
+}
+
+// --- ComputePass ---
+
+func (r *ResourceRegistry) RegisterComputePass(pass hal.ComputePassEncoder) types.ComputePass {
+	handle := types.ComputePass(r.newHandle())
+	r.mu.Lock()
+	r.computePasses[handle] = pass
+	r.computePassHandles[pass] = handle
+	r.mu.Unlock()
+	return handle
+}
+
+func (r *ResourceRegistry) GetComputePass(handle types.ComputePass) (hal.ComputePassEncoder, error) {
+	r.mu.RLock()
+	pass, ok := r.computePasses[handle]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("invalid compute pass handle: %d", handle)
+	}
+	return pass, nil
+}
+
+func (r *ResourceRegistry) UnregisterComputePass(handle types.ComputePass) {
+	r.mu.Lock()
+	if pass, ok := r.computePasses[handle]; ok {
+		delete(r.computePasses, handle)
+		delete(r.computePassHandles, pass)
+	}
+	r.mu.Unlock()
+}
+
 // --- Buffer ---
 
 func (r *ResourceRegistry) RegisterBuffer(buffer hal.Buffer) types.Buffer {
@@ -819,6 +887,8 @@ func (r *ResourceRegistry) Clear() {
 	r.commandBuffers = make(map[types.CommandBuffer]hal.CommandBuffer)
 	r.commandBufferDevices = make(map[types.CommandBuffer]types.Device)
 	r.renderPasses = make(map[types.RenderPass]hal.RenderPassEncoder)
+	r.computePipelines = make(map[types.ComputePipeline]hal.ComputePipeline)
+	r.computePasses = make(map[types.ComputePass]hal.ComputePassEncoder)
 	r.buffers = make(map[types.Buffer]hal.Buffer)
 	r.samplers = make(map[types.Sampler]hal.Sampler)
 	r.bindGroupLayouts = make(map[types.BindGroupLayout]hal.BindGroupLayout)
@@ -843,6 +913,8 @@ func (r *ResourceRegistry) Clear() {
 	r.commandEncoderHandles = make(map[hal.CommandEncoder]types.CommandEncoder)
 	r.commandBufferHandles = make(map[hal.CommandBuffer]types.CommandBuffer)
 	r.renderPassHandles = make(map[hal.RenderPassEncoder]types.RenderPass)
+	r.computePipelineHandles = make(map[hal.ComputePipeline]types.ComputePipeline)
+	r.computePassHandles = make(map[hal.ComputePassEncoder]types.ComputePass)
 	r.bufferHandles = make(map[hal.Buffer]types.Buffer)
 	r.samplerHandles = make(map[hal.Sampler]types.Sampler)
 	r.bindGroupLayoutHandles = make(map[hal.BindGroupLayout]types.BindGroupLayout)
