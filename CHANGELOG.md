@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-02-10
+
+### Added
+
+- **HalProvider support** — `GPUContextProvider()` now implements `gpucontext.HalProvider`,
+  exposing low-level HAL device and queue for GPU accelerators (e.g. gg SDF compute shaders)
+  - `HalDevice() any` — returns `hal.Device` for direct GPU operations
+  - `HalQueue() any` — returns `hal.Queue` for command submission
+- **HalResourceProvider** — `GetHalDevice()` / `GetHalQueue()` resolve handle-based
+  gogpu types to underlying wgpu HAL objects (both Vulkan and Metal backends)
+- **Compute pipeline support in native Vulkan backend** — full compute shader lifecycle:
+  compute pipelines, bind groups, compute passes, buffer creation with readback
+- **`MapBufferRead` / `UnmapBuffer`** — GPU→CPU buffer readback via `hal.Queue.ReadBuffer`
+  in native Vulkan backend (was stub)
+- **`CopyBufferToBuffer`** — new Backend interface method for GPU-side buffer copies
+- **Full compute support in Rust backend** — CreateComputePipeline, BeginComputePass,
+  SetComputePipeline, SetComputeBindGroup, DispatchWorkgroups, EndComputePass,
+  MapBufferRead, CreateShaderModuleSPIRV — all implemented via go-webgpu/webgpu v0.3.0
+
+### Changed
+
+- **gpucontext** dependency updated v0.8.0 → v0.9.0
+- **wgpu** dependency updated v0.14.0 → v0.15.0 (ReadBuffer, compute support)
+- **go-webgpu/webgpu** dependency updated v0.2.1 → v0.3.0
+- **naga** dependency updated v0.11.1 → v0.12.0 (indirect, function calls, SPIR-V fixes)
+- **golang.org/x/sys** updated v0.40.0 → v0.41.0
+
 ## [0.16.0] - 2026-02-07
 
 ### Added

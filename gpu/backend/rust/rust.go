@@ -9,6 +9,7 @@ package rust
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
@@ -40,6 +41,7 @@ type Backend struct {
 	bindGroups       map[types.BindGroup]*wgpu.BindGroup
 	pipelineLayouts  map[types.PipelineLayout]*wgpu.PipelineLayout
 	mappedBufferData map[types.Buffer][]byte
+	bufferDevices    map[types.Buffer]types.Device
 
 	nextHandle uintptr
 }
@@ -72,6 +74,7 @@ func New() *Backend {
 		bindGroups:       make(map[types.BindGroup]*wgpu.BindGroup),
 		pipelineLayouts:  make(map[types.PipelineLayout]*wgpu.PipelineLayout),
 		mappedBufferData: make(map[types.Buffer][]byte),
+		bufferDevices:    make(map[types.Buffer]types.Device),
 		nextHandle:       1,
 	}
 }
@@ -123,8 +126,9 @@ func (b *Backend) Destroy() {
 	releaseMap(b.devices)
 	releaseMap(b.adapters)
 	releaseMap(b.instances)
-	// Clear mapped buffer data (no Release needed, just memory)
+	// Clear mapped buffer data and device tracking (no Release needed, just memory)
 	b.mappedBufferData = make(map[types.Buffer][]byte)
+	b.bufferDevices = make(map[types.Buffer]types.Device)
 }
 
 // CreateInstance creates a WebGPU instance.
@@ -273,12 +277,49 @@ func (b *Backend) CreateShaderModuleWGSL(device types.Device, code string) (type
 	return handle, nil
 }
 
+// shaderSourceSPIRV provides SPIR-V bytecode for shader creation.
+// This matches the wgpu-native WGPUShaderSourceSPIRV chained struct layout.
+type shaderSourceSPIRV struct {
+	Chain    wgpu.ChainedStruct
+	CodeSize uint32
+	_        [4]byte // padding for alignment
+	Code     uintptr // *uint32
+}
+
 // CreateShaderModuleSPIRV creates a shader module from SPIR-V bytecode.
-// Note: SPIR-V support requires wgpu-gpu features that may not be available.
+// Uses the wgpu-native SPIR-V extension via chained struct.
 func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
-	// SPIR-V shader creation is not yet implemented in the wgpu bindings.
-	// Users should use WGSL shaders for now or compile SPIR-V to WGSL using naga.
-	return 0, gpu.ErrNotImplemented
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	if len(spirv) == 0 {
+		return 0, fmt.Errorf("rust backend: empty SPIR-V bytecode")
+	}
+
+	spirvSource := shaderSourceSPIRV{
+		Chain: wgpu.ChainedStruct{
+			Next:  0,
+			SType: uint32(wgpu.STypeShaderSourceSPIRV),
+		},
+		CodeSize: uint32(len(spirv)),
+		Code:     uintptr(unsafe.Pointer(&spirv[0])),
+	}
+
+	desc := wgpu.ShaderModuleDescriptor{
+		NextInChain: uintptr(unsafe.Pointer(&spirvSource)),
+		Label:       wgpu.EmptyStringView(),
+	}
+
+	shader := dev.CreateShaderModule(&desc)
+	if shader == nil {
+		return 0, fmt.Errorf("rust backend: failed to create SPIR-V shader module")
+	}
+
+	handle := types.ShaderModule(b.newHandle())
+	b.shaders[handle] = shader
+	return handle, nil
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -358,12 +399,34 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 }
 
 // CreateComputePipeline creates a compute pipeline.
-// Note: Compute pipeline support requires wgpu-gpu features that may not be available
-// in the current version of go-webgpu/webgpu bindings.
 func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
-	// Compute pipeline creation is not yet implemented in the wgpu bindings.
-	// This will be enabled once go-webgpu/webgpu adds compute pipeline support.
-	return 0, gpu.ErrNotImplemented
+	dev := b.devices[device]
+	if dev == nil {
+		return 0, fmt.Errorf("rust backend: invalid device")
+	}
+
+	shader := b.shaders[desc.Module]
+	if shader == nil {
+		return 0, fmt.Errorf("rust backend: invalid shader module")
+	}
+
+	// Get pipeline layout if specified
+	var pipelineLayout *wgpu.PipelineLayout
+	if desc.Layout != 0 {
+		pipelineLayout = b.pipelineLayouts[desc.Layout]
+		if pipelineLayout == nil {
+			return 0, fmt.Errorf("rust backend: invalid pipeline layout")
+		}
+	}
+
+	pipeline := dev.CreateComputePipelineSimple(pipelineLayout, shader, desc.EntryPoint)
+	if pipeline == nil {
+		return 0, fmt.Errorf("rust backend: failed to create compute pipeline")
+	}
+
+	handle := types.ComputePipeline(b.newHandle())
+	b.computePipelines[handle] = pipeline
+	return handle, nil
 }
 
 // CreateCommandEncoder creates a command encoder.
@@ -415,15 +478,28 @@ func (b *Backend) EndRenderPass(pass types.RenderPass) {
 }
 
 // BeginComputePass begins a compute pass.
-// Note: Compute pass support is not yet implemented in the wgpu bindings.
 func (b *Backend) BeginComputePass(encoder types.CommandEncoder) types.ComputePass {
-	// Not yet implemented in wgpu bindings
-	return 0
+	enc := b.encoders[encoder]
+	if enc == nil {
+		return 0
+	}
+
+	pass := enc.BeginComputePass(nil)
+	if pass == nil {
+		return 0
+	}
+
+	handle := types.ComputePass(b.newHandle())
+	b.computePasses[handle] = pass
+	return handle
 }
 
 // EndComputePass ends a compute pass.
 func (b *Backend) EndComputePass(pass types.ComputePass) {
-	// Not yet implemented in wgpu bindings
+	p := b.computePasses[pass]
+	if p != nil {
+		p.End()
+	}
 }
 
 // FinishEncoder finishes the command encoder.
@@ -477,21 +553,29 @@ func (b *Backend) Draw(pass types.RenderPass, vertexCount, instanceCount, firstV
 }
 
 // SetComputePipeline sets the compute pipeline for a compute pass.
-// Note: Compute pass support is not yet implemented in the wgpu bindings.
 func (b *Backend) SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline) {
-	// Not yet implemented in wgpu bindings
+	p := b.computePasses[pass]
+	pipe := b.computePipelines[pipeline]
+	if p != nil && pipe != nil {
+		p.SetPipeline(pipe)
+	}
 }
 
 // SetComputeBindGroup sets a bind group for a compute pass.
-// Note: Compute pass support is not yet implemented in the wgpu bindings.
 func (b *Backend) SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
-	// Not yet implemented in wgpu bindings
+	p := b.computePasses[pass]
+	bg := b.bindGroups[bindGroup]
+	if p != nil && bg != nil {
+		p.SetBindGroup(index, bg, dynamicOffsets)
+	}
 }
 
 // DispatchWorkgroups dispatches compute work.
-// Note: Compute pass support is not yet implemented in the wgpu bindings.
 func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
-	// Not yet implemented in wgpu bindings
+	p := b.computePasses[pass]
+	if p != nil {
+		p.DispatchWorkgroups(x, y, z)
+	}
 }
 
 // CreateTexture creates a texture.
@@ -631,6 +715,7 @@ func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor
 
 	handle := types.Buffer(b.newHandle())
 	b.gpuBuffers[handle] = buffer
+	b.bufferDevices[handle] = device
 	return handle, nil
 }
 
@@ -646,22 +731,69 @@ func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uin
 }
 
 // CopyBufferToBuffer records a buffer-to-buffer copy command.
-func (b *Backend) CopyBufferToBuffer(types.CommandEncoder, types.Buffer, uint64, types.Buffer, uint64, uint64) {
-	// Not yet implemented for Rust backend
+func (b *Backend) CopyBufferToBuffer(encoder types.CommandEncoder, src types.Buffer, srcOffset uint64, dst types.Buffer, dstOffset, size uint64) {
+	enc := b.encoders[encoder]
+	srcBuf := b.gpuBuffers[src]
+	dstBuf := b.gpuBuffers[dst]
+	if enc == nil || srcBuf == nil || dstBuf == nil {
+		return
+	}
+	enc.CopyBufferToBuffer(srcBuf, srcOffset, dstBuf, dstOffset, size)
 }
 
-// MapBufferRead maps a buffer for reading and returns its contents.
-// Note: Buffer mapping support is not yet implemented in the wgpu bindings.
+// MapBufferRead maps a buffer for reading and returns a copy of its contents.
+// The buffer must have been created with MapRead usage.
+// This method maps the buffer, copies the data to a Go slice, and stores the
+// mapped data for later cleanup via UnmapBuffer.
 func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
-	// Buffer mapping is not yet implemented in wgpu bindings.
-	// This will be enabled once go-webgpu/webgpu adds buffer mapping support.
-	return nil, gpu.ErrNotImplemented
+	buf := b.gpuBuffers[buffer]
+	if buf == nil {
+		return nil, fmt.Errorf("rust backend: invalid buffer")
+	}
+
+	// Get the device that created this buffer for polling
+	devHandle := b.bufferDevices[buffer]
+	dev := b.devices[devHandle]
+	if dev == nil {
+		return nil, fmt.Errorf("rust backend: no device associated with buffer")
+	}
+
+	// Get buffer size
+	size := buf.GetSize()
+	if size == 0 {
+		return nil, fmt.Errorf("rust backend: buffer has zero size")
+	}
+
+	// Map the buffer for reading (blocks until complete via device polling)
+	if err := buf.MapAsync(dev, wgpu.MapModeRead, 0, size); err != nil {
+		return nil, fmt.Errorf("rust backend: map buffer: %w", err)
+	}
+
+	// Get pointer to mapped data
+	ptr := buf.GetMappedRange(0, size)
+	if ptr == nil {
+		buf.Unmap()
+		return nil, fmt.Errorf("rust backend: failed to get mapped range")
+	}
+
+	// Copy data to a Go-owned slice (the mapped pointer is only valid until Unmap)
+	data := make([]byte, size)
+	copy(data, unsafe.Slice((*byte)(ptr), size))
+
+	// Store the data and keep buffer mapped for UnmapBuffer
+	b.mappedBufferData[buffer] = data
+
+	// Unmap immediately since we already copied the data
+	buf.Unmap()
+
+	return data, nil
 }
 
-// UnmapBuffer unmaps a previously mapped buffer.
-// Note: Buffer mapping support is not yet implemented in the wgpu bindings.
+// UnmapBuffer unmaps a previously mapped buffer and cleans up cached data.
+// Since MapBufferRead copies data and unmaps immediately, this only clears
+// the cached data slice.
 func (b *Backend) UnmapBuffer(buffer types.Buffer) {
-	// Not yet implemented in wgpu bindings
+	delete(b.mappedBufferData, buffer)
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -882,6 +1014,8 @@ func (b *Backend) ReleaseBuffer(buffer types.Buffer) {
 		buf.Release()
 		delete(b.gpuBuffers, buffer)
 	}
+	delete(b.bufferDevices, buffer)
+	delete(b.mappedBufferData, buffer)
 }
 
 // ReleaseBindGroupLayout releases a bind group layout.
@@ -939,15 +1073,21 @@ func (b *Backend) ReleaseRenderPass(pass types.RenderPass) {
 }
 
 // ReleaseComputePipeline releases a compute pipeline.
-// Note: Compute pipeline support is not yet implemented.
 func (b *Backend) ReleaseComputePipeline(pipeline types.ComputePipeline) {
-	// Not yet implemented in wgpu bindings
+	p := b.computePipelines[pipeline]
+	if p != nil {
+		p.Release()
+		delete(b.computePipelines, pipeline)
+	}
 }
 
 // ReleaseComputePass releases a compute pass.
-// Note: Compute pass support is not yet implemented.
 func (b *Backend) ReleaseComputePass(pass types.ComputePass) {
-	// Not yet implemented in wgpu bindings
+	p := b.computePasses[pass]
+	if p != nil {
+		p.Release()
+		delete(b.computePasses, pass)
+	}
 }
 
 // ReleaseShaderModule releases a shader module.

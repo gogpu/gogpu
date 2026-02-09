@@ -21,15 +21,17 @@ import (
 
 // Backend implements gpu.Backend using pure Go wgpu HAL.
 type Backend struct {
-	registry *ResourceRegistry
-	backend  hal.Backend
+	registry    *ResourceRegistry
+	backend     hal.Backend
+	bufferSizes map[types.Buffer]uint64
 }
 
 // New creates a new Pure Go backend.
 func New() *Backend {
 	return &Backend{
-		registry: NewResourceRegistry(),
-		backend:  vulkan.Backend{}, // Vulkan is the first HAL implementation
+		registry:    NewResourceRegistry(),
+		backend:     vulkan.Backend{}, // Vulkan is the first HAL implementation
+		bufferSizes: make(map[types.Buffer]uint64),
 	}
 }
 
@@ -681,6 +683,7 @@ func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor
 	}
 
 	handle := b.registry.RegisterBuffer(buffer)
+	b.bufferSizes[handle] = desc.Size
 	return handle, nil
 }
 
@@ -1001,15 +1004,35 @@ func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
 	halPass.Dispatch(x, y, z)
 }
 
-// MapBufferRead maps a buffer for reading and returns its contents.
+// MapBufferRead reads a buffer's contents from the GPU.
 // The buffer must have been created with BufferUsageMapRead | BufferUsageCopyDst.
 func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
-	return nil, gpu.ErrNotImplemented
+	halBuffer, err := b.registry.GetBuffer(buffer)
+	if err != nil {
+		return nil, fmt.Errorf("gpu: invalid buffer: %w", err)
+	}
+
+	size, ok := b.bufferSizes[buffer]
+	if !ok {
+		return nil, fmt.Errorf("gpu: unknown buffer size for handle %d", buffer)
+	}
+
+	halQueue := b.registry.GetAnyQueue()
+	if halQueue == nil {
+		return nil, fmt.Errorf("gpu: no queue available for ReadBuffer")
+	}
+
+	data := make([]byte, size)
+	if err := halQueue.ReadBuffer(halBuffer, 0, data); err != nil {
+		return nil, fmt.Errorf("gpu: ReadBuffer failed: %w", err)
+	}
+	return data, nil
 }
 
-// UnmapBuffer unmaps a previously mapped buffer.
+// UnmapBuffer is a no-op for the native backend.
+// ReadBuffer returns a copy of the data, so no unmapping is needed.
 func (b *Backend) UnmapBuffer(buffer types.Buffer) {
-	// Not implemented yet
+	// No-op: ReadBuffer copies data, no persistent mapping to release.
 }
 
 // --- Resource release ---
@@ -1044,6 +1067,7 @@ func (b *Backend) ReleaseBuffer(buffer types.Buffer) {
 		halBuffer.Destroy()
 	}
 	b.registry.UnregisterBuffer(buffer)
+	delete(b.bufferSizes, buffer)
 }
 
 func (b *Backend) ReleaseBindGroupLayout(layout types.BindGroupLayout) {
@@ -1225,4 +1249,3 @@ func (b *Backend) GetHalQueue(queue types.Queue) any {
 
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)
-

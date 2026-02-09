@@ -182,6 +182,24 @@ events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
 
 This enables enterprise-grade dependency injection between packages without circular imports.
 
+### HalProvider (Direct GPU Access)
+
+For GPU accelerators that need low-level HAL access (compute shaders, buffer readback):
+
+```go
+import "github.com/gogpu/gpucontext"
+
+provider := app.GPUContextProvider()
+
+// Type-assert to HalProvider for direct HAL access
+if hp, ok := provider.(gpucontext.HalProvider); ok {
+    halDevice := hp.HalDevice() // hal.Device for compute pipelines
+    halQueue := hp.HalQueue()   // hal.Queue for command submission
+}
+```
+
+Used by [gogpu/gg](https://github.com/gogpu/gg) GPU SDF accelerator for compute shader dispatch on shared device.
+
 ### Window & Platform Integration
 
 `App` implements `gpucontext.WindowProvider` and `gpucontext.PlatformProvider` for UI frameworks:

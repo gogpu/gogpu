@@ -765,4 +765,3 @@ func (b *Backend) GetHalQueue(queue types.Queue) any {
 
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)
-

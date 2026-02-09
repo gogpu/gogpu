@@ -14,25 +14,26 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
               ┌─────────────────┴────────────────┐
               │                                  │
        ┌──────▼──────┐                    ┌──────▼──────┐
-       │   gogpu     │                    │     gg      │
-       │  Framework  │                    │ 2D Graphics │
+       │   gogpu     │  ◄─HalProvider──►  │     gg      │
+       │  Framework  │  (device sharing)  │ 2D Graphics │
        └──────┬──────┘                    └──────┬──────┘
               │                                  │
               │                    ┌─────────────┼──────────────┐
               │                    │             │              │
               │             ┌──────▼────┐  ┌─────▼─────┐  ┌─────▼─────┐
-              │             │gg/backend │  │gg/backend │  │gg/backend │
-              │             │   rust    │  │  native   │  │ software  │
-              │             └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-              │                   │              │              │
-       ┌──────┴──────┐            │              │              │
-       │             │            │              │         ┌────▼────┐
-┌──────▼────┐ ┌──────▼────┐       │              │         │   CPU   │
-│gogpu/back-│ │gogpu/back-│       │              │         │  2D     │
-│end/rust   │ │end/native │       │              │         │Rasteriz.│
-└─────┬─────┘ └─────┬─────┘       │              │         └─────────┘
-      │             │             │              │
-      │             └─────────────┼──────────────┘
+              │             │gg/internal│  │gg/internal│  │  gg/gpu   │
+              │             │  /raster/ │  │   /gpu/   │  │ (opt-in   │
+              │             │ CPU Core  │  │ GPU Accel │  │  import)  │
+              │             └───────────┘  └─────┬─────┘  └───────────┘
+              │                                  │
+       ┌──────┴──────┐                           │
+       │             │                           │
+┌──────▼────┐ ┌──────▼────┐                      │
+│gogpu/back-│ │gogpu/back-│                      │
+│end/rust   │ │end/native │                      │
+└─────┬─────┘ └─────┬─────┘                      │
+      │             │                            │
+      │             └────────────────────────────┘
       │                           │
       │                    ┌──────▼──────┐
       │                    │    wgpu     │
@@ -95,13 +96,18 @@ See [GPUCONTEXT_GPUTYPES_DECISION.md](dev/research/GPUCONTEXT_GPUTYPES_DECISION.
 | **Native**   | Pure Go via gogpu/wgpu     | (default)      | Yes          |
 | **Rust**     | wgpu-native via FFI        | `-tags rust`   | Yes          |
 
-### gg Backends
+### gg: CPU Core + GPU Accelerator (ARCH-008)
 
-| Backend      | Description                | Build Tag      | GPU Required |
-|--------------|----------------------------|----------------|--------------|
-| **Native**   | Pure Go via gogpu/wgpu     | (default)      | Yes          |
-| **Rust**     | wgpu-native via FFI        | `-tags rust`   | Yes          |
-| **Software** | CPU 2D rasterizer          | (fallback)     | No           |
+gg uses a fundamentally different model: **CPU is the core, GPU is an optional accelerator**.
+
+| Component | Description | GPU Required |
+|-----------|-------------|--------------|
+| **internal/raster/** | CPU rasterization core (always available) | No |
+| **internal/gpu/** | GPU SDF acceleration (compute shaders) | Yes |
+| **gpu/** | Public opt-in registration (`import _ "gg/gpu"`) | Yes |
+
+GPU accelerator uses `hal.Queue` interface — works with any wgpu backend (Vulkan, Metal, DX12).
+When gogpu is present, gg receives the shared device via `gpucontext.HalProvider`.
 
 ### wgpu HAL Backends
 
@@ -120,10 +126,10 @@ There are **two different** software rendering options:
 | Component            | Level     | Purpose                              |
 |----------------------|-----------|--------------------------------------|
 | `wgpu/hal/software`  | HAL       | Full WebGPU emulation on CPU         |
-| `gg/backend/software`| Backend   | Lightweight 2D rasterizer (no wgpu)  |
+| `gg/internal/raster` | Core      | CPU 2D rasterizer (always available) |
 
 - **wgpu/hal/software** — Emulates GPU operations for testing or headless environments
-- **gg/backend/software** — Direct 2D rendering without WebGPU overhead
+- **gg/internal/raster** — CPU rasterization core with analytic AA, always works without GPU
 
 ## Backend Selection
 
@@ -141,15 +147,12 @@ app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
 ### gg
 
 ```go
-import "github.com/gogpu/gg/backend"
+import _ "github.com/gogpu/gg/gpu" // opt-in GPU acceleration
 
-// Auto-select best available
-b := backend.Default()
-
-// Explicit selection
-b := backend.Get(backend.BackendNative)
-b := backend.Get(backend.BackendRust)
-b := backend.Get(backend.BackendSoftware)
+// CPU rasterization always works (no imports needed)
+dc := gg.NewContext(800, 600)
+dc.DrawCircle(400, 300, 100)
+dc.Fill() // tries GPU first, falls back to CPU
 ```
 
 ### Build Tags
@@ -168,7 +171,7 @@ When multiple backends are available:
 
 **gogpu:** Rust → Native
 
-**gg:** Rust → Native → Software
+**gg:** GPU Accelerator (if registered) → CPU Core (always available)
 
 ## Dependency Graph
 
@@ -198,7 +201,8 @@ naga (shader)              wgpu              go-webgpu/webgpu
 - `gpucontext` imports `gputypes` — interfaces use shared types
 - gogpu and gg do NOT depend on each other
 - Both implement/consume gpucontext interfaces for interoperability
-- gg can receive GPU device from gogpu via DeviceProvider pattern
+- gg receives GPU device from gogpu via `gpucontext.HalProvider` (direct HAL access)
+- gg GPU accelerator uses `hal.Device`/`hal.Queue` for compute shader dispatch
 - All projects use compatible `gputypes.TextureFormat` etc.
 
 ## Package Structure
@@ -213,6 +217,7 @@ gogpu/
 ├── renderer.go         # WebGPU pipeline
 ├── texture.go          # Texture management
 ├── event_source.go     # gpucontext.EventSource adapter
+├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
 ├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
 │   ├── backend.go      # Backend interface (120+ methods)
@@ -330,16 +335,17 @@ Platform Layer          InputState               Game Loop
 5. EndFrame()      → Present surface
 ```
 
-## Why Separate Backend Systems?
+## Why Different GPU Models?
 
-gogpu and gg have **separate backend interfaces** by design:
+gogpu and gg use GPU differently by design:
 
-| Aspect               | gogpu                | gg                    |
-|----------------------|----------------------|-----------------------|
-| **Purpose**          | GPU framework        | 2D graphics library   |
-| **Interface methods**| 120+                 | 6                     |
-| **API style**        | Handle-based         | Object-oriented       |
-| **Software fallback**| No                   | Yes                   |
+| Aspect               | gogpu                | gg                      |
+|----------------------|----------------------|-------------------------|
+| **Purpose**          | GPU framework        | 2D graphics library     |
+| **GPU model**        | Dual backend (Rust/Go) | CPU core + GPU accelerator |
+| **Interface methods**| 120+ (Backend)       | hal.Device/Queue (HAL)  |
+| **Without GPU**      | Cannot run           | Falls back to CPU core  |
+| **Integration**      | Owns device          | Borrows via HalProvider |
 
 Both share **gogpu/wgpu** as the common WebGPU implementation.
 
