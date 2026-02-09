@@ -359,7 +359,7 @@ func (a *Accelerator) dispatchCompute(
 ) error {
 	// Calculate pixel buffer size (width * height * 4 bytes per RGBA pixel packed as u32)
 	pixelCount := target.Width * target.Height
-	storageSize := uint64(pixelCount) * 4
+	storageSize := uint64(pixelCount) * 4 //nolint:gosec // G115: width*height is always positive and bounded by GPU limits
 
 	// Create uniform buffer
 	uniformBuf, err := a.backend.CreateBuffer(a.device, &types.BufferDescriptor{
@@ -511,9 +511,6 @@ func getColorFromPaint(paint *gg.Paint) gg.RGBA {
 			return sb.Color
 		}
 		return paint.Brush.ColorAt(0, 0)
-	}
-	if paint.Pattern != nil {
-		return paint.Pattern.ColorAt(0, 0)
 	}
 	return gg.Black
 }
