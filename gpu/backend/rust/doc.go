@@ -1,8 +1,8 @@
-// Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
+// Package rust provides the WebGPU backend using wgpu-gpu (Rust) via go-webgpu/webgpu.
 //
 // This backend offers maximum performance but requires:
 //   - Windows OS (due to go-webgpu/goffi limitations)
-//   - wgpu-native library (wgpu_native.dll)
+//   - wgpu-gpu library (wgpu_native.dll)
 //
 // # Build Tags
 //
@@ -10,7 +10,7 @@
 //
 //	go build -tags rust ./...
 //
-// Without the rust tag, only the native (Pure Go) backend is available.
+// Without the rust tag, only the gpu (Pure Go) backend is available.
 //
 // # Requirements
 //

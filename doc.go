@@ -1,7 +1,7 @@
 // Package gogpu provides a simple, cross-platform GPU graphics API for Go.
 //
 // GoGPU is designed to make GPU programming accessible while maintaining
-// the flexibility for advanced use cases. It wraps WebGPU (via wgpu-native)
+// the flexibility for advanced use cases. It wraps WebGPU (via wgpu-gpu)
 // and provides a clean, Go-idiomatic API.
 //
 // # Quick Start

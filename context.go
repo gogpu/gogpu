@@ -64,7 +64,7 @@ func (c *Context) Format() gputypes.TextureFormat {
 }
 
 // Backend returns the name of the active backend.
-// Returns "Rust (wgpu-native)" or "Pure Go (gogpu/wgpu)".
+// Returns "Rust (wgpu-gpu)" or "Pure Go (gogpu/wgpu)".
 func (c *Context) Backend() string {
 	return c.renderer.Backend()
 }

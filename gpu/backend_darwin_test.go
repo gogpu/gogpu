@@ -45,7 +45,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 func TestNativeBackendInterfaceDarwin(t *testing.T) {
 	backend := native.New()
 	if backend == nil {
-		t.Fatal("native.New returned nil")
+		t.Fatal("gpu.New returned nil")
 	}
 
 	gpu.SetBackend(backend)

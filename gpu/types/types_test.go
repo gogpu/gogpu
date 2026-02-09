@@ -10,7 +10,7 @@ func TestBackendTypeString(t *testing.T) {
 		expected string
 	}{
 		{BackendAuto, "Auto"},
-		{BackendRust, "Rust (wgpu-native)"},
+		{BackendRust, "Rust (wgpu-gpu)"},
 		{BackendNative, "Native (Pure Go)"},
 		{BackendGo, "Native (Pure Go)"}, // Alias should return same string
 		{BackendType(99), "Auto"},       // Unknown defaults to Auto

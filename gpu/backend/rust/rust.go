@@ -1,6 +1,6 @@
 //go:build rust && windows
 
-// Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
+// Package rust provides the WebGPU backend using wgpu-gpu (Rust) via go-webgpu/webgpu.
 // This backend offers maximum performance and is battle-tested in production.
 // Currently only available on Windows due to go-webgpu/goffi limitations.
 //
@@ -17,9 +17,9 @@ import (
 	"github.com/gogpu/gogpu/gpu/types"
 )
 
-// Backend implements gpu.Backend using wgpu-native.
+// Backend implements gpu.Backend using wgpu-gpu.
 type Backend struct {
-	// Store native handles for cleanup
+	// Store gpu handles for cleanup
 	instances        map[types.Instance]*wgpu.Instance
 	adapters         map[types.Adapter]*wgpu.Adapter
 	devices          map[types.Device]*wgpu.Device
@@ -97,7 +97,7 @@ func releaseMap[K comparable, V Releasable](m map[K]V) {
 
 // Name returns the backend identifier.
 func (b *Backend) Name() string {
-	return "Rust (wgpu-native)"
+	return "Rust (wgpu-gpu)"
 }
 
 // Init initializes the backend.
@@ -274,7 +274,7 @@ func (b *Backend) CreateShaderModuleWGSL(device types.Device, code string) (type
 }
 
 // CreateShaderModuleSPIRV creates a shader module from SPIR-V bytecode.
-// Note: SPIR-V support requires wgpu-native features that may not be available.
+// Note: SPIR-V support requires wgpu-gpu features that may not be available.
 func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
 	// SPIR-V shader creation is not yet implemented in the wgpu bindings.
 	// Users should use WGSL shaders for now or compile SPIR-V to WGSL using naga.
@@ -358,7 +358,7 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 }
 
 // CreateComputePipeline creates a compute pipeline.
-// Note: Compute pipeline support requires wgpu-native features that may not be available
+// Note: Compute pipeline support requires wgpu-gpu features that may not be available
 // in the current version of go-webgpu/webgpu bindings.
 func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
 	// Compute pipeline creation is not yet implemented in the wgpu bindings.
@@ -446,8 +446,8 @@ func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence 
 	q := b.queues[queue]
 	buf := b.cmdBuffers[commands]
 	if q != nil && buf != nil {
-		// TODO: Pass fence to wgpu-native when fence support is implemented.
-		// wgpu-native uses device.poll() for synchronization model.
+		// TODO: Pass fence to wgpu-gpu when fence support is implemented.
+		// wgpu-gpu uses device.poll() for synchronization model.
 		q.Submit(buf)
 	}
 	return types.SubmissionIndex(fenceValue)
@@ -455,7 +455,7 @@ func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence 
 
 // GetFenceStatus returns true if the fence is signaled (non-blocking).
 func (b *Backend) GetFenceStatus(fence types.Fence) (bool, error) {
-	// wgpu-native uses device.poll() for synchronization, not explicit fences.
+	// wgpu-gpu uses device.poll() for synchronization, not explicit fences.
 	return true, nil // Always signaled for now
 }
 
@@ -643,6 +643,11 @@ func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uin
 	}
 
 	q.WriteBuffer(buf, offset, data)
+}
+
+// CopyBufferToBuffer records a buffer-to-buffer copy command.
+func (b *Backend) CopyBufferToBuffer(types.CommandEncoder, types.Buffer, uint64, types.Buffer, uint64, uint64) {
+	// Not yet implemented for Rust backend
 }
 
 // MapBufferRead maps a buffer for reading and returns its contents.
@@ -955,35 +960,35 @@ func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
 }
 
 // ResetCommandPool resets the command pool to reclaim command buffer memory.
-// wgpu-native handles command buffer lifecycle automatically, so this is a no-op.
+// wgpu-gpu handles command buffer lifecycle automatically, so this is a no-op.
 func (b *Backend) ResetCommandPool(device types.Device) {
-	// wgpu-native manages command buffer memory internally.
+	// wgpu-gpu manages command buffer memory internally.
 	// No explicit reset needed.
 }
 
 // CreateFence creates a new fence in the unsignaled state.
-// Note: wgpu-native uses a different synchronization model with device.poll().
+// Note: wgpu-gpu uses a different synchronization model with device.poll().
 func (b *Backend) CreateFence(device types.Device) (types.Fence, error) {
-	// wgpu-native uses device.poll() for synchronization, not explicit fences.
+	// wgpu-gpu uses device.poll() for synchronization, not explicit fences.
 	// This will be implemented when go-webgpu/webgpu adds fence support.
 	return 0, gpu.ErrNotImplemented
 }
 
 // WaitFence waits for a fence to be signaled.
 func (b *Backend) WaitFence(device types.Device, fence types.Fence, timeout uint64) (bool, error) {
-	// wgpu-native uses device.poll() for synchronization.
+	// wgpu-gpu uses device.poll() for synchronization.
 	return true, nil // Always "signaled" for now
 }
 
 // ResetFence resets a fence to the unsignaled state.
 func (b *Backend) ResetFence(device types.Device, fence types.Fence) error {
-	// wgpu-native uses device.poll() for synchronization.
+	// wgpu-gpu uses device.poll() for synchronization.
 	return nil
 }
 
 // DestroyFence destroys a fence.
 func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
-	// wgpu-native manages synchronization internally.
+	// wgpu-gpu manages synchronization internally.
 }
 
 // Ensure Backend implements gpu.Backend.

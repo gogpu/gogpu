@@ -26,7 +26,7 @@ import (
 // This pattern follows enterprise DI best practices, similar to
 // database/sql.DB or http.Client with custom Transport.
 type DeviceProvider interface {
-	// Backend returns the GPU backend (rust or native).
+	// Backend returns the GPU backend (rust or gpu).
 	Backend() gpu.Backend
 
 	// Device returns the GPU device handle.

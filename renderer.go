@@ -6,7 +6,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gogpu/gpu"
-	_ "github.com/gogpu/gogpu/gpu/backend/native" // Register native backend
+	_ "github.com/gogpu/gogpu/gpu/backend/native" // Register gpu backend
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gputypes"
@@ -101,13 +101,13 @@ func createBackend(typ types.BackendType) (gpu.Backend, error) {
 		return gpu.CreateBackend("rust"), nil
 
 	case types.BackendNative:
-		if !gpu.IsBackendRegistered("native") {
-			return nil, fmt.Errorf("native backend not available")
+		if !gpu.IsBackendRegistered("gpu") {
+			return nil, fmt.Errorf("gpu backend not available")
 		}
-		return gpu.CreateBackend("native"), nil
+		return gpu.CreateBackend("gpu"), nil
 
 	case types.BackendAuto:
-		// Auto: use best available backend (rust > native)
+		// Auto: use best available backend (rust > gpu)
 		if b := gpu.SelectBestBackend(); b != nil {
 			return b, nil
 		}

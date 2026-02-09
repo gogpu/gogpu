@@ -1,4 +1,4 @@
-// Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
+// Package gpu provides the WebGPU backend using pure Go (gogpu/wgpu).
 // This is the default backend, always available without external dependencies.
 //
 // Supports: Windows (Vulkan), Linux (Vulkan), macOS (Metal)
@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	gpu.RegisterBackend("native", func() gpu.Backend {
+	gpu.RegisterBackend("gpu", func() gpu.Backend {
 		return New()
 	})
 }

@@ -16,7 +16,7 @@ var (
 	registryMu sync.RWMutex
 	backends   = make(map[string]BackendFactory)
 	// Priority order for backend selection (first available wins)
-	backendPriority = []string{"rust", "native"}
+	backendPriority = []string{"rust", "gpu"}
 )
 
 // RegisterBackend registers a backend factory with the given name.
@@ -70,7 +70,7 @@ func CreateBackend(name string) Backend {
 }
 
 // SelectBestBackend returns the best available backend based on priority.
-// Priority order: rust > native
+// Priority order: rust > gpu
 // Returns nil if no backends are registered.
 func SelectBestBackend() Backend {
 	registryMu.RLock()

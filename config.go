@@ -61,7 +61,7 @@ func (c Config) WithSize(width, height int) Config {
 }
 
 // WithBackend returns a copy with the backend set.
-// Use types.BackendRust for maximum performance (requires native library).
+// Use types.BackendRust for maximum performance (requires gpu library).
 // Use types.BackendNative for zero dependencies (pure Go, may be slower).
 // Use types.BackendAuto (default) to automatically select the best available.
 func (c Config) WithBackend(backend types.BackendType) Config {

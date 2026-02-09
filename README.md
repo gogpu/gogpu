@@ -92,7 +92,7 @@ GoGPU supports two WebGPU implementations, selectable at compile time or runtime
 # Pure Go backend (default, zero dependencies)
 go build ./...
 
-# Enable Rust backend (requires wgpu-native DLL, Windows only)
+# Enable Rust backend (requires wgpu-gpu DLL, Windows only)
 go build -tags rust ./...
 ```
 
@@ -145,7 +145,7 @@ GoGPU exposes GPU resources through the `DeviceProvider` interface for integrati
 
 ```go
 type DeviceProvider interface {
-    Backend() gpu.Backend        // GPU backend (rust or native)
+    Backend() gpu.Backend        // GPU backend (rust or gpu)
     Device() types.Device        // GPU device handle
     Queue() types.Queue          // Command queue
     SurfaceFormat() types.TextureFormat

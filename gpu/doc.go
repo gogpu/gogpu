@@ -3,7 +3,7 @@
 // This package defines the Backend interface that abstracts over different
 // WebGPU implementations. Users can choose between:
 //
-//   - Rust backend (wgpu-native): Maximum performance, battle-tested
+//   - Rust backend (wgpu-gpu): Maximum performance, battle-tested
 //   - Pure Go backend: Zero dependencies, simple cross-compilation
 //
 // # Backend Selection
@@ -46,7 +46,7 @@
 // # Subpackages
 //
 //   - gpu/backend/rust: Rust backend using go-webgpu/webgpu
-//   - gpu/backend/native: Native Go backend (stub, in development)
+//   - gpu/backend/gpu: Native Go backend (stub, in development)
 //
 // # WebGPU Compatibility
 //

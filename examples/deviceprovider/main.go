@@ -4,7 +4,7 @@
 // to access GPU resources for integration with external libraries.
 //
 // DeviceProvider exposes:
-// - Backend() - GPU backend (rust or native)
+// - Backend() - GPU backend (rust or gpu)
 // - Device() - GPU device handle
 // - Queue() - Command queue
 // - SurfaceFormat() - Texture format

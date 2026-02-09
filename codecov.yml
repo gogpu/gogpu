@@ -17,7 +17,7 @@ ignore:
   - "examples/**/*"
   - "internal/platform/**/*"
   - "gpu/backend/rust/**/*"
-  - "gpu/backend/native/**/*"
+  - "gpu/backend/gpu/**/*"
   - "window/**/*"
   - "input/**/*"
   - "cmd/**/*"

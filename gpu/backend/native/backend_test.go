@@ -10,7 +10,7 @@ import (
 	"github.com/gogpu/gogpu/gpu"
 )
 
-// TestBackendNotStub verifies that the native backend is properly implemented
+// TestBackendNotStub verifies that the gpu backend is properly implemented
 // for supported platforms (Windows, Linux, macOS) and not using the stub.
 func TestBackendNotStub(t *testing.T) {
 	b := New()

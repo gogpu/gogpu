@@ -67,6 +67,8 @@ func (m *mockBackend) CreateBuffer(types.Device, *types.BufferDescriptor) (types
 	return 1, nil
 }
 func (m *mockBackend) WriteBuffer(types.Queue, types.Buffer, uint64, []byte) {}
+func (m *mockBackend) CopyBufferToBuffer(types.CommandEncoder, types.Buffer, uint64, types.Buffer, uint64, uint64) {
+}
 func (m *mockBackend) CreateBindGroupLayout(types.Device, *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
 	return 1, nil
 }
@@ -184,9 +186,9 @@ func TestSelectBestBackend(t *testing.T) {
 		registryMu.Unlock()
 	}()
 
-	// Register native first, then rust
-	RegisterBackend("native", func() Backend {
-		return &mockBackend{name: "native"}
+	// Register gpu first, then rust
+	RegisterBackend("gpu", func() Backend {
+		return &mockBackend{name: "gpu"}
 	})
 	RegisterBackend("rust", func() Backend {
 		return &mockBackend{name: "rust"}

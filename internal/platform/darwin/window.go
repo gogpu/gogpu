@@ -232,7 +232,7 @@ func (w *Window) ContentView() ID {
 	return w.contentView
 }
 
-// Handle returns the native window handle (NSWindow pointer) for surface creation.
+// Handle returns the gpu window handle (NSWindow pointer) for surface creation.
 func (w *Window) Handle() uintptr {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -12,8 +12,8 @@ const (
 	// Zero dependencies, just `go build`. Default backend.
 	BackendNative
 
-	// BackendRust uses wgpu-native (Rust) via go-webgpu/webgpu.
-	// Maximum performance, requires native library. Windows only.
+	// BackendRust uses wgpu-gpu (Rust) via go-webgpu/webgpu.
+	// Maximum performance, requires gpu library. Windows only.
 	BackendRust
 
 	// BackendGo is an alias for BackendNative.
@@ -25,7 +25,7 @@ const (
 func (b BackendType) String() string {
 	switch b {
 	case BackendRust:
-		return "Rust (wgpu-native)"
+		return "Rust (wgpu-gpu)"
 	case BackendNative:
 		return "Native (Pure Go)"
 	default:
