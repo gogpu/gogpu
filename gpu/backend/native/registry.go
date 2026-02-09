@@ -846,6 +846,18 @@ func (r *ResourceRegistry) UnregisterPipelineLayout(handle types.PipelineLayout)
 	r.mu.Unlock()
 }
 
+// GetAnyQueue returns any registered queue, or nil if none exist.
+// This is used for operations that need a queue but don't have a specific handle,
+// such as buffer readback where only the buffer handle is available.
+func (r *ResourceRegistry) GetAnyQueue() hal.Queue {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, q := range r.queues {
+		return q
+	}
+	return nil
+}
+
 // WaitAllDevicesIdle waits for all registered devices to complete their GPU operations.
 // This should be called before destroying resources to prevent hangs.
 func (r *ResourceRegistry) WaitAllDevicesIdle() {

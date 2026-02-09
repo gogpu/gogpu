@@ -984,11 +984,32 @@ func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
 
 // MapBufferRead maps a buffer for reading and returns its contents.
 // The buffer must have been created with BufferUsageMapRead | BufferUsageCopyDst.
-//
-// TODO: Implement proper buffer readback via hal.Queue.ReadBuffer.
-// Currently returns an error; callers should fall back to CPU rendering.
+// Internally uses hal.Queue.ReadBuffer which calls QueueWaitIdle for synchronization.
 func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
-	return nil, fmt.Errorf("native: buffer readback not yet implemented")
+	halBuffer, err := b.registry.GetBuffer(buffer)
+	if err != nil {
+		return nil, fmt.Errorf("native: MapBufferRead: %w", err)
+	}
+
+	// Get buffer size via type assertion to the concrete Vulkan buffer.
+	vkBuf, ok := halBuffer.(*vulkan.Buffer)
+	if !ok {
+		return nil, fmt.Errorf("native: MapBufferRead: buffer is not a Vulkan buffer")
+	}
+	bufSize := vkBuf.Size()
+
+	// Find a queue for the ReadBuffer call.
+	// ReadBuffer internally calls QueueWaitIdle to ensure GPU has finished.
+	halQueue := b.registry.GetAnyQueue()
+	if halQueue == nil {
+		return nil, fmt.Errorf("native: MapBufferRead: no queue available")
+	}
+
+	data := make([]byte, bufSize)
+	if err := halQueue.ReadBuffer(halBuffer, 0, data); err != nil {
+		return nil, fmt.Errorf("native: MapBufferRead: %w", err)
+	}
+	return data, nil
 }
 
 // UnmapBuffer unmaps a previously mapped buffer.

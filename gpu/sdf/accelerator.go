@@ -381,7 +381,7 @@ func (a *Accelerator) dispatchCompute(
 	storageBuf, err := a.backend.CreateBuffer(a.device, &types.BufferDescriptor{
 		Label: "SDF Pixels",
 		Size:  storageSize,
-		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst | gputypes.BufferUsageCopySrc,
+		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst | gputypes.BufferUsageCopySrc | gputypes.BufferUsageMapRead,
 	})
 	if err != nil {
 		return fmt.Errorf("sdf: failed to create storage buffer: %w", err)
