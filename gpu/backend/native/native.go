@@ -1,6 +1,6 @@
 //go:build !windows && !linux && !darwin
 
-// Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
+// Package gpu provides the WebGPU backend using pure Go (gogpu/wgpu).
 // This backend offers zero dependencies and simple cross-compilation.
 // Currently a stub - returns ErrNotImplemented for all operations.
 // TODO: Implement OpenGL/Metal backends for Linux/macOS.
@@ -155,6 +155,10 @@ func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor
 // WriteBuffer writes data to a buffer.
 func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte) {
 	// Not implemented
+}
+
+// CopyBufferToBuffer records a buffer-to-buffer copy command.
+func (b *Backend) CopyBufferToBuffer(types.CommandEncoder, types.Buffer, uint64, types.Buffer, uint64, uint64) {
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -328,6 +332,12 @@ func (b *Backend) ResetFence(device types.Device, fence types.Fence) error {
 func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
 	// Not implemented
 }
+
+// GetHalDevice returns nil on unsupported platforms.
+func (b *Backend) GetHalDevice(_ types.Device) any { return nil }
+
+// GetHalQueue returns nil on unsupported platforms.
+func (b *Backend) GetHalQueue(_ types.Queue) any { return nil }
 
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)

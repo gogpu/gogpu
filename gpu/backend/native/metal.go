@@ -1,6 +1,6 @@
 //go:build darwin
 
-// Package native provides the WebGPU backend using pure Go (gogpu/wgpu).
+// Package gpu provides the WebGPU backend using pure Go (gogpu/wgpu).
 // This backend offers zero dependencies and simple cross-compilation.
 //
 // Implementation uses gogpu/wgpu HAL (Hardware Abstraction Layer) with Metal backend.
@@ -60,7 +60,7 @@ func (b *Backend) CreateInstance() (types.Instance, error) {
 
 	halInstance, err := b.backend.CreateInstance(desc)
 	if err != nil {
-		return 0, fmt.Errorf("native: failed to create instance: %w", err)
+		return 0, fmt.Errorf("gpu: failed to create instance: %w", err)
 	}
 
 	// Register and return handle
@@ -78,7 +78,7 @@ func (b *Backend) RequestAdapter(instance types.Instance, opts *types.AdapterOpt
 	// Enumerate adapters
 	adapters := halInstance.EnumerateAdapters(nil) // nil = no surface hint
 	if len(adapters) == 0 {
-		return 0, fmt.Errorf("native: no adapters found")
+		return 0, fmt.Errorf("gpu: no adapters found")
 	}
 
 	// Pick first adapter for now
@@ -100,7 +100,7 @@ func (b *Backend) RequestDevice(adapter types.Adapter, opts *types.DeviceOptions
 	// Open device with default features and limits
 	openDevice, err := halAdapter.Open(gputypes.Features(0), gputypes.DefaultLimits())
 	if err != nil {
-		return 0, fmt.Errorf("native: failed to open device: %w", err)
+		return 0, fmt.Errorf("gpu: failed to open device: %w", err)
 	}
 
 	// Register device and queue
@@ -131,7 +131,7 @@ func (b *Backend) CreateSurface(instance types.Instance, handle types.SurfaceHan
 
 	halSurface, err := halInstance.CreateSurface(handle.Instance, handle.Window)
 	if err != nil {
-		return 0, fmt.Errorf("native: failed to create surface: %w", err)
+		return 0, fmt.Errorf("gpu: failed to create surface: %w", err)
 	}
 
 	surfaceHandle := b.registry.RegisterSurface(halSurface)
@@ -250,7 +250,7 @@ func (b *Backend) CreateShaderModuleWGSL(device types.Device, code string) (type
 
 	module, err := halDevice.CreateShaderModule(desc)
 	if err != nil {
-		return 0, fmt.Errorf("native: failed to create shader module: %w", err)
+		return 0, fmt.Errorf("gpu: failed to create shader module: %w", err)
 	}
 
 	handle := b.registry.RegisterShaderModule(module)
@@ -306,7 +306,7 @@ func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPi
 
 	pipeline, err := halDevice.CreateRenderPipeline(halDesc)
 	if err != nil {
-		return 0, fmt.Errorf("native: failed to create render pipeline: %w", err)
+		return 0, fmt.Errorf("gpu: failed to create render pipeline: %w", err)
 	}
 
 	handle := b.registry.RegisterRenderPipeline(pipeline)
@@ -540,6 +540,9 @@ func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uin
 	// Not implemented yet
 }
 
+func (b *Backend) CopyBufferToBuffer(types.CommandEncoder, types.Buffer, uint64, types.Buffer, uint64, uint64) {
+}
+
 func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
 	return 0, gpu.ErrNotImplemented
 }
@@ -742,5 +745,24 @@ func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
 	// TODO: Implement fence destruction using Metal events when available
 }
 
+// GetHalDevice returns the underlying HAL device for the given handle.
+func (b *Backend) GetHalDevice(device types.Device) any {
+	dev, err := b.registry.GetDevice(device)
+	if err != nil {
+		return nil
+	}
+	return dev
+}
+
+// GetHalQueue returns the underlying HAL queue for the given handle.
+func (b *Backend) GetHalQueue(queue types.Queue) any {
+	q, err := b.registry.GetQueue(queue)
+	if err != nil {
+		return nil
+	}
+	return q
+}
+
 // Ensure Backend implements gpu.Backend.
 var _ gpu.Backend = (*Backend)(nil)
+

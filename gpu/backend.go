@@ -85,6 +85,7 @@ type Backend interface {
 	// Buffer operations
 	CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error)
 	WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte)
+	CopyBufferToBuffer(encoder types.CommandEncoder, src types.Buffer, srcOffset uint64, dst types.Buffer, dstOffset, size uint64)
 	MapBufferRead(buffer types.Buffer) ([]byte, error)
 	UnmapBuffer(buffer types.Buffer)
 
