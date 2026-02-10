@@ -17,14 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `HalQueue() any` — returns `hal.Queue` for command submission
 - **HalResourceProvider** — `GetHalDevice()` / `GetHalQueue()` resolve handle-based
   gogpu types to underlying wgpu HAL objects (both Vulkan and Metal backends)
-- **Compute pipeline support in native Vulkan backend** — full compute shader lifecycle:
-  compute pipelines, bind groups, compute passes, buffer creation with readback
+- **Full compute pipeline support in native backend** — compute pipelines, bind groups,
+  compute passes, buffer creation with readback — works on both Vulkan and Metal via HAL
 - **`MapBufferRead` / `UnmapBuffer`** — GPU→CPU buffer readback via `hal.Queue.ReadBuffer`
-  in native Vulkan backend (was stub)
+  in native backend
 - **`CopyBufferToBuffer`** — new Backend interface method for GPU-side buffer copies
 - **Full compute support in Rust backend** — CreateComputePipeline, BeginComputePass,
   SetComputePipeline, SetComputeBindGroup, DispatchWorkgroups, EndComputePass,
   MapBufferRead, CreateShaderModuleSPIRV — all implemented via go-webgpu/webgpu v0.3.0
+
+### Refactored
+
+- **Unified native backend** — eliminated ~950 lines of code duplication between
+  Vulkan and Metal backends. Single `backend.go` implementation via `hal.Device`/`hal.Queue`
+  interfaces, with thin platform files (`hal_vulkan.go`, `hal_metal.go`) for backend selection.
+  Metal now gets all compute/buffer/fence operations for free through HAL abstraction.
 
 ### Changed
 
