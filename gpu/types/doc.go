@@ -1,46 +1,18 @@
-// Package types defines GPU types and handles used throughout gogpu.
-//
-// # Architecture
+// Package types defines GPU configuration types for gogpu.
 //
 // This package provides:
-//   - Handle types: Opaque references to GPU resources (Instance, Device, Texture, etc.)
 //   - BackendType: Enum for selecting Rust vs Pure Go backend
-//   - Re-exports of gputypes: WebGPU types for backward compatibility
 //
-// # Type Sources
+// # Backend Selection
 //
-// Types in this package come from two sources:
+// Use BackendType constants with gogpu.Config.WithBackend():
 //
-// 1. Gogpu-specific (defined here):
-//   - All Handle types (Instance, Adapter, Device, Queue, Surface, etc.)
-//   - BackendType (Auto, Native, Rust)
-//   - SurfaceHandle, SurfaceTexture, SurfaceStatus
-//   - Gogpu-specific descriptors that use handles
+//	config.WithBackend(types.BackendRust)   // Rust backend
+//	config.WithBackend(types.BackendNative) // Pure Go backend
+//	config.WithBackend(types.BackendAuto)   // Auto-select (default)
 //
-// 2. WebGPU standard (re-exported from gputypes):
-//   - TextureFormat, TextureUsage, TextureDimension, etc.
-//   - BufferUsage, BufferDescriptor, etc.
-//   - BlendState, BlendComponent, BlendFactor, etc.
-//   - All WebGPU spec constants and types
+// # WebGPU Types
 //
-// # Migration to gputypes
-//
-// For new code, prefer importing gputypes directly:
-//
-//	import "github.com/gogpu/gputypes"
-//
-// This package re-exports all gputypes types for backward compatibility
-// with existing code that imports github.com/gogpu/gogpu/gpu/types.
-//
-// # Usage Example
-//
-//	import "github.com/gogpu/gogpu/gpu/types"
-//
-//	// Using handle types (gogpu-specific)
-//	var device types.Device
-//	var texture types.Texture
-//
-//	// Using WebGPU types (from gputypes)
-//	format := types.TextureFormatRGBA8Unorm
-//	usage := types.TextureUsageTextureBinding | types.TextureUsageCopyDst
+// For WebGPU resource types (textures, buffers, etc.), use the HAL interfaces
+// from github.com/gogpu/wgpu/hal or standard types from github.com/gogpu/gputypes.
 package types

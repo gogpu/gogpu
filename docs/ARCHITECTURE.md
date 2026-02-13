@@ -211,9 +211,7 @@ gogpu/
 ├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
 ├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
-│   ├── backend.go      # Legacy Backend interface (deprecated)
-│   ├── registry.go     # Legacy auto-registration (deprecated)
-│   ├── types/          # GoGPU-specific types (descriptors)
+│   ├── types/          # Backend type enum (BackendType)
 │   └── backend/
 │       ├── native/     # HAL backend creation (Vulkan/Metal selection)
 │       └── rust/       # Rust HAL adapter (opt-in, -tags rust)

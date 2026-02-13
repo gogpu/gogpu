@@ -17,9 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `FencePool` uses `hal.Device`/`hal.Fence` directly
   - `DeviceProvider` returns `hal.Device`/`hal.Queue` directly
   - All GPU errors propagated via `fmt.Errorf("context: %w", err)` chains
-  - Deleted: `gpu/backend/native/backend.go` (1091 LOC), `registry.go` (900 LOC),
-    `metal.go` (746 LOC), associated tests
-  - Rust backend rewritten as thin HAL adapter (see below)
   - Resolves [#84](https://github.com/gogpu/gogpu/issues/84)
 
 - **Rust backend: HAL adapter** — Rewritten `gpu/backend/rust/rust.go` from handle-based
@@ -32,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `rustRenderPass`/`rustComputePass` implement render/compute pass encoders
   - Fences: stub implementation (wgpu-native uses `device.Poll()`)
   - Backend selection in `renderer.init()`: Auto/Native/Rust via build-tagged files
+
+### Removed
+
+- **`gpu.Backend` interface** — Legacy 40-method interface with uintptr handles, replaced by
+  `hal.*` Go interfaces. Deleted `gpu/backend.go` (158 LOC).
+- **`gpu/registry.go`** — Legacy backend registration system (RegisterBackend, SelectBestBackend,
+  etc.). No longer needed — backends are selected directly in renderer. Deleted 122 LOC + 271 LOC tests.
+- **`gpu/types/handles.go`** — Unused uintptr handle type aliases (Instance, Adapter, Device, etc.).
+  All code now uses `hal.*` interface types. Deleted 122 LOC.
+- **`gpu/types/descriptors.go`** — Unused descriptor types that referenced uintptr handles.
+  All code now uses `hal.*` descriptor types. Deleted 175 LOC.
+- **`gpu/backend_darwin_test.go`** — Metal integration test using legacy `gpu.Backend` API.
+  Deleted 233 LOC.
 
 ## [0.17.0] - 2026-02-10
 

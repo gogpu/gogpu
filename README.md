@@ -326,8 +326,8 @@ Vulkan     Metal     Software
 | Package | Purpose |
 |---------|---------|
 | `gogpu` (root) | App, Config, Context, Renderer, Texture |
-| `gpu/` | Backend interface (Rust), registry |
-| `gpu/types/` | GoGPU-specific types (descriptors) |
+| `gpu/` | Backend selection (HAL-based) |
+| `gpu/types/` | Backend type enum (BackendType) |
 | `gpu/backend/rust/` | Rust backend via wgpu-native FFI (opt-in, `-tags rust`) |
 | `gpu/backend/native/` | HAL backend creation (Vulkan/Metal selection) |
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
