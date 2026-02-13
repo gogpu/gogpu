@@ -18,6 +18,8 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
        │  Framework  │  (device sharing)  │ 2D Graphics │
        └──────┬──────┘                    └──────┬──────┘
               │                                  │
+              │ Uses hal.Device/Queue            │
+              │ directly (Go interfaces)         │
               │                    ┌─────────────┼──────────────┐
               │                    │             │              │
               │             ┌──────▼────┐  ┌─────▼─────┐  ┌─────▼─────┐
@@ -26,33 +28,19 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
               │             │ CPU Core  │  │ GPU Accel │  │  import)  │
               │             └───────────┘  └─────┬─────┘  └───────────┘
               │                                  │
-       ┌──────┴──────┐                           │
-       │             │                           │
-┌──────▼────┐ ┌──────▼────┐                      │
-│gogpu/back-│ │gogpu/back-│                      │
-│end/rust   │ │end/native │                      │
-└─────┬─────┘ └─────┬─────┘                      │
-      │             │                            │
-      │             └────────────────────────────┘
-      │                           │
-      │                    ┌──────▼──────┐
-      │                    │    wgpu     │
-      │                    │    core     │
-      │                    └──────┬──────┘
-      │                           │
-      │              ┌────────────┼────────────┐
-      │              │            │            │
-      │       ┌──────▼────┐ ┌─────▼─────┐ ┌────▼─────┐
-      │       │  Vulkan   │ │   Metal   │ │ Software │
-      │       │ (Win/Lin) │ │  (macOS)  │ │  (CPU)   │
-      │       └───────────┘ └───────────┘ └──────────┘
-      │                           │
-      │                       wgpu/hal
-      │
-┌─────▼─────────┐
-│  wgpu-native  │
-│  (Rust FFI)   │
-└───────────────┘
+              └──────────────────────────────────┘
+                              │
+                       ┌──────▼──────┐
+                       │    wgpu     │
+                       │   hal.*     │
+                       └──────┬──────┘
+                              │
+                 ┌────────────┼────────────┐
+                 │            │            │
+          ┌──────▼────┐ ┌─────▼─────┐ ┌────▼─────┐
+          │  Vulkan   │ │   Metal   │ │ Software │
+          │ (Win/Lin) │ │  (macOS)  │ │  (CPU)   │
+          └───────────┘ └───────────┘ └──────────┘
 ```
 
 ## Projects
@@ -91,9 +79,11 @@ See [GPUCONTEXT_GPUTYPES_DECISION.md](dev/research/GPUCONTEXT_GPUTYPES_DECISION.
 
 ### gogpu Backends
 
+The renderer uses `hal.Device`/`hal.Queue` Go interfaces directly — no handle-based abstraction layer.
+
 | Backend      | Description                | Build Tag      | GPU Required |
 |--------------|----------------------------|----------------|--------------|
-| **Native**   | Pure Go via gogpu/wgpu     | (default)      | Yes          |
+| **Native**   | Pure Go via gogpu/wgpu HAL | (default)      | Yes          |
 | **Rust**     | wgpu-native via FFI        | `-tags rust`   | Yes          |
 
 ### gg: CPU Core + GPU Accelerator (ARCH-008)
@@ -214,25 +204,27 @@ gogpu/
 ├── app.go              # Application lifecycle
 ├── config.go           # Configuration (builder pattern)
 ├── context.go          # Drawing context
-├── renderer.go         # WebGPU pipeline
-├── texture.go          # Texture management
+├── renderer.go         # Uses hal.Device/Queue directly
+├── texture.go          # Texture management (hal.Texture/View/Sampler)
+├── fence_pool.go       # GPU fence pool (hal.Fence)
 ├── event_source.go     # gpucontext.EventSource adapter
 ├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
 ├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
-│   ├── backend.go      # Backend interface (120+ methods)
+│   ├── backend.go      # Backend interface (Rust backend only)
 │   ├── registry.go     # Auto-registration
-│   ├── types/          # GoGPU-specific types (handles, descriptors)
+│   ├── types/          # GoGPU-specific types (descriptors)
 │   └── backend/
-│       ├── native/     # Pure Go backend
-│       └── rust/       # Rust FFI backend
+│       ├── native/     # HAL backend creation (Vulkan/Metal selection)
+│       └── rust/       # Rust FFI backend (opt-in, -tags rust)
 ├── gmath/              # Math (Vec2, Vec3, Mat4, Color)
 ├── window/             # Window config
 ├── input/              # Ebiten-style input state (keyboard, mouse)
 └── internal/platform/  # OS windowing + input (Win32, Cocoa, X11, Wayland)
 ```
 
-**Note:** WebGPU types (TextureFormat, BufferUsage, etc.) are imported directly from `github.com/gogpu/gputypes`.
+**Note:** The renderer uses `hal.Device`/`hal.Queue` Go interfaces directly from `gogpu/wgpu/hal`.
+WebGPU types (TextureFormat, BufferUsage, etc.) are imported from `github.com/gogpu/gputypes`.
 
 ### wgpu
 
@@ -328,11 +320,11 @@ Platform Layer          InputState               Game Loop
 ## Renderer Pipeline
 
 ```
-1. newRenderer()   → Create backend (Auto/Rust/Native) [on render thread]
-2. init()          → Instance → Surface → Adapter → Device → Queue
-3. BeginFrame()    → Acquire surface texture
+1. newRenderer()   → Create HAL backend (Vulkan/Metal) [on render thread]
+2. init()          → Instance → Surface → Adapter → Device (hal.Device) → Queue (hal.Queue)
+3. BeginFrame()    → surface.AcquireTexture() → device.CreateTextureView()
 4. User draws      → Via Context in OnDraw callback
-5. EndFrame()      → Present surface
+5. EndFrame()      → queue.Submit() → queue.Present() (with fence-based tracking)
 ```
 
 ## Why Different GPU Models?
@@ -342,12 +334,61 @@ gogpu and gg use GPU differently by design:
 | Aspect               | gogpu                | gg                      |
 |----------------------|----------------------|-------------------------|
 | **Purpose**          | GPU framework        | 2D graphics library     |
-| **GPU model**        | Dual backend (Rust/Go) | CPU core + GPU accelerator |
-| **Interface methods**| 120+ (Backend)       | hal.Device/Queue (HAL)  |
+| **GPU model**        | HAL direct (hal.Device/Queue) | CPU core + GPU accelerator |
+| **GPU API**          | hal.Device/Queue     | hal.Device/Queue (HAL)  |
 | **Without GPU**      | Cannot run           | Falls back to CPU core  |
 | **Integration**      | Owns device          | Borrows via HalProvider |
 
-Both share **gogpu/wgpu** as the common WebGPU implementation.
+Both use `hal.Device`/`hal.Queue` Go interfaces from **gogpu/wgpu** — no intermediate abstractions.
+
+## Why HAL Direct? (Architecture Decision)
+
+### Historical Context
+
+GoGPU started (December 2025) with **only a Rust backend** — wrapping wgpu-native via FFI.
+The `gpu.Backend` interface was designed for this C-style world:
+
+```
+Go code → gpu.Backend (Go interface)
+    → rust.Backend (Go struct with uintptr handles)
+        → wgpu-native C API (returns opaque pointers as uintptr)
+```
+
+In this design, `uintptr` handles were **natural** — wgpu-native returns C pointers,
+Go stores them as `uintptr`, and maps track the association. This is exactly how every
+Go wrapper for a C library works (database/sql, OpenGL bindings, etc.).
+
+### The Problem: Pure Go Backend (January 2026)
+
+When we added the **Pure Go backend** (gogpu/wgpu), the handle pattern became redundant:
+
+```
+Go code → gpu.Backend → native.Backend (Go struct with uintptr handles)
+    → ResourceRegistry (40+ maps: uintptr → Go interface)
+        → hal.Device (already a Go interface!)
+```
+
+The Pure Go path was creating Go objects, converting them to `uintptr` handles,
+storing them in maps, then looking them up by handle to call the same Go methods.
+This added **~2000 lines of pure indirection** with no benefit:
+
+1. **Error swallowing** — 10+ Backend methods returned no error, silently discarding GPU failures
+2. **O(1) overhead per call** — map lookup for every GPU operation
+3. **Memory pressure** — 40+ maps holding references that the GC must scan
+
+### The Fix: HAL Direct (v0.18.0)
+
+Industry research confirmed that **no production 2D/3D engine** adds a handle layer over WebGPU:
+- **Bevy** → wgpu directly (Rust traits, not handles)
+- **Vello** → wgpu directly
+- **Skia Graphite** → Dawn directly (C++ objects, not handles)
+- **gg** → hal.Queue directly (already working)
+
+The refactoring eliminates the indirection entirely:
+- Renderer stores `hal.Device`, `hal.Queue`, `hal.Texture` etc. as Go interface values
+- All GPU errors propagate via `fmt.Errorf("context: %w", err)` chains
+- ~2700 net lines removed
+- Rust backend preserved behind build tag (`-tags rust`), will get a thin HAL adapter
 
 ## Platform Support
 

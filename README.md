@@ -145,16 +145,15 @@ GoGPU exposes GPU resources through the `DeviceProvider` interface for integrati
 
 ```go
 type DeviceProvider interface {
-    Backend() gpu.Backend        // GPU backend (rust or gpu)
-    Device() types.Device        // GPU device handle
-    Queue() types.Queue          // Command queue
-    SurfaceFormat() types.TextureFormat
+    Device() hal.Device              // HAL GPU device (type-safe Go interface)
+    Queue() hal.Queue                // HAL command queue
+    SurfaceFormat() gputypes.TextureFormat
 }
 
 // Usage
 provider := app.DeviceProvider()
-device := provider.Device()
-queue := provider.Queue()
+device := provider.Device()   // hal.Device — 30+ methods with error returns
+queue := provider.Queue()     // hal.Queue — Submit, WriteBuffer, ReadBuffer
 ```
 
 ### Cross-Package Integration (gpucontext)
@@ -256,33 +255,32 @@ All input methods are thread-safe and work with the frame-based update loop.
 
 ## Compute Shaders
 
-Full compute shader support in both backends:
+Full compute shader support via HAL interfaces:
 
 ```go
-// Create compute pipeline via backend
-pipeline, _ := backend.CreateComputePipeline(device, &types.ComputePipelineDescriptor{
-    Layout: pipelineLayout,
-    Compute: types.ProgrammableStageDescriptor{
-        Module:     shaderModule,
-        EntryPoint: "main",
-    },
+// Create compute pipeline via HAL device
+pipeline, _ := device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
+    Layout:     pipelineLayout,
+    Module:     shaderModule,
+    EntryPoint: "main",
 })
 
 // Create storage buffers
-inputBuffer, _ := backend.CreateBuffer(device, &types.BufferDescriptor{
+inputBuffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
     Size:  dataSize,
-    Usage: types.BufferUsageStorage | types.BufferUsageCopyDst,
+    Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
 })
 
-outputBuffer, _ := backend.CreateBuffer(device, &types.BufferDescriptor{
-    Size:  dataSize,
-    Usage: types.BufferUsageStorage | types.BufferUsageCopySrc,
-})
-
-// Dispatch compute work
-computePass.SetPipeline(pipeline)
-computePass.SetBindGroup(0, bindGroup, nil)
-computePass.Dispatch(workgroupsX, 1, 1)
+// Dispatch compute work via command encoder
+encoder, _ := device.CreateCommandEncoder()
+encoder.BeginEncoding("compute")
+pass := encoder.BeginComputePass(&hal.ComputePassDescriptor{})
+pass.SetPipeline(pipeline)
+pass.SetBindGroup(0, bindGroup, nil)
+pass.Dispatch(workgroupsX, 1, 1)
+pass.End()
+cmdBuf := encoder.EndEncoding()
+queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0)
 ```
 
 ---
@@ -307,16 +305,20 @@ User Application
        ▼
 ┌─────────────────────────────────────────────────────────┐
 │                    gogpu.Renderer                       │
-│    Surface, Device, Queue, Frame Management             │
+│  Uses hal.Device / hal.Queue directly (Go interfaces)   │
 └─────────────────────────────────────────────────────────┘
        │
-       ├─────────────────┬─────────────────┐
-       ▼                 ▼                 ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│   Rust      │  │  Native Go  │  │  Platform   │
-│   Backend   │  │   Backend   │  │  Windowing  │
-│ (wgpu-native)│ │ (gogpu/wgpu)│  │ Win32/Cocoa │
-└─────────────┘  └─────────────┘  └─────────────┘
+       ├─────────────────┐
+       ▼                 ▼
+┌─────────────┐  ┌─────────────┐
+│  gogpu/wgpu │  │  Platform   │
+│ (Pure Go    │  │  Windowing  │
+│  WebGPU)    │  │ Win32/Cocoa │
+└──────┬──────┘  └─────────────┘
+       │
+ ┌─────┴─────┬───────────┐
+ ▼           ▼           ▼
+Vulkan     Metal     Software
 ```
 
 ### Package Structure
@@ -324,10 +326,10 @@ User Application
 | Package | Purpose |
 |---------|---------|
 | `gogpu` (root) | App, Config, Context, Renderer, Texture |
-| `gpu/` | Backend interface, registry, auto-selection |
-| `gpu/types/` | GoGPU-specific types (handles, descriptors) |
-| `gpu/backend/rust/` | Rust backend via wgpu-native FFI |
-| `gpu/backend/native/` | Pure Go backend via gogpu/wgpu |
+| `gpu/` | Backend interface (Rust), registry |
+| `gpu/types/` | GoGPU-specific types (descriptors) |
+| `gpu/backend/rust/` | Rust backend via wgpu-native FFI (opt-in, `-tags rust`) |
+| `gpu/backend/native/` | HAL backend creation (Vulkan/Metal selection) |
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
 | `window/` | Window configuration |
 | `input/` | Keyboard and mouse input |

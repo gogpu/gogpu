@@ -3,8 +3,6 @@ package gogpu
 import (
 	"errors"
 	"testing"
-
-	"github.com/gogpu/gogpu/gpu/types"
 )
 
 func TestDrawTextureNilTexture(t *testing.T) {
@@ -19,9 +17,9 @@ func TestDrawTextureNilTexture(t *testing.T) {
 func TestDrawTextureDestroyedTexture(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
-	// Texture with handle = 0 is considered destroyed
+	// Texture with nil HAL texture is considered destroyed
 	tex := &Texture{
-		texture: 0,
+		texture: nil,
 		width:   64,
 		height:  64,
 	}
@@ -45,7 +43,7 @@ func TestDrawTextureScaledDestroyedTexture(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: 0,
+		texture: nil,
 		width:   64,
 		height:  64,
 	}
@@ -60,7 +58,7 @@ func TestDrawTextureScaledNegativeDimensions(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: types.Texture(1),
+		texture: &mockTexture{},
 		width:   64,
 		height:  64,
 	}
@@ -97,7 +95,7 @@ func TestDrawTextureExDestroyedTexture(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: 0,
+		texture: nil,
 		width:   64,
 		height:  64,
 	}
@@ -112,7 +110,7 @@ func TestDrawTextureExNegativeDimensions(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: types.Texture(1),
+		texture: &mockTexture{},
 		width:   64,
 		height:  64,
 	}
@@ -149,12 +147,12 @@ func TestDrawTextureExValidTexture(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: types.Texture(1),
+		texture: &mockTexture{},
 		width:   64,
 		height:  64,
 	}
 
-	// Should return nil when no frame is in progress (currentView == 0).
+	// Should return nil when no frame is in progress (currentView == nil).
 	// This is the correct behavior - it silently succeeds without drawing.
 	err := ctx.DrawTextureEx(tex, DrawTextureOptions{
 		X:      100,
@@ -173,7 +171,7 @@ func TestDrawTextureExDefaultValues(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: types.Texture(1),
+		texture: &mockTexture{},
 		width:   64,
 		height:  32,
 	}
@@ -205,9 +203,9 @@ func TestValidateTexture(t *testing.T) {
 			wantErr: ErrTextureNil,
 		},
 		{
-			name: "destroyed texture (handle=0)",
+			name: "destroyed texture (nil HAL texture)",
 			tex: &Texture{
-				texture: 0,
+				texture: nil,
 				width:   64,
 				height:  64,
 			},
@@ -216,7 +214,7 @@ func TestValidateTexture(t *testing.T) {
 		{
 			name: "valid texture",
 			tex: &Texture{
-				texture: types.Texture(42),
+				texture: &mockTexture{},
 				width:   64,
 				height:  64,
 			},
@@ -268,7 +266,7 @@ func TestDrawTextureExAlphaClamping(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: types.Texture(1),
+		texture: &mockTexture{},
 		width:   64,
 		height:  64,
 	}

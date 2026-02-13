@@ -2,8 +2,6 @@ package gogpu
 
 import (
 	"sync"
-
-	"github.com/gogpu/gogpu/gpu/types"
 )
 
 // SubmissionTracker tracks GPU submissions for non-blocking resource recycling.
@@ -19,21 +17,21 @@ import (
 //
 //	tracker := NewSubmissionTracker()
 //	subIdx := tracker.NextIndex()
-//	backend.Submit(queue, commands, fence, subIdx)
+//	queue.Submit(commands, fence, subIdx)
 //	tracker.Track(subIdx)
 //	// Later, after some frames:
-//	fenceValue, _ := backend.GetFenceValue(fence)
+//	fenceValue := fencePool.PollCompleted()
 //	tracker.Triage(fenceValue)  // Recycles completed submissions
 type SubmissionTracker struct {
 	mu           sync.Mutex
-	nextIndex    types.SubmissionIndex
+	nextIndex    uint64
 	active       []activeSubmission
-	completedIdx types.SubmissionIndex
+	completedIdx uint64
 }
 
 // activeSubmission represents a submission that is still in-flight on the GPU.
 type activeSubmission struct {
-	index types.SubmissionIndex
+	index uint64
 	// Future: Resources to recycle when submission completes.
 	// For now, we just track the index for the infrastructure.
 }
@@ -48,7 +46,7 @@ func NewSubmissionTracker() *SubmissionTracker {
 
 // NextIndex returns the next submission index and increments the counter.
 // This should be called before Submit() to get the value to pass to the fence.
-func (t *SubmissionTracker) NextIndex() types.SubmissionIndex {
+func (t *SubmissionTracker) NextIndex() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.nextIndex++
@@ -57,7 +55,7 @@ func (t *SubmissionTracker) NextIndex() types.SubmissionIndex {
 
 // Track records a new submission as active.
 // Call this after Submit() succeeds.
-func (t *SubmissionTracker) Track(index types.SubmissionIndex) {
+func (t *SubmissionTracker) Track(index uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active = append(t.active, activeSubmission{index: index})
@@ -67,37 +65,36 @@ func (t *SubmissionTracker) Track(index types.SubmissionIndex) {
 // Returns true if any submissions were triaged (completed).
 //
 // This is the key method for non-blocking resource recycling:
-// - Call GetFenceValue() to get the current fence value (non-blocking)
+// - Call PollCompleted() on the FencePool to get the current fence value (non-blocking)
 // - Pass that value to Triage() to mark submissions as complete
 // - All submissions with index <= fenceValue are considered complete
 func (t *SubmissionTracker) Triage(fenceValue uint64) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	fv := types.SubmissionIndex(fenceValue)
-	if fv <= t.completedIdx {
+	if fenceValue <= t.completedIdx {
 		return false // No new completions
 	}
 
 	var remaining []activeSubmission
 	for _, sub := range t.active {
-		if sub.index > fv {
+		if sub.index > fenceValue {
 			// Still in-flight, keep tracking
 			remaining = append(remaining, sub)
 		}
-		// Submissions with index <= fv are complete.
+		// Submissions with index <= fenceValue are complete.
 		// Future: Call resource cleanup callbacks here.
 	}
 
 	triaged := len(t.active) != len(remaining)
 	t.active = remaining
-	t.completedIdx = fv
+	t.completedIdx = fenceValue
 	return triaged
 }
 
 // CompletedIndex returns the last known completed submission index.
 // All submissions with index <= this value have been processed by the GPU.
-func (t *SubmissionTracker) CompletedIndex() types.SubmissionIndex {
+func (t *SubmissionTracker) CompletedIndex() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.completedIdx
@@ -105,7 +102,7 @@ func (t *SubmissionTracker) CompletedIndex() types.SubmissionIndex {
 
 // LatestIndex returns the most recent submission index.
 // This is the index that will be signaled when the latest submission completes.
-func (t *SubmissionTracker) LatestIndex() types.SubmissionIndex {
+func (t *SubmissionTracker) LatestIndex() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.nextIndex

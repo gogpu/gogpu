@@ -3,7 +3,6 @@ package gogpu
 import (
 	"testing"
 
-	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 )
@@ -25,12 +24,11 @@ func TestGPUContextProviderNilBeforeRun(t *testing.T) {
 
 // TestGPUContextAdapterMethods tests the methods of gpuContextAdapter.
 func TestGPUContextAdapterMethods(t *testing.T) {
-	// Create a renderer with test values (no actual GPU needed)
+	// Create a renderer with nil HAL interfaces (no actual GPU needed)
 	renderer := &Renderer{
-		backend: nil,
-		adapter: types.Adapter(41),
-		device:  types.Device(42),
-		queue:   types.Queue(43),
+		adapter: nil, // HAL interfaces are nil in test
+		device:  nil,
+		queue:   nil,
 		format:  gputypes.TextureFormatBGRA8Unorm,
 	}
 
@@ -123,7 +121,7 @@ func TestDeviceAdapterInterface(t *testing.T) {
 
 // TestDeviceAdapterMethods tests deviceAdapter methods.
 func TestDeviceAdapterMethods(t *testing.T) {
-	renderer := &Renderer{device: types.Device(42)}
+	renderer := &Renderer{device: nil}
 	device := &deviceAdapter{renderer: renderer}
 
 	t.Run("Poll", func(t *testing.T) {

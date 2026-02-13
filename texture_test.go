@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
 )
 
@@ -53,43 +52,43 @@ func TestTextureMetadata(t *testing.T) {
 }
 
 func TestTextureHandles(t *testing.T) {
-	// Create a texture with known handles (without GPU resources)
+	// Create a texture with mock HAL interfaces
 	tex := &Texture{
-		texture: types.Texture(42),
-		view:    types.TextureView(43),
-		sampler: types.Sampler(44),
+		texture: &mockTexture{},
+		view:    &mockTextureView{},
+		sampler: &mockSampler{},
 	}
 
-	if tex.Handle() != 42 {
-		t.Errorf("Handle() = %d, want 42", tex.Handle())
+	if tex.Handle() == nil {
+		t.Error("Handle() returned nil, want non-nil")
 	}
-	if tex.View() != 43 {
-		t.Errorf("View() = %d, want 43", tex.View())
+	if tex.View() == nil {
+		t.Error("View() returned nil, want non-nil")
 	}
-	if tex.Sampler() != 44 {
-		t.Errorf("Sampler() = %d, want 44", tex.Sampler())
+	if tex.Sampler() == nil {
+		t.Error("Sampler() returned nil, want non-nil")
 	}
 }
 
 func TestTextureDestroyWithNilRenderer(t *testing.T) {
 	// Destroy should be safe to call with nil renderer
 	tex := &Texture{
-		texture: types.Texture(42),
-		view:    types.TextureView(43),
-		sampler: types.Sampler(44),
+		texture: &mockTexture{},
+		view:    &mockTextureView{},
+		sampler: &mockSampler{},
 	}
 
 	// Should not panic
 	tex.Destroy()
 }
 
-func TestTextureDestroyWithNilBackend(t *testing.T) {
-	// Destroy should be safe to call with nil backend
+func TestTextureDestroyWithNilDevice(t *testing.T) {
+	// Destroy should be safe to call with nil device
 	tex := &Texture{
-		texture:  types.Texture(42),
-		view:     types.TextureView(43),
-		sampler:  types.Sampler(44),
-		renderer: &Renderer{backend: nil},
+		texture:  &mockTexture{},
+		view:     &mockTextureView{},
+		sampler:  &mockSampler{},
+		renderer: &Renderer{device: nil},
 	}
 
 	// Should not panic
@@ -345,22 +344,22 @@ func TestUpdateDataDestroyedTexture(t *testing.T) {
 			tex:  &Texture{width: 10, height: 10, format: gputypes.TextureFormatRGBA8Unorm},
 		},
 		{
-			name: "nil backend",
+			name: "nil device",
 			tex: &Texture{
 				width:    10,
 				height:   10,
 				format:   gputypes.TextureFormatRGBA8Unorm,
-				renderer: &Renderer{backend: nil},
+				renderer: &Renderer{device: nil},
 			},
 		},
 		{
-			name: "zero texture handle",
+			name: "nil texture handle",
 			tex: &Texture{
 				width:    10,
 				height:   10,
 				format:   gputypes.TextureFormatRGBA8Unorm,
-				texture:  0,
-				renderer: &Renderer{backend: nil},
+				texture:  nil,
+				renderer: &Renderer{device: nil},
 			},
 		},
 	}
@@ -381,8 +380,8 @@ func TestUpdateDataInvalidSize(t *testing.T) {
 		width:   10,
 		height:  10,
 		format:  gputypes.TextureFormatRGBA8Unorm,
-		texture: types.Texture(1), // non-zero to pass destroyed check
-		// Note: renderer/backend are nil so it will fail at destroyed check first
+		texture: &mockTexture{}, // non-nil to pass destroyed check
+		// Note: renderer is nil so it will fail at destroyed check first
 	}
 
 	// UpdateData with nil renderer should return destroyed error first
@@ -402,22 +401,22 @@ func TestUpdateRegionDestroyedTexture(t *testing.T) {
 			tex:  &Texture{width: 10, height: 10, format: gputypes.TextureFormatRGBA8Unorm},
 		},
 		{
-			name: "nil backend",
+			name: "nil device",
 			tex: &Texture{
 				width:    10,
 				height:   10,
 				format:   gputypes.TextureFormatRGBA8Unorm,
-				renderer: &Renderer{backend: nil},
+				renderer: &Renderer{device: nil},
 			},
 		},
 		{
-			name: "zero texture handle",
+			name: "nil texture handle",
 			tex: &Texture{
 				width:    10,
 				height:   10,
 				format:   gputypes.TextureFormatRGBA8Unorm,
-				texture:  0,
-				renderer: &Renderer{backend: nil},
+				texture:  nil,
+				renderer: &Renderer{device: nil},
 			},
 		},
 	}
@@ -440,7 +439,7 @@ func TestUpdateRegionInvalidParams(t *testing.T) {
 		width:    10,
 		height:   10,
 		format:   gputypes.TextureFormatRGBA8Unorm,
-		texture:  0, // Will fail destroyed check
+		texture:  nil, // Will fail destroyed check
 		renderer: nil,
 	}
 

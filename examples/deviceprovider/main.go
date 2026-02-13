@@ -4,10 +4,9 @@
 // to access GPU resources for integration with external libraries.
 //
 // DeviceProvider exposes:
-// - Backend() - GPU backend (rust or gpu)
-// - Device() - GPU device handle
-// - Queue() - Command queue
-// - SurfaceFormat() - Texture format
+// - Device() - HAL GPU device
+// - Queue() - HAL command queue
+// - SurfaceFormat() - Preferred texture format
 package main
 
 import (
@@ -38,7 +37,6 @@ func main() {
 		// Print device info once
 		if !printed {
 			fmt.Println("=== DeviceProvider Info ===")
-			fmt.Printf("Backend: %T\n", provider.Backend())
 			fmt.Printf("Device: %v\n", provider.Device())
 			fmt.Printf("Queue: %v\n", provider.Queue())
 			fmt.Printf("Surface Format: %v\n", provider.SurfaceFormat())
@@ -46,8 +44,7 @@ func main() {
 			printed = true
 		}
 
-		// Example: Access backend directly for advanced operations
-		// backend := provider.Backend()
+		// Example: Access HAL device/queue directly for advanced operations
 		// device := provider.Device()
 		// queue := provider.Queue()
 		//

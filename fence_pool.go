@@ -2,9 +2,9 @@ package gogpu
 
 import (
 	"sync"
+	"time"
 
-	"github.com/gogpu/gogpu/gpu"
-	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // FencePool manages a pool of GPU fences for non-blocking submission tracking.
@@ -19,33 +19,31 @@ import (
 //   - Triage: move completed fences back to free pool
 type FencePool struct {
 	mu            sync.Mutex
-	backend       gpu.Backend
-	device        types.Device
+	device        hal.Device
 	active        []activeFence // (submissionIndex, fence) pairs
-	free          []types.Fence // fences ready for reuse
-	lastCompleted types.SubmissionIndex
+	free          []hal.Fence   // fences ready for reuse
+	lastCompleted uint64
 }
 
 // activeFence tracks a fence and its associated submission index.
 // Also tracks resources that must be released when the submission completes.
 // Following wgpu-rs ActiveSubmission pattern: resources remain alive until GPU finishes.
 type activeFence struct {
-	index   types.SubmissionIndex
-	fence   types.Fence
-	cmdBufs []types.CommandBuffer // Command buffers to release when complete
+	index   uint64
+	fence   hal.Fence
+	cmdBufs []hal.CommandBuffer // Command buffers to release when complete
 }
 
 // NewFencePool creates a new fence pool.
-func NewFencePool(backend gpu.Backend, device types.Device) *FencePool {
+func NewFencePool(device hal.Device) *FencePool {
 	return &FencePool{
-		backend: backend,
-		device:  device,
+		device: device,
 	}
 }
 
 // AcquireFence gets a fence for a new submission.
 // Returns a fence from the free pool or creates a new one.
-func (p *FencePool) AcquireFence() (types.Fence, error) {
+func (p *FencePool) AcquireFence() (hal.Fence, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -55,21 +53,21 @@ func (p *FencePool) AcquireFence() (types.Fence, error) {
 		p.free = p.free[:len(p.free)-1]
 
 		// Reset the fence for reuse
-		if err := p.backend.ResetFence(p.device, fence); err != nil {
+		if err := p.device.ResetFence(fence); err != nil {
 			// If reset fails, create a new fence instead
-			return p.backend.CreateFence(p.device)
+			return p.device.CreateFence()
 		}
 		return fence, nil
 	}
 
 	// Create new fence
-	return p.backend.CreateFence(p.device)
+	return p.device.CreateFence()
 }
 
 // TrackSubmission records that a submission was made with the given fence.
 // Resources (command buffers) are stored and released only when the fence signals.
 // This follows wgpu-rs pattern: resources must remain alive until GPU finishes.
-func (p *FencePool) TrackSubmission(index types.SubmissionIndex, fence types.Fence, cmdBufs ...types.CommandBuffer) {
+func (p *FencePool) TrackSubmission(index uint64, fence hal.Fence, cmdBufs ...hal.CommandBuffer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.active = append(p.active, activeFence{
@@ -83,7 +81,7 @@ func (p *FencePool) TrackSubmission(index types.SubmissionIndex, fence types.Fen
 // This is non-blocking - uses GetFenceStatus to poll without waiting.
 // Also moves completed fences back to the free pool and releases associated resources.
 // Following wgpu-rs pattern: resources are released only when GPU finishes using them.
-func (p *FencePool) PollCompleted() types.SubmissionIndex {
+func (p *FencePool) PollCompleted() uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -91,7 +89,7 @@ func (p *FencePool) PollCompleted() types.SubmissionIndex {
 	maxCompleted := p.lastCompleted
 
 	for _, af := range p.active {
-		signaled, err := p.backend.GetFenceStatus(af.fence)
+		signaled, err := p.device.GetFenceStatus(af.fence)
 		if err != nil {
 			// On error, assume not signaled and keep tracking
 			remaining = append(remaining, af)
@@ -101,7 +99,7 @@ func (p *FencePool) PollCompleted() types.SubmissionIndex {
 		if signaled {
 			// Submission complete - release resources that were waiting
 			for _, cmdBuf := range af.cmdBufs {
-				p.backend.ReleaseCommandBuffer(cmdBuf)
+				p.device.FreeCommandBuffer(cmdBuf)
 			}
 			// Fence can be reused
 			p.free = append(p.free, af.fence)
@@ -120,7 +118,7 @@ func (p *FencePool) PollCompleted() types.SubmissionIndex {
 }
 
 // LastCompleted returns the last known completed submission index.
-func (p *FencePool) LastCompleted() types.SubmissionIndex {
+func (p *FencePool) LastCompleted() uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.lastCompleted
@@ -135,14 +133,14 @@ func (p *FencePool) ActiveCount() int {
 
 // WaitAll waits for all active submissions to complete.
 // Uses blocking wait on each active fence.
-func (p *FencePool) WaitAll(timeoutNs uint64) {
+func (p *FencePool) WaitAll(timeout time.Duration) {
 	p.mu.Lock()
 	fences := make([]activeFence, len(p.active))
 	copy(fences, p.active)
 	p.mu.Unlock()
 
 	for _, af := range fences {
-		_, _ = p.backend.WaitFence(p.device, af.fence, timeoutNs)
+		_, _ = p.device.Wait(af.fence, af.index, timeout)
 	}
 
 	// Poll to update state
@@ -155,7 +153,7 @@ func (p *FencePool) WaitAll(timeoutNs uint64) {
 func (p *FencePool) Destroy() {
 	// Wait for all submissions to complete (1 second timeout).
 	// This must be done before taking the lock to avoid deadlock.
-	p.WaitAll(1_000_000_000)
+	p.WaitAll(time.Second)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -164,15 +162,15 @@ func (p *FencePool) Destroy() {
 	for _, af := range p.active {
 		// Release pending command buffers
 		for _, cmdBuf := range af.cmdBufs {
-			p.backend.ReleaseCommandBuffer(cmdBuf)
+			p.device.FreeCommandBuffer(cmdBuf)
 		}
-		p.backend.DestroyFence(p.device, af.fence)
+		p.device.DestroyFence(af.fence)
 	}
 	p.active = nil
 
 	// Destroy free fences
 	for _, fence := range p.free {
-		p.backend.DestroyFence(p.device, fence)
+		p.device.DestroyFence(fence)
 	}
 	p.free = nil
 }

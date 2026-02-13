@@ -155,8 +155,8 @@ func validateTexture(tex *Texture) error {
 		return ErrTextureNil
 	}
 
-	// A texture is considered destroyed if its GPU handle is 0
-	if tex.texture == 0 {
+	// A texture is considered destroyed if its HAL texture interface is nil
+	if tex.texture == nil {
 		return ErrTextureDestroyed
 	}
 

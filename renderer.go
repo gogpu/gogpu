@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/gogpu/gogpu/gpu"
-	_ "github.com/gogpu/gogpu/gpu/backend/native" // Register gpu backend
+	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // texQuadUniformSize is the size of the uniform buffer for textured quads.
@@ -19,15 +19,16 @@ const texQuadUniformSize = 32
 // Renderer manages the GPU rendering pipeline.
 // It handles device initialization, surface management, and frame presentation.
 type Renderer struct {
-	// Backend abstraction
-	backend gpu.Backend
+	// HAL objects (direct interfaces, no uintptr handles)
+	halBackend hal.Backend
+	instance   hal.Instance
+	adapter    hal.Adapter
+	device     hal.Device
+	queue      hal.Queue
+	surface    hal.Surface
 
-	// GPU handles
-	instance types.Instance
-	adapter  types.Adapter
-	device   types.Device
-	queue    types.Queue
-	surface  types.Surface
+	// Backend metadata
+	backendName string
 
 	// Surface configuration
 	format            gputypes.TextureFormat
@@ -36,33 +37,33 @@ type Renderer struct {
 	surfaceConfigured bool // Whether surface has been configured with valid dimensions
 
 	// Current frame state
-	currentTexture types.Texture
-	currentView    types.TextureView
-	frameCleared   bool // Whether the frame has been cleared (for LoadOp selection)
+	currentSurfaceTexture hal.SurfaceTexture
+	currentView           hal.TextureView
+	frameCleared          bool // Whether the frame has been cleared (for LoadOp selection)
 
 	// FencePool for non-blocking submission tracking (wgpu-rs pattern).
 	// Each submission gets its own fence from the pool.
 	// Non-blocking: poll fence status to determine completed submissions.
 	fencePool         *FencePool
-	nextSubmissionIdx types.SubmissionIndex
+	nextSubmissionIdx uint64
 
 	// Built-in pipelines
-	trianglePipeline types.RenderPipeline
-	triangleShader   types.ShaderModule
+	trianglePipeline hal.RenderPipeline
+	triangleShader   hal.ShaderModule
 
 	// Textured quad pipeline resources
-	texQuadPipeline       types.RenderPipeline
-	texQuadShader         types.ShaderModule
-	texQuadUniformLayout  types.BindGroupLayout
-	texQuadTextureLayout  types.BindGroupLayout
-	texQuadPipelineLayout types.PipelineLayout
-	texQuadUniformBuffer  types.Buffer
-	texQuadUniformBindGrp types.BindGroup
+	texQuadPipeline       hal.RenderPipeline
+	texQuadShader         hal.ShaderModule
+	texQuadUniformLayout  hal.BindGroupLayout
+	texQuadTextureLayout  hal.BindGroupLayout
+	texQuadPipelineLayout hal.PipelineLayout
+	texQuadUniformBuffer  hal.Buffer
+	texQuadUniformBindGrp hal.BindGroup
 	texQuadUniformData    []byte // Pre-allocated buffer for uniform data (reduces GC pressure)
 	texQuadPipelineInited bool
 
 	// Texture bind group cache - avoids creating new bind groups per draw call
-	texBindGroupCache map[types.TextureView]types.BindGroup
+	texBindGroupCache map[hal.TextureView]hal.BindGroup
 
 	// Platform reference
 	platform platform.Platform
@@ -70,69 +71,32 @@ type Renderer struct {
 
 // newRenderer creates and initializes a new renderer.
 func newRenderer(plat platform.Platform, backendType types.BackendType) (*Renderer, error) {
-	// Create backend based on type
-	backend, err := createBackend(backendType)
-	if err != nil {
-		return nil, err
-	}
-
 	r := &Renderer{
-		backend:  backend,
 		platform: plat,
 	}
 
-	if err := r.init(); err != nil {
-		backend.Destroy()
+	if err := r.init(backendType); err != nil {
 		return nil, err
 	}
 
 	return r, nil
 }
 
-// createBackend creates a backend of the specified type using the registry.
-// Backends are registered via init() in their respective packages.
-// Build with -tags rust to enable the Rust backend.
-func createBackend(typ types.BackendType) (gpu.Backend, error) {
-	switch typ {
-	case types.BackendRust:
-		if !gpu.IsBackendRegistered("rust") {
-			return nil, fmt.Errorf("rust backend not available (build with -tags rust)")
-		}
-		return gpu.CreateBackend("rust"), nil
-
-	case types.BackendNative:
-		if !gpu.IsBackendRegistered("gpu") {
-			return nil, fmt.Errorf("gpu backend not available")
-		}
-		return gpu.CreateBackend("gpu"), nil
-
-	case types.BackendAuto:
-		// Auto: use best available backend (rust > gpu)
-		if b := gpu.SelectBestBackend(); b != nil {
-			return b, nil
-		}
-		return nil, gpu.ErrNoBackendRegistered
-
-	default:
-		// Default: same as Auto
-		if b := gpu.SelectBestBackend(); b != nil {
-			return b, nil
-		}
-		return nil, gpu.ErrNoBackendRegistered
-	}
-}
-
 // init initializes WebGPU and creates the rendering pipeline.
-func (r *Renderer) init() error {
-	var err error
+func (r *Renderer) init(backendType types.BackendType) error {
+	// Create HAL backend based on platform (Vulkan on Windows/Linux, Metal on macOS).
+	// For now, only native (Pure Go) backend is supported.
+	// The Rust backend is deferred to Phase 3.
+	_ = backendType // BackendType selection deferred to Phase 3 (Rust backend)
 
-	// Initialize backend
-	if err = r.backend.Init(); err != nil {
-		return fmt.Errorf("gogpu: failed to init backend: %w", err)
-	}
+	r.halBackend = native.NewHalBackend()
+	r.backendName = native.HalBackendName()
 
 	// Create WebGPU instance
-	r.instance, err = r.backend.CreateInstance()
+	var err error
+	r.instance, err = r.halBackend.CreateInstance(&hal.InstanceDescriptor{
+		Backends: gputypes.Backends(native.HalBackendVariant()),
+	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
 	}
@@ -141,34 +105,30 @@ func (r *Renderer) init() error {
 	hinstance, hwnd := r.platform.GetHandle()
 
 	// Create surface
-	r.surface, err = r.backend.CreateSurface(r.instance, types.SurfaceHandle{
-		Instance: hinstance,
-		Window:   hwnd,
-	})
+	r.surface, err = r.instance.CreateSurface(hinstance, hwnd)
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create surface: %w", err)
 	}
 
-	// Request adapter
-	r.adapter, err = r.backend.RequestAdapter(r.instance, &types.AdapterOptions{
-		PowerPreference: gputypes.PowerPreferenceHighPerformance,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
+	// Enumerate adapters and pick the first compatible one
+	adapters := r.instance.EnumerateAdapters(r.surface)
+	if len(adapters) == 0 {
+		return fmt.Errorf("gogpu: no compatible GPU adapters found")
 	}
+	exposed := adapters[0]
+	r.adapter = exposed.Adapter
 
-	// Request device
-	r.device, err = r.backend.RequestDevice(r.adapter, nil)
+	// Open device with default features and limits
+	openDevice, err := r.adapter.Open(0, gputypes.DefaultLimits())
 	if err != nil {
-		return fmt.Errorf("gogpu: failed to request device: %w", err)
+		return fmt.Errorf("gogpu: failed to open device: %w", err)
 	}
-
-	// Get queue
-	r.queue = r.backend.GetQueue(r.device)
+	r.device = openDevice.Device
+	r.queue = openDevice.Queue
 
 	// Create fence pool for non-blocking submission tracking (wgpu-rs pattern).
 	// Each submission gets its own fence, enabling true non-blocking completion checks.
-	r.fencePool = NewFencePool(r.backend, r.device)
+	r.fencePool = NewFencePool(r.device)
 
 	// Configure surface
 	// Get current window dimensions. On some platforms (especially macOS),
@@ -187,14 +147,16 @@ func (r *Renderer) init() error {
 		r.width = uint32(width)   //nolint:gosec // G115: validated positive above
 		r.height = uint32(height) //nolint:gosec // G115: validated positive above
 
-		r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
+		if err := r.surface.Configure(r.device, &hal.SurfaceConfiguration{
 			Format:      r.format,
 			Usage:       gputypes.TextureUsageRenderAttachment,
 			Width:       r.width,
 			Height:      r.height,
 			AlphaMode:   gputypes.CompositeAlphaModeOpaque,
 			PresentMode: gputypes.PresentModeFifo, // VSync
-		})
+		}); err != nil {
+			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
+		}
 		r.surfaceConfigured = true
 	}
 	// If dimensions are zero, surfaceConfigured remains false.
@@ -221,7 +183,8 @@ func (r *Renderer) Resize(width, height int) {
 	r.width = uint32(width)   //nolint:gosec // G115: validated positive above
 	r.height = uint32(height) //nolint:gosec // G115: validated positive above
 
-	r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
+	// Ignore error — surface will be reconfigured on next frame attempt if this fails
+	_ = r.surface.Configure(r.device, &hal.SurfaceConfiguration{
 		Format:      r.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       r.width,
@@ -241,24 +204,14 @@ func (r *Renderer) BeginFrame() bool {
 		return false
 	}
 
-	surfTex, err := r.backend.GetCurrentTexture(r.surface)
+	// Acquire the next surface texture via HAL.
+	// Pass nil fence — we don't need a fence for acquisition.
+	acquired, err := r.surface.AcquireTexture(nil)
 	if err != nil {
-		return false
-	}
-
-	// Handle different surface statuses
-	switch surfTex.Status {
-	case types.SurfaceStatusSuccess:
-		// OK, continue
-	case types.SurfaceStatusTimeout:
-		// Frame not available yet - skip without reconfiguring.
-		// This keeps the window responsive.
-		return false
-	default:
-		// Surface needs reconfiguration.
+		// Surface needs reconfiguration (outdated or lost).
 		// Only attempt if we have valid dimensions.
 		if r.width > 0 && r.height > 0 {
-			r.backend.ConfigureSurface(r.surface, r.device, &types.SurfaceConfig{
+			_ = r.surface.Configure(r.device, &hal.SurfaceConfiguration{
 				Format:      r.format,
 				Usage:       gputypes.TextureUsageRenderAttachment,
 				Width:       r.width,
@@ -270,23 +223,33 @@ func (r *Renderer) BeginFrame() bool {
 		return false
 	}
 
-	r.currentTexture = surfTex.Texture
+	r.currentSurfaceTexture = acquired.Texture
 
 	// Create texture view for rendering
-	r.currentView = r.backend.CreateTextureView(r.currentTexture, nil)
+	view, err := r.device.CreateTextureView(r.currentSurfaceTexture, nil)
+	if err != nil {
+		r.surface.DiscardTexture(r.currentSurfaceTexture)
+		r.currentSurfaceTexture = nil
+		return false
+	}
+	r.currentView = view
 
 	// Reset frame state for new frame
 	r.frameCleared = false
 
-	return r.currentView != 0
+	return true
 }
 
 // EndFrame presents the rendered frame.
 func (r *Renderer) EndFrame() {
-	// Present first while texture is still valid.
-	// On Metal (macOS), releasing the texture view before present
-	// can invalidate the drawable, causing blank frames.
-	r.backend.Present(r.surface)
+	// Present the surface texture via queue.
+	if r.currentSurfaceTexture != nil {
+		// Call platform-specific pre-submit hook (Metal drawable attachment).
+		// For Vulkan this is a no-op.
+		// Note: We pass nil cmdBuffer here because Present doesn't need it.
+		// Metal's presentDrawable is handled internally by queue.Present.
+		_ = r.queue.Present(r.surface, r.currentSurfaceTexture)
+	}
 
 	// Non-blocking submission tracking: poll completed submissions.
 	// This is the wgpu-rs FencePool pattern where each submission has its own fence.
@@ -298,29 +261,33 @@ func (r *Renderer) EndFrame() {
 	}
 
 	// Release resources after presentation
-	if r.currentView != 0 {
-		r.backend.ReleaseTextureView(r.currentView)
-		r.currentView = 0
+	if r.currentView != nil {
+		r.device.DestroyTextureView(r.currentView)
+		r.currentView = nil
 	}
-	if r.currentTexture != 0 {
-		r.backend.ReleaseTexture(r.currentTexture)
-		r.currentTexture = 0
-	}
+	// SurfaceTexture is consumed by Present, no need to destroy it
+	r.currentSurfaceTexture = nil
 }
 
 // Clear submits a clear command with the specified color.
 func (r *Renderer) Clear(red, green, blue, alpha float64) {
-	if r.currentView == 0 {
+	if r.currentView == nil {
 		return
 	}
 
-	encoder := r.backend.CreateCommandEncoder(r.device)
-	if encoder == 0 {
+	encoder, err := r.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "Clear",
+	})
+	if err != nil {
 		return
 	}
 
-	renderPass := r.backend.BeginRenderPass(encoder, &types.RenderPassDescriptor{
-		ColorAttachments: []types.ColorAttachment{
+	if err := encoder.BeginEncoding("Clear"); err != nil {
+		return
+	}
+
+	renderPass := encoder.BeginRenderPass(&hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
 				View:       r.currentView,
 				LoadOp:     gputypes.LoadOpClear,
@@ -330,11 +297,12 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 		},
 	})
 
-	r.backend.EndRenderPass(renderPass)
-	r.backend.ReleaseRenderPass(renderPass)
+	renderPass.End()
 
-	commands := r.backend.FinishEncoder(encoder)
-	r.backend.ReleaseCommandEncoder(encoder)
+	commands, err := encoder.EndEncoding()
+	if err != nil {
+		return
+	}
 
 	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
@@ -346,11 +314,11 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 // submitWithFence submits commands with a fence for non-blocking tracking.
 // The command buffer is stored and released only when GPU finishes using it.
 // This follows wgpu-rs pattern: resources must remain alive until GPU completes.
-func (r *Renderer) submitWithFence(commands types.CommandBuffer) {
+func (r *Renderer) submitWithFence(commands hal.CommandBuffer) {
 	if r.fencePool == nil {
 		// No fence pool - submit and release immediately (legacy behavior)
-		r.backend.Submit(r.queue, commands, 0, 0)
-		r.backend.ReleaseCommandBuffer(commands)
+		_ = r.queue.Submit([]hal.CommandBuffer{commands}, nil, 0)
+		r.device.FreeCommandBuffer(commands)
 		return
 	}
 
@@ -358,8 +326,8 @@ func (r *Renderer) submitWithFence(commands types.CommandBuffer) {
 	fence, err := r.fencePool.AcquireFence()
 	if err != nil {
 		// Fence acquisition failed - submit and release immediately
-		r.backend.Submit(r.queue, commands, 0, 0)
-		r.backend.ReleaseCommandBuffer(commands)
+		_ = r.queue.Submit([]hal.CommandBuffer{commands}, nil, 0)
+		r.device.FreeCommandBuffer(commands)
 		return
 	}
 
@@ -368,7 +336,7 @@ func (r *Renderer) submitWithFence(commands types.CommandBuffer) {
 	subIdx := r.nextSubmissionIdx
 
 	// Submit with fence signaling
-	r.backend.Submit(r.queue, commands, fence, uint64(subIdx))
+	_ = r.queue.Submit([]hal.CommandBuffer{commands}, fence, subIdx)
 
 	// Track submission WITH command buffer for deferred release.
 	// Command buffer will be released when fence signals (GPU done).
@@ -387,30 +355,43 @@ func (r *Renderer) Format() gputypes.TextureFormat {
 
 // Backend returns the name of the active backend.
 func (r *Renderer) Backend() string {
-	return r.backend.Name()
+	return r.backendName
 }
 
 // initTrianglePipeline creates the built-in triangle render pipeline.
 func (r *Renderer) initTrianglePipeline() error {
-	if r.trianglePipeline != 0 {
+	if r.trianglePipeline != nil {
 		return nil // Already initialized
 	}
 
 	var err error
 
 	// Create shader module
-	r.triangleShader, err = r.backend.CreateShaderModuleWGSL(r.device, coloredTriangleShaderSource)
+	r.triangleShader, err = r.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
+		Label:  "Triangle Shader",
+		Source: hal.ShaderSource{WGSL: coloredTriangleShaderSource},
+	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create shader module: %w", err)
 	}
 
 	// Create render pipeline
-	r.trianglePipeline, err = r.backend.CreateRenderPipeline(r.device, &types.RenderPipelineDescriptor{
-		VertexShader:     r.triangleShader,
-		VertexEntryPoint: "vs_main",
-		FragmentShader:   r.triangleShader,
-		FragmentEntry:    "fs_main",
-		TargetFormat:     r.format,
+	r.trianglePipeline, err = r.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label: "Triangle Pipeline",
+		Vertex: hal.VertexState{
+			Module:     r.triangleShader,
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     r.triangleShader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    r.format,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create render pipeline: %w", err)
@@ -421,24 +402,30 @@ func (r *Renderer) initTrianglePipeline() error {
 
 // DrawTriangle draws the built-in colored triangle.
 func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
-	if r.currentView == 0 {
+	if r.currentView == nil {
 		return nil
 	}
 
 	// Initialize pipeline on first use
-	if r.trianglePipeline == 0 {
+	if r.trianglePipeline == nil {
 		if err := r.initTrianglePipeline(); err != nil {
 			return err
 		}
 	}
 
-	encoder := r.backend.CreateCommandEncoder(r.device)
-	if encoder == 0 {
-		return fmt.Errorf("gogpu: failed to create command encoder")
+	encoder, err := r.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "DrawTriangle",
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create command encoder: %w", err)
 	}
 
-	renderPass := r.backend.BeginRenderPass(encoder, &types.RenderPassDescriptor{
-		ColorAttachments: []types.ColorAttachment{
+	if err := encoder.BeginEncoding("DrawTriangle"); err != nil {
+		return fmt.Errorf("gogpu: failed to begin encoding: %w", err)
+	}
+
+	renderPass := encoder.BeginRenderPass(&hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
 				View:       r.currentView,
 				LoadOp:     gputypes.LoadOpClear,
@@ -448,14 +435,15 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 		},
 	})
 
-	r.backend.SetPipeline(renderPass, r.trianglePipeline)
-	r.backend.Draw(renderPass, 3, 1, 0, 0) // 3 vertices, 1 instance
+	renderPass.SetPipeline(r.trianglePipeline)
+	renderPass.Draw(3, 1, 0, 0) // 3 vertices, 1 instance
 
-	r.backend.EndRenderPass(renderPass)
-	r.backend.ReleaseRenderPass(renderPass)
+	renderPass.End()
 
-	commands := r.backend.FinishEncoder(encoder)
-	r.backend.ReleaseCommandEncoder(encoder)
+	commands, err := encoder.EndEncoding()
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to finish encoding: %w", err)
+	}
 
 	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
@@ -473,15 +461,18 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	var err error
 
 	// Create shader module
-	r.texQuadShader, err = r.backend.CreateShaderModuleWGSL(r.device, positionedQuadShaderSource)
+	r.texQuadShader, err = r.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
+		Label:  "Textured Quad Shader",
+		Source: hal.ShaderSource{WGSL: positionedQuadShaderSource},
+	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create textured quad shader: %w", err)
 	}
 
 	// Create bind group layout for uniforms (group 0)
-	r.texQuadUniformLayout, err = r.backend.CreateBindGroupLayout(r.device, &types.BindGroupLayoutDescriptor{
+	r.texQuadUniformLayout, err = r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
 		Label: "Textured Quad Uniform Layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
@@ -497,9 +488,9 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	}
 
 	// Create bind group layout for texture+sampler (group 1)
-	r.texQuadTextureLayout, err = r.backend.CreateBindGroupLayout(r.device, &types.BindGroupLayoutDescriptor{
+	r.texQuadTextureLayout, err = r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
 		Label: "Textured Quad Texture Layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
 				Visibility: gputypes.ShaderStageFragment,
@@ -523,9 +514,9 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	}
 
 	// Create pipeline layout with both bind group layouts
-	r.texQuadPipelineLayout, err = r.backend.CreatePipelineLayout(r.device, &types.PipelineLayoutDescriptor{
+	r.texQuadPipelineLayout, err = r.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
 		Label:            "Textured Quad Pipeline Layout",
-		BindGroupLayouts: []types.BindGroupLayout{r.texQuadUniformLayout, r.texQuadTextureLayout},
+		BindGroupLayouts: []hal.BindGroupLayout{r.texQuadUniformLayout, r.texQuadTextureLayout},
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create pipeline layout: %w", err)
@@ -535,26 +526,37 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	// The shader outputs premultiplied data for both straight and premultiplied
 	// input textures (controlled by uniform flag), so the blend state is always:
 	// Source-over: Src * 1 + Dst * (1 - SrcA)
-	r.texQuadPipeline, err = r.backend.CreateRenderPipeline(r.device, &types.RenderPipelineDescriptor{
-		Label:            "Textured Quad Pipeline",
-		VertexShader:     r.texQuadShader,
-		VertexEntryPoint: "vs_main",
-		FragmentShader:   r.texQuadShader,
-		FragmentEntry:    "fs_main",
-		TargetFormat:     r.format,
-		Topology:         gputypes.PrimitiveTopologyTriangleList,
-		CullMode:         gputypes.CullModeNone,
-		Layout:           r.texQuadPipelineLayout,
-		Blend: &gputypes.BlendState{
-			Color: gputypes.BlendComponent{
-				Operation: gputypes.BlendOperationAdd,
-				SrcFactor: gputypes.BlendFactorOne,
-				DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
-			},
-			Alpha: gputypes.BlendComponent{
-				Operation: gputypes.BlendOperationAdd,
-				SrcFactor: gputypes.BlendFactorOne,
-				DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+	r.texQuadPipeline, err = r.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label:  "Textured Quad Pipeline",
+		Layout: r.texQuadPipelineLayout,
+		Vertex: hal.VertexState{
+			Module:     r.texQuadShader,
+			EntryPoint: "vs_main",
+		},
+		Primitive: gputypes.PrimitiveState{
+			Topology: gputypes.PrimitiveTopologyTriangleList,
+			CullMode: gputypes.CullModeNone,
+		},
+		Fragment: &hal.FragmentState{
+			Module:     r.texQuadShader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    r.format,
+					WriteMask: gputypes.ColorWriteMaskAll,
+					Blend: &gputypes.BlendState{
+						Color: gputypes.BlendComponent{
+							Operation: gputypes.BlendOperationAdd,
+							SrcFactor: gputypes.BlendFactorOne,
+							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+						},
+						Alpha: gputypes.BlendComponent{
+							Operation: gputypes.BlendOperationAdd,
+							SrcFactor: gputypes.BlendFactorOne,
+							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+						},
+					},
+				},
 			},
 		},
 	})
@@ -563,7 +565,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	}
 
 	// Create uniform buffer
-	r.texQuadUniformBuffer, err = r.backend.CreateBuffer(r.device, &types.BufferDescriptor{
+	r.texQuadUniformBuffer, err = r.device.CreateBuffer(&hal.BufferDescriptor{
 		Label: "Textured Quad Uniforms",
 		Size:  texQuadUniformSize,
 		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
@@ -573,15 +575,17 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 	}
 
 	// Create bind group for uniforms (group 0)
-	r.texQuadUniformBindGrp, err = r.backend.CreateBindGroup(r.device, &types.BindGroupDescriptor{
+	r.texQuadUniformBindGrp, err = r.device.CreateBindGroup(&hal.BindGroupDescriptor{
 		Label:  "Textured Quad Uniform Bind Group",
 		Layout: r.texQuadUniformLayout,
-		Entries: []types.BindGroupEntry{
+		Entries: []gputypes.BindGroupEntry{
 			{
 				Binding: 0,
-				Buffer:  r.texQuadUniformBuffer,
-				Offset:  0,
-				Size:    texQuadUniformSize,
+				Resource: gputypes.BufferBinding{
+					Buffer: r.texQuadUniformBuffer.NativeHandle(),
+					Offset: 0,
+					Size:   texQuadUniformSize,
+				},
 			},
 		},
 	})
@@ -598,10 +602,10 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 
 // getOrCreateTexBindGroup returns a cached bind group for the texture, or creates one.
 // This avoids creating a new GPU bind group for every draw call with the same texture.
-func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (types.BindGroup, error) {
+func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (hal.BindGroup, error) {
 	// Initialize cache lazily
 	if r.texBindGroupCache == nil {
-		r.texBindGroupCache = make(map[types.TextureView]types.BindGroup)
+		r.texBindGroupCache = make(map[hal.TextureView]hal.BindGroup)
 	}
 
 	// Check cache first
@@ -610,22 +614,26 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (types.BindGroup, error
 	}
 
 	// Create new bind group for this texture
-	bg, err := r.backend.CreateBindGroup(r.device, &types.BindGroupDescriptor{
+	bg, err := r.device.CreateBindGroup(&hal.BindGroupDescriptor{
 		Label:  "Textured Quad Texture Bind Group",
 		Layout: r.texQuadTextureLayout,
-		Entries: []types.BindGroupEntry{
+		Entries: []gputypes.BindGroupEntry{
 			{
 				Binding: 0,
-				Sampler: tex.sampler,
+				Resource: gputypes.SamplerBinding{
+					Sampler: tex.sampler.NativeHandle(),
+				},
 			},
 			{
-				Binding:     1,
-				TextureView: tex.view,
+				Binding: 1,
+				Resource: gputypes.TextureViewBinding{
+					TextureView: tex.view.NativeHandle(),
+				},
 			},
 		},
 	})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// Store in cache
@@ -636,7 +644,7 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (types.BindGroup, error
 // drawTexturedQuad draws a textured quad with the given options.
 // This is an internal method called by Context.DrawTextureEx.
 func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
-	if r.currentView == 0 {
+	if r.currentView == nil {
 		return nil // No frame in progress
 	}
 
@@ -666,7 +674,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
 
 	// Upload uniform data
-	r.backend.WriteBuffer(r.queue, r.texQuadUniformBuffer, 0, r.texQuadUniformData)
+	r.queue.WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData)
 
 	// Get or create cached bind group for texture (group 1)
 	texBindGroup, err := r.getOrCreateTexBindGroup(tex)
@@ -675,9 +683,15 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	}
 
 	// Create command encoder
-	encoder := r.backend.CreateCommandEncoder(r.device)
-	if encoder == 0 {
-		return fmt.Errorf("gogpu: failed to create command encoder")
+	encoder, err := r.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "DrawTexturedQuad",
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create command encoder: %w", err)
+	}
+
+	if err := encoder.BeginEncoding("DrawTexturedQuad"); err != nil {
+		return fmt.Errorf("gogpu: failed to begin encoding: %w", err)
 	}
 
 	// Determine LoadOp based on whether frame was already cleared
@@ -687,8 +701,8 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	}
 
 	// Begin render pass
-	renderPass := r.backend.BeginRenderPass(encoder, &types.RenderPassDescriptor{
-		ColorAttachments: []types.ColorAttachment{
+	renderPass := encoder.BeginRenderPass(&hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
 				View:       r.currentView,
 				LoadOp:     loadOp,
@@ -699,20 +713,21 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	})
 
 	// Set pipeline and bind groups
-	r.backend.SetPipeline(renderPass, r.texQuadPipeline)
-	r.backend.SetBindGroup(renderPass, 0, r.texQuadUniformBindGrp, nil)
-	r.backend.SetBindGroup(renderPass, 1, texBindGroup, nil)
+	renderPass.SetPipeline(r.texQuadPipeline)
+	renderPass.SetBindGroup(0, r.texQuadUniformBindGrp, nil)
+	renderPass.SetBindGroup(1, texBindGroup, nil)
 
 	// Draw 6 vertices (2 triangles for quad)
-	r.backend.Draw(renderPass, 6, 1, 0, 0)
+	renderPass.Draw(6, 1, 0, 0)
 
 	// End render pass
-	r.backend.EndRenderPass(renderPass)
-	r.backend.ReleaseRenderPass(renderPass)
+	renderPass.End()
 
 	// Finish and submit
-	commands := r.backend.FinishEncoder(encoder)
-	r.backend.ReleaseCommandEncoder(encoder)
+	commands, err := encoder.EndEncoding()
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to finish encoding: %w", err)
+	}
 
 	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
@@ -733,50 +748,71 @@ func (r *Renderer) Destroy() {
 		r.fencePool = nil
 	}
 
-	if r.currentView != 0 {
-		r.backend.ReleaseTextureView(r.currentView)
-		r.currentView = 0
+	if r.currentView != nil {
+		r.device.DestroyTextureView(r.currentView)
+		r.currentView = nil
 	}
-	if r.currentTexture != 0 {
-		r.backend.ReleaseTexture(r.currentTexture)
-		r.currentTexture = 0
-	}
+	r.currentSurfaceTexture = nil
 
 	// Release cached texture bind groups
 	for view, bg := range r.texBindGroupCache {
-		r.backend.ReleaseBindGroup(bg)
+		r.device.DestroyBindGroup(bg)
 		delete(r.texBindGroupCache, view)
 	}
 
 	// Release textured quad pipeline resources
-	if r.texQuadUniformBindGrp != 0 {
-		r.backend.ReleaseBindGroup(r.texQuadUniformBindGrp)
-		r.texQuadUniformBindGrp = 0
+	if r.texQuadUniformBindGrp != nil {
+		r.device.DestroyBindGroup(r.texQuadUniformBindGrp)
+		r.texQuadUniformBindGrp = nil
 	}
-	if r.texQuadUniformBuffer != 0 {
-		r.backend.ReleaseBuffer(r.texQuadUniformBuffer)
-		r.texQuadUniformBuffer = 0
+	if r.texQuadUniformBuffer != nil {
+		r.device.DestroyBuffer(r.texQuadUniformBuffer)
+		r.texQuadUniformBuffer = nil
 	}
-	if r.texQuadPipelineLayout != 0 {
-		r.backend.ReleasePipelineLayout(r.texQuadPipelineLayout)
-		r.texQuadPipelineLayout = 0
+	if r.texQuadPipelineLayout != nil {
+		r.device.DestroyPipelineLayout(r.texQuadPipelineLayout)
+		r.texQuadPipelineLayout = nil
 	}
-	if r.texQuadTextureLayout != 0 {
-		r.backend.ReleaseBindGroupLayout(r.texQuadTextureLayout)
-		r.texQuadTextureLayout = 0
+	if r.texQuadTextureLayout != nil {
+		r.device.DestroyBindGroupLayout(r.texQuadTextureLayout)
+		r.texQuadTextureLayout = nil
 	}
-	if r.texQuadUniformLayout != 0 {
-		r.backend.ReleaseBindGroupLayout(r.texQuadUniformLayout)
-		r.texQuadUniformLayout = 0
+	if r.texQuadUniformLayout != nil {
+		r.device.DestroyBindGroupLayout(r.texQuadUniformLayout)
+		r.texQuadUniformLayout = nil
 	}
-	if r.texQuadShader != 0 {
-		r.backend.ReleaseShaderModule(r.texQuadShader)
-		r.texQuadShader = 0
+	if r.texQuadShader != nil {
+		r.device.DestroyShaderModule(r.texQuadShader)
+		r.texQuadShader = nil
 	}
-	// Note: texQuadPipeline is not released separately as it's managed by backend
+	if r.texQuadPipeline != nil {
+		r.device.DestroyRenderPipeline(r.texQuadPipeline)
+		r.texQuadPipeline = nil
+	}
+	if r.triangleShader != nil {
+		r.device.DestroyShaderModule(r.triangleShader)
+		r.triangleShader = nil
+	}
+	if r.trianglePipeline != nil {
+		r.device.DestroyRenderPipeline(r.trianglePipeline)
+		r.trianglePipeline = nil
+	}
 
-	// Backend handles cleanup of all resources
-	if r.backend != nil {
-		r.backend.Destroy()
+	// Destroy core resources in reverse order of creation
+	if r.surface != nil {
+		r.surface.Destroy()
+		r.surface = nil
+	}
+	if r.device != nil {
+		r.device.Destroy()
+		r.device = nil
+	}
+	if r.adapter != nil {
+		r.adapter.Destroy()
+		r.adapter = nil
+	}
+	if r.instance != nil {
+		r.instance.Destroy()
+		r.instance = nil
 	}
 }

@@ -1,22 +1,15 @@
 package gogpu
 
 import (
-	"github.com/gogpu/gputypes"
 	"testing"
 
-	"github.com/gogpu/gogpu/gpu"
-	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // TestDeviceProviderInterface verifies the DeviceProvider interface contract.
 func TestDeviceProviderInterface(t *testing.T) {
-	// Verify interface methods exist
-	var _ interface {
-		Backend() gpu.Backend
-		Device() types.Device
-		Queue() types.Queue
-		SurfaceFormat() gputypes.TextureFormat
-	} = DeviceProvider(nil)
+	// Verify interface methods exist with HAL types
+	var _ DeviceProvider = (*rendererDeviceProvider)(nil)
 }
 
 // TestDeviceProviderNilBeforeRun verifies DeviceProvider returns nil before Run().
@@ -37,30 +30,26 @@ func TestRendererDeviceProviderImplementation(t *testing.T) {
 
 // TestRendererDeviceProviderMethods tests the methods of rendererDeviceProvider.
 func TestRendererDeviceProviderMethods(t *testing.T) {
-	// Create a renderer with test values (no actual GPU needed)
+	// Create a renderer with nil HAL interfaces (no actual GPU needed)
 	renderer := &Renderer{
-		backend: nil, // We test nil handling
-		device:  types.Device(42),
-		queue:   types.Queue(43),
-		format:  gputypes.TextureFormatBGRA8Unorm,
+		device: nil, // HAL interfaces are nil in test
+		queue:  nil,
+		format: gputypes.TextureFormatBGRA8Unorm,
 	}
 
 	provider := &rendererDeviceProvider{renderer: renderer}
 
-	t.Run("Backend", func(t *testing.T) {
-		// Backend can be nil in test
-		_ = provider.Backend()
-	})
-
 	t.Run("Device", func(t *testing.T) {
-		if provider.Device() != types.Device(42) {
-			t.Errorf("Device() = %v, want %v", provider.Device(), types.Device(42))
+		// Device is nil (no actual GPU in test)
+		if provider.Device() != nil {
+			t.Error("Device() should be nil with nil device")
 		}
 	})
 
 	t.Run("Queue", func(t *testing.T) {
-		if provider.Queue() != types.Queue(43) {
-			t.Errorf("Queue() = %v, want %v", provider.Queue(), types.Queue(43))
+		// Queue is nil (no actual GPU in test)
+		if provider.Queue() != nil {
+			t.Error("Queue() should be nil with nil queue")
 		}
 	})
 

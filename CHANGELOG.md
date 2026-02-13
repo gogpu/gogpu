@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Refactored
+
+- **Eliminate handle-based Backend abstraction** — Renderer now uses `hal.Device`/`hal.Queue`
+  directly instead of going through `gpu.Backend` + `ResourceRegistry` handle maps.
+  This removes ~2700 net lines of indirection code and enables proper error propagation.
+  - `Renderer` fields changed from `types.*` (uintptr handles) to `hal.*` (Go interfaces)
+  - `Texture` uses `hal.Texture`/`hal.TextureView`/`hal.Sampler` directly
+  - `FencePool` uses `hal.Device`/`hal.Fence` directly
+  - `DeviceProvider` returns `hal.Device`/`hal.Queue` directly
+  - All GPU errors propagated via `fmt.Errorf("context: %w", err)` chains
+  - Deleted: `gpu/backend/native/backend.go` (1091 LOC), `registry.go` (900 LOC),
+    `metal.go` (746 LOC), associated tests
+  - Rust backend unchanged (behind `//go:build rust && windows`, Phase 3 planned)
+  - Resolves [#84](https://github.com/gogpu/gogpu/issues/84)
+
 ## [0.17.0] - 2026-02-10
 
 ### Added

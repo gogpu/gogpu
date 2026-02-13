@@ -1,7 +1,6 @@
 package gogpu
 
 import (
-	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 )
@@ -47,23 +46,14 @@ func (a *gpuContextAdapter) Adapter() gpucontext.Adapter {
 	return &adapterAdapter{renderer: a.renderer}
 }
 
-// halResourceProvider is a local duck-type interface for backends that expose
-// HAL-level resources via handle lookup.
-type halResourceProvider interface {
-	GetHalDevice(device types.Device) any
-	GetHalQueue(queue types.Queue) any
-}
-
 // HalDevice returns the HAL device for direct GPU access.
 // Implements gpucontext.HalProvider.
 func (a *gpuContextAdapter) HalDevice() any {
 	if a.renderer == nil {
 		return nil
 	}
-	if hrp, ok := a.renderer.backend.(halResourceProvider); ok {
-		return hrp.GetHalDevice(a.renderer.device)
-	}
-	return nil
+	// Return the HAL device directly — no more duck-typing via backend.
+	return a.renderer.device
 }
 
 // HalQueue returns the HAL queue for direct GPU access.
@@ -72,10 +62,8 @@ func (a *gpuContextAdapter) HalQueue() any {
 	if a.renderer == nil {
 		return nil
 	}
-	if hrp, ok := a.renderer.backend.(halResourceProvider); ok {
-		return hrp.GetHalQueue(a.renderer.queue)
-	}
-	return nil
+	// Return the HAL queue directly — no more duck-typing via backend.
+	return a.renderer.queue
 }
 
 // Ensure gpuContextAdapter implements gpucontext.DeviceProvider.

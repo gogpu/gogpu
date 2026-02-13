@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // Texture update errors.
@@ -32,10 +32,10 @@ var (
 // Texture represents a GPU texture resource with its associated view and sampler.
 // It provides a high-level interface for working with textures in GoGPU.
 type Texture struct {
-	// GPU resources
-	texture types.Texture
-	view    types.TextureView
-	sampler types.Sampler
+	// GPU resources (HAL interfaces)
+	texture hal.Texture
+	view    hal.TextureView
+	sampler hal.Sampler
 
 	// Metadata
 	width         int
@@ -79,19 +79,19 @@ func (t *Texture) Format() gputypes.TextureFormat {
 	return t.format
 }
 
-// Handle returns the underlying GPU texture handle.
+// Handle returns the underlying HAL texture.
 // For advanced use cases that need direct GPU access.
-func (t *Texture) Handle() types.Texture {
+func (t *Texture) Handle() hal.Texture {
 	return t.texture
 }
 
-// View returns the texture view handle.
-func (t *Texture) View() types.TextureView {
+// View returns the texture view.
+func (t *Texture) View() hal.TextureView {
 	return t.view
 }
 
-// Sampler returns the sampler handle.
-func (t *Texture) Sampler() types.Sampler {
+// Sampler returns the sampler.
+func (t *Texture) Sampler() hal.Sampler {
 	return t.sampler
 }
 
@@ -153,21 +153,21 @@ func bytesPerPixelForFormat(format gputypes.TextureFormat) int {
 // Destroy releases all GPU resources associated with this texture.
 // After calling Destroy, the texture should not be used.
 func (t *Texture) Destroy() {
-	if t.renderer == nil || t.renderer.backend == nil {
+	if t.renderer == nil || t.renderer.device == nil {
 		return
 	}
 
-	if t.sampler != 0 {
-		t.renderer.backend.ReleaseSampler(t.sampler)
-		t.sampler = 0
+	if t.sampler != nil {
+		t.renderer.device.DestroySampler(t.sampler)
+		t.sampler = nil
 	}
-	if t.view != 0 {
-		t.renderer.backend.ReleaseTextureView(t.view)
-		t.view = 0
+	if t.view != nil {
+		t.renderer.device.DestroyTextureView(t.view)
+		t.view = nil
 	}
-	if t.texture != 0 {
-		t.renderer.backend.ReleaseTexture(t.texture)
-		t.texture = 0
+	if t.texture != nil {
+		t.renderer.device.DestroyTexture(t.texture)
+		t.texture = nil
 	}
 }
 
@@ -279,11 +279,11 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		return nil, fmt.Errorf("gogpu: invalid data size: expected %d bytes, got %d", expectedSize, len(data))
 	}
 
-	// Create GPU texture
+	// Create GPU texture via HAL device
 	// Note: width/height validated above (expectedSize check ensures they are positive)
-	texture, err := r.backend.CreateTexture(r.device, &types.TextureDescriptor{
+	texture, err := r.device.CreateTexture(&hal.TextureDescriptor{
 		Label: opts.Label,
-		Size: gputypes.Extent3D{
+		Size: hal.Extent3D{
 			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
@@ -298,50 +298,49 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		return nil, fmt.Errorf("gogpu: failed to create texture: %w", err)
 	}
 
-	// Upload pixel data
-	r.backend.WriteTexture(
-		r.queue,
-		&types.ImageCopyTexture{
+	// Upload pixel data via HAL queue
+	r.queue.WriteTexture(
+		&hal.ImageCopyTexture{
 			Texture:  texture,
 			MipLevel: 0,
-			Origin:   gputypes.Origin3D{X: 0, Y: 0, Z: 0},
+			Origin:   hal.Origin3D{X: 0, Y: 0, Z: 0},
 			Aspect:   gputypes.TextureAspectAll,
 		},
 		data,
-		&types.ImageDataLayout{
+		&hal.ImageDataLayout{
 			Offset:       0,
 			BytesPerRow:  uint32(width * 4), //nolint:gosec // G115: width validated positive above
 			RowsPerImage: uint32(height),    //nolint:gosec // G115: height validated positive above
 		},
-		&gputypes.Extent3D{
+		&hal.Extent3D{
 			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
 		},
 	)
 
-	// Create texture view
-	view := r.backend.CreateTextureView(texture, nil)
-	if view == 0 {
-		r.backend.ReleaseTexture(texture)
-		return nil, fmt.Errorf("gogpu: failed to create texture view")
+	// Create texture view via HAL device
+	view, err := r.device.CreateTextureView(texture, nil)
+	if err != nil {
+		r.device.DestroyTexture(texture)
+		return nil, fmt.Errorf("gogpu: failed to create texture view: %w", err)
 	}
 
-	// Create sampler
-	sampler, err := r.backend.CreateSampler(r.device, &types.SamplerDescriptor{
+	// Create sampler via HAL device
+	sampler, err := r.device.CreateSampler(&hal.SamplerDescriptor{
 		Label:        opts.Label,
 		AddressModeU: opts.AddressModeU,
 		AddressModeV: opts.AddressModeV,
 		AddressModeW: gputypes.AddressModeClampToEdge,
 		MagFilter:    opts.MagFilter,
 		MinFilter:    opts.MinFilter,
-		MipmapFilter: gputypes.MipmapFilterModeNearest,
+		MipmapFilter: gputypes.FilterModeNearest,
 		LodMinClamp:  0,
 		LodMaxClamp:  32,
 	})
 	if err != nil {
-		r.backend.ReleaseTextureView(view)
-		r.backend.ReleaseTexture(texture)
+		r.device.DestroyTextureView(view)
+		r.device.DestroyTexture(texture)
 		return nil, fmt.Errorf("gogpu: failed to create sampler: %w", err)
 	}
 
@@ -365,7 +364,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 // Returns ErrTextureUpdateDestroyed if the texture has been destroyed.
 // Returns ErrInvalidDataSize if the data size doesn't match texture dimensions.
 func (t *Texture) UpdateData(data []byte) error {
-	if t.renderer == nil || t.renderer.backend == nil || t.texture == 0 {
+	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed
 	}
 
@@ -380,21 +379,20 @@ func (t *Texture) UpdateData(data []byte) error {
 			ErrInvalidDataSize, expectedSize, t.width, t.height, bpp, len(data))
 	}
 
-	t.renderer.backend.WriteTexture(
-		t.renderer.queue,
-		&types.ImageCopyTexture{
+	t.renderer.queue.WriteTexture(
+		&hal.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
-			Origin:   gputypes.Origin3D{X: 0, Y: 0, Z: 0},
+			Origin:   hal.Origin3D{X: 0, Y: 0, Z: 0},
 			Aspect:   gputypes.TextureAspectAll,
 		},
 		data,
-		&types.ImageDataLayout{
+		&hal.ImageDataLayout{
 			Offset:       0,
 			BytesPerRow:  uint32(t.width * bpp), //nolint:gosec // G115: width validated in constructor
 			RowsPerImage: uint32(t.height),      //nolint:gosec // G115: height validated in constructor
 		},
-		&gputypes.Extent3D{
+		&hal.Extent3D{
 			Width:              uint32(t.width),  //nolint:gosec // G115: width validated in constructor
 			Height:             uint32(t.height), //nolint:gosec // G115: height validated in constructor
 			DepthOrArrayLayers: 1,
@@ -420,7 +418,7 @@ func (t *Texture) UpdateData(data []byte) error {
 // Returns ErrRegionOutOfBounds if the region exceeds texture dimensions.
 // Returns ErrInvalidDataSize if the data size doesn't match region dimensions.
 func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
-	if t.renderer == nil || t.renderer.backend == nil || t.texture == 0 {
+	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed
 	}
 
@@ -448,12 +446,11 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 			ErrInvalidDataSize, expectedSize, w, h, bpp, len(data))
 	}
 
-	t.renderer.backend.WriteTexture(
-		t.renderer.queue,
-		&types.ImageCopyTexture{
+	t.renderer.queue.WriteTexture(
+		&hal.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
-			Origin: gputypes.Origin3D{
+			Origin: hal.Origin3D{
 				X: uint32(x), //nolint:gosec // G115: x validated non-negative above
 				Y: uint32(y), //nolint:gosec // G115: y validated non-negative above
 				Z: 0,
@@ -461,12 +458,12 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 			Aspect: gputypes.TextureAspectAll,
 		},
 		data,
-		&types.ImageDataLayout{
+		&hal.ImageDataLayout{
 			Offset:       0,
 			BytesPerRow:  uint32(w * bpp), //nolint:gosec // G115: w validated positive above
 			RowsPerImage: uint32(h),       //nolint:gosec // G115: h validated positive above
 		},
-		&gputypes.Extent3D{
+		&hal.Extent3D{
 			Width:              uint32(w), //nolint:gosec // G115: w validated positive above
 			Height:             uint32(h), //nolint:gosec // G115: h validated positive above
 			DepthOrArrayLayers: 1,

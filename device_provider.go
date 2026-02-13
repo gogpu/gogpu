@@ -1,9 +1,8 @@
 package gogpu
 
 import (
-	"github.com/gogpu/gogpu/gpu"
-	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // DeviceProvider provides access to GPU resources for external libraries.
@@ -26,14 +25,11 @@ import (
 // This pattern follows enterprise DI best practices, similar to
 // database/sql.DB or http.Client with custom Transport.
 type DeviceProvider interface {
-	// Backend returns the GPU backend (rust or gpu).
-	Backend() gpu.Backend
+	// Device returns the HAL GPU device.
+	Device() hal.Device
 
-	// Device returns the GPU device handle.
-	Device() types.Device
-
-	// Queue returns the GPU command queue.
-	Queue() types.Queue
+	// Queue returns the HAL GPU command queue.
+	Queue() hal.Queue
 
 	// SurfaceFormat returns the preferred texture format for rendering.
 	SurfaceFormat() gputypes.TextureFormat
@@ -44,18 +40,13 @@ type rendererDeviceProvider struct {
 	renderer *Renderer
 }
 
-// Backend returns the GPU backend.
-func (p *rendererDeviceProvider) Backend() gpu.Backend {
-	return p.renderer.backend
-}
-
-// Device returns the GPU device handle.
-func (p *rendererDeviceProvider) Device() types.Device {
+// Device returns the HAL GPU device.
+func (p *rendererDeviceProvider) Device() hal.Device {
 	return p.renderer.device
 }
 
-// Queue returns the GPU command queue.
-func (p *rendererDeviceProvider) Queue() types.Queue {
+// Queue returns the HAL GPU command queue.
+func (p *rendererDeviceProvider) Queue() hal.Queue {
 	return p.renderer.queue
 }
 
