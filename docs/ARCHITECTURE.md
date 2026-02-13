@@ -211,12 +211,12 @@ gogpu/
 ├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
 ├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
-│   ├── backend.go      # Backend interface (Rust backend only)
-│   ├── registry.go     # Auto-registration
+│   ├── backend.go      # Legacy Backend interface (deprecated)
+│   ├── registry.go     # Legacy auto-registration (deprecated)
 │   ├── types/          # GoGPU-specific types (descriptors)
 │   └── backend/
 │       ├── native/     # HAL backend creation (Vulkan/Metal selection)
-│       └── rust/       # Rust FFI backend (opt-in, -tags rust)
+│       └── rust/       # Rust HAL adapter (opt-in, -tags rust)
 ├── gmath/              # Math (Vec2, Vec3, Mat4, Color)
 ├── window/             # Window config
 ├── input/              # Ebiten-style input state (keyboard, mouse)
@@ -224,6 +224,7 @@ gogpu/
 ```
 
 **Note:** The renderer uses `hal.Device`/`hal.Queue` Go interfaces directly from `gogpu/wgpu/hal`.
+Both Native and Rust backends implement the same `hal.*` interfaces — thin wrapper structs with zero handle maps.
 WebGPU types (TextureFormat, BufferUsage, etc.) are imported from `github.com/gogpu/gputypes`.
 
 ### wgpu
@@ -388,7 +389,7 @@ The refactoring eliminates the indirection entirely:
 - Renderer stores `hal.Device`, `hal.Queue`, `hal.Texture` etc. as Go interface values
 - All GPU errors propagate via `fmt.Errorf("context: %w", err)` chains
 - ~2700 net lines removed
-- Rust backend preserved behind build tag (`-tags rust`), will get a thin HAL adapter
+- Rust backend rewritten as thin HAL adapter (24 wrapper structs, zero handle maps)
 
 ## Platform Support
 

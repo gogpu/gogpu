@@ -19,8 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All GPU errors propagated via `fmt.Errorf("context: %w", err)` chains
   - Deleted: `gpu/backend/native/backend.go` (1091 LOC), `registry.go` (900 LOC),
     `metal.go` (746 LOC), associated tests
-  - Rust backend unchanged (behind `//go:build rust && windows`, Phase 3 planned)
+  - Rust backend rewritten as thin HAL adapter (see below)
   - Resolves [#84](https://github.com/gogpu/gogpu/issues/84)
+
+- **Rust backend: HAL adapter** — Rewritten `gpu/backend/rust/rust.go` from handle-based
+  `gpu.Backend` (17 handle maps, 1136 LOC) to thin wrapper structs implementing `hal.*`
+  interfaces (24 wrappers, 1580 LOC, zero handle maps). Each `rust*` struct holds a
+  `*wgpu.*` pointer and delegates directly — no map lookups, no uintptr handles.
+  - `rustDevice` implements `hal.Device` (30+ methods)
+  - `rustQueue` implements `hal.Queue` (Submit, WriteBuffer, ReadBuffer, Present)
+  - `rustCommandEncoder` implements `hal.CommandEncoder` (barriers are no-ops)
+  - `rustRenderPass`/`rustComputePass` implement render/compute pass encoders
+  - Fences: stub implementation (wgpu-native uses `device.Poll()`)
+  - Backend selection in `renderer.init()`: Auto/Native/Rust via build-tagged files
 
 ## [0.17.0] - 2026-02-10
 

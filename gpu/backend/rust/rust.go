@@ -1,6 +1,6 @@
 //go:build rust && windows
 
-// Package rust provides the WebGPU backend using wgpu-gpu (Rust) via go-webgpu/webgpu.
+// Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
 // This backend offers maximum performance and is battle-tested in production.
 // Currently only available on Windows due to go-webgpu/goffi limitations.
 //
@@ -8,584 +8,199 @@
 package rust
 
 import (
+	"errors"
 	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
-
-	"github.com/gogpu/gogpu/gpu"
-	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/wgpu/hal"
 )
 
-// Backend implements gpu.Backend using wgpu-gpu.
-type Backend struct {
-	// Store gpu handles for cleanup
-	instances        map[types.Instance]*wgpu.Instance
-	adapters         map[types.Adapter]*wgpu.Adapter
-	devices          map[types.Device]*wgpu.Device
-	queues           map[types.Queue]*wgpu.Queue
-	surfaces         map[types.Surface]*wgpu.Surface
-	shaders          map[types.ShaderModule]*wgpu.ShaderModule
-	pipelines        map[types.RenderPipeline]*wgpu.RenderPipeline
-	computePipelines map[types.ComputePipeline]*wgpu.ComputePipeline
-	encoders         map[types.CommandEncoder]*wgpu.CommandEncoder
-	cmdBuffers       map[types.CommandBuffer]*wgpu.CommandBuffer
-	passes           map[types.RenderPass]*wgpu.RenderPassEncoder
-	computePasses    map[types.ComputePass]*wgpu.ComputePassEncoder
-	textures         map[types.Texture]*wgpu.Texture
-	views            map[types.TextureView]*wgpu.TextureView
-	samplers         map[types.Sampler]*wgpu.Sampler
-	gpuBuffers       map[types.Buffer]*wgpu.Buffer
-	bindGroupLayouts map[types.BindGroupLayout]*wgpu.BindGroupLayout
-	bindGroups       map[types.BindGroup]*wgpu.BindGroup
-	pipelineLayouts  map[types.PipelineLayout]*wgpu.PipelineLayout
-	mappedBufferData map[types.Buffer][]byte
-	bufferDevices    map[types.Buffer]types.Device
+// ---------------------------------------------------------------------------
+// Backend — implements hal.Backend
+// ---------------------------------------------------------------------------
 
-	nextHandle uintptr
-}
+// rustBackend implements hal.Backend for the Rust (wgpu-native) backend.
+type rustBackend struct{}
 
-// IsAvailable returns true on Windows where go-webgpu/goffi is supported.
-func IsAvailable() bool {
-	return true
-}
+// Variant returns the backend type identifier.
+func (b rustBackend) Variant() gputypes.Backend { return gputypes.BackendVulkan }
 
-// New creates a new Rust backend.
-func New() *Backend {
-	return &Backend{
-		instances:        make(map[types.Instance]*wgpu.Instance),
-		adapters:         make(map[types.Adapter]*wgpu.Adapter),
-		devices:          make(map[types.Device]*wgpu.Device),
-		queues:           make(map[types.Queue]*wgpu.Queue),
-		surfaces:         make(map[types.Surface]*wgpu.Surface),
-		shaders:          make(map[types.ShaderModule]*wgpu.ShaderModule),
-		pipelines:        make(map[types.RenderPipeline]*wgpu.RenderPipeline),
-		computePipelines: make(map[types.ComputePipeline]*wgpu.ComputePipeline),
-		encoders:         make(map[types.CommandEncoder]*wgpu.CommandEncoder),
-		cmdBuffers:       make(map[types.CommandBuffer]*wgpu.CommandBuffer),
-		passes:           make(map[types.RenderPass]*wgpu.RenderPassEncoder),
-		computePasses:    make(map[types.ComputePass]*wgpu.ComputePassEncoder),
-		textures:         make(map[types.Texture]*wgpu.Texture),
-		views:            make(map[types.TextureView]*wgpu.TextureView),
-		samplers:         make(map[types.Sampler]*wgpu.Sampler),
-		gpuBuffers:       make(map[types.Buffer]*wgpu.Buffer),
-		bindGroupLayouts: make(map[types.BindGroupLayout]*wgpu.BindGroupLayout),
-		bindGroups:       make(map[types.BindGroup]*wgpu.BindGroup),
-		pipelineLayouts:  make(map[types.PipelineLayout]*wgpu.PipelineLayout),
-		mappedBufferData: make(map[types.Buffer][]byte),
-		bufferDevices:    make(map[types.Buffer]types.Device),
-		nextHandle:       1,
-	}
-}
-
-func (b *Backend) newHandle() uintptr {
-	h := b.nextHandle
-	b.nextHandle++
-	return h
-}
-
-// Releasable is implemented by all wgpu resource types.
-type Releasable interface {
-	Release()
-}
-
-// releaseMap releases all resources in a map (Rust Drop pattern).
-func releaseMap[K comparable, V Releasable](m map[K]V) {
-	for k, v := range m {
-		v.Release()
-		delete(m, k)
-	}
-}
-
-// Name returns the backend identifier.
-func (b *Backend) Name() string {
-	return "Rust (wgpu-gpu)"
-}
-
-// Init initializes the backend.
-func (b *Backend) Init() error {
-	return nil
-}
-
-// Destroy releases all backend resources in reverse order of creation.
-func (b *Backend) Destroy() {
-	releaseMap(b.computePasses)
-	releaseMap(b.computePipelines)
-	releaseMap(b.pipelineLayouts)
-	releaseMap(b.bindGroups)
-	releaseMap(b.bindGroupLayouts)
-	releaseMap(b.gpuBuffers)
-	releaseMap(b.samplers)
-	releaseMap(b.views)
-	releaseMap(b.textures)
-	releaseMap(b.pipelines)
-	releaseMap(b.shaders)
-	releaseMap(b.surfaces)
-	releaseMap(b.queues)
-	releaseMap(b.devices)
-	releaseMap(b.adapters)
-	releaseMap(b.instances)
-	// Clear mapped buffer data and device tracking (no Release needed, just memory)
-	b.mappedBufferData = make(map[types.Buffer][]byte)
-	b.bufferDevices = make(map[types.Buffer]types.Device)
-}
-
-// CreateInstance creates a WebGPU instance.
-func (b *Backend) CreateInstance() (types.Instance, error) {
+// CreateInstance creates a new GPU instance via wgpu-native.
+func (b rustBackend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error) {
 	inst, err := wgpu.CreateInstance(nil)
 	if err != nil {
-		return 0, fmt.Errorf("rust backend: create instance: %w", err)
+		return nil, fmt.Errorf("rust backend: create instance: %w", err)
 	}
-	handle := types.Instance(b.newHandle())
-	b.instances[handle] = inst
-	return handle, nil
+	return &rustInstance{inst: inst}, nil
 }
 
-// RequestAdapter requests a GPU adapter.
-func (b *Backend) RequestAdapter(instance types.Instance, opts *types.AdapterOptions) (types.Adapter, error) {
-	inst := b.instances[instance]
-	if inst == nil {
-		return 0, fmt.Errorf("rust backend: invalid instance")
-	}
+// ---------------------------------------------------------------------------
+// Instance — implements hal.Instance
+// ---------------------------------------------------------------------------
 
-	var wgpuOpts *wgpu.RequestAdapterOptions
-	if opts != nil {
-		wgpuOpts = &wgpu.RequestAdapterOptions{
-			PowerPreference: opts.PowerPreference,
+// rustInstance wraps wgpu.Instance to implement hal.Instance.
+type rustInstance struct {
+	inst *wgpu.Instance
+}
+
+// CreateSurface creates a rendering surface from platform handles.
+// On Windows, displayHandle is HINSTANCE and windowHandle is HWND.
+func (i *rustInstance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
+	surf, err := i.inst.CreateSurfaceFromWindowsHWND(displayHandle, windowHandle)
+	if err != nil {
+		return nil, fmt.Errorf("rust backend: create surface: %w", err)
+	}
+	return &rustSurface{surf: surf}, nil
+}
+
+// EnumerateAdapters returns compatible GPU adapters.
+// wgpu-native uses RequestAdapter, so we request one adapter and return it as a single-element slice.
+func (i *rustInstance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapter {
+	opts := &wgpu.RequestAdapterOptions{}
+	if surfaceHint != nil {
+		if rs, ok := surfaceHint.(*rustSurface); ok {
+			opts.CompatibleSurface = rs.surf.Handle()
 		}
 	}
 
-	adapter, err := inst.RequestAdapter(wgpuOpts)
-	if err != nil {
-		return 0, fmt.Errorf("rust backend: request adapter: %w", err)
+	adapter, err := i.inst.RequestAdapter(opts)
+	if err != nil || adapter == nil {
+		return nil
 	}
 
-	handle := types.Adapter(b.newHandle())
-	b.adapters[handle] = adapter
-	return handle, nil
+	// Get adapter info
+	info, _ := adapter.GetInfo()
+	var adapterInfo gputypes.AdapterInfo
+	if info != nil {
+		adapterInfo.Name = info.Device
+		adapterInfo.Vendor = info.Vendor
+	}
+
+	return []hal.ExposedAdapter{
+		{
+			Adapter: &rustAdapter{adapter: adapter},
+			Info:    adapterInfo,
+		},
+	}
 }
 
-// RequestDevice requests a GPU device.
-func (b *Backend) RequestDevice(adapter types.Adapter, opts *types.DeviceOptions) (types.Device, error) {
-	adpt := b.adapters[adapter]
-	if adpt == nil {
-		return 0, fmt.Errorf("rust backend: invalid adapter")
+// Destroy releases the instance.
+func (i *rustInstance) Destroy() {
+	if i.inst != nil {
+		i.inst.Release()
+		i.inst = nil
 	}
-
-	device, err := adpt.RequestDevice(nil)
-	if err != nil {
-		return 0, fmt.Errorf("rust backend: request device: %w", err)
-	}
-
-	handle := types.Device(b.newHandle())
-	b.devices[handle] = device
-	return handle, nil
 }
 
-// GetQueue gets the device queue.
-func (b *Backend) GetQueue(device types.Device) types.Queue {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0
+// ---------------------------------------------------------------------------
+// Adapter — implements hal.Adapter
+// ---------------------------------------------------------------------------
+
+// rustAdapter wraps wgpu.Adapter to implement hal.Adapter.
+type rustAdapter struct {
+	adapter *wgpu.Adapter
+}
+
+// Open opens a logical device with the requested features and limits.
+func (a *rustAdapter) Open(features gputypes.Features, limits gputypes.Limits) (hal.OpenDevice, error) {
+	dev, err := a.adapter.RequestDevice(nil)
+	if err != nil {
+		return hal.OpenDevice{}, fmt.Errorf("rust backend: request device: %w", err)
 	}
+
 	queue := dev.GetQueue()
-	handle := types.Queue(b.newHandle())
-	b.queues[handle] = queue
-	return handle
-}
-
-// CreateSurface creates a rendering surface.
-func (b *Backend) CreateSurface(instance types.Instance, sh types.SurfaceHandle) (types.Surface, error) {
-	inst := b.instances[instance]
-	if inst == nil {
-		return 0, fmt.Errorf("rust backend: invalid instance")
+	if queue == nil {
+		dev.Release()
+		return hal.OpenDevice{}, fmt.Errorf("rust backend: failed to get queue")
 	}
 
-	surface, err := inst.CreateSurfaceFromWindowsHWND(sh.Instance, sh.Window)
-	if err != nil {
-		return 0, fmt.Errorf("rust backend: create surface: %w", err)
-	}
-
-	handle := types.Surface(b.newHandle())
-	b.surfaces[handle] = surface
-	return handle, nil
-}
-
-// ConfigureSurface configures the surface.
-func (b *Backend) ConfigureSurface(surface types.Surface, device types.Device, config *types.SurfaceConfig) {
-	surf := b.surfaces[surface]
-	dev := b.devices[device]
-	if surf == nil || dev == nil {
-		return
-	}
-
-	surf.Configure(&wgpu.SurfaceConfiguration{
-		Device:      dev,
-		Format:      config.Format,
-		Usage:       config.Usage,
-		Width:       config.Width,
-		Height:      config.Height,
-		PresentMode: config.PresentMode,
-		AlphaMode:   config.AlphaMode,
-	})
-}
-
-// GetCurrentTexture gets the current surface texture.
-func (b *Backend) GetCurrentTexture(surface types.Surface) (types.SurfaceTexture, error) {
-	surf := b.surfaces[surface]
-	if surf == nil {
-		return types.SurfaceTexture{}, fmt.Errorf("rust backend: invalid surface")
-	}
-
-	tex, err := surf.GetCurrentTexture()
-	if err != nil {
-		return types.SurfaceTexture{Status: types.SurfaceStatusError}, err
-	}
-
-	handle := types.Texture(b.newHandle())
-	b.textures[handle] = tex.Texture
-
-	return types.SurfaceTexture{
-		Texture: handle,
-		Status:  types.SurfaceStatusSuccess,
+	return hal.OpenDevice{
+		Device: &rustDevice{dev: dev},
+		Queue:  &rustQueue{q: queue, dev: dev},
 	}, nil
 }
 
-// Present presents the surface.
-func (b *Backend) Present(surface types.Surface) {
-	surf := b.surfaces[surface]
-	if surf != nil {
-		surf.Present()
+// TextureFormatCapabilities returns capabilities for a specific texture format.
+func (a *rustAdapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
+	// wgpu-native doesn't expose per-format capabilities directly.
+	// Return common capabilities.
+	return hal.TextureFormatCapabilities{
+		Flags: hal.TextureFormatCapabilitySampled |
+			hal.TextureFormatCapabilityRenderAttachment |
+			hal.TextureFormatCapabilityBlendable |
+			hal.TextureFormatCapabilityMultisample,
 	}
 }
 
-// CreateShaderModuleWGSL creates a shader module from WGSL code.
-func (b *Backend) CreateShaderModuleWGSL(device types.Device, code string) (types.ShaderModule, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
+// SurfaceCapabilities returns capabilities for a specific surface.
+func (a *rustAdapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
+	rs, ok := surface.(*rustSurface)
+	if !ok || rs.surf == nil {
+		return nil
 	}
 
-	shader := dev.CreateShaderModuleWGSL(code)
-	if shader == nil {
-		return 0, fmt.Errorf("rust backend: failed to create shader module")
+	caps, err := rs.surf.GetCapabilities(a.adapter)
+	if err != nil || caps == nil {
+		return nil
 	}
 
-	handle := types.ShaderModule(b.newHandle())
-	b.shaders[handle] = shader
-	return handle, nil
+	return &hal.SurfaceCapabilities{
+		Formats:      caps.Formats,
+		PresentModes: caps.PresentModes,
+		AlphaModes:   caps.AlphaModes,
+	}
 }
 
-// shaderSourceSPIRV provides SPIR-V bytecode for shader creation.
-// This matches the wgpu-native WGPUShaderSourceSPIRV chained struct layout.
-type shaderSourceSPIRV struct {
-	Chain    wgpu.ChainedStruct
-	CodeSize uint32
-	_        [4]byte // padding for alignment
-	Code     uintptr // *uint32
+// Destroy releases the adapter.
+func (a *rustAdapter) Destroy() {
+	if a.adapter != nil {
+		a.adapter.Release()
+		a.adapter = nil
+	}
 }
 
-// CreateShaderModuleSPIRV creates a shader module from SPIR-V bytecode.
-// Uses the wgpu-native SPIR-V extension via chained struct.
-func (b *Backend) CreateShaderModuleSPIRV(device types.Device, spirv []uint32) (types.ShaderModule, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
+// ---------------------------------------------------------------------------
+// Device — implements hal.Device
+// ---------------------------------------------------------------------------
 
-	if len(spirv) == 0 {
-		return 0, fmt.Errorf("rust backend: empty SPIR-V bytecode")
-	}
-
-	spirvSource := shaderSourceSPIRV{
-		Chain: wgpu.ChainedStruct{
-			Next:  0,
-			SType: uint32(wgpu.STypeShaderSourceSPIRV),
-		},
-		CodeSize: uint32(len(spirv)),
-		Code:     uintptr(unsafe.Pointer(&spirv[0])),
-	}
-
-	desc := wgpu.ShaderModuleDescriptor{
-		NextInChain: uintptr(unsafe.Pointer(&spirvSource)),
-		Label:       wgpu.EmptyStringView(),
-	}
-
-	shader := dev.CreateShaderModule(&desc)
-	if shader == nil {
-		return 0, fmt.Errorf("rust backend: failed to create SPIR-V shader module")
-	}
-
-	handle := types.ShaderModule(b.newHandle())
-	b.shaders[handle] = shader
-	return handle, nil
+// rustDevice wraps wgpu.Device to implement hal.Device.
+type rustDevice struct {
+	dev *wgpu.Device
 }
 
-// CreateRenderPipeline creates a render pipeline.
-// Supports optional pipeline layout and blend state for alpha blending.
-func (b *Backend) CreateRenderPipeline(device types.Device, desc *types.RenderPipelineDescriptor) (types.RenderPipeline, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
+// CreateBuffer creates a GPU buffer.
+func (d *rustDevice) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
+	var mappedAtCreation wgpu.Bool
+	if desc.MappedAtCreation {
+		mappedAtCreation = wgpu.True
 	}
 
-	vertShader := b.shaders[desc.VertexShader]
-	fragShader := b.shaders[desc.FragmentShader]
-	if vertShader == nil || fragShader == nil {
-		return 0, fmt.Errorf("rust backend: invalid shader module")
-	}
-
-	// Get pipeline layout if specified
-	var pipelineLayout *wgpu.PipelineLayout
-	if desc.Layout != 0 {
-		pipelineLayout = b.pipelineLayouts[desc.Layout]
-		if pipelineLayout == nil {
-			return 0, fmt.Errorf("rust backend: invalid pipeline layout")
-		}
-	}
-
-	// Build color target with optional blend state
-	colorTarget := wgpu.ColorTargetState{
-		Format:    desc.TargetFormat,
-		WriteMask: gputypes.ColorWriteMaskAll,
-	}
-
-	if desc.Blend != nil {
-		colorTarget.Blend = &wgpu.BlendState{
-			Color: wgpu.BlendComponent{
-				Operation: desc.Blend.Color.Operation,
-				SrcFactor: desc.Blend.Color.SrcFactor,
-				DstFactor: desc.Blend.Color.DstFactor,
-			},
-			Alpha: wgpu.BlendComponent{
-				Operation: desc.Blend.Alpha.Operation,
-				SrcFactor: desc.Blend.Alpha.SrcFactor,
-				DstFactor: desc.Blend.Alpha.DstFactor,
-			},
-		}
-	}
-
-	pipeline := dev.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
-		Label:  desc.Label,
-		Layout: pipelineLayout,
-		Vertex: wgpu.VertexState{
-			Module:     vertShader,
-			EntryPoint: desc.VertexEntryPoint,
-			// No vertex buffers - we use vertex-less rendering with indices in shader
-		},
-		Primitive: wgpu.PrimitiveState{
-			Topology:  desc.Topology,
-			FrontFace: desc.FrontFace,
-			CullMode:  desc.CullMode,
-		},
-		Multisample: wgpu.MultisampleState{
-			Count: 1,
-			Mask:  0xFFFFFFFF,
-		},
-		Fragment: &wgpu.FragmentState{
-			Module:     fragShader,
-			EntryPoint: desc.FragmentEntry,
-			Targets:    []wgpu.ColorTargetState{colorTarget},
-		},
+	buf := d.dev.CreateBuffer(&wgpu.BufferDescriptor{
+		Label:            wgpu.EmptyStringView(),
+		Size:             desc.Size,
+		Usage:            desc.Usage,
+		MappedAtCreation: mappedAtCreation,
 	})
-	if pipeline == nil {
-		return 0, fmt.Errorf("rust backend: failed to create pipeline")
+	if buf == nil {
+		return nil, fmt.Errorf("rust backend: failed to create buffer")
 	}
-
-	handle := types.RenderPipeline(b.newHandle())
-	b.pipelines[handle] = pipeline
-	return handle, nil
+	return &rustBuffer{buf: buf}, nil
 }
 
-// CreateComputePipeline creates a compute pipeline.
-func (b *Backend) CreateComputePipeline(device types.Device, desc *types.ComputePipelineDescriptor) (types.ComputePipeline, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
-
-	shader := b.shaders[desc.Module]
-	if shader == nil {
-		return 0, fmt.Errorf("rust backend: invalid shader module")
-	}
-
-	// Get pipeline layout if specified
-	var pipelineLayout *wgpu.PipelineLayout
-	if desc.Layout != 0 {
-		pipelineLayout = b.pipelineLayouts[desc.Layout]
-		if pipelineLayout == nil {
-			return 0, fmt.Errorf("rust backend: invalid pipeline layout")
-		}
-	}
-
-	pipeline := dev.CreateComputePipelineSimple(pipelineLayout, shader, desc.EntryPoint)
-	if pipeline == nil {
-		return 0, fmt.Errorf("rust backend: failed to create compute pipeline")
-	}
-
-	handle := types.ComputePipeline(b.newHandle())
-	b.computePipelines[handle] = pipeline
-	return handle, nil
-}
-
-// CreateCommandEncoder creates a command encoder.
-func (b *Backend) CreateCommandEncoder(device types.Device) types.CommandEncoder {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0
-	}
-
-	encoder := dev.CreateCommandEncoder(nil)
-	handle := types.CommandEncoder(b.newHandle())
-	b.encoders[handle] = encoder
-	return handle
-}
-
-// BeginRenderPass begins a render pass.
-func (b *Backend) BeginRenderPass(encoder types.CommandEncoder, desc *types.RenderPassDescriptor) types.RenderPass {
-	enc := b.encoders[encoder]
-	if enc == nil {
-		return 0
-	}
-
-	attachments := make([]wgpu.RenderPassColorAttachment, len(desc.ColorAttachments))
-	for i, att := range desc.ColorAttachments {
-		view := b.views[att.View]
-		attachments[i] = wgpu.RenderPassColorAttachment{
-			View:       view,
-			LoadOp:     att.LoadOp,
-			StoreOp:    att.StoreOp,
-			ClearValue: wgpu.Color{R: att.ClearValue.R, G: att.ClearValue.G, B: att.ClearValue.B, A: att.ClearValue.A},
-		}
-	}
-
-	pass := enc.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		ColorAttachments: attachments,
-	})
-
-	handle := types.RenderPass(b.newHandle())
-	b.passes[handle] = pass
-	return handle
-}
-
-// EndRenderPass ends a render pass.
-func (b *Backend) EndRenderPass(pass types.RenderPass) {
-	p := b.passes[pass]
-	if p != nil {
-		p.End()
+// DestroyBuffer destroys a GPU buffer.
+func (d *rustDevice) DestroyBuffer(buffer hal.Buffer) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		rb.buf.Release()
+		rb.buf = nil
 	}
 }
 
-// BeginComputePass begins a compute pass.
-func (b *Backend) BeginComputePass(encoder types.CommandEncoder) types.ComputePass {
-	enc := b.encoders[encoder]
-	if enc == nil {
-		return 0
-	}
-
-	pass := enc.BeginComputePass(nil)
-	if pass == nil {
-		return 0
-	}
-
-	handle := types.ComputePass(b.newHandle())
-	b.computePasses[handle] = pass
-	return handle
-}
-
-// EndComputePass ends a compute pass.
-func (b *Backend) EndComputePass(pass types.ComputePass) {
-	p := b.computePasses[pass]
-	if p != nil {
-		p.End()
-	}
-}
-
-// FinishEncoder finishes the command encoder.
-func (b *Backend) FinishEncoder(encoder types.CommandEncoder) types.CommandBuffer {
-	enc := b.encoders[encoder]
-	if enc == nil {
-		return 0
-	}
-
-	buffer := enc.Finish(nil)
-	handle := types.CommandBuffer(b.newHandle())
-	b.cmdBuffers[handle] = buffer
-	return handle
-}
-
-// Submit submits commands to the queue with optional fence signaling.
-// If fence is non-zero, it will be signaled with fenceValue when commands complete.
-// Returns the submission index for tracking completion.
-func (b *Backend) Submit(queue types.Queue, commands types.CommandBuffer, fence types.Fence, fenceValue uint64) types.SubmissionIndex {
-	q := b.queues[queue]
-	buf := b.cmdBuffers[commands]
-	if q != nil && buf != nil {
-		// TODO: Pass fence to wgpu-gpu when fence support is implemented.
-		// wgpu-gpu uses device.poll() for synchronization model.
-		q.Submit(buf)
-	}
-	return types.SubmissionIndex(fenceValue)
-}
-
-// GetFenceStatus returns true if the fence is signaled (non-blocking).
-func (b *Backend) GetFenceStatus(fence types.Fence) (bool, error) {
-	// wgpu-gpu uses device.poll() for synchronization, not explicit fences.
-	return true, nil // Always signaled for now
-}
-
-// SetPipeline sets the render pipeline.
-func (b *Backend) SetPipeline(pass types.RenderPass, pipeline types.RenderPipeline) {
-	p := b.passes[pass]
-	pipe := b.pipelines[pipeline]
-	if p != nil && pipe != nil {
-		p.SetPipeline(pipe)
-	}
-}
-
-// Draw issues a draw call.
-func (b *Backend) Draw(pass types.RenderPass, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	p := b.passes[pass]
-	if p != nil {
-		p.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
-	}
-}
-
-// SetComputePipeline sets the compute pipeline for a compute pass.
-func (b *Backend) SetComputePipeline(pass types.ComputePass, pipeline types.ComputePipeline) {
-	p := b.computePasses[pass]
-	pipe := b.computePipelines[pipeline]
-	if p != nil && pipe != nil {
-		p.SetPipeline(pipe)
-	}
-}
-
-// SetComputeBindGroup sets a bind group for a compute pass.
-func (b *Backend) SetComputeBindGroup(pass types.ComputePass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
-	p := b.computePasses[pass]
-	bg := b.bindGroups[bindGroup]
-	if p != nil && bg != nil {
-		p.SetBindGroup(index, bg, dynamicOffsets)
-	}
-}
-
-// DispatchWorkgroups dispatches compute work.
-func (b *Backend) DispatchWorkgroups(pass types.ComputePass, x, y, z uint32) {
-	p := b.computePasses[pass]
-	if p != nil {
-		p.DispatchWorkgroups(x, y, z)
-	}
-}
-
-// CreateTexture creates a texture.
-func (b *Backend) CreateTexture(device types.Device, desc *types.TextureDescriptor) (types.Texture, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
-
-	wgpuDesc := &wgpu.TextureDescriptor{
+// CreateTexture creates a GPU texture.
+func (d *rustDevice) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
+	tex := d.dev.CreateTexture(&wgpu.TextureDescriptor{
 		Label: wgpu.EmptyStringView(),
 		Size: gputypes.Extent3D{
 			Width:              desc.Size.Width,
@@ -597,41 +212,553 @@ func (b *Backend) CreateTexture(device types.Device, desc *types.TextureDescript
 		Dimension:     desc.Dimension,
 		Format:        desc.Format,
 		Usage:         desc.Usage,
-	}
-
-	texture := dev.CreateTexture(wgpuDesc)
-	if texture == nil {
-		return 0, fmt.Errorf("rust backend: failed to create texture")
-	}
-
-	handle := types.Texture(b.newHandle())
-	b.textures[handle] = texture
-	return handle, nil
-}
-
-// CreateTextureView creates a texture view.
-func (b *Backend) CreateTextureView(texture types.Texture, desc *types.TextureViewDescriptor) types.TextureView {
-	tex := b.textures[texture]
+	})
 	if tex == nil {
-		return 0
+		return nil, fmt.Errorf("rust backend: failed to create texture")
 	}
-
-	view := tex.CreateView(nil)
-	handle := types.TextureView(b.newHandle())
-	b.views[handle] = view
-	return handle
+	return &rustTexture{tex: tex}, nil
 }
 
-// WriteTexture writes data to a texture.
-func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, data []byte, layout *types.ImageDataLayout, size *gputypes.Extent3D) {
-	q := b.queues[queue]
-	tex := b.textures[dst.Texture]
-	if q == nil || tex == nil {
+// DestroyTexture destroys a GPU texture.
+func (d *rustDevice) DestroyTexture(texture hal.Texture) {
+	if rt, ok := texture.(*rustTexture); ok && rt.tex != nil {
+		rt.tex.Release()
+		rt.tex = nil
+	}
+}
+
+// CreateTextureView creates a view into a texture.
+func (d *rustDevice) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
+	rt, ok := texture.(*rustTexture)
+	if !ok || rt.tex == nil {
+		// Also check for surface textures
+		if st, ok2 := texture.(*rustSurfaceTexture); ok2 && st.tex != nil {
+			view := st.tex.CreateView(nil)
+			if view == nil {
+				return nil, fmt.Errorf("rust backend: failed to create texture view")
+			}
+			return &rustTextureView{view: view}, nil
+		}
+		return nil, fmt.Errorf("rust backend: invalid texture")
+	}
+
+	// Pass nil descriptor for default view
+	var wgpuDesc *wgpu.TextureViewDescriptor
+	if desc != nil {
+		wgpuDesc = &wgpu.TextureViewDescriptor{
+			Label:           wgpu.EmptyStringView(),
+			Format:          desc.Format,
+			Dimension:       desc.Dimension,
+			BaseMipLevel:    desc.BaseMipLevel,
+			MipLevelCount:   desc.MipLevelCount,
+			BaseArrayLayer:  desc.BaseArrayLayer,
+			ArrayLayerCount: desc.ArrayLayerCount,
+		}
+	}
+
+	view := rt.tex.CreateView(wgpuDesc)
+	if view == nil {
+		return nil, fmt.Errorf("rust backend: failed to create texture view")
+	}
+	return &rustTextureView{view: view}, nil
+}
+
+// DestroyTextureView destroys a texture view.
+func (d *rustDevice) DestroyTextureView(view hal.TextureView) {
+	if rv, ok := view.(*rustTextureView); ok && rv.view != nil {
+		rv.view.Release()
+		rv.view = nil
+	}
+}
+
+// CreateSampler creates a texture sampler.
+func (d *rustDevice) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
+	wgpuDesc := &wgpu.SamplerDescriptor{
+		Label:         wgpu.EmptyStringView(),
+		AddressModeU:  desc.AddressModeU,
+		AddressModeV:  desc.AddressModeV,
+		AddressModeW:  desc.AddressModeW,
+		MagFilter:     desc.MagFilter,
+		MinFilter:     desc.MinFilter,
+		MipmapFilter:  gputypes.MipmapFilterMode(desc.MipmapFilter),
+		LodMinClamp:   desc.LodMinClamp,
+		LodMaxClamp:   desc.LodMaxClamp,
+		Compare:       desc.Compare,
+		MaxAnisotropy: desc.Anisotropy,
+	}
+
+	sampler := d.dev.CreateSampler(wgpuDesc)
+	if sampler == nil {
+		return nil, fmt.Errorf("rust backend: failed to create sampler")
+	}
+	return &rustSampler{sampler: sampler}, nil
+}
+
+// DestroySampler destroys a sampler.
+func (d *rustDevice) DestroySampler(sampler hal.Sampler) {
+	if rs, ok := sampler.(*rustSampler); ok && rs.sampler != nil {
+		rs.sampler.Release()
+		rs.sampler = nil
+	}
+}
+
+// CreateBindGroupLayout creates a bind group layout.
+func (d *rustDevice) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
+	entries := make([]wgpu.BindGroupLayoutEntry, len(desc.Entries))
+	for i, entry := range desc.Entries {
+		wgpuEntry := wgpu.BindGroupLayoutEntry{
+			Binding:    entry.Binding,
+			Visibility: entry.Visibility,
+		}
+
+		if entry.Buffer != nil {
+			var hasDynamicOffset wgpu.Bool
+			if entry.Buffer.HasDynamicOffset {
+				hasDynamicOffset = wgpu.True
+			}
+			wgpuEntry.Buffer = wgpu.BufferBindingLayout{
+				Type:             entry.Buffer.Type,
+				HasDynamicOffset: hasDynamicOffset,
+				MinBindingSize:   entry.Buffer.MinBindingSize,
+			}
+		}
+
+		if entry.Sampler != nil {
+			wgpuEntry.Sampler = wgpu.SamplerBindingLayout{
+				Type: entry.Sampler.Type,
+			}
+		}
+
+		if entry.Texture != nil {
+			var multisampled wgpu.Bool
+			if entry.Texture.Multisampled {
+				multisampled = wgpu.True
+			}
+			wgpuEntry.Texture = wgpu.TextureBindingLayout{
+				SampleType:    entry.Texture.SampleType,
+				ViewDimension: entry.Texture.ViewDimension,
+				Multisampled:  multisampled,
+			}
+		}
+
+		entries[i] = wgpuEntry
+	}
+
+	layout := d.dev.CreateBindGroupLayoutSimple(entries)
+	if layout == nil {
+		return nil, fmt.Errorf("rust backend: failed to create bind group layout")
+	}
+	return &rustBindGroupLayout{layout: layout}, nil
+}
+
+// DestroyBindGroupLayout destroys a bind group layout.
+func (d *rustDevice) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
+	if rl, ok := layout.(*rustBindGroupLayout); ok && rl.layout != nil {
+		rl.layout.Release()
+		rl.layout = nil
+	}
+}
+
+// CreateBindGroup creates a bind group.
+func (d *rustDevice) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
+	rl, ok := desc.Layout.(*rustBindGroupLayout)
+	if !ok || rl.layout == nil {
+		return nil, fmt.Errorf("rust backend: invalid bind group layout")
+	}
+
+	entries := make([]wgpu.BindGroupEntry, len(desc.Entries))
+	for i, entry := range desc.Entries {
+		entries[i] = bindGroupEntryToWGPU(entry)
+	}
+
+	bg := d.dev.CreateBindGroupSimple(rl.layout, entries)
+	if bg == nil {
+		return nil, fmt.Errorf("rust backend: failed to create bind group")
+	}
+	return &rustBindGroup{bg: bg}, nil
+}
+
+// DestroyBindGroup destroys a bind group.
+func (d *rustDevice) DestroyBindGroup(group hal.BindGroup) {
+	if rg, ok := group.(*rustBindGroup); ok && rg.bg != nil {
+		rg.bg.Release()
+		rg.bg = nil
+	}
+}
+
+// CreatePipelineLayout creates a pipeline layout.
+func (d *rustDevice) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
+	layouts := make([]*wgpu.BindGroupLayout, len(desc.BindGroupLayouts))
+	for i, layout := range desc.BindGroupLayouts {
+		rl, ok := layout.(*rustBindGroupLayout)
+		if !ok || rl.layout == nil {
+			return nil, fmt.Errorf("rust backend: invalid bind group layout at index %d", i)
+		}
+		layouts[i] = rl.layout
+	}
+
+	pl := d.dev.CreatePipelineLayoutSimple(layouts)
+	if pl == nil {
+		return nil, fmt.Errorf("rust backend: failed to create pipeline layout")
+	}
+	return &rustPipelineLayout{layout: pl}, nil
+}
+
+// DestroyPipelineLayout destroys a pipeline layout.
+func (d *rustDevice) DestroyPipelineLayout(layout hal.PipelineLayout) {
+	if rl, ok := layout.(*rustPipelineLayout); ok && rl.layout != nil {
+		rl.layout.Release()
+		rl.layout = nil
+	}
+}
+
+// CreateShaderModule creates a shader module.
+func (d *rustDevice) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	var shader *wgpu.ShaderModule
+
+	switch {
+	case desc.Source.WGSL != "":
+		shader = d.dev.CreateShaderModuleWGSL(desc.Source.WGSL)
+	case len(desc.Source.SPIRV) > 0:
+		// Use SPIR-V via chained struct.
+		// unsafe.Pointer is required for FFI interop with wgpu-native.
+		spirvSource := shaderSourceSPIRV{
+			Chain: wgpu.ChainedStruct{
+				Next:  0,
+				SType: uint32(wgpu.STypeShaderSourceSPIRV),
+			},
+			CodeSize: uint32(len(desc.Source.SPIRV)),                 //nolint:gosec // G115: SPIR-V size fits uint32
+			Code:     uintptr(unsafe.Pointer(&desc.Source.SPIRV[0])), //nolint:gosec // G103: FFI interop
+		}
+		wgpuDesc := wgpu.ShaderModuleDescriptor{
+			NextInChain: uintptr(unsafe.Pointer(&spirvSource)), //nolint:gosec // G103: FFI interop
+			Label:       wgpu.EmptyStringView(),
+		}
+		shader = d.dev.CreateShaderModule(&wgpuDesc)
+	default:
+		return nil, fmt.Errorf("rust backend: no shader source provided")
+	}
+
+	if shader == nil {
+		return nil, fmt.Errorf("rust backend: failed to create shader module")
+	}
+	return &rustShaderModule{module: shader}, nil
+}
+
+// shaderSourceSPIRV provides SPIR-V bytecode for shader creation.
+// This matches the wgpu-native WGPUShaderSourceSPIRV chained struct layout.
+type shaderSourceSPIRV struct {
+	Chain    wgpu.ChainedStruct
+	CodeSize uint32
+	_        [4]byte // padding for alignment
+	Code     uintptr // *uint32
+}
+
+// DestroyShaderModule destroys a shader module.
+func (d *rustDevice) DestroyShaderModule(module hal.ShaderModule) {
+	if rm, ok := module.(*rustShaderModule); ok && rm.module != nil {
+		rm.module.Release()
+		rm.module = nil
+	}
+}
+
+// CreateRenderPipeline creates a render pipeline.
+func (d *rustDevice) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	vertModule, ok := desc.Vertex.Module.(*rustShaderModule)
+	if !ok || vertModule.module == nil {
+		return nil, fmt.Errorf("rust backend: invalid vertex shader module")
+	}
+
+	wgpuDesc := &wgpu.RenderPipelineDescriptor{
+		Label: desc.Label,
+		Vertex: wgpu.VertexState{
+			Module:     vertModule.module,
+			EntryPoint: desc.Vertex.EntryPoint,
+		},
+		Primitive: wgpu.PrimitiveState{
+			Topology:  desc.Primitive.Topology,
+			FrontFace: desc.Primitive.FrontFace,
+			CullMode:  desc.Primitive.CullMode,
+		},
+		Multisample: wgpu.MultisampleState{
+			Count: desc.Multisample.Count,
+			Mask:  uint32(desc.Multisample.Mask), //nolint:gosec // G115: truncation is safe, mask is always 32-bit
+		},
+	}
+
+	// Default multisample state
+	if wgpuDesc.Multisample.Count == 0 {
+		wgpuDesc.Multisample.Count = 1
+	}
+	if wgpuDesc.Multisample.Mask == 0 {
+		wgpuDesc.Multisample.Mask = 0xFFFFFFFF
+	}
+
+	// Pipeline layout
+	if desc.Layout != nil {
+		if rl, ok2 := desc.Layout.(*rustPipelineLayout); ok2 {
+			wgpuDesc.Layout = rl.layout
+		}
+	}
+
+	// Vertex buffers
+	if len(desc.Vertex.Buffers) > 0 {
+		wgpuDesc.Vertex.Buffers = convertVertexBufferLayouts(desc.Vertex.Buffers)
+	}
+
+	// Fragment state
+	if desc.Fragment != nil {
+		fragModule, ok2 := desc.Fragment.Module.(*rustShaderModule)
+		if !ok2 || fragModule.module == nil {
+			return nil, fmt.Errorf("rust backend: invalid fragment shader module")
+		}
+		wgpuDesc.Fragment = &wgpu.FragmentState{
+			Module:     fragModule.module,
+			EntryPoint: desc.Fragment.EntryPoint,
+			Targets:    convertColorTargetStates(desc.Fragment.Targets),
+		}
+	}
+
+	// Depth/stencil state
+	if desc.DepthStencil != nil {
+		wgpuDesc.DepthStencil = &wgpu.DepthStencilState{
+			Format:            desc.DepthStencil.Format,
+			DepthWriteEnabled: desc.DepthStencil.DepthWriteEnabled,
+			DepthCompare:      desc.DepthStencil.DepthCompare,
+			StencilFront: wgpu.StencilFaceState{
+				Compare:     desc.DepthStencil.StencilFront.Compare,
+				FailOp:      gputypes.StencilOperation(desc.DepthStencil.StencilFront.FailOp),
+				DepthFailOp: gputypes.StencilOperation(desc.DepthStencil.StencilFront.DepthFailOp),
+				PassOp:      gputypes.StencilOperation(desc.DepthStencil.StencilFront.PassOp),
+			},
+			StencilBack: wgpu.StencilFaceState{
+				Compare:     desc.DepthStencil.StencilBack.Compare,
+				FailOp:      gputypes.StencilOperation(desc.DepthStencil.StencilBack.FailOp),
+				DepthFailOp: gputypes.StencilOperation(desc.DepthStencil.StencilBack.DepthFailOp),
+				PassOp:      gputypes.StencilOperation(desc.DepthStencil.StencilBack.PassOp),
+			},
+			StencilReadMask:     desc.DepthStencil.StencilReadMask,
+			StencilWriteMask:    desc.DepthStencil.StencilWriteMask,
+			DepthBias:           desc.DepthStencil.DepthBias,
+			DepthBiasSlopeScale: desc.DepthStencil.DepthBiasSlopeScale,
+			DepthBiasClamp:      desc.DepthStencil.DepthBiasClamp,
+		}
+	}
+
+	pipeline := d.dev.CreateRenderPipeline(wgpuDesc)
+	if pipeline == nil {
+		return nil, fmt.Errorf("rust backend: failed to create render pipeline")
+	}
+	return &rustRenderPipeline{pipeline: pipeline}, nil
+}
+
+// DestroyRenderPipeline destroys a render pipeline.
+func (d *rustDevice) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
+	if rp, ok := pipeline.(*rustRenderPipeline); ok && rp.pipeline != nil {
+		rp.pipeline.Release()
+		rp.pipeline = nil
+	}
+}
+
+// CreateComputePipeline creates a compute pipeline.
+func (d *rustDevice) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	shader, ok := desc.Compute.Module.(*rustShaderModule)
+	if !ok || shader.module == nil {
+		return nil, fmt.Errorf("rust backend: invalid compute shader module")
+	}
+
+	var layout *wgpu.PipelineLayout
+	if desc.Layout != nil {
+		if rl, ok2 := desc.Layout.(*rustPipelineLayout); ok2 {
+			layout = rl.layout
+		}
+	}
+
+	pipeline := d.dev.CreateComputePipelineSimple(layout, shader.module, desc.Compute.EntryPoint)
+	if pipeline == nil {
+		return nil, fmt.Errorf("rust backend: failed to create compute pipeline")
+	}
+	return &rustComputePipeline{pipeline: pipeline}, nil
+}
+
+// DestroyComputePipeline destroys a compute pipeline.
+func (d *rustDevice) DestroyComputePipeline(pipeline hal.ComputePipeline) {
+	if rp, ok := pipeline.(*rustComputePipeline); ok && rp.pipeline != nil {
+		rp.pipeline.Release()
+		rp.pipeline = nil
+	}
+}
+
+// CreateCommandEncoder creates a command encoder.
+func (d *rustDevice) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	enc := d.dev.CreateCommandEncoder(nil)
+	if enc == nil {
+		return nil, fmt.Errorf("rust backend: failed to create command encoder")
+	}
+	return &rustCommandEncoder{enc: enc}, nil
+}
+
+// CreateRenderBundleEncoder creates a render bundle encoder.
+func (d *rustDevice) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	wgpuDesc := &wgpu.RenderBundleEncoderDescriptor{
+		Label:              wgpu.EmptyStringView(),
+		DepthStencilFormat: desc.DepthStencilFormat,
+		SampleCount:        desc.SampleCount,
+	}
+
+	if desc.DepthReadOnly {
+		wgpuDesc.DepthReadOnly = wgpu.True
+	}
+	if desc.StencilReadOnly {
+		wgpuDesc.StencilReadOnly = wgpu.True
+	}
+
+	if len(desc.ColorFormats) > 0 {
+		wgpuDesc.ColorFormatCount = uintptr(len(desc.ColorFormats))
+		wgpuDesc.ColorFormats = &desc.ColorFormats[0]
+	}
+
+	rbe := d.dev.CreateRenderBundleEncoder(wgpuDesc)
+	if rbe == nil {
+		return nil, fmt.Errorf("rust backend: failed to create render bundle encoder")
+	}
+	return &rustRenderBundleEncoder{enc: rbe}, nil
+}
+
+// DestroyRenderBundle destroys a render bundle.
+func (d *rustDevice) DestroyRenderBundle(bundle hal.RenderBundle) {
+	if rb, ok := bundle.(*rustRenderBundle); ok && rb.bundle != nil {
+		rb.bundle.Release()
+		rb.bundle = nil
+	}
+}
+
+// FreeCommandBuffer returns a command buffer to the command pool.
+func (d *rustDevice) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	if rcb, ok := cmdBuffer.(*rustCommandBuffer); ok && rcb.buf != nil {
+		rcb.buf.Release()
+		rcb.buf = nil
+	}
+}
+
+// CreateFence creates a synchronization fence.
+// wgpu-native uses device.poll() for synchronization, not explicit fences.
+// This returns a stub fence.
+func (d *rustDevice) CreateFence() (hal.Fence, error) {
+	return &rustFence{}, nil
+}
+
+// DestroyFence destroys a fence.
+func (d *rustDevice) DestroyFence(fence hal.Fence) {
+	// No-op: wgpu-native uses device.poll() for synchronization.
+}
+
+// Wait waits for a fence to reach the specified value.
+// wgpu-native uses device.poll(wait=true) for synchronization.
+func (d *rustDevice) Wait(fence hal.Fence, value uint64, timeout time.Duration) (bool, error) {
+	_ = value
+	_ = timeout
+	// Block until all GPU work completes via device polling.
+	d.dev.Poll(true)
+	return true, nil
+}
+
+// ResetFence resets a fence to the unsignaled state.
+func (d *rustDevice) ResetFence(fence hal.Fence) error {
+	// No-op: wgpu-native uses device.poll() for synchronization.
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *rustDevice) GetFenceStatus(fence hal.Fence) (bool, error) {
+	// Poll without blocking. Returns true when queue is empty.
+	d.dev.Poll(false)
+	return true, nil
+}
+
+// Destroy releases the device.
+func (d *rustDevice) Destroy() {
+	if d.dev != nil {
+		d.dev.Release()
+		d.dev = nil
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Queue — implements hal.Queue
+// ---------------------------------------------------------------------------
+
+// rustQueue wraps wgpu.Queue to implement hal.Queue.
+type rustQueue struct {
+	q   *wgpu.Queue
+	dev *wgpu.Device
+}
+
+// Submit submits command buffers to the GPU.
+func (q *rustQueue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+	cmds := make([]*wgpu.CommandBuffer, 0, len(commandBuffers))
+	for _, cb := range commandBuffers {
+		if rcb, ok := cb.(*rustCommandBuffer); ok && rcb.buf != nil {
+			cmds = append(cmds, rcb.buf)
+		}
+	}
+	if len(cmds) > 0 {
+		q.q.Submit(cmds...)
+	}
+	return nil
+}
+
+// WriteBuffer writes data to a buffer immediately.
+func (q *rustQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		q.q.WriteBuffer(rb.buf, offset, data)
+	}
+}
+
+// ReadBuffer reads data from a GPU buffer.
+// Uses MapAsync + GetMappedRange + copy + Unmap internally.
+func (q *rustQueue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	rb, ok := buffer.(*rustBuffer)
+	if !ok || rb.buf == nil {
+		return fmt.Errorf("rust backend: invalid buffer")
+	}
+
+	size := uint64(len(data))
+	if size == 0 {
+		return nil
+	}
+
+	// Map the buffer for reading (blocks via device polling)
+	if err := rb.buf.MapAsync(q.dev, wgpu.MapModeRead, offset, size); err != nil {
+		return fmt.Errorf("rust backend: map buffer: %w", err)
+	}
+
+	// Get pointer to mapped data
+	ptr := rb.buf.GetMappedRange(offset, size)
+	if ptr == nil {
+		rb.buf.Unmap()
+		return fmt.Errorf("rust backend: failed to get mapped range")
+	}
+
+	// Copy data to caller's slice.
+	// unsafe.Slice is required to access the GPU-mapped memory region.
+	copy(data, unsafe.Slice((*byte)(ptr), size)) //nolint:gosec // G103: required for GPU buffer readback
+
+	// Unmap immediately
+	rb.buf.Unmap()
+
+	return nil
+}
+
+// WriteTexture writes data to a texture immediately.
+func (q *rustQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+	rt, ok := dst.Texture.(*rustTexture)
+	if !ok || rt.tex == nil {
 		return
 	}
 
 	wgpuDst := &wgpu.TexelCopyTextureInfo{
-		Texture:  tex.Handle(),
+		Texture:  rt.tex.Handle(),
 		MipLevel: dst.MipLevel,
 		Origin: gputypes.Origin3D{
 			X: dst.Origin.X,
@@ -653,483 +780,801 @@ func (b *Backend) WriteTexture(queue types.Queue, dst *types.ImageCopyTexture, d
 		DepthOrArrayLayers: size.DepthOrArrayLayers,
 	}
 
-	q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
+	q.q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
 }
 
-// CreateSampler creates a sampler.
-func (b *Backend) CreateSampler(device types.Device, desc *types.SamplerDescriptor) (types.Sampler, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
+// Present presents a surface texture to the screen.
+// In wgpu-native, presentation is done via Surface.Present, not Queue.Present.
+func (q *rustQueue) Present(surface hal.Surface, texture hal.SurfaceTexture) error {
+	rs, ok := surface.(*rustSurface)
+	if !ok || rs.surf == nil {
+		return fmt.Errorf("rust backend: invalid surface")
 	}
-
-	wgpuDesc := &wgpu.SamplerDescriptor{
-		Label:         wgpu.EmptyStringView(),
-		AddressModeU:  desc.AddressModeU,
-		AddressModeV:  desc.AddressModeV,
-		AddressModeW:  desc.AddressModeW,
-		MagFilter:     desc.MagFilter,
-		MinFilter:     desc.MinFilter,
-		MipmapFilter:  desc.MipmapFilter,
-		LodMinClamp:   desc.LodMinClamp,
-		LodMaxClamp:   desc.LodMaxClamp,
-		Compare:       desc.Compare,
-		MaxAnisotropy: desc.MaxAnisotropy,
-	}
-
-	sampler := dev.CreateSampler(wgpuDesc)
-	if sampler == nil {
-		return 0, fmt.Errorf("rust backend: failed to create sampler")
-	}
-
-	handle := types.Sampler(b.newHandle())
-	b.samplers[handle] = sampler
-	return handle, nil
-}
-
-// CreateBuffer creates a buffer.
-func (b *Backend) CreateBuffer(device types.Device, desc *types.BufferDescriptor) (types.Buffer, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
-
-	var mappedAtCreation wgpu.Bool
-	if desc.MappedAtCreation {
-		mappedAtCreation = wgpu.True
-	} else {
-		mappedAtCreation = wgpu.False
-	}
-
-	wgpuDesc := &wgpu.BufferDescriptor{
-		Label:            wgpu.EmptyStringView(),
-		Size:             desc.Size,
-		Usage:            desc.Usage,
-		MappedAtCreation: mappedAtCreation,
-	}
-
-	buffer := dev.CreateBuffer(wgpuDesc)
-	if buffer == nil {
-		return 0, fmt.Errorf("rust backend: failed to create buffer")
-	}
-
-	handle := types.Buffer(b.newHandle())
-	b.gpuBuffers[handle] = buffer
-	b.bufferDevices[handle] = device
-	return handle, nil
-}
-
-// WriteBuffer writes data to a buffer.
-func (b *Backend) WriteBuffer(queue types.Queue, buffer types.Buffer, offset uint64, data []byte) {
-	q := b.queues[queue]
-	buf := b.gpuBuffers[buffer]
-	if q == nil || buf == nil {
-		return
-	}
-
-	q.WriteBuffer(buf, offset, data)
-}
-
-// CopyBufferToBuffer records a buffer-to-buffer copy command.
-func (b *Backend) CopyBufferToBuffer(encoder types.CommandEncoder, src types.Buffer, srcOffset uint64, dst types.Buffer, dstOffset, size uint64) {
-	enc := b.encoders[encoder]
-	srcBuf := b.gpuBuffers[src]
-	dstBuf := b.gpuBuffers[dst]
-	if enc == nil || srcBuf == nil || dstBuf == nil {
-		return
-	}
-	enc.CopyBufferToBuffer(srcBuf, srcOffset, dstBuf, dstOffset, size)
-}
-
-// MapBufferRead maps a buffer for reading and returns a copy of its contents.
-// The buffer must have been created with MapRead usage.
-// This method maps the buffer, copies the data to a Go slice, and stores the
-// mapped data for later cleanup via UnmapBuffer.
-func (b *Backend) MapBufferRead(buffer types.Buffer) ([]byte, error) {
-	buf := b.gpuBuffers[buffer]
-	if buf == nil {
-		return nil, fmt.Errorf("rust backend: invalid buffer")
-	}
-
-	// Get the device that created this buffer for polling
-	devHandle := b.bufferDevices[buffer]
-	dev := b.devices[devHandle]
-	if dev == nil {
-		return nil, fmt.Errorf("rust backend: no device associated with buffer")
-	}
-
-	// Get buffer size
-	size := buf.GetSize()
-	if size == 0 {
-		return nil, fmt.Errorf("rust backend: buffer has zero size")
-	}
-
-	// Map the buffer for reading (blocks until complete via device polling)
-	if err := buf.MapAsync(dev, wgpu.MapModeRead, 0, size); err != nil {
-		return nil, fmt.Errorf("rust backend: map buffer: %w", err)
-	}
-
-	// Get pointer to mapped data
-	ptr := buf.GetMappedRange(0, size)
-	if ptr == nil {
-		buf.Unmap()
-		return nil, fmt.Errorf("rust backend: failed to get mapped range")
-	}
-
-	// Copy data to a Go-owned slice (the mapped pointer is only valid until Unmap)
-	data := make([]byte, size)
-	copy(data, unsafe.Slice((*byte)(ptr), size))
-
-	// Store the data and keep buffer mapped for UnmapBuffer
-	b.mappedBufferData[buffer] = data
-
-	// Unmap immediately since we already copied the data
-	buf.Unmap()
-
-	return data, nil
-}
-
-// UnmapBuffer unmaps a previously mapped buffer and cleans up cached data.
-// Since MapBufferRead copies data and unmaps immediately, this only clears
-// the cached data slice.
-func (b *Backend) UnmapBuffer(buffer types.Buffer) {
-	delete(b.mappedBufferData, buffer)
-}
-
-// CreateBindGroupLayout creates a bind group layout.
-func (b *Backend) CreateBindGroupLayout(device types.Device, desc *types.BindGroupLayoutDescriptor) (types.BindGroupLayout, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
-
-	entries := make([]wgpu.BindGroupLayoutEntry, len(desc.Entries))
-	for i, entry := range desc.Entries {
-		wgpuEntry := wgpu.BindGroupLayoutEntry{
-			Binding:    entry.Binding,
-			Visibility: entry.Visibility,
-		}
-
-		if entry.Buffer != nil {
-			var hasDynamicOffset wgpu.Bool
-			if entry.Buffer.HasDynamicOffset {
-				hasDynamicOffset = wgpu.True
-			} else {
-				hasDynamicOffset = wgpu.False
-			}
-			wgpuEntry.Buffer = wgpu.BufferBindingLayout{
-				Type:             entry.Buffer.Type,
-				HasDynamicOffset: hasDynamicOffset,
-				MinBindingSize:   entry.Buffer.MinBindingSize,
-			}
-		}
-
-		if entry.Sampler != nil {
-			wgpuEntry.Sampler = wgpu.SamplerBindingLayout{
-				Type: entry.Sampler.Type,
-			}
-		}
-
-		if entry.Texture != nil {
-			var multisampled wgpu.Bool
-			if entry.Texture.Multisampled {
-				multisampled = wgpu.True
-			} else {
-				multisampled = wgpu.False
-			}
-			wgpuEntry.Texture = wgpu.TextureBindingLayout{
-				SampleType:    entry.Texture.SampleType,
-				ViewDimension: entry.Texture.ViewDimension,
-				Multisampled:  multisampled,
-			}
-		}
-
-		entries[i] = wgpuEntry
-	}
-
-	layout := dev.CreateBindGroupLayoutSimple(entries)
-	if layout == nil {
-		return 0, fmt.Errorf("rust backend: failed to create bind group layout")
-	}
-
-	handle := types.BindGroupLayout(b.newHandle())
-	b.bindGroupLayouts[handle] = layout
-	return handle, nil
-}
-
-// CreateBindGroup creates a bind group.
-func (b *Backend) CreateBindGroup(device types.Device, desc *types.BindGroupDescriptor) (types.BindGroup, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
-
-	layout := b.bindGroupLayouts[desc.Layout]
-	if layout == nil {
-		return 0, fmt.Errorf("rust backend: invalid bind group layout")
-	}
-
-	entries := make([]wgpu.BindGroupEntry, len(desc.Entries))
-	for i, entry := range desc.Entries {
-		wgpuEntry := wgpu.BindGroupEntry{
-			Binding: entry.Binding,
-		}
-
-		if entry.Buffer != 0 {
-			buf := b.gpuBuffers[entry.Buffer]
-			if buf != nil {
-				wgpuEntry.Buffer = buf.Handle()
-				wgpuEntry.Offset = entry.Offset
-				wgpuEntry.Size = entry.Size
-			}
-		}
-
-		if entry.Sampler != 0 {
-			sampler := b.samplers[entry.Sampler]
-			if sampler != nil {
-				wgpuEntry.Sampler = sampler.Handle()
-			}
-		}
-
-		if entry.TextureView != 0 {
-			view := b.views[entry.TextureView]
-			if view != nil {
-				wgpuEntry.TextureView = view.Handle()
-			}
-		}
-
-		entries[i] = wgpuEntry
-	}
-
-	bindGroup := dev.CreateBindGroupSimple(layout, entries)
-	if bindGroup == nil {
-		return 0, fmt.Errorf("rust backend: failed to create bind group")
-	}
-
-	handle := types.BindGroup(b.newHandle())
-	b.bindGroups[handle] = bindGroup
-	return handle, nil
-}
-
-// CreatePipelineLayout creates a pipeline layout.
-func (b *Backend) CreatePipelineLayout(device types.Device, desc *types.PipelineLayoutDescriptor) (types.PipelineLayout, error) {
-	dev := b.devices[device]
-	if dev == nil {
-		return 0, fmt.Errorf("rust backend: invalid device")
-	}
-
-	layouts := make([]*wgpu.BindGroupLayout, len(desc.BindGroupLayouts))
-	for i, layoutHandle := range desc.BindGroupLayouts {
-		layout := b.bindGroupLayouts[layoutHandle]
-		if layout == nil {
-			return 0, fmt.Errorf("rust backend: invalid bind group layout at index %d", i)
-		}
-		layouts[i] = layout
-	}
-
-	pipelineLayout := dev.CreatePipelineLayoutSimple(layouts)
-	if pipelineLayout == nil {
-		return 0, fmt.Errorf("rust backend: failed to create pipeline layout")
-	}
-
-	handle := types.PipelineLayout(b.newHandle())
-	b.pipelineLayouts[handle] = pipelineLayout
-	return handle, nil
-}
-
-// SetBindGroup sets a bind group for rendering.
-func (b *Backend) SetBindGroup(pass types.RenderPass, index uint32, bindGroup types.BindGroup, dynamicOffsets []uint32) {
-	p := b.passes[pass]
-	bg := b.bindGroups[bindGroup]
-	if p == nil || bg == nil {
-		return
-	}
-
-	p.SetBindGroup(index, bg, dynamicOffsets)
-}
-
-// SetVertexBuffer sets a vertex buffer for rendering.
-func (b *Backend) SetVertexBuffer(pass types.RenderPass, slot uint32, buffer types.Buffer, offset, size uint64) {
-	p := b.passes[pass]
-	buf := b.gpuBuffers[buffer]
-	if p == nil || buf == nil {
-		return
-	}
-
-	p.SetVertexBuffer(slot, buf, offset, size)
-}
-
-// SetIndexBuffer sets an index buffer for rendering.
-func (b *Backend) SetIndexBuffer(pass types.RenderPass, buffer types.Buffer, format gputypes.IndexFormat, offset, size uint64) {
-	p := b.passes[pass]
-	buf := b.gpuBuffers[buffer]
-	if p == nil || buf == nil {
-		return
-	}
-
-	p.SetIndexBuffer(buf, format, offset, size)
-}
-
-// DrawIndexed issues an indexed draw call.
-func (b *Backend) DrawIndexed(pass types.RenderPass, indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
-	p := b.passes[pass]
-	if p == nil {
-		return
-	}
-
-	p.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
-}
-
-// ReleaseTextureView releases a texture view.
-func (b *Backend) ReleaseTextureView(view types.TextureView) {
-	v := b.views[view]
-	if v != nil {
-		v.Release()
-		delete(b.views, view)
-	}
-}
-
-// ReleaseTexture releases a texture.
-func (b *Backend) ReleaseTexture(texture types.Texture) {
-	t := b.textures[texture]
-	if t != nil {
-		t.Release()
-		delete(b.textures, texture)
-	}
-}
-
-// ReleaseSampler releases a sampler.
-func (b *Backend) ReleaseSampler(sampler types.Sampler) {
-	s := b.samplers[sampler]
-	if s != nil {
-		s.Release()
-		delete(b.samplers, sampler)
-	}
-}
-
-// ReleaseBuffer releases a buffer.
-func (b *Backend) ReleaseBuffer(buffer types.Buffer) {
-	buf := b.gpuBuffers[buffer]
-	if buf != nil {
-		buf.Release()
-		delete(b.gpuBuffers, buffer)
-	}
-	delete(b.bufferDevices, buffer)
-	delete(b.mappedBufferData, buffer)
-}
-
-// ReleaseBindGroupLayout releases a bind group layout.
-func (b *Backend) ReleaseBindGroupLayout(layout types.BindGroupLayout) {
-	l := b.bindGroupLayouts[layout]
-	if l != nil {
-		l.Release()
-		delete(b.bindGroupLayouts, layout)
-	}
-}
-
-// ReleaseBindGroup releases a bind group.
-func (b *Backend) ReleaseBindGroup(group types.BindGroup) {
-	g := b.bindGroups[group]
-	if g != nil {
-		g.Release()
-		delete(b.bindGroups, group)
-	}
-}
-
-// ReleasePipelineLayout releases a pipeline layout.
-func (b *Backend) ReleasePipelineLayout(layout types.PipelineLayout) {
-	l := b.pipelineLayouts[layout]
-	if l != nil {
-		l.Release()
-		delete(b.pipelineLayouts, layout)
-	}
-}
-
-// ReleaseCommandBuffer releases a command buffer.
-func (b *Backend) ReleaseCommandBuffer(buffer types.CommandBuffer) {
-	buf := b.cmdBuffers[buffer]
-	if buf != nil {
-		buf.Release()
-		delete(b.cmdBuffers, buffer)
-	}
-}
-
-// ReleaseCommandEncoder releases a command encoder.
-func (b *Backend) ReleaseCommandEncoder(encoder types.CommandEncoder) {
-	enc := b.encoders[encoder]
-	if enc != nil {
-		enc.Release()
-		delete(b.encoders, encoder)
-	}
-}
-
-// ReleaseRenderPass releases a render pass.
-func (b *Backend) ReleaseRenderPass(pass types.RenderPass) {
-	p := b.passes[pass]
-	if p != nil {
-		p.Release()
-		delete(b.passes, pass)
-	}
-}
-
-// ReleaseComputePipeline releases a compute pipeline.
-func (b *Backend) ReleaseComputePipeline(pipeline types.ComputePipeline) {
-	p := b.computePipelines[pipeline]
-	if p != nil {
-		p.Release()
-		delete(b.computePipelines, pipeline)
-	}
-}
-
-// ReleaseComputePass releases a compute pass.
-func (b *Backend) ReleaseComputePass(pass types.ComputePass) {
-	p := b.computePasses[pass]
-	if p != nil {
-		p.Release()
-		delete(b.computePasses, pass)
-	}
-}
-
-// ReleaseShaderModule releases a shader module.
-func (b *Backend) ReleaseShaderModule(module types.ShaderModule) {
-	s := b.shaders[module]
-	if s != nil {
-		s.Release()
-		delete(b.shaders, module)
-	}
-}
-
-// ResetCommandPool resets the command pool to reclaim command buffer memory.
-// wgpu-gpu handles command buffer lifecycle automatically, so this is a no-op.
-func (b *Backend) ResetCommandPool(device types.Device) {
-	// wgpu-gpu manages command buffer memory internally.
-	// No explicit reset needed.
-}
-
-// CreateFence creates a new fence in the unsignaled state.
-// Note: wgpu-gpu uses a different synchronization model with device.poll().
-func (b *Backend) CreateFence(device types.Device) (types.Fence, error) {
-	// wgpu-gpu uses device.poll() for synchronization, not explicit fences.
-	// This will be implemented when go-webgpu/webgpu adds fence support.
-	return 0, gpu.ErrNotImplemented
-}
-
-// WaitFence waits for a fence to be signaled.
-func (b *Backend) WaitFence(device types.Device, fence types.Fence, timeout uint64) (bool, error) {
-	// wgpu-gpu uses device.poll() for synchronization.
-	return true, nil // Always "signaled" for now
-}
-
-// ResetFence resets a fence to the unsignaled state.
-func (b *Backend) ResetFence(device types.Device, fence types.Fence) error {
-	// wgpu-gpu uses device.poll() for synchronization.
+	rs.surf.Present()
 	return nil
 }
 
-// DestroyFence destroys a fence.
-func (b *Backend) DestroyFence(device types.Device, fence types.Fence) {
-	// wgpu-gpu manages synchronization internally.
+// GetTimestampPeriod returns the timestamp period in nanoseconds.
+func (q *rustQueue) GetTimestampPeriod() float32 {
+	// wgpu-native typically returns 1.0 for Vulkan (timestamps in nanoseconds).
+	return 1.0
 }
 
-// Ensure Backend implements gpu.Backend.
-var _ gpu.Backend = (*Backend)(nil)
+// ---------------------------------------------------------------------------
+// Surface — implements hal.Surface
+// ---------------------------------------------------------------------------
+
+// rustSurface wraps wgpu.Surface to implement hal.Surface.
+type rustSurface struct {
+	surf *wgpu.Surface
+}
+
+// Configure configures the surface with the given device and settings.
+func (s *rustSurface) Configure(device hal.Device, config *hal.SurfaceConfiguration) error {
+	rd, ok := device.(*rustDevice)
+	if !ok || rd.dev == nil {
+		return fmt.Errorf("rust backend: invalid device")
+	}
+
+	if config.Width == 0 || config.Height == 0 {
+		return hal.ErrZeroArea
+	}
+
+	s.surf.Configure(&wgpu.SurfaceConfiguration{
+		Device:      rd.dev,
+		Format:      config.Format,
+		Usage:       config.Usage,
+		Width:       config.Width,
+		Height:      config.Height,
+		AlphaMode:   config.AlphaMode,
+		PresentMode: config.PresentMode,
+	})
+	return nil
+}
+
+// Unconfigure removes the surface configuration.
+func (s *rustSurface) Unconfigure(device hal.Device) {
+	s.surf.Unconfigure()
+}
+
+// AcquireTexture acquires the next surface texture for rendering.
+func (s *rustSurface) AcquireTexture(fence hal.Fence) (*hal.AcquiredSurfaceTexture, error) {
+	surfTex, err := s.surf.GetCurrentTexture()
+	if err != nil {
+		return nil, convertSurfaceError(err)
+	}
+
+	suboptimal := surfTex.Status == wgpu.SurfaceGetCurrentTextureStatusSuccessSuboptimal
+
+	return &hal.AcquiredSurfaceTexture{
+		Texture:    &rustSurfaceTexture{tex: surfTex.Texture},
+		Suboptimal: suboptimal,
+	}, nil
+}
+
+// DiscardTexture discards a surface texture without presenting it.
+func (s *rustSurface) DiscardTexture(texture hal.SurfaceTexture) {
+	// wgpu-native: surface textures are automatically discarded if not presented.
+	// Release the texture reference.
+	if rst, ok := texture.(*rustSurfaceTexture); ok && rst.tex != nil {
+		rst.tex.Release()
+		rst.tex = nil
+	}
+}
+
+// Destroy releases the surface.
+func (s *rustSurface) Destroy() {
+	if s.surf != nil {
+		s.surf.Release()
+		s.surf = nil
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Command Encoder — implements hal.CommandEncoder
+// ---------------------------------------------------------------------------
+
+// rustCommandEncoder wraps wgpu.CommandEncoder to implement hal.CommandEncoder.
+type rustCommandEncoder struct {
+	enc *wgpu.CommandEncoder
+}
+
+// BeginEncoding begins command recording.
+// wgpu-native encoding starts at creation, so this is a no-op.
+func (e *rustCommandEncoder) BeginEncoding(label string) error {
+	return nil
+}
+
+// EndEncoding finishes command recording and returns a command buffer.
+func (e *rustCommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
+	if e.enc == nil {
+		return nil, fmt.Errorf("rust backend: encoder is nil")
+	}
+	buf := e.enc.Finish(nil)
+	if buf == nil {
+		return nil, fmt.Errorf("rust backend: failed to finish command encoder")
+	}
+	return &rustCommandBuffer{buf: buf}, nil
+}
+
+// DiscardEncoding discards the encoder without creating a command buffer.
+func (e *rustCommandEncoder) DiscardEncoding() {
+	if e.enc != nil {
+		e.enc.Release()
+		e.enc = nil
+	}
+}
+
+// ResetAll resets command buffers for reuse.
+// wgpu-native handles command buffer lifecycle automatically.
+func (e *rustCommandEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
+	// No-op: wgpu-native manages command buffer memory internally.
+}
+
+// TransitionBuffers transitions buffer states for synchronization.
+// No-op for wgpu-native — it handles barriers internally.
+func (e *rustCommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
+	// No-op: wgpu-native tracks resource state automatically.
+}
+
+// TransitionTextures transitions texture states for synchronization.
+// No-op for wgpu-native — it handles barriers internally.
+func (e *rustCommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+	// No-op: wgpu-native tracks resource state automatically.
+}
+
+// ClearBuffer clears a buffer region to zero.
+func (e *rustCommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		e.enc.ClearBuffer(rb.buf, offset, size)
+	}
+}
+
+// CopyBufferToBuffer copies data between buffers.
+func (e *rustCommandEncoder) CopyBufferToBuffer(src, dst hal.Buffer, regions []hal.BufferCopy) {
+	srcBuf, ok1 := src.(*rustBuffer)
+	dstBuf, ok2 := dst.(*rustBuffer)
+	if !ok1 || !ok2 || srcBuf.buf == nil || dstBuf.buf == nil {
+		return
+	}
+	for _, r := range regions {
+		e.enc.CopyBufferToBuffer(srcBuf.buf, r.SrcOffset, dstBuf.buf, r.DstOffset, r.Size)
+	}
+}
+
+// CopyBufferToTexture copies data from a buffer to a texture.
+func (e *rustCommandEncoder) CopyBufferToTexture(src hal.Buffer, dst hal.Texture, regions []hal.BufferTextureCopy) {
+	srcBuf, ok1 := src.(*rustBuffer)
+	dstTex, ok2 := dst.(*rustTexture)
+	if !ok1 || !ok2 || srcBuf.buf == nil || dstTex.tex == nil {
+		return
+	}
+	for _, r := range regions {
+		bufInfo := &wgpu.TexelCopyBufferInfo{
+			Layout: wgpu.TexelCopyBufferLayout{
+				Offset:       r.BufferLayout.Offset,
+				BytesPerRow:  r.BufferLayout.BytesPerRow,
+				RowsPerImage: r.BufferLayout.RowsPerImage,
+			},
+			Buffer: srcBuf.buf.Handle(),
+		}
+		texInfo := &wgpu.TexelCopyTextureInfo{
+			Texture:  dstTex.tex.Handle(),
+			MipLevel: r.TextureBase.MipLevel,
+			Origin: gputypes.Origin3D{
+				X: r.TextureBase.Origin.X,
+				Y: r.TextureBase.Origin.Y,
+				Z: r.TextureBase.Origin.Z,
+			},
+			Aspect: wgpu.TextureAspect(r.TextureBase.Aspect),
+		}
+		size := &gputypes.Extent3D{
+			Width:              r.Size.Width,
+			Height:             r.Size.Height,
+			DepthOrArrayLayers: r.Size.DepthOrArrayLayers,
+		}
+		e.enc.CopyBufferToTexture(bufInfo, texInfo, size)
+	}
+}
+
+// CopyTextureToBuffer copies data from a texture to a buffer.
+func (e *rustCommandEncoder) CopyTextureToBuffer(src hal.Texture, dst hal.Buffer, regions []hal.BufferTextureCopy) {
+	srcTex, ok1 := src.(*rustTexture)
+	dstBuf, ok2 := dst.(*rustBuffer)
+	if !ok1 || !ok2 || srcTex.tex == nil || dstBuf.buf == nil {
+		return
+	}
+	for _, r := range regions {
+		texInfo := &wgpu.TexelCopyTextureInfo{
+			Texture:  srcTex.tex.Handle(),
+			MipLevel: r.TextureBase.MipLevel,
+			Origin: gputypes.Origin3D{
+				X: r.TextureBase.Origin.X,
+				Y: r.TextureBase.Origin.Y,
+				Z: r.TextureBase.Origin.Z,
+			},
+			Aspect: wgpu.TextureAspect(r.TextureBase.Aspect),
+		}
+		bufInfo := &wgpu.TexelCopyBufferInfo{
+			Layout: wgpu.TexelCopyBufferLayout{
+				Offset:       r.BufferLayout.Offset,
+				BytesPerRow:  r.BufferLayout.BytesPerRow,
+				RowsPerImage: r.BufferLayout.RowsPerImage,
+			},
+			Buffer: dstBuf.buf.Handle(),
+		}
+		size := &gputypes.Extent3D{
+			Width:              r.Size.Width,
+			Height:             r.Size.Height,
+			DepthOrArrayLayers: r.Size.DepthOrArrayLayers,
+		}
+		e.enc.CopyTextureToBuffer(texInfo, bufInfo, size)
+	}
+}
+
+// CopyTextureToTexture copies data between textures.
+func (e *rustCommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions []hal.TextureCopy) {
+	srcTex, ok1 := src.(*rustTexture)
+	dstTex, ok2 := dst.(*rustTexture)
+	if !ok1 || !ok2 || srcTex.tex == nil || dstTex.tex == nil {
+		return
+	}
+	for _, r := range regions {
+		srcInfo := &wgpu.TexelCopyTextureInfo{
+			Texture:  srcTex.tex.Handle(),
+			MipLevel: r.SrcBase.MipLevel,
+			Origin: gputypes.Origin3D{
+				X: r.SrcBase.Origin.X,
+				Y: r.SrcBase.Origin.Y,
+				Z: r.SrcBase.Origin.Z,
+			},
+			Aspect: wgpu.TextureAspect(r.SrcBase.Aspect),
+		}
+		dstInfo := &wgpu.TexelCopyTextureInfo{
+			Texture:  dstTex.tex.Handle(),
+			MipLevel: r.DstBase.MipLevel,
+			Origin: gputypes.Origin3D{
+				X: r.DstBase.Origin.X,
+				Y: r.DstBase.Origin.Y,
+				Z: r.DstBase.Origin.Z,
+			},
+			Aspect: wgpu.TextureAspect(r.DstBase.Aspect),
+		}
+		size := &gputypes.Extent3D{
+			Width:              r.Size.Width,
+			Height:             r.Size.Height,
+			DepthOrArrayLayers: r.Size.DepthOrArrayLayers,
+		}
+		e.enc.CopyTextureToTexture(srcInfo, dstInfo, size)
+	}
+}
+
+// BeginRenderPass begins a render pass.
+func (e *rustCommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	attachments := make([]wgpu.RenderPassColorAttachment, len(desc.ColorAttachments))
+	for i, att := range desc.ColorAttachments {
+		var view *wgpu.TextureView
+		if rv, ok := att.View.(*rustTextureView); ok && rv.view != nil {
+			view = rv.view
+		}
+
+		var resolveTarget *wgpu.TextureView
+		if att.ResolveTarget != nil {
+			if rv, ok := att.ResolveTarget.(*rustTextureView); ok && rv.view != nil {
+				resolveTarget = rv.view
+			}
+		}
+
+		attachments[i] = wgpu.RenderPassColorAttachment{
+			View:          view,
+			ResolveTarget: resolveTarget,
+			LoadOp:        att.LoadOp,
+			StoreOp:       att.StoreOp,
+			ClearValue: wgpu.Color{
+				R: att.ClearValue.R,
+				G: att.ClearValue.G,
+				B: att.ClearValue.B,
+				A: att.ClearValue.A,
+			},
+		}
+	}
+
+	wgpuDesc := &wgpu.RenderPassDescriptor{
+		ColorAttachments: attachments,
+	}
+
+	// Depth/stencil attachment
+	if desc.DepthStencilAttachment != nil {
+		dsView, ok := desc.DepthStencilAttachment.View.(*rustTextureView)
+		if ok && dsView.view != nil {
+			wgpuDesc.DepthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+				View:              dsView.view,
+				DepthLoadOp:       desc.DepthStencilAttachment.DepthLoadOp,
+				DepthStoreOp:      desc.DepthStencilAttachment.DepthStoreOp,
+				DepthClearValue:   desc.DepthStencilAttachment.DepthClearValue,
+				DepthReadOnly:     desc.DepthStencilAttachment.DepthReadOnly,
+				StencilLoadOp:     desc.DepthStencilAttachment.StencilLoadOp,
+				StencilStoreOp:    desc.DepthStencilAttachment.StencilStoreOp,
+				StencilClearValue: desc.DepthStencilAttachment.StencilClearValue,
+				StencilReadOnly:   desc.DepthStencilAttachment.StencilReadOnly,
+			}
+		}
+	}
+
+	pass := e.enc.BeginRenderPass(wgpuDesc)
+	if pass == nil {
+		return nil
+	}
+	return &rustRenderPass{pass: pass}
+}
+
+// BeginComputePass begins a compute pass.
+func (e *rustCommandEncoder) BeginComputePass(desc *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	pass := e.enc.BeginComputePass(nil)
+	if pass == nil {
+		return nil
+	}
+	return &rustComputePass{pass: pass}
+}
+
+// ---------------------------------------------------------------------------
+// Render Pass Encoder — implements hal.RenderPassEncoder
+// ---------------------------------------------------------------------------
+
+// rustRenderPass wraps wgpu.RenderPassEncoder to implement hal.RenderPassEncoder.
+type rustRenderPass struct {
+	pass *wgpu.RenderPassEncoder
+}
+
+// End finishes the render pass.
+func (p *rustRenderPass) End() {
+	if p.pass != nil {
+		p.pass.End()
+	}
+}
+
+// SetPipeline sets the active render pipeline.
+func (p *rustRenderPass) SetPipeline(pipeline hal.RenderPipeline) {
+	if rp, ok := pipeline.(*rustRenderPipeline); ok && rp.pipeline != nil {
+		p.pass.SetPipeline(rp.pipeline)
+	}
+}
+
+// SetBindGroup sets a bind group for the given index.
+func (p *rustRenderPass) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
+	if rg, ok := group.(*rustBindGroup); ok && rg.bg != nil {
+		p.pass.SetBindGroup(index, rg.bg, offsets)
+	}
+}
+
+// SetVertexBuffer sets a vertex buffer for the given slot.
+func (p *rustRenderPass) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		// wgpu uses size 0 to mean "remaining buffer"
+		p.pass.SetVertexBuffer(slot, rb.buf, offset, 0)
+	}
+}
+
+// SetIndexBuffer sets the index buffer.
+func (p *rustRenderPass) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		// wgpu uses size 0 to mean "remaining buffer"
+		p.pass.SetIndexBuffer(rb.buf, format, offset, 0)
+	}
+}
+
+// SetViewport sets the viewport transformation.
+func (p *rustRenderPass) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
+	p.pass.SetViewport(x, y, width, height, minDepth, maxDepth)
+}
+
+// SetScissorRect sets the scissor rectangle for clipping.
+func (p *rustRenderPass) SetScissorRect(x, y, width, height uint32) {
+	p.pass.SetScissorRect(x, y, width, height)
+}
+
+// SetBlendConstant sets the blend constant color.
+func (p *rustRenderPass) SetBlendConstant(color *gputypes.Color) {
+	if color == nil {
+		return
+	}
+	wgpuColor := &wgpu.Color{R: color.R, G: color.G, B: color.B, A: color.A}
+	p.pass.SetBlendConstant(wgpuColor)
+}
+
+// SetStencilReference sets the stencil reference value.
+func (p *rustRenderPass) SetStencilReference(reference uint32) {
+	p.pass.SetStencilReference(reference)
+}
+
+// Draw draws primitives.
+func (p *rustRenderPass) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	p.pass.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+}
+
+// DrawIndexed draws indexed primitives.
+func (p *rustRenderPass) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	p.pass.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+}
+
+// DrawIndirect draws primitives with GPU-generated parameters.
+func (p *rustRenderPass) DrawIndirect(buffer hal.Buffer, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		p.pass.DrawIndirect(rb.buf, offset)
+	}
+}
+
+// DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
+func (p *rustRenderPass) DrawIndexedIndirect(buffer hal.Buffer, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		p.pass.DrawIndexedIndirect(rb.buf, offset)
+	}
+}
+
+// ExecuteBundle executes a pre-recorded render bundle.
+func (p *rustRenderPass) ExecuteBundle(bundle hal.RenderBundle) {
+	if rb, ok := bundle.(*rustRenderBundle); ok && rb.bundle != nil {
+		p.pass.ExecuteBundles([]*wgpu.RenderBundle{rb.bundle})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Compute Pass Encoder — implements hal.ComputePassEncoder
+// ---------------------------------------------------------------------------
+
+// rustComputePass wraps wgpu.ComputePassEncoder to implement hal.ComputePassEncoder.
+type rustComputePass struct {
+	pass *wgpu.ComputePassEncoder
+}
+
+// End finishes the compute pass.
+func (p *rustComputePass) End() {
+	if p.pass != nil {
+		p.pass.End()
+	}
+}
+
+// SetPipeline sets the active compute pipeline.
+func (p *rustComputePass) SetPipeline(pipeline hal.ComputePipeline) {
+	if rp, ok := pipeline.(*rustComputePipeline); ok && rp.pipeline != nil {
+		p.pass.SetPipeline(rp.pipeline)
+	}
+}
+
+// SetBindGroup sets a bind group for the given index.
+func (p *rustComputePass) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
+	if rg, ok := group.(*rustBindGroup); ok && rg.bg != nil {
+		p.pass.SetBindGroup(index, rg.bg, offsets)
+	}
+}
+
+// Dispatch dispatches compute work.
+func (p *rustComputePass) Dispatch(x, y, z uint32) {
+	p.pass.DispatchWorkgroups(x, y, z)
+}
+
+// DispatchIndirect dispatches compute work with GPU-generated parameters.
+func (p *rustComputePass) DispatchIndirect(buffer hal.Buffer, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		p.pass.DispatchWorkgroupsIndirect(rb.buf, offset)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Render Bundle Encoder — implements hal.RenderBundleEncoder
+// ---------------------------------------------------------------------------
+
+// rustRenderBundleEncoder wraps wgpu.RenderBundleEncoder to implement hal.RenderBundleEncoder.
+type rustRenderBundleEncoder struct {
+	enc *wgpu.RenderBundleEncoder
+}
+
+// SetPipeline sets the active render pipeline.
+func (e *rustRenderBundleEncoder) SetPipeline(pipeline hal.RenderPipeline) {
+	if rp, ok := pipeline.(*rustRenderPipeline); ok && rp.pipeline != nil {
+		e.enc.SetPipeline(rp.pipeline)
+	}
+}
+
+// SetBindGroup sets a bind group for the given index.
+func (e *rustRenderBundleEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
+	if rg, ok := group.(*rustBindGroup); ok && rg.bg != nil {
+		e.enc.SetBindGroup(index, rg.bg, offsets)
+	}
+}
+
+// SetVertexBuffer sets a vertex buffer for the given slot.
+func (e *rustRenderBundleEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		e.enc.SetVertexBuffer(slot, rb.buf, offset, 0)
+	}
+}
+
+// SetIndexBuffer sets the index buffer.
+func (e *rustRenderBundleEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
+	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
+		e.enc.SetIndexBuffer(rb.buf, format, offset, 0)
+	}
+}
+
+// Draw draws primitives.
+func (e *rustRenderBundleEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	e.enc.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+}
+
+// DrawIndexed draws indexed primitives.
+func (e *rustRenderBundleEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
+	e.enc.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+}
+
+// Finish finalizes the bundle and returns it.
+func (e *rustRenderBundleEncoder) Finish() hal.RenderBundle {
+	if e.enc == nil {
+		return nil
+	}
+	bundle := e.enc.Finish(nil)
+	if bundle == nil {
+		return nil
+	}
+	return &rustRenderBundle{bundle: bundle}
+}
+
+// ---------------------------------------------------------------------------
+// Resource wrappers — implement hal resource interfaces
+// ---------------------------------------------------------------------------
+
+// rustBuffer wraps wgpu.Buffer to implement hal.Buffer.
+type rustBuffer struct {
+	buf *wgpu.Buffer
+}
+
+func (b *rustBuffer) Destroy()              { b.buf.Release() }
+func (b *rustBuffer) NativeHandle() uintptr { return b.buf.Handle() }
+
+// rustTexture wraps wgpu.Texture to implement hal.Texture.
+type rustTexture struct {
+	tex *wgpu.Texture
+}
+
+func (t *rustTexture) Destroy()              { t.tex.Release() }
+func (t *rustTexture) NativeHandle() uintptr { return t.tex.Handle() }
+
+// rustSurfaceTexture wraps wgpu.Texture acquired from a surface.
+// Implements hal.SurfaceTexture (extends hal.Texture).
+type rustSurfaceTexture struct {
+	tex *wgpu.Texture
+}
+
+func (t *rustSurfaceTexture) Destroy()              { t.tex.Release() }
+func (t *rustSurfaceTexture) NativeHandle() uintptr { return t.tex.Handle() }
+
+// rustTextureView wraps wgpu.TextureView to implement hal.TextureView.
+type rustTextureView struct {
+	view *wgpu.TextureView
+}
+
+func (v *rustTextureView) Destroy()              { v.view.Release() }
+func (v *rustTextureView) NativeHandle() uintptr { return v.view.Handle() }
+
+// rustSampler wraps wgpu.Sampler to implement hal.Sampler.
+type rustSampler struct {
+	sampler *wgpu.Sampler
+}
+
+func (s *rustSampler) Destroy()              { s.sampler.Release() }
+func (s *rustSampler) NativeHandle() uintptr { return s.sampler.Handle() }
+
+// rustShaderModule wraps wgpu.ShaderModule to implement hal.ShaderModule.
+type rustShaderModule struct {
+	module *wgpu.ShaderModule
+}
+
+func (m *rustShaderModule) Destroy() { m.module.Release() }
+
+// rustBindGroupLayout wraps wgpu.BindGroupLayout to implement hal.BindGroupLayout.
+type rustBindGroupLayout struct {
+	layout *wgpu.BindGroupLayout
+}
+
+func (l *rustBindGroupLayout) Destroy() { l.layout.Release() }
+
+// rustBindGroup wraps wgpu.BindGroup to implement hal.BindGroup.
+type rustBindGroup struct {
+	bg *wgpu.BindGroup
+}
+
+func (g *rustBindGroup) Destroy() { g.bg.Release() }
+
+// rustPipelineLayout wraps wgpu.PipelineLayout to implement hal.PipelineLayout.
+type rustPipelineLayout struct {
+	layout *wgpu.PipelineLayout
+}
+
+func (l *rustPipelineLayout) Destroy() { l.layout.Release() }
+
+// rustRenderPipeline wraps wgpu.RenderPipeline to implement hal.RenderPipeline.
+type rustRenderPipeline struct {
+	pipeline *wgpu.RenderPipeline
+}
+
+func (p *rustRenderPipeline) Destroy() { p.pipeline.Release() }
+
+// rustComputePipeline wraps wgpu.ComputePipeline to implement hal.ComputePipeline.
+type rustComputePipeline struct {
+	pipeline *wgpu.ComputePipeline
+}
+
+func (p *rustComputePipeline) Destroy() { p.pipeline.Release() }
+
+// rustCommandBuffer wraps wgpu.CommandBuffer to implement hal.CommandBuffer.
+type rustCommandBuffer struct {
+	buf *wgpu.CommandBuffer
+}
+
+func (b *rustCommandBuffer) Destroy() { b.buf.Release() }
+
+// rustFence is a stub fence — wgpu-native uses device.poll() for synchronization.
+type rustFence struct{}
+
+func (f *rustFence) Destroy() {}
+
+// rustRenderBundle wraps wgpu.RenderBundle to implement hal.RenderBundle.
+type rustRenderBundle struct {
+	bundle *wgpu.RenderBundle
+}
+
+func (b *rustRenderBundle) Destroy() { b.bundle.Release() }
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+// bindGroupEntryToWGPU converts a hal BindGroupEntry to wgpu BindGroupEntry.
+// HAL uses gputypes.BindGroupEntry with ResourceBinding interfaces.
+func bindGroupEntryToWGPU(entry gputypes.BindGroupEntry) wgpu.BindGroupEntry {
+	wgpuEntry := wgpu.BindGroupEntry{
+		Binding: entry.Binding,
+	}
+
+	// Extract resource binding based on type
+	switch r := entry.Resource.(type) {
+	case gputypes.BufferBinding:
+		wgpuEntry.Buffer = r.Buffer
+		wgpuEntry.Offset = r.Offset
+		wgpuEntry.Size = r.Size
+	case gputypes.SamplerBinding:
+		wgpuEntry.Sampler = r.Sampler
+	case gputypes.TextureViewBinding:
+		wgpuEntry.TextureView = r.TextureView
+	}
+
+	return wgpuEntry
+}
+
+// convertVertexBufferLayouts converts gputypes.VertexBufferLayout to wgpu.VertexBufferLayout.
+// The key difference is that wgpu uses pointer+count (FFI layout) while gputypes uses slices.
+func convertVertexBufferLayouts(layouts []gputypes.VertexBufferLayout) []wgpu.VertexBufferLayout {
+	result := make([]wgpu.VertexBufferLayout, len(layouts))
+	for i, layout := range layouts {
+		var attrs *wgpu.VertexAttribute
+		var attrCount uintptr
+		if len(layout.Attributes) > 0 {
+			wgpuAttrs := make([]wgpu.VertexAttribute, len(layout.Attributes))
+			for j, attr := range layout.Attributes {
+				wgpuAttrs[j] = wgpu.VertexAttribute{
+					Format:         attr.Format,
+					Offset:         attr.Offset,
+					ShaderLocation: attr.ShaderLocation,
+				}
+			}
+			attrs = &wgpuAttrs[0]
+			attrCount = uintptr(len(wgpuAttrs))
+		}
+		result[i] = wgpu.VertexBufferLayout{
+			ArrayStride:    layout.ArrayStride,
+			StepMode:       layout.StepMode,
+			AttributeCount: attrCount,
+			Attributes:     attrs,
+		}
+	}
+	return result
+}
+
+// convertColorTargetStates converts gputypes.ColorTargetState to wgpu.ColorTargetState.
+// The key difference is the BlendState type and BlendComponent field ordering.
+func convertColorTargetStates(targets []gputypes.ColorTargetState) []wgpu.ColorTargetState {
+	result := make([]wgpu.ColorTargetState, len(targets))
+	for i, target := range targets {
+		result[i] = wgpu.ColorTargetState{
+			Format:    target.Format,
+			WriteMask: target.WriteMask,
+		}
+		if target.Blend != nil {
+			result[i].Blend = &wgpu.BlendState{
+				Color: wgpu.BlendComponent{
+					Operation: target.Blend.Color.Operation,
+					SrcFactor: target.Blend.Color.SrcFactor,
+					DstFactor: target.Blend.Color.DstFactor,
+				},
+				Alpha: wgpu.BlendComponent{
+					Operation: target.Blend.Alpha.Operation,
+					SrcFactor: target.Blend.Alpha.SrcFactor,
+					DstFactor: target.Blend.Alpha.DstFactor,
+				},
+			}
+		}
+	}
+	return result
+}
+
+// convertSurfaceError converts wgpu surface errors to hal errors.
+func convertSurfaceError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for specific surface error types using errors.Is for wrapped error support.
+	switch {
+	case errors.Is(err, wgpu.ErrSurfaceNeedsReconfigure):
+		return hal.ErrSurfaceOutdated
+	case errors.Is(err, wgpu.ErrSurfaceLost):
+		return hal.ErrSurfaceLost
+	case errors.Is(err, wgpu.ErrSurfaceTimeout):
+		return hal.ErrTimeout
+	case errors.Is(err, wgpu.ErrSurfaceOutOfMemory):
+		return hal.ErrDeviceOutOfMemory
+	case errors.Is(err, wgpu.ErrSurfaceDeviceLost):
+		return hal.ErrDeviceLost
+	default:
+		return fmt.Errorf("rust backend: surface error: %w", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Public API — used by init.go for HAL backend registration
+// ---------------------------------------------------------------------------
+
+// IsAvailable returns true on Windows where go-webgpu/goffi is supported.
+func IsAvailable() bool {
+	return true
+}
+
+// NewHalBackend returns the Rust HAL backend.
+func NewHalBackend() hal.Backend { return rustBackend{} }
+
+// HalBackendName returns the human-readable backend name.
+func HalBackendName() string { return "Rust (wgpu-native)" }
+
+// HalBackendVariant returns the backend variant for instance creation.
+func HalBackendVariant() gputypes.Backend { return gputypes.BackendVulkan }
+
+// ---------------------------------------------------------------------------
+// Interface compliance checks
+// ---------------------------------------------------------------------------
+
+var (
+	_ hal.Backend             = rustBackend{}
+	_ hal.Instance            = (*rustInstance)(nil)
+	_ hal.Adapter             = (*rustAdapter)(nil)
+	_ hal.Device              = (*rustDevice)(nil)
+	_ hal.Queue               = (*rustQueue)(nil)
+	_ hal.Surface             = (*rustSurface)(nil)
+	_ hal.CommandEncoder      = (*rustCommandEncoder)(nil)
+	_ hal.RenderPassEncoder   = (*rustRenderPass)(nil)
+	_ hal.ComputePassEncoder  = (*rustComputePass)(nil)
+	_ hal.Buffer              = (*rustBuffer)(nil)
+	_ hal.Texture             = (*rustTexture)(nil)
+	_ hal.SurfaceTexture      = (*rustSurfaceTexture)(nil)
+	_ hal.TextureView         = (*rustTextureView)(nil)
+	_ hal.Sampler             = (*rustSampler)(nil)
+	_ hal.ShaderModule        = (*rustShaderModule)(nil)
+	_ hal.BindGroupLayout     = (*rustBindGroupLayout)(nil)
+	_ hal.BindGroup           = (*rustBindGroup)(nil)
+	_ hal.PipelineLayout      = (*rustPipelineLayout)(nil)
+	_ hal.RenderPipeline      = (*rustRenderPipeline)(nil)
+	_ hal.ComputePipeline     = (*rustComputePipeline)(nil)
+	_ hal.CommandBuffer       = (*rustCommandBuffer)(nil)
+	_ hal.Fence               = (*rustFence)(nil)
+	_ hal.RenderBundle        = (*rustRenderBundle)(nil)
+	_ hal.RenderBundleEncoder = (*rustRenderBundleEncoder)(nil)
+)

@@ -84,18 +84,38 @@ func newRenderer(plat platform.Platform, backendType types.BackendType) (*Render
 
 // init initializes WebGPU and creates the rendering pipeline.
 func (r *Renderer) init(backendType types.BackendType) error {
-	// Create HAL backend based on platform (Vulkan on Windows/Linux, Metal on macOS).
-	// For now, only native (Pure Go) backend is supported.
-	// The Rust backend is deferred to Phase 3.
-	_ = backendType // BackendType selection deferred to Phase 3 (Rust backend)
+	// Select HAL backend based on user preference.
+	// BackendRust requires -tags rust build and Windows.
+	// BackendNative/BackendGo uses the pure Go wgpu implementation.
+	// BackendAuto prefers Rust if available, otherwise falls back to native.
+	var backendVariant gputypes.Backend
 
-	r.halBackend = native.NewHalBackend()
-	r.backendName = native.HalBackendName()
+	switch backendType {
+	case types.BackendRust:
+		if !rustHalAvailable() {
+			return fmt.Errorf("gogpu: rust backend requested but not available (build with -tags rust on Windows)")
+		}
+		r.halBackend, r.backendName, backendVariant = newRustHalBackend()
+
+	case types.BackendNative:
+		r.halBackend = native.NewHalBackend()
+		r.backendName = native.HalBackendName()
+		backendVariant = native.HalBackendVariant()
+
+	default: // BackendAuto
+		if rustHalAvailable() {
+			r.halBackend, r.backendName, backendVariant = newRustHalBackend()
+		} else {
+			r.halBackend = native.NewHalBackend()
+			r.backendName = native.HalBackendName()
+			backendVariant = native.HalBackendVariant()
+		}
+	}
 
 	// Create WebGPU instance
 	var err error
 	r.instance, err = r.halBackend.CreateInstance(&hal.InstanceDescriptor{
-		Backends: gputypes.Backends(native.HalBackendVariant()),
+		Backends: gputypes.Backends(backendVariant),
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
