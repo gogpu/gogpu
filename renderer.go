@@ -70,12 +70,12 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(plat platform.Platform, backendType types.BackendType) (*Renderer, error) {
+func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI) (*Renderer, error) {
 	r := &Renderer{
 		platform: plat,
 	}
 
-	if err := r.init(backendType); err != nil {
+	if err := r.init(backendType, graphicsAPI); err != nil {
 		return nil, err
 	}
 
@@ -83,11 +83,15 @@ func newRenderer(plat platform.Platform, backendType types.BackendType) (*Render
 }
 
 // init initializes WebGPU and creates the rendering pipeline.
-func (r *Renderer) init(backendType types.BackendType) error {
+func (r *Renderer) init(backendType types.BackendType, graphicsAPI types.GraphicsAPI) error {
 	// Select HAL backend based on user preference.
 	// BackendRust requires -tags rust build and Windows.
 	// BackendNative/BackendGo uses the pure Go wgpu implementation.
 	// BackendAuto prefers Rust if available, otherwise falls back to native.
+	//
+	// graphicsAPI selects the graphics API (Vulkan/DX12/Metal).
+	// For Native backend, this controls which HAL implementation is used.
+	// For Rust backend, wgpu-native handles API selection internally (TODO: pass through).
 	var backendVariant gputypes.Backend
 
 	switch backendType {
@@ -98,24 +102,24 @@ func (r *Renderer) init(backendType types.BackendType) error {
 		r.halBackend, r.backendName, backendVariant = newRustHalBackend()
 
 	case types.BackendNative:
-		r.halBackend = native.NewHalBackend()
-		r.backendName = native.HalBackendName()
-		backendVariant = native.HalBackendVariant()
+		r.halBackend, r.backendName, backendVariant = native.NewHalBackend(graphicsAPI)
 
 	default: // BackendAuto
 		if rustHalAvailable() {
 			r.halBackend, r.backendName, backendVariant = newRustHalBackend()
 		} else {
-			r.halBackend = native.NewHalBackend()
-			r.backendName = native.HalBackendName()
-			backendVariant = native.HalBackendVariant()
+			r.halBackend, r.backendName, backendVariant = native.NewHalBackend(graphicsAPI)
 		}
 	}
 
-	// Create WebGPU instance
+	// Create WebGPU instance.
+	// Enable debug/validation flags so that GPU-side errors (invalid shaders,
+	// bad PSO, etc.) are caught on the CPU before submission, preventing
+	// driver-level crashes (e.g. DPC_WATCHDOG_VIOLATION BSOD on DX12).
 	var err error
 	r.instance, err = r.halBackend.CreateInstance(&hal.InstanceDescriptor{
 		Backends: gputypes.Backends(backendVariant),
+		Flags:    gputypes.InstanceFlagsDebug | gputypes.InstanceFlagsValidation,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
@@ -473,6 +477,8 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 
 // initTexturedQuadPipeline creates the GPU resources for textured quad rendering.
 // This is called lazily on the first DrawTexture call.
+//
+//nolint:funlen // pipeline init is inherently sequential setup code
 func (r *Renderer) initTexturedQuadPipeline() error {
 	if r.texQuadPipelineInited {
 		return nil

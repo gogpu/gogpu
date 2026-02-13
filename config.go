@@ -26,6 +26,11 @@ type Config struct {
 	// BackendAuto (default) selects the best available.
 	Backend types.BackendType
 
+	// GraphicsAPI specifies which graphics API to use (Vulkan, DX12, Metal).
+	// GraphicsAPIAuto (default) selects the best for the platform.
+	// This is orthogonal to Backend (Rust/Native implementation choice).
+	GraphicsAPI types.GraphicsAPI
+
 	// ContinuousRender enables continuous rendering (game loop style).
 	// When false (default), renders only when RequestRedraw() is called
 	// or when events occur (resize, input, etc.) - more power efficient.
@@ -69,6 +74,16 @@ func (c Config) WithBackend(backend types.BackendType) Config {
 	return c
 }
 
+// WithGraphicsAPI returns a copy with the graphics API set.
+// Use types.GraphicsAPIVulkan to force Vulkan (Windows/Linux).
+// Use types.GraphicsAPIDX12 to force DirectX 12 (Windows only).
+// Use types.GraphicsAPIMetal to force Metal (macOS only).
+// Use types.GraphicsAPIAuto (default) to let the platform choose.
+func (c Config) WithGraphicsAPI(api types.GraphicsAPI) Config {
+	c.GraphicsAPI = api
+	return c
+}
+
 // WithContinuousRender sets the rendering mode.
 // When true (default): renders every frame at VSync rate - for games/animations.
 // When false: renders only on RequestRedraw() or events - power efficient for UI.
@@ -83,4 +98,14 @@ const (
 	BackendRust   = types.BackendRust
 	BackendNative = types.BackendNative
 	BackendGo     = types.BackendGo // Alias for BackendNative
+)
+
+// Re-export graphics API types for convenience.
+const (
+	GraphicsAPIAuto     = types.GraphicsAPIAuto
+	GraphicsAPIVulkan   = types.GraphicsAPIVulkan
+	GraphicsAPIDX12     = types.GraphicsAPIDX12
+	GraphicsAPIMetal    = types.GraphicsAPIMetal
+	GraphicsAPIGLES     = types.GraphicsAPIGLES
+	GraphicsAPISoftware = types.GraphicsAPISoftware
 )

@@ -32,3 +32,47 @@ func (b BackendType) String() string {
 		return "Auto"
 	}
 }
+
+// GraphicsAPI specifies which graphics API to use for rendering.
+// This is orthogonal to BackendType (Rust/Native implementation choice).
+type GraphicsAPI uint8
+
+const (
+	// GraphicsAPIAuto automatically selects the best graphics API for the platform.
+	// Windows: Vulkan (default), macOS: Metal, Linux: Vulkan.
+	GraphicsAPIAuto GraphicsAPI = iota
+
+	// GraphicsAPIVulkan forces Vulkan. Available on Windows and Linux.
+	GraphicsAPIVulkan
+
+	// GraphicsAPIDX12 forces DirectX 12. Available on Windows only.
+	GraphicsAPIDX12
+
+	// GraphicsAPIMetal forces Metal. Available on macOS only.
+	GraphicsAPIMetal
+
+	// GraphicsAPIGLES forces OpenGL ES. Available on Windows and Linux.
+	GraphicsAPIGLES
+
+	// GraphicsAPISoftware forces the software rasterizer.
+	// Requires building with -tags software.
+	GraphicsAPISoftware
+)
+
+// String returns the graphics API name.
+func (g GraphicsAPI) String() string {
+	switch g {
+	case GraphicsAPIVulkan:
+		return "Vulkan"
+	case GraphicsAPIDX12:
+		return "DX12"
+	case GraphicsAPIMetal:
+		return "Metal"
+	case GraphicsAPIGLES:
+		return "GLES"
+	case GraphicsAPISoftware:
+		return "Software"
+	default:
+		return "Auto"
+	}
+}

@@ -130,7 +130,7 @@ func (a *App) Run() error {
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(a.platform, a.config.Backend)
+		a.renderer, initErr = newRenderer(a.platform, a.config.Backend, a.config.GraphicsAPI)
 	})
 	if initErr != nil {
 		return initErr

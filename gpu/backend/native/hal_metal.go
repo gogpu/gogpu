@@ -3,16 +3,14 @@
 package native
 
 import (
+	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/metal"
 )
 
 // NewHalBackend returns the Metal HAL backend for macOS.
-func NewHalBackend() hal.Backend { return metal.Backend{} }
-
-// HalBackendName returns the human-readable backend name.
-func HalBackendName() string { return "Pure Go (gogpu/wgpu/metal)" }
-
-// HalBackendVariant returns the backend variant for instance creation.
-func HalBackendVariant() gputypes.Backend { return gputypes.BackendMetal }
+// macOS only supports Metal, so the api parameter is ignored.
+func NewHalBackend(api types.GraphicsAPI) (hal.Backend, string, gputypes.Backend) {
+	return metal.Backend{}, "Pure Go (gogpu/wgpu/metal)", gputypes.BackendMetal
+}
