@@ -91,3 +91,19 @@ func (c *Context) DrawTriangleColor(bg gmath.Color) error {
 func (c *Context) Renderer() *Renderer {
 	return c.renderer
 }
+
+// SurfaceView returns the current frame's surface texture view.
+// This is the GPU texture view that will be presented to the screen.
+// Returns nil if no frame is in progress.
+//
+// Use this with ggcanvas.RenderDirect for zero-copy GPU rendering,
+// bypassing the GPU→CPU→GPU readback path.
+func (c *Context) SurfaceView() any {
+	return c.renderer.currentView
+}
+
+// SurfaceSize returns the current surface dimensions in pixels.
+func (c *Context) SurfaceSize() (width, height uint32) {
+	w, h := c.renderer.Size()
+	return uint32(w), uint32(h) //nolint:gosec // G115: renderer validates dimensions
+}
