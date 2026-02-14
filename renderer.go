@@ -3,6 +3,7 @@ package gogpu
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
@@ -203,19 +204,30 @@ func (r *Renderer) Resize(width, height int) {
 		return
 	}
 
+	// Save old dimensions in case Configure fails — we must keep
+	// r.width/r.height consistent with the actual swapchain size.
+	oldWidth, oldHeight := r.width, r.height
+
 	// Note: width/height validated positive above
 	r.width = uint32(width)   //nolint:gosec // G115: validated positive above
 	r.height = uint32(height) //nolint:gosec // G115: validated positive above
 
-	// Ignore error — surface will be reconfigured on next frame attempt if this fails
-	_ = r.surface.Configure(r.device, &hal.SurfaceConfiguration{
+	// Configure surface with new dimensions.
+	if err := r.surface.Configure(r.device, &hal.SurfaceConfiguration{
 		Format:      r.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       r.width,
 		Height:      r.height,
 		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
 		PresentMode: gputypes.PresentModeFifo,
-	})
+	}); err != nil {
+		log.Printf("gogpu: Resize: Configure FAILED for %dx%d: %v", r.width, r.height, err)
+		// Restore old dimensions to keep renderer consistent with swapchain.
+		// Next frame will retry with the new size.
+		r.width = oldWidth
+		r.height = oldHeight
+		return
+	}
 	r.surfaceConfigured = true
 }
 
@@ -232,6 +244,7 @@ func (r *Renderer) BeginFrame() bool {
 	// Pass nil fence — we don't need a fence for acquisition.
 	acquired, err := r.surface.AcquireTexture(nil)
 	if err != nil {
+		log.Printf("gogpu: BeginFrame: AcquireTexture FAILED (%dx%d): %v", r.width, r.height, err)
 		// Surface needs reconfiguration (outdated or lost).
 		// Only attempt if we have valid dimensions.
 		if r.width > 0 && r.height > 0 {
@@ -590,11 +603,16 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		return fmt.Errorf("gogpu: failed to create render pipeline: %w", err)
 	}
 
-	// Create uniform buffer
+	// Create uniform buffer on upload heap for direct CPU writes.
+	// This avoids staging buffer + GPU copy per frame, reducing from
+	// 4 to 3 command encoder creations during resize. Upload heap buffers
+	// are CPU-writable and GPU-readable (coherent memory on DX12).
+	// MappedAtCreation keeps the buffer persistently mapped for zero-overhead writes.
 	r.texQuadUniformBuffer, err = r.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "Textured Quad Uniforms",
-		Size:  texQuadUniformSize,
-		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		Label:            "Textured Quad Uniforms",
+		Size:             texQuadUniformSize,
+		Usage:            gputypes.BufferUsageUniform | gputypes.BufferUsageMapWrite,
+		MappedAtCreation: true,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create uniform buffer: %w", err)
@@ -688,27 +706,16 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		premulFlag = 1.0
 	}
 
-	// Prepare uniform data (reuse pre-allocated buffer)
-	// Layout: rect(x,y,w,h) + screen(w,h) + alpha + premultiplied
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(r.width)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(r.height)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
-
-	// Upload uniform data
-	r.queue.WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData)
-
 	// Get or create cached bind group for texture (group 1)
 	texBindGroup, err := r.getOrCreateTexBindGroup(tex)
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to get texture bind group: %w", err)
 	}
 
-	// Create command encoder
+	// Create command encoder BEFORE writing uniform data.
+	// BeginEncoding calls waitForGPU which ensures all prior GPU work
+	// (including the previous frame's render pass reading the uniform buffer)
+	// has completed. Writing uniform data before this would race with the GPU.
 	encoder, err := r.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
 		Label: "DrawTexturedQuad",
 	})
@@ -719,6 +726,20 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	if err := encoder.BeginEncoding("DrawTexturedQuad"); err != nil {
 		return fmt.Errorf("gogpu: failed to begin encoding: %w", err)
 	}
+
+	// Upload uniform data AFTER waitForGPU (inside BeginEncoding) to avoid
+	// racing with the GPU reading the uniform buffer from a previous frame.
+	// For UPLOAD heap buffers, WriteBuffer is a direct CPU memcpy — safe to
+	// call between BeginEncoding and BeginRenderPass.
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(r.width)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(r.height)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
+	r.queue.WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData)
 
 	// Determine LoadOp based on whether frame was already cleared
 	loadOp := gputypes.LoadOpClear

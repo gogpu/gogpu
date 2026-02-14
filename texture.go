@@ -157,6 +157,16 @@ func (t *Texture) Destroy() {
 		return
 	}
 
+	// Evict from bind group cache before destroying the view.
+	// The cached bind group references this texture's view and sampler,
+	// so it must be destroyed before we destroy those resources.
+	if t.view != nil && t.renderer.texBindGroupCache != nil {
+		if bg, ok := t.renderer.texBindGroupCache[t.view]; ok {
+			t.renderer.device.DestroyBindGroup(bg)
+			delete(t.renderer.texBindGroupCache, t.view)
+		}
+	}
+
 	if t.sampler != nil {
 		t.renderer.device.DestroySampler(t.sampler)
 		t.sampler = nil
