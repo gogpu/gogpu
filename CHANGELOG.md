@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **DX12 deferred clear** — `ClearColor` + `DrawTexture` merged into a single render
+  pass via deferred clear pattern. Eliminates the intermediate RT→PRESENT→RT state
+  transition that caused content loss on DX12 FLIP_DISCARD swapchains during resize.
+
 ### Refactored
 
 - **Eliminate handle-based Backend abstraction** — Renderer now uses `hal.Device`/`hal.Queue`

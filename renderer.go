@@ -42,6 +42,14 @@ type Renderer struct {
 	currentView           hal.TextureView
 	frameCleared          bool // Whether the frame has been cleared (for LoadOp selection)
 
+	// Deferred clear — eliminates separate Clear render pass.
+	// ClearColor stores the color and sets hasPendingClear=true.
+	// The next drawTexturedQuad uses LoadOpClear with this color
+	// instead of a separate render pass (avoids double RT→PRESENT→RT
+	// state transition that can lose content on DX12 FLIP_DISCARD).
+	pendingClearColor gputypes.Color
+	hasPendingClear   bool
+
 	// FencePool for non-blocking submission tracking (wgpu-rs pattern).
 	// Each submission gets its own fence from the pool.
 	// Non-blocking: poll fence status to determine completed submissions.
@@ -273,12 +281,17 @@ func (r *Renderer) BeginFrame() bool {
 
 	// Reset frame state for new frame
 	r.frameCleared = false
+	r.hasPendingClear = false
 
 	return true
 }
 
 // EndFrame presents the rendered frame.
 func (r *Renderer) EndFrame() {
+	// Flush any pending clear that wasn't consumed by a draw call.
+	// This handles the case where user calls ClearColor without drawing.
+	r.flushClear()
+
 	// Present the surface texture via queue.
 	if r.currentSurfaceTexture != nil {
 		// Call platform-specific pre-submit hook (Metal drawable attachment).
@@ -306,9 +319,22 @@ func (r *Renderer) EndFrame() {
 	r.currentSurfaceTexture = nil
 }
 
-// Clear submits a clear command with the specified color.
+// Clear defers a clear command to be applied at the start of the next render pass.
+// This avoids a separate render pass for clearing, which on DX12 FLIP_DISCARD
+// swapchains can cause content loss due to the intermediate RT→PRESENT→RT
+// state transition between Clear and the subsequent draw pass.
 func (r *Renderer) Clear(red, green, blue, alpha float64) {
 	if r.currentView == nil {
+		return
+	}
+	r.pendingClearColor = gputypes.Color{R: red, G: green, B: blue, A: alpha}
+	r.hasPendingClear = true
+}
+
+// flushClear applies any pending clear immediately as a standalone render pass.
+// Called by EndFrame if no draw calls consumed the pending clear.
+func (r *Renderer) flushClear() {
+	if !r.hasPendingClear || r.currentView == nil {
 		return
 	}
 
@@ -329,7 +355,7 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 				View:       r.currentView,
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
-				ClearValue: gputypes.Color{R: red, G: green, B: blue, A: alpha},
+				ClearValue: r.pendingClearColor,
 			},
 		},
 	})
@@ -341,10 +367,8 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 		return
 	}
 
-	// Submit with fence tracking (command buffer released when GPU done)
 	r.submitWithFence(commands)
-
-	// Mark frame as cleared for subsequent draw calls
+	r.hasPendingClear = false
 	r.frameCleared = true
 }
 
@@ -741,9 +765,15 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
 	r.queue.WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData)
 
-	// Determine LoadOp based on whether frame was already cleared
+	// Determine LoadOp: consume pending clear if available, otherwise preserve content.
+	// This merges ClearColor + DrawTexture into a single render pass, avoiding
+	// the intermediate RT→PRESENT→RT transition that loses content on DX12.
 	loadOp := gputypes.LoadOpClear
-	if r.frameCleared {
+	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 1}
+	if r.hasPendingClear {
+		clearValue = r.pendingClearColor
+		r.hasPendingClear = false
+	} else if r.frameCleared {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -754,7 +784,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 				View:       r.currentView,
 				LoadOp:     loadOp,
 				StoreOp:    gputypes.StoreOpStore,
-				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1}, // Only used if LoadOpClear
+				ClearValue: clearValue,
 			},
 		},
 	})
