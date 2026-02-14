@@ -102,6 +102,19 @@ func (c *Context) SurfaceView() any {
 	return c.renderer.currentView
 }
 
+// CheckDeviceHealth returns nil if the GPU device is operational, or an error
+// describing why the device was removed. This is a diagnostic method for
+// debugging DX12 DEVICE_REMOVED issues.
+func (c *Context) CheckDeviceHealth() error {
+	type healthChecker interface {
+		CheckHealth(label string) error
+	}
+	if hc, ok := c.renderer.device.(healthChecker); ok {
+		return hc.CheckHealth("Context.CheckDeviceHealth")
+	}
+	return nil // Backend doesn't support health check
+}
+
 // SurfaceSize returns the current surface dimensions in pixels.
 func (c *Context) SurfaceSize() (width, height uint32) {
 	w, h := c.renderer.Size()
