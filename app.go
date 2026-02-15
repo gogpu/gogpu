@@ -147,11 +147,14 @@ func (a *App) Run() error {
 		return initErr
 	}
 	defer func() {
-		// Call onClose callback before destroying renderer so user code
-		// can release GPU resources (ggcanvas, textures, etc.) while
-		// the device is still alive.
+		// Wait for GPU idle, then call onClose callback before destroying
+		// renderer so user code can release GPU resources (ggcanvas,
+		// textures, etc.) while the device is still alive.
 		if a.onClose != nil {
-			a.renderLoop.RunOnRenderThreadVoid(a.onClose)
+			a.renderLoop.RunOnRenderThreadVoid(func() {
+				a.renderer.WaitForGPU()
+				a.onClose()
+			})
 		}
 		a.renderLoop.RunOnRenderThreadVoid(func() {
 			a.renderer.Destroy()

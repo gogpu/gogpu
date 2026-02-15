@@ -75,19 +75,21 @@ func main() {
 		}
 	})
 
+	// Clean up GPU resources before renderer is destroyed.
+	app.OnClose(func() {
+		if checkerTex != nil {
+			checkerTex.Destroy()
+			checkerTex = nil
+		}
+		if gradientTex != nil {
+			gradientTex.Destroy()
+			gradientTex = nil
+		}
+	})
+
 	// Run the application
-	// Note: Textures created via Renderer are automatically cleaned up
-	// when the application exits, but explicit cleanup is good practice.
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
-	}
-
-	// Cleanup textures after Run returns
-	if checkerTex != nil {
-		checkerTex.Destroy()
-	}
-	if gradientTex != nil {
-		gradientTex.Destroy()
 	}
 }
 

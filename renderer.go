@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
@@ -56,8 +57,9 @@ type Renderer struct {
 	nextSubmissionIdx uint64
 
 	// Built-in pipelines
-	trianglePipeline hal.RenderPipeline
-	triangleShader   hal.ShaderModule
+	trianglePipeline       hal.RenderPipeline
+	trianglePipelineLayout hal.PipelineLayout
+	triangleShader         hal.ShaderModule
 
 	// Textured quad pipeline resources
 	texQuadPipeline       hal.RenderPipeline
@@ -433,9 +435,18 @@ func (r *Renderer) initTrianglePipeline() error {
 		return fmt.Errorf("gogpu: failed to create shader module: %w", err)
 	}
 
+	// Create empty pipeline layout (no bind groups needed for triangle)
+	r.trianglePipelineLayout, err = r.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+		Label: "Triangle Pipeline Layout",
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create triangle pipeline layout: %w", err)
+	}
+
 	// Create render pipeline
 	r.trianglePipeline, err = r.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
-		Label: "Triangle Pipeline",
+		Label:  "Triangle Pipeline",
+		Layout: r.trianglePipelineLayout,
 		Vertex: hal.VertexState{
 			Module:     r.triangleShader,
 			EntryPoint: "vs_main",
@@ -812,6 +823,15 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	return nil
 }
 
+// WaitForGPU blocks until all submitted GPU work completes.
+// Call this before destroying user-created GPU resources to prevent
+// Vulkan validation errors about resources still in use by command buffers.
+func (r *Renderer) WaitForGPU() {
+	if r.fencePool != nil {
+		r.fencePool.WaitAll(time.Second)
+	}
+}
+
 // Destroy releases all GPU resources.
 func (r *Renderer) Destroy() {
 	// Wait for all GPU work to complete before destroying resources.
@@ -870,6 +890,10 @@ func (r *Renderer) Destroy() {
 	if r.trianglePipeline != nil {
 		r.device.DestroyRenderPipeline(r.trianglePipeline)
 		r.trianglePipeline = nil
+	}
+	if r.trianglePipelineLayout != nil {
+		r.device.DestroyPipelineLayout(r.trianglePipelineLayout)
+		r.trianglePipelineLayout = nil
 	}
 
 	// Destroy core resources in reverse order of creation
