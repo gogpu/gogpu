@@ -25,34 +25,33 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.16.0
+## Current State: v0.18.1
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
 - Multi-thread architecture (Ebiten/Gio pattern)
+- Event-driven rendering with three-state model (0% CPU when idle)
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
-- **gpucontext.TextureDrawer** — Cross-package texture rendering
+- Zero-copy surface rendering via SurfaceView
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
-- Clean architecture with shared gputypes
-- webgpu.h spec-compliant enum values
+- Structured logging via log/slog
+- HAL-direct architecture (no handle maps)
 
-### v0.16.0 Features
-- ✅ **WindowProvider** — DPI scale factor, window geometry, redraw requests
-- ✅ **PlatformProvider** — Clipboard, cursor (12 shapes), dark mode, accessibility
-- ✅ **Windows Full Implementation** — Win32 API for all platform features
-- ✅ **Single Pipeline Alpha** — Unified premultiplied/straight alpha via uniform switch
-- ✅ **NVIDIA Crash Fix** — Fixed `vkCreateGraphicsPipelines` crash on RTX 2080
-- ✅ **Modal Loop Rendering** — Smooth animation during Win32 drag/resize (WM_TIMER)
-- ✅ **Render-on-Demand Mode** — Power-efficient UI (8% GPU vs 100%)
-- ✅ **Unified Event System** — W3C Pointer Events, Gesture Recognition
-- ✅ **Fence-based GPU Sync** — Non-blocking frame completion
-- ✅ **Texture.UpdateData** — Format-aware with BytesPerPixel
+### v0.18.x Features
+- ✅ **Event-driven three-state model** — IDLE (0% CPU) / ANIMATING (VSync) / CONTINUOUS
+- ✅ **AnimationToken** — Token-based animation lifecycle with atomic counter
+- ✅ **Native WaitEvents/WakeUp** — macOS (Cocoa), Linux (X11 poll), Windows (MsgWait)
+- ✅ **SurfaceView** — Zero-copy rendering for gg/ggcanvas integration
+- ✅ **GraphicsAPI selection** — Runtime Vulkan/DX12/Metal/GLES/Software choice
+- ✅ **HAL-direct architecture** — hal.Device/Queue interfaces, no handle maps
+- ✅ **Structured logging** — log/slog, silent by default
+- ✅ **DX12 deferred clear** — Fixes content loss on FLIP_DISCARD swapchains
 
 ---
 
 ## Upcoming
 
-### v0.17.0 — API Polish
+### v0.19.0 — API Polish
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
 - [ ] macOS/Linux PlatformProvider native implementations
@@ -125,7 +124,11 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.15.7** | 2026-02 | NVIDIA crash fix, single pipeline alpha, naga v0.11.0 |
+| **v0.18.1** | 2026-02 | Event-driven three-state model, native WaitEvents, AnimationToken |
+| v0.18.0 | 2026-02 | HAL-direct, GraphicsAPI selection, SurfaceView, slog |
+| v0.17.0 | 2026-02 | HalProvider, compute support, unified native backend |
+| v0.16.0 | 2026-02 | WindowProvider, PlatformProvider (clipboard, cursor, dark mode) |
+| v0.15.7 | 2026-02 | NVIDIA crash fix, single pipeline alpha, naga v0.11.0 |
 | v0.15.6 | 2026-02 | Modal loop rendering (WM_TIMER), smooth drag/resize on Windows |
 | v0.15.x | 2026-02 | Render-on-demand, Event System, Fence sync, Texture.BytesPerPixel |
 | v0.14.x | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |

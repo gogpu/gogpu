@@ -33,7 +33,8 @@
 | **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux (Vulkan/GLES), macOS (Metal) |
-| **Graphics** | Windowing, input handling, texture loading, zero-copy surface rendering |
+| **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering |
+| **Graphics** | Windowing, input handling, texture loading |
 | **Compute** | Full compute shader support |
 | **Integration** | DeviceProvider, HalProvider, WindowProvider, PlatformProvider, SurfaceView |
 | **Logging** | Structured logging via `log/slog`, silent by default |
@@ -292,6 +293,32 @@ app.OnUpdate(func(dt float64) {
 ```
 
 All input methods are thread-safe and work with the frame-based update loop.
+
+### Event-Driven Rendering
+
+GoGPU uses a three-state rendering model for optimal power efficiency:
+
+| State | Condition | CPU Usage | Latency |
+|-------|-----------|-----------|---------|
+| **Idle** | No activity | 0% (blocks on OS events) | <1ms wakeup |
+| **Animating** | Active animation tokens | VSync (~60fps) | Smooth |
+| **Continuous** | `ContinuousRender=true` | 100% (game loop) | Immediate |
+
+```go
+// Event-driven mode (default for UI apps)
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithContinuousRender(false))
+
+// Start animation — renders at VSync while token is alive
+token := app.StartAnimation()
+// ... animation runs at 60fps ...
+token.Stop() // Loop returns to idle (0% CPU)
+
+// Request single-frame redraw from any goroutine
+app.RequestRedraw()
+```
+
+Multiple animation tokens can be active simultaneously. The loop renders continuously until all tokens are stopped.
 
 ### Resource Cleanup
 

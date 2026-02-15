@@ -213,12 +213,14 @@ naga (shader)              wgpu              go-webgpu/webgpu
 
 ```
 gogpu/
-├── app.go              # Application lifecycle
+├── app.go              # Application lifecycle (three-state main loop)
 ├── config.go           # Configuration (builder pattern)
 ├── context.go          # Drawing context
 ├── renderer.go         # Uses hal.Device/Queue directly
 ├── texture.go          # Texture management (hal.Texture/View/Sampler)
 ├── fence_pool.go       # GPU fence pool (hal.Fence)
+├── animation.go        # AnimationController + AnimationToken
+├── invalidator.go      # Goroutine-safe redraw coalescing
 ├── event_source.go     # gpucontext.EventSource adapter
 ├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
 ├── gesture.go          # GestureRecognizer (Vello-style)
@@ -274,6 +276,70 @@ Main Thread (OS Thread 0)       Render Thread (Dedicated)
 - `internal/thread.Thread` — OS thread abstraction with `runtime.LockOSThread()`
 - `internal/thread.RenderLoop` — Deferred resize pattern
 - `Platform.InSizeMove()` — Tracks modal resize loop (Windows)
+
+## Event-Driven Rendering
+
+The main loop uses a three-state model for optimal power efficiency:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Main Loop States                     │
+│                                                         │
+│  ┌──────────┐    StartAnimation()    ┌───────────────┐  │
+│  │   IDLE   │ ─────────────────────► │  ANIMATING    │  │
+│  │  0% CPU  │ ◄───────────────────── │  VSync 60fps  │  │
+│  │ WaitEvents│    token.Stop()       │               │  │
+│  └────┬─────┘                        └───────────────┘  │
+│       │                                                 │
+│       │ RequestRedraw()                                 │
+│       ▼                                                 │
+│  ┌──────────┐    ContinuousRender=true                  │
+│  │ ONE FRAME│ ──────────────────────►┌───────────────┐  │
+│  │  render  │                        │  CONTINUOUS   │  │
+│  │  + idle  │                        │  game loop    │  │
+│  └──────────┘                        └───────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### States
+
+| State | Trigger | Behavior | CPU |
+|-------|---------|----------|-----|
+| **IDLE** | No animations, no invalidation | Blocks on `platform.WaitEvents()` | 0% |
+| **ANIMATING** | `StartAnimation()` token active | Renders at VSync rate | ~2-5% |
+| **CONTINUOUS** | `ContinuousRender=true` | Renders every frame | ~100% |
+
+### Key Components
+
+- **`Invalidator`** — Goroutine-safe redraw coalescing (Gio pattern).
+  Uses a buffered channel (capacity 1) as a lock-free signal.
+  Multiple concurrent `Invalidate()` calls produce exactly one wakeup.
+
+- **`AnimationController`** / **`AnimationToken`** — Token-based animation lifecycle.
+  Atomic counter tracks active animations. Loop renders at VSync while count > 0.
+
+- **Platform `WaitEvents` / `WakeUp`** — Native OS blocking:
+  - Windows: `MsgWaitForMultipleObjectsEx` / `PostMessageW(WM_NULL)`
+  - macOS: `[NSApp nextEventMatchingMask:]` / `[NSApp postEvent:atStart:]`
+  - Linux X11: `poll()` on connection fd / `XSendEvent(ClientMessage)`
+
+### Main Loop Pseudocode
+
+```
+for running {
+    continuous := config.ContinuousRender || animations.IsAnimating()
+    invalidated := invalidator.Consume()
+
+    if !continuous && !invalidated {
+        platform.WaitEvents()   // blocks until OS event arrives (0% CPU)
+    }
+
+    processEvents()
+    if continuous || invalidated || hasEvents {
+        renderFrame()
+    }
+}
+```
 
 ## Event System
 

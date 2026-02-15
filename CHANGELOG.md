@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-02-15
+
+### Added
+
+- **Event-driven rendering with three-state model** — Main loop now operates in three states:
+  - **IDLE**: No activity — blocks on OS events via `WaitEvents` (0% CPU, <1ms response)
+  - **ANIMATING**: Active animations — renders at VSync (smooth 60fps)
+  - **CONTINUOUS**: `ContinuousRender=true` — renders every frame (game loop)
+  - Previous behavior was a 100ms `time.Sleep` poll loop when idle
+
+- **`App.StartAnimation()` / `AnimationToken`** — Token-based animation lifecycle.
+  Call `StartAnimation()` to begin VSync rendering, `token.Stop()` when done.
+  Thread-safe via `atomic.Int32`. Multiple concurrent animations supported.
+
+- **`Invalidator`** — Goroutine-safe redraw request coalescing (Gio pattern).
+  `App.RequestRedraw()` now uses lock-free buffered channel with platform wakeup.
+  Multiple concurrent invalidations coalesce into a single redraw.
+
+- **Native `WaitEvents` / `WakeUp`** for all platforms:
+  - **Windows**: `MsgWaitForMultipleObjectsEx` + `PostMessageW(WM_NULL)` (already existed)
+  - **macOS**: `[NSApp nextEventMatchingMask:]` blocking + `[NSApp postEvent:atStart:]`
+  - **Linux X11**: `poll()` on X11 connection fd + `XSendEvent` (ClientMessage)
+
 ## [0.18.0] - 2026-02-15
 
 ### Added
@@ -877,7 +900,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/gogpu/gogpu/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/gogpu/gogpu/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/gogpu/gogpu/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/gogpu/gogpu/compare/v0.15.7...v0.16.0
