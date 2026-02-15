@@ -533,6 +533,18 @@ func (p *Platform) GetHandle() (instance, window uintptr) {
 	return uintptr(p.conn.Fd()), uintptr(p.window)
 }
 
+// Fd returns the X11 connection file descriptor.
+// This can be used with poll/epoll for event loop integration.
+func (p *Platform) Fd() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn == nil {
+		return -1
+	}
+	return p.conn.Fd()
+}
+
 // Destroy closes the window and releases resources.
 func (p *Platform) Destroy() {
 	p.mu.Lock()

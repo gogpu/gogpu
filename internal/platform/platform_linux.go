@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/gogpu/gogpu/internal/platform/wayland"
 	"github.com/gogpu/gogpu/internal/platform/x11"
 	"github.com/gogpu/gpucontext"
@@ -16,6 +18,10 @@ import (
 // waylandPlatform implements the Platform interface using Wayland.
 type waylandPlatform struct {
 	mu sync.Mutex
+
+	// Wakeup pipe for cross-goroutine WakeUp → WaitEvents unblocking.
+	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
+	wakePipe [2]int
 
 	// Wayland core objects
 	display    *wayland.Display
@@ -61,6 +67,10 @@ type waylandPlatform struct {
 // x11Platform wraps x11.Platform to implement the Platform interface.
 type x11Platform struct {
 	inner *x11.Platform
+
+	// Wakeup pipe for cross-goroutine WakeUp → WaitEvents unblocking.
+	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
+	wakePipe [2]int
 }
 
 // newPlatform creates the platform-specific implementation.
@@ -91,7 +101,17 @@ func (p *x11Platform) Init(config Config) error {
 		Resizable:  config.Resizable,
 		Fullscreen: config.Fullscreen,
 	}
-	return p.inner.Init(x11Config)
+	if err := p.inner.Init(x11Config); err != nil {
+		return err
+	}
+
+	// Create wakeup pipe for WakeUp → WaitEvents unblocking
+	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
+		p.inner.Destroy()
+		return fmt.Errorf("x11: wakeup pipe: %w", err)
+	}
+
+	return nil
 }
 
 // PollEvents processes pending X11 events.
@@ -124,6 +144,11 @@ func (p *x11Platform) GetHandle() (instance, window uintptr) {
 
 // Destroy closes the window and releases resources.
 func (p *x11Platform) Destroy() {
+	if p.wakePipe[0] != 0 {
+		_ = unix.Close(p.wakePipe[0])
+		_ = unix.Close(p.wakePipe[1])
+		p.wakePipe = [2]int{}
+	}
 	p.inner.Destroy()
 }
 
@@ -154,15 +179,30 @@ func (p *x11Platform) SetKeyCallback(_ func(key gpucontext.Key, mods gpucontext.
 func (p *x11Platform) SetModalFrameCallback(_ func()) {}
 
 // WaitEvents blocks until at least one OS event is available.
-// TODO: Implement using XNextEvent or poll on ConnectionNumber(display).
+// Uses unix.Poll on the X11 socket fd and a wakeup pipe to block with 0% CPU.
 func (p *x11Platform) WaitEvents() {
-	time.Sleep(time.Millisecond) // Stub: poll at 1ms until proper X11 impl
+	connFd := p.inner.Fd()
+	if connFd < 0 {
+		return
+	}
+
+	fds := []unix.PollFd{
+		{Fd: int32(connFd), Events: unix.POLLIN | unix.POLLERR},
+		{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN},
+	}
+	// Block indefinitely until an event arrives or WakeUp is called.
+	// EINTR from signal delivery is harmless — returns as spurious wakeup.
+	_, _ = unix.Poll(fds, -1)
+
+	// Drain the wakeup pipe so it is ready for the next WakeUp call.
+	drainPipe(p.wakePipe[0])
 }
 
 // WakeUp unblocks WaitEvents from any goroutine.
-// TODO: Implement using a self-pipe or XSendEvent to wake the event loop.
+// Writing a single byte to the pipe wakes up unix.Poll immediately.
+// Safe from any goroutine — pipe writes <= PIPE_BUF (4096 on Linux) are atomic.
 func (p *x11Platform) WakeUp() {
-	// Stub: no-op until proper X11 implementation
+	_, _ = unix.Write(p.wakePipe[1], []byte{0})
 }
 
 // Init creates the Wayland window.
@@ -276,6 +316,12 @@ func (p *waylandPlatform) Init(config Config) error {
 	if err := p.waitForConfigure(); err != nil {
 		_ = display.Close()
 		return fmt.Errorf("wayland: failed to wait for configure: %w", err)
+	}
+
+	// Create wakeup pipe for WakeUp → WaitEvents unblocking
+	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
+		_ = display.Close()
+		return fmt.Errorf("wayland: wakeup pipe: %w", err)
 	}
 
 	// Optionally bind to seat for input devices
@@ -1174,6 +1220,13 @@ func (p *waylandPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Close wakeup pipe
+	if p.wakePipe[0] != 0 {
+		_ = unix.Close(p.wakePipe[0])
+		_ = unix.Close(p.wakePipe[1])
+		p.wakePipe = [2]int{}
+	}
+
 	// Destroy in reverse order of creation
 
 	if p.pointer != nil {
@@ -1251,15 +1304,42 @@ func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucon
 func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}
 
 // WaitEvents blocks until at least one OS event is available.
-// TODO: Implement using poll/epoll on the Wayland display fd.
+// Uses unix.Poll on the Wayland display fd and a wakeup pipe to block with 0% CPU.
 func (p *waylandPlatform) WaitEvents() {
-	time.Sleep(time.Millisecond) // Stub: poll at 1ms until proper Wayland impl
+	dispFd := p.display.Fd()
+	if dispFd < 0 {
+		return
+	}
+
+	fds := []unix.PollFd{
+		{Fd: int32(dispFd), Events: unix.POLLIN | unix.POLLERR},
+		{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN},
+	}
+	// Block indefinitely until an event arrives or WakeUp is called.
+	// EINTR from signal delivery is harmless — returns as spurious wakeup.
+	_, _ = unix.Poll(fds, -1)
+
+	// Drain the wakeup pipe so it is ready for the next WakeUp call.
+	drainPipe(p.wakePipe[0])
 }
 
 // WakeUp unblocks WaitEvents from any goroutine.
-// TODO: Implement using a self-pipe or eventfd to wake the poll/epoll.
+// Writing a single byte to the pipe wakes up unix.Poll immediately.
+// Safe from any goroutine — pipe writes <= PIPE_BUF (4096 on Linux) are atomic.
 func (p *waylandPlatform) WakeUp() {
-	// Stub: no-op until proper Wayland implementation
+	_, _ = unix.Write(p.wakePipe[1], []byte{0})
+}
+
+// drainPipe reads all pending bytes from a non-blocking pipe fd.
+// This ensures the pipe is empty for the next WakeUp call.
+func drainPipe(fd int) {
+	var buf [64]byte
+	for {
+		_, err := unix.Read(fd, buf[:])
+		if err != nil {
+			break
+		}
+	}
 }
 
 // waylandPlatform provider stubs

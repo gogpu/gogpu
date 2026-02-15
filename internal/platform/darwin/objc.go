@@ -82,6 +82,18 @@ var (
 			types.DoubleTypeDescriptor,
 		},
 	}
+	// nsPointType has the same layout as nsSizeType (two doubles),
+	// but is kept as a separate variable for clarity when used with
+	// NSPoint parameters (e.g., event location).
+	nsPointType = &types.TypeDescriptor{
+		Size:      16,
+		Alignment: 8,
+		Kind:      types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.DoubleTypeDescriptor,
+			types.DoubleTypeDescriptor,
+		},
+	}
 )
 
 // initRuntime initializes the Objective-C runtime by loading required libraries

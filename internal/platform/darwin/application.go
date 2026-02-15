@@ -6,6 +6,9 @@ import (
 	"errors"
 	"sync"
 	"unsafe"
+
+	"github.com/go-webgpu/goffi/ffi"
+	"github.com/go-webgpu/goffi/types"
 )
 
 // Errors returned by Application operations.
@@ -198,6 +201,163 @@ func (id ID) nextEventMatchingMask(mask NSEventMask, date ID, mode ID, dequeue b
 		mode.Ptr(),
 		dequeueVal,
 	)
+}
+
+// PostEmptyEvent posts a synthetic NSEventTypeApplicationDefined event
+// to unblock WaitEvents. This is thread-safe and can be called from any goroutine.
+// It is the standard Cocoa pattern used by GLFW, winit, SDL, and Qt to wake
+// the main event loop.
+func (a *Application) PostEmptyEvent() {
+	if !a.initialized || a.nsApp.IsNil() {
+		return
+	}
+
+	// Create synthetic event:
+	// [NSEvent otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:]
+	event := createApplicationDefinedEvent()
+	if event.IsNil() {
+		return
+	}
+
+	// [NSApp postEvent:event atStart:YES]
+	// postEvent:atStart: is thread-safe per Apple documentation.
+	msgSend(a.nsApp, selectors.postEventAtStart, event.Ptr(), uintptr(1))
+}
+
+// createApplicationDefinedEvent creates an NSEventTypeApplicationDefined event
+// using the NSEvent class method otherEventWithType:location:modifierFlags:
+// timestamp:windowNumber:context:subtype:data1:data2:.
+func createApplicationDefinedEvent() ID {
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	initSelectors()
+	initClasses()
+
+	// otherEventWithType: has 9 parameters (+ self + _cmd = 11 total):
+	//   self:          NSEvent class pointer
+	//   _cmd:          selector
+	//   type:          NSUInteger (uint64) = 15 (ApplicationDefined)
+	//   location:      NSPoint (struct of 2 doubles)
+	//   modifierFlags: NSUInteger (uint64) = 0
+	//   timestamp:     NSTimeInterval (double) = 0.0
+	//   windowNumber:  NSInteger (int64) = 0
+	//   context:       pointer = nil
+	//   subtype:       short (int16) = 0
+	//   data1:         NSInteger (int64) = 0
+	//   data2:         NSInteger (int64) = 0
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self (NSEvent class)
+		types.PointerTypeDescriptor, // _cmd (SEL)
+		types.UInt64TypeDescriptor,  // type (NSUInteger)
+		nsPointType,                 // location (NSPoint = 2 doubles)
+		types.UInt64TypeDescriptor,  // modifierFlags (NSUInteger)
+		types.DoubleTypeDescriptor,  // timestamp (NSTimeInterval)
+		types.SInt64TypeDescriptor,  // windowNumber (NSInteger)
+		types.PointerTypeDescriptor, // context (nil)
+		types.SInt16TypeDescriptor,  // subtype (short)
+		types.SInt64TypeDescriptor,  // data1 (NSInteger)
+		types.SInt64TypeDescriptor,  // data2 (NSInteger)
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self          uintptr
+		cmd           uintptr
+		eventType     uint64
+		location      NSPoint
+		modifierFlags uint64
+		timestamp     float64
+		windowNumber  int64
+		context       uintptr
+		subtype       int16
+		data1         int64
+		data2         int64
+	}{
+		self:      uintptr(classes.NSEvent),
+		cmd:       uintptr(selectors.otherEventWithType),
+		eventType: uint64(NSEventTypeApplicationDefined),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.cmd),
+		unsafe.Pointer(&argBox.eventType),
+		unsafe.Pointer(&argBox.location),
+		unsafe.Pointer(&argBox.modifierFlags),
+		unsafe.Pointer(&argBox.timestamp),
+		unsafe.Pointer(&argBox.windowNumber),
+		unsafe.Pointer(&argBox.context),
+		unsafe.Pointer(&argBox.subtype),
+		unsafe.Pointer(&argBox.data1),
+		unsafe.Pointer(&argBox.data2),
+	}
+
+	var result uintptr
+	err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return ID(result)
+}
+
+// WaitEventsWithHandler blocks until at least one event is available,
+// then processes all pending events using the provided handler.
+// This combines the blocking behavior of WaitEvents with the handler
+// dispatch pattern of PollEventsWithHandler.
+func (a *Application) WaitEventsWithHandler(handler EventHandler) {
+	if !a.initialized {
+		return
+	}
+
+	// Create local autorelease pool for event processing
+	pool := classes.NSAutoreleasePool.Send(selectors.new)
+	defer pool.Send(selectors.release)
+
+	// Get distant future date for blocking wait
+	distantFuture := classes.NSDate.Send(selectors.distantFuture)
+
+	// Get default run loop mode string
+	modeStr := NewNSString("kCFRunLoopDefaultMode")
+	defer modeStr.Release()
+
+	// Block until first event arrives
+	event := a.nextEvent(distantFuture, modeStr.ID())
+	if !event.IsNil() {
+		// Get event type
+		eventType := NSEventType(event.GetUint64(selectors.eventType))
+
+		// Let handler inspect the event
+		shouldDispatch := true
+		if handler != nil {
+			shouldDispatch = handler(event, eventType)
+		}
+
+		// Dispatch to application if not consumed
+		if shouldDispatch {
+			a.nsApp.SendPtr(selectors.sendEvent, event.Ptr())
+		}
+	}
+
+	// Process any remaining pending events without blocking
+	a.PollEventsWithHandler(handler)
 }
 
 // NSApp returns the raw NSApplication ID for advanced usage.

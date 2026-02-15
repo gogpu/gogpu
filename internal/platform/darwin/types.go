@@ -103,22 +103,23 @@ type NSEventType NSUInteger
 
 // Event types.
 const (
-	NSEventTypeLeftMouseDown     NSEventType = 1
-	NSEventTypeLeftMouseUp       NSEventType = 2
-	NSEventTypeRightMouseDown    NSEventType = 3
-	NSEventTypeRightMouseUp      NSEventType = 4
-	NSEventTypeMouseMoved        NSEventType = 5
-	NSEventTypeLeftMouseDragged  NSEventType = 6
-	NSEventTypeRightMouseDragged NSEventType = 7
-	NSEventTypeMouseEntered      NSEventType = 8
-	NSEventTypeMouseExited       NSEventType = 9
-	NSEventTypeKeyDown           NSEventType = 10
-	NSEventTypeKeyUp             NSEventType = 11
-	NSEventTypeFlagsChanged      NSEventType = 12
-	NSEventTypeScrollWheel       NSEventType = 22
-	NSEventTypeOtherMouseDown    NSEventType = 25
-	NSEventTypeOtherMouseUp      NSEventType = 26
-	NSEventTypeOtherMouseDragged NSEventType = 27
+	NSEventTypeLeftMouseDown      NSEventType = 1
+	NSEventTypeLeftMouseUp        NSEventType = 2
+	NSEventTypeRightMouseDown     NSEventType = 3
+	NSEventTypeRightMouseUp       NSEventType = 4
+	NSEventTypeMouseMoved         NSEventType = 5
+	NSEventTypeLeftMouseDragged   NSEventType = 6
+	NSEventTypeRightMouseDragged  NSEventType = 7
+	NSEventTypeMouseEntered       NSEventType = 8
+	NSEventTypeMouseExited        NSEventType = 9
+	NSEventTypeKeyDown            NSEventType = 10
+	NSEventTypeKeyUp              NSEventType = 11
+	NSEventTypeFlagsChanged       NSEventType = 12
+	NSEventTypeScrollWheel        NSEventType = 22
+	NSEventTypeApplicationDefined NSEventType = 15
+	NSEventTypeOtherMouseDown     NSEventType = 25
+	NSEventTypeOtherMouseUp       NSEventType = 26
+	NSEventTypeOtherMouseDragged  NSEventType = 27
 )
 
 // NSEventModifierFlags are the modifier key flags in an NSEvent.

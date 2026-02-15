@@ -112,6 +112,10 @@ var selectors struct {
 	deltaX                      SEL
 	deltaY                      SEL
 
+	// NSEvent - creation and posting
+	otherEventWithType SEL
+	postEventAtStart   SEL
+
 	// NSNotificationCenter
 	defaultCenter                 SEL
 	addObserverSelectorNameObject SEL
@@ -248,6 +252,11 @@ func initSelectors() {
 		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
 		selectors.deltaX = RegisterSelector("deltaX")
 		selectors.deltaY = RegisterSelector("deltaY")
+
+		// NSEvent - creation and posting
+		selectors.otherEventWithType = RegisterSelector(
+			"otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:")
+		selectors.postEventAtStart = RegisterSelector("postEvent:atStart:")
 
 		// NSNotificationCenter
 		selectors.defaultCenter = RegisterSelector("defaultCenter")

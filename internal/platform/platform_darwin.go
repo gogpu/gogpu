@@ -429,16 +429,57 @@ func (p *darwinPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucont
 // macOS doesn't have modal resize loops — CAMetalLayer handles live resize smoothly.
 func (p *darwinPlatform) SetModalFrameCallback(_ func()) {}
 
-// WaitEvents blocks until at least one OS event is available.
-// TODO: Implement using NSApplication nextEventMatchingMask with distantFuture.
+// WaitEvents blocks until at least one OS event is available, then processes
+// all pending events. Uses [NSApp nextEventMatchingMask:untilDate:inMode:dequeue:]
+// with distantFuture, which blocks at kernel level via mach_msg for 0% CPU idle.
 func (p *darwinPlatform) WaitEvents() {
-	time.Sleep(time.Millisecond) // Stub: poll at 1ms until proper macOS impl
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.app != nil {
+		p.app.WaitEventsWithHandler(p.handleEvent)
+	}
+
+	// Check for resize after processing events
+	p.checkResize()
 }
 
-// WakeUp unblocks WaitEvents from any goroutine.
-// TODO: Implement using [NSApp postEvent:atStart:] or CFRunLoopSourceSignal.
+// WakeUp unblocks WaitEvents from any goroutine by posting a synthetic
+// NSEventTypeApplicationDefined event. This is thread-safe per Apple
+// documentation and is the standard pattern used by GLFW, winit, SDL, and Qt.
 func (p *darwinPlatform) WakeUp() {
-	// Stub: no-op until proper macOS implementation
+	// No lock needed: PostEmptyEvent only reads a.initialized (set once at init)
+	// and calls postEvent:atStart: which is documented as thread-safe.
+	if p.app != nil {
+		p.app.PostEmptyEvent()
+	}
+}
+
+// checkResize checks for window size changes and updates the surface.
+// Must be called with p.mu held.
+func (p *darwinPlatform) checkResize() {
+	if p.window == nil {
+		return
+	}
+
+	oldWidth, oldHeight := p.config.Width, p.config.Height
+	p.window.UpdateSize()
+	newWidth, newHeight := p.window.Size()
+
+	if newWidth != oldWidth || newHeight != oldHeight {
+		p.config.Width = newWidth
+		p.config.Height = newHeight
+
+		if p.surface != nil {
+			p.surface.Resize(newWidth, newHeight)
+		}
+
+		p.queueEvent(Event{
+			Type:   EventResize,
+			Width:  newWidth,
+			Height: newHeight,
+		})
+	}
 }
 
 // dispatchPointerEvent dispatches a pointer event to the registered callback.
