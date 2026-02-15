@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls with structured `slog` logger. All diagnostic output now goes through the
   configurable logging system (silent by default).
 
+### Dependencies
+- **wgpu v0.15.0 → v0.16.0** — GLES pipeline, Metal/DX12/Vulkan fixes, slog, lint cleanup
+- **naga v0.12.0 → v0.13.0** — GLSL backend, HLSL/SPIR-V fixes
+
 ### Removed
 
 - **`gpu.Backend` interface** — Legacy 40-method interface with uintptr handles, replaced by
