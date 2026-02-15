@@ -293,6 +293,25 @@ app.OnUpdate(func(dt float64) {
 
 All input methods are thread-safe and work with the frame-based update loop.
 
+### Resource Cleanup
+
+Use `OnClose` to release GPU resources before the renderer is destroyed:
+
+```go
+app.OnClose(func() {
+    if canvas != nil {
+        _ = canvas.Close()
+        canvas = nil
+    }
+})
+
+if err := app.Run(); err != nil {
+    log.Fatal(err)
+}
+```
+
+`OnClose` runs on the render thread before `Renderer.Destroy()`, ensuring textures, bind groups, and pipelines are released while the device is still alive.
+
 ---
 
 ## Compute Shaders

@@ -31,6 +31,7 @@ type App struct {
 	onDraw   func(*Context)
 	onUpdate func(float64) // delta time in seconds
 	onResize func(int, int)
+	onClose  func() // called before renderer destruction
 
 	// State
 	running     bool
@@ -68,6 +69,16 @@ func (a *App) OnUpdate(fn func(float64)) *App {
 // OnResize sets the callback for window resize events.
 func (a *App) OnResize(fn func(width, height int)) *App {
 	a.onResize = fn
+	return a
+}
+
+// OnClose sets the callback invoked when the application is shutting down,
+// before the GPU renderer is destroyed. Use this to release GPU resources
+// (e.g., ggcanvas.Canvas) that depend on the renderer being alive.
+//
+// The callback runs on the render thread.
+func (a *App) OnClose(fn func()) *App {
+	a.onClose = fn
 	return a
 }
 
@@ -136,6 +147,12 @@ func (a *App) Run() error {
 		return initErr
 	}
 	defer func() {
+		// Call onClose callback before destroying renderer so user code
+		// can release GPU resources (ggcanvas, textures, etc.) while
+		// the device is still alive.
+		if a.onClose != nil {
+			a.renderLoop.RunOnRenderThreadVoid(a.onClose)
+		}
 		a.renderLoop.RunOnRenderThreadVoid(func() {
 			a.renderer.Destroy()
 		})

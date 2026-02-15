@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configurable structured logging. Silent by default (nop handler). Thread-safe via
   `atomic.Pointer`. Log levels: Debug (diagnostics), Info (lifecycle), Warn (non-fatal issues).
 
+- **`App.OnClose()` callback** — registers a cleanup function that runs on the render thread
+  before `Renderer.Destroy()`. Ensures GPU resources (textures, bind groups, pipelines) are
+  released while the device is still alive, preventing Vulkan validation errors on exit.
+
 - **GLES triangle rendering test example** — `examples/gles_test/` demonstrates GLES backend
   selection via `WithGraphicsAPI(gogpu.GraphicsAPIGLES)`.
 
