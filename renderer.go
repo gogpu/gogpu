@@ -3,7 +3,6 @@ package gogpu
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
@@ -229,7 +228,6 @@ func (r *Renderer) Resize(width, height int) {
 		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
 		PresentMode: gputypes.PresentModeFifo,
 	}); err != nil {
-		log.Printf("gogpu: Resize: Configure FAILED for %dx%d: %v", r.width, r.height, err)
 		// Restore old dimensions to keep renderer consistent with swapchain.
 		// Next frame will retry with the new size.
 		r.width = oldWidth
@@ -252,7 +250,6 @@ func (r *Renderer) BeginFrame() bool {
 	// Pass nil fence — we don't need a fence for acquisition.
 	acquired, err := r.surface.AcquireTexture(nil)
 	if err != nil {
-		log.Printf("gogpu: BeginFrame: AcquireTexture FAILED (%dx%d): %v", r.width, r.height, err)
 		// Surface needs reconfiguration (outdated or lost).
 		// Only attempt if we have valid dimensions.
 		if r.width > 0 && r.height > 0 {
