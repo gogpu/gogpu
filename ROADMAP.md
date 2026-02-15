@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.18.1
+## Current State: v0.18.2
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go)
@@ -124,7 +124,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.18.1** | 2026-02 | Event-driven three-state model, native WaitEvents, AnimationToken |
+| **v0.18.2** | 2026-02 | Update wgpu v0.16.1 (Vulkan framebuffer cache fix) |
+| v0.18.1 | 2026-02 | Event-driven three-state model, native WaitEvents, AnimationToken |
 | v0.18.0 | 2026-02 | HAL-direct, GraphicsAPI selection, SurfaceView, slog |
 | v0.17.0 | 2026-02 | HalProvider, compute support, unified native backend |
 | v0.16.0 | 2026-02 | WindowProvider, PlatformProvider (clipboard, cursor, dark mode) |
