@@ -10,6 +10,7 @@ package rust
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 	"unsafe"
 
@@ -245,14 +246,25 @@ func (d *rustDevice) CreateTextureView(texture hal.Texture, desc *hal.TextureVie
 	// Pass nil descriptor for default view
 	var wgpuDesc *wgpu.TextureViewDescriptor
 	if desc != nil {
+		// Convert HAL conventions to wgpu-native conventions:
+		// HAL uses 0 for "all remaining" mip levels/array layers,
+		// wgpu-native uses math.MaxUint32 (WGPU_MIP_LEVEL_COUNT_UNDEFINED).
+		mipCount := desc.MipLevelCount
+		if mipCount == 0 {
+			mipCount = math.MaxUint32
+		}
+		layerCount := desc.ArrayLayerCount
+		if layerCount == 0 {
+			layerCount = math.MaxUint32
+		}
 		wgpuDesc = &wgpu.TextureViewDescriptor{
 			Label:           wgpu.EmptyStringView(),
 			Format:          desc.Format,
 			Dimension:       desc.Dimension,
 			BaseMipLevel:    desc.BaseMipLevel,
-			MipLevelCount:   desc.MipLevelCount,
+			MipLevelCount:   mipCount,
 			BaseArrayLayer:  desc.BaseArrayLayer,
-			ArrayLayerCount: desc.ArrayLayerCount,
+			ArrayLayerCount: layerCount,
 		}
 	}
 
@@ -527,15 +539,15 @@ func (d *rustDevice) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (h
 			DepthCompare:      desc.DepthStencil.DepthCompare,
 			StencilFront: wgpu.StencilFaceState{
 				Compare:     desc.DepthStencil.StencilFront.Compare,
-				FailOp:      gputypes.StencilOperation(desc.DepthStencil.StencilFront.FailOp),
-				DepthFailOp: gputypes.StencilOperation(desc.DepthStencil.StencilFront.DepthFailOp),
-				PassOp:      gputypes.StencilOperation(desc.DepthStencil.StencilFront.PassOp),
+				FailOp:      halStencilOpToGPUTypes(desc.DepthStencil.StencilFront.FailOp),
+				DepthFailOp: halStencilOpToGPUTypes(desc.DepthStencil.StencilFront.DepthFailOp),
+				PassOp:      halStencilOpToGPUTypes(desc.DepthStencil.StencilFront.PassOp),
 			},
 			StencilBack: wgpu.StencilFaceState{
 				Compare:     desc.DepthStencil.StencilBack.Compare,
-				FailOp:      gputypes.StencilOperation(desc.DepthStencil.StencilBack.FailOp),
-				DepthFailOp: gputypes.StencilOperation(desc.DepthStencil.StencilBack.DepthFailOp),
-				PassOp:      gputypes.StencilOperation(desc.DepthStencil.StencilBack.PassOp),
+				FailOp:      halStencilOpToGPUTypes(desc.DepthStencil.StencilBack.FailOp),
+				DepthFailOp: halStencilOpToGPUTypes(desc.DepthStencil.StencilBack.DepthFailOp),
+				PassOp:      halStencilOpToGPUTypes(desc.DepthStencil.StencilBack.PassOp),
 			},
 			StencilReadMask:     desc.DepthStencil.StencilReadMask,
 			StencilWriteMask:    desc.DepthStencil.StencilWriteMask,
@@ -1150,16 +1162,16 @@ func (p *rustRenderPass) SetBindGroup(index uint32, group hal.BindGroup, offsets
 // SetVertexBuffer sets a vertex buffer for the given slot.
 func (p *rustRenderPass) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
-		// wgpu uses size 0 to mean "remaining buffer"
-		p.pass.SetVertexBuffer(slot, rb.buf, offset, 0)
+		// wgpu-native uses math.MaxUint64 (WGPU_WHOLE_SIZE) for "remaining buffer".
+		p.pass.SetVertexBuffer(slot, rb.buf, offset, math.MaxUint64)
 	}
 }
 
 // SetIndexBuffer sets the index buffer.
 func (p *rustRenderPass) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
-		// wgpu uses size 0 to mean "remaining buffer"
-		p.pass.SetIndexBuffer(rb.buf, format, offset, 0)
+		// wgpu-native uses math.MaxUint64 (WGPU_WHOLE_SIZE) for "remaining buffer".
+		p.pass.SetIndexBuffer(rb.buf, format, offset, math.MaxUint64)
 	}
 }
 
@@ -1286,14 +1298,14 @@ func (e *rustRenderBundleEncoder) SetBindGroup(index uint32, group hal.BindGroup
 // SetVertexBuffer sets a vertex buffer for the given slot.
 func (e *rustRenderBundleEncoder) SetVertexBuffer(slot uint32, buffer hal.Buffer, offset uint64) {
 	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
-		e.enc.SetVertexBuffer(slot, rb.buf, offset, 0)
+		e.enc.SetVertexBuffer(slot, rb.buf, offset, math.MaxUint64)
 	}
 }
 
 // SetIndexBuffer sets the index buffer.
 func (e *rustRenderBundleEncoder) SetIndexBuffer(buffer hal.Buffer, format gputypes.IndexFormat, offset uint64) {
 	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
-		e.enc.SetIndexBuffer(rb.buf, format, offset, 0)
+		e.enc.SetIndexBuffer(rb.buf, format, offset, math.MaxUint64)
 	}
 }
 
@@ -1428,6 +1440,14 @@ func (b *rustRenderBundle) Destroy() { b.bundle.Release() }
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+// halStencilOpToGPUTypes converts hal.StencilOperation (uint8, iota from 0)
+// to gputypes.StencilOperation (uint32, WebGPU spec values starting at 1).
+// HAL: Keep=0, Zero=1, ..., DecrementWrap=7
+// gputypes: Undefined=0, Keep=1, Zero=2, ..., DecrementWrap=8
+func halStencilOpToGPUTypes(op hal.StencilOperation) gputypes.StencilOperation {
+	return gputypes.StencilOperation(op + 1)
+}
 
 // bindGroupEntryToWGPU converts a hal BindGroupEntry to wgpu BindGroupEntry.
 // HAL uses gputypes.BindGroupEntry with ResourceBinding interfaces.

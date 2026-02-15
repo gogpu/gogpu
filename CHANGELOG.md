@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Rust backend: StencilOperation off-by-one** — HAL `StencilOperation` uses iota (Keep=0),
+  gputypes uses WebGPU spec values (Keep=1). Direct cast was off by one, causing incorrect
+  stencil operations in the stencil-then-cover pipeline (visible as star rendering artifact).
+- **Rust backend: MipLevelCount panic** — HAL uses 0 for "all remaining mip levels",
+  wgpu-native expects `math.MaxUint32` (WGPU_MIP_LEVEL_COUNT_UNDEFINED). Was crashing
+  on `CreateTextureView`.
+- **Rust backend: SetVertexBuffer/SetIndexBuffer panic** — HAL uses size 0 for "whole buffer",
+  wgpu-native expects `math.MaxUint64` (WGPU_WHOLE_SIZE). Was crashing during render pass.
+
 - **DX12 deferred clear** — `ClearColor` + `DrawTexture` merged into a single render
   pass via deferred clear pattern. Eliminates the intermediate RT→PRESENT→RT state
   transition that caused content loss on DX12 FLIP_DISCARD swapchains during resize.
