@@ -34,9 +34,12 @@ type App struct {
 	onClose  func() // called before renderer destruction
 
 	// State
-	running     bool
-	lastFrame   time.Time
-	needsRedraw bool // For render-on-demand mode
+	running   bool
+	lastFrame time.Time
+
+	// Event-driven rendering
+	invalidator *Invalidator
+	animations  *AnimationController
 
 	// Event source for gpucontext integration
 	eventSource *eventSourceAdapter
@@ -161,14 +164,33 @@ func (a *App) Run() error {
 		})
 	}()
 
-	// Main loop
+	// Main loop with three-state event-driven model:
+	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
+	//   2. ANIMATING: Active animations — render at VSync (smooth 60fps)
+	//   3. CONTINUOUS: ContinuousRender=true — always render (game loop)
 	a.running = true
 	a.lastFrame = time.Now()
-	a.needsRedraw = true // Initial draw
+	a.invalidator = newInvalidator(a.platform.WakeUp)
+	a.animations = &AnimationController{}
+	a.invalidator.Invalidate() // Request initial frame
 
 	for a.running && !a.platform.ShouldClose() {
-		// Process platform events (main thread)
-		a.processEventsMultiThread()
+		// Determine rendering state
+		continuous := a.config.ContinuousRender || a.animations.IsAnimating()
+		invalidated := a.invalidator.Consume()
+
+		if !continuous && !invalidated {
+			// IDLE STATE: Block on OS events (0% CPU, <1ms response)
+			a.platform.WaitEvents()
+		}
+
+		// Process all pending platform events
+		hasEvents := a.processEventsMultiThread()
+
+		// Check if invalidation arrived during event processing
+		if a.invalidator.Consume() {
+			invalidated = true
+		}
 
 		// Calculate delta time
 		now := time.Now()
@@ -186,16 +208,9 @@ func (a *App) Run() error {
 			a.onUpdate(deltaTime)
 		}
 
-		// Render frame on render thread
-		// In continuous mode: render every frame (game loop)
-		// In on-demand mode: render only when needsRedraw is set
-		if a.config.ContinuousRender || a.needsRedraw {
+		// Render frame if needed
+		if continuous || invalidated || hasEvents {
 			a.renderFrameMultiThread()
-			a.needsRedraw = false
-		} else {
-			// In on-demand mode, sleep to avoid busy loop.
-			// 100ms = responsive enough for UI, power-efficient when idle.
-			time.Sleep(time.Millisecond * 100)
 		}
 	}
 
@@ -204,7 +219,8 @@ func (a *App) Run() error {
 
 // processEventsMultiThread handles platform events with multi-thread pattern.
 // Resize events are deferred to the render thread via RequestResize.
-func (a *App) processEventsMultiThread() {
+// Returns true if any events were processed (used for event-driven rendering).
+func (a *App) processEventsMultiThread() bool {
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
 	var lastResize *platform.Event
@@ -224,12 +240,8 @@ func (a *App) processEventsMultiThread() {
 		switch event.Type {
 		case platform.EventResize:
 			lastResize = event
-			a.needsRedraw = true
 		case platform.EventClose:
 			a.running = false
-		default:
-			// Any other event (input, etc.) triggers redraw in on-demand mode
-			a.needsRedraw = true
 		}
 	}
 
@@ -251,6 +263,8 @@ func (a *App) processEventsMultiThread() {
 	if a.eventSource != nil {
 		a.eventSource.dispatchEndFrame()
 	}
+
+	return len(events) > 0
 }
 
 // renderFrameMultiThread renders a frame using the render thread.
@@ -335,9 +349,20 @@ func (a *App) Quit() {
 // RequestRedraw requests a frame redraw.
 // In render-on-demand mode (ContinuousRender=false), this triggers a single frame render.
 // In continuous mode, this has no effect as frames are rendered continuously.
-// Call this when UI state changes and needs to be displayed.
+// Safe to call from any goroutine.
 func (a *App) RequestRedraw() {
-	a.needsRedraw = true
+	if a.invalidator != nil {
+		a.invalidator.Invalidate()
+	}
+}
+
+// StartAnimation signals that an animation is starting.
+// While any animation is active, the main loop renders at VSync rate.
+// Call Stop() on the returned token when the animation completes.
+func (a *App) StartAnimation() *AnimationToken {
+	token := a.animations.StartAnimation()
+	a.RequestRedraw() // Wake up to start rendering
+	return token
 }
 
 // Size returns the current window size.

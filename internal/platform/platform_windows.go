@@ -125,6 +125,12 @@ const (
 	spiGetHighContrast        = 0x0042
 	hcfHighContrastOn         = 0x00000001
 
+	// WaitEvents / WakeUp constants
+	wmWakeUp       = 0x0401     // WM_USER + 1 (custom wakeup message)
+	qsAllinput     = 0x04FF     // QS_ALLINPUT
+	mwmoInputAvail = 0x0004     // MWMO_INPUTAVAILABLE
+	infinite       = 0xFFFFFFFF // INFINITE
+
 	// Registry constants
 	hkeyCurrentUser uintptr = 0x80000001
 	keyRead         uintptr = 0x20019
@@ -166,6 +172,10 @@ var (
 	procGetMessageTime     = user32.NewProc("GetMessageTime")
 	procSetTimer           = user32.NewProc("SetTimer")
 	procKillTimer          = user32.NewProc("KillTimer")
+
+	// WaitEvents / WakeUp
+	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
+	procPostMessageW                = user32.NewProc("PostMessageW")
 
 	// DPI
 	procGetDpiForWindow = user32.NewProc("GetDpiForWindow")
@@ -450,6 +460,26 @@ func (p *windowsPlatform) Destroy() {
 		p.hwnd = 0
 	}
 	globalPlatform = nil
+}
+
+// WaitEvents blocks until at least one OS event is available.
+// MsgWaitForMultipleObjectsEx blocks the thread with zero CPU usage until
+// input arrives. MWMO_INPUTAVAILABLE returns immediately if messages are
+// already queued. Does NOT remove messages; PollEvents (PeekMessage) does that.
+func (p *windowsPlatform) WaitEvents() {
+	procMsgWaitForMultipleObjectsEx.Call(
+		0,                       // nCount (no handles)
+		0,                       // pHandles (nil)
+		uintptr(infinite),       // dwMilliseconds
+		uintptr(qsAllinput),     // dwWakeMask
+		uintptr(mwmoInputAvail), // dwFlags
+	)
+}
+
+// WakeUp unblocks WaitEvents from any goroutine.
+// PostMessageW is thread-safe and wakes MsgWaitForMultipleObjectsEx.
+func (p *windowsPlatform) WakeUp() {
+	procPostMessageW.Call(uintptr(p.hwnd), uintptr(wmWakeUp), 0, 0)
 }
 
 // ScaleFactor returns the DPI scale factor for the window.
@@ -1169,6 +1199,10 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	case wmClose:
 		p.shouldClose = true
 		p.queueEvent(Event{Type: EventClose})
+		return 0
+
+	case wmWakeUp:
+		// No-op: sole purpose is to unblock MsgWaitForMultipleObjectsEx in WaitEvents.
 		return 0
 
 	case wmDestroy:

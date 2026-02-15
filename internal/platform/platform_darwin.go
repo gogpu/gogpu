@@ -429,6 +429,18 @@ func (p *darwinPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucont
 // macOS doesn't have modal resize loops — CAMetalLayer handles live resize smoothly.
 func (p *darwinPlatform) SetModalFrameCallback(_ func()) {}
 
+// WaitEvents blocks until at least one OS event is available.
+// TODO: Implement using NSApplication nextEventMatchingMask with distantFuture.
+func (p *darwinPlatform) WaitEvents() {
+	time.Sleep(time.Millisecond) // Stub: poll at 1ms until proper macOS impl
+}
+
+// WakeUp unblocks WaitEvents from any goroutine.
+// TODO: Implement using [NSApp postEvent:atStart:] or CFRunLoopSourceSignal.
+func (p *darwinPlatform) WakeUp() {
+	// Stub: no-op until proper macOS implementation
+}
+
 // dispatchPointerEvent dispatches a pointer event to the registered callback.
 func (p *darwinPlatform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	// Callback is read under lock, but called without lock to avoid deadlocks.

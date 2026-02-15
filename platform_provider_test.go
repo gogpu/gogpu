@@ -31,6 +31,8 @@ func (m *mockPlatform) SetPointerCallback(func(gpucontext.PointerEvent))        
 func (m *mockPlatform) SetScrollCallback(func(gpucontext.ScrollEvent))                  {}
 func (m *mockPlatform) SetKeyCallback(func(gpucontext.Key, gpucontext.Modifiers, bool)) {}
 func (m *mockPlatform) SetModalFrameCallback(func())                                    {}
+func (m *mockPlatform) WaitEvents()                                                     {}
+func (m *mockPlatform) WakeUp()                                                         {}
 func (m *mockPlatform) Destroy()                                                        {}
 func (m *mockPlatform) ScaleFactor() float64                                            { return m.scaleFactor }
 func (m *mockPlatform) ClipboardRead() (string, error)                                  { return m.clipboardText, nil }
@@ -70,10 +72,7 @@ func TestWindowProviderNilPlatform(t *testing.T) {
 	})
 
 	t.Run("RequestRedraw", func(t *testing.T) {
-		app.RequestRedraw() // must not panic
-		if !app.needsRedraw {
-			t.Error("RequestRedraw() should set needsRedraw")
-		}
+		app.RequestRedraw() // must not panic with nil invalidator
 	})
 }
 

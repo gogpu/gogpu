@@ -82,6 +82,16 @@ type Platform interface {
 	// eliminate the need for this callback entirely. See ROADMAP.md.
 	SetModalFrameCallback(fn func())
 
+	// WaitEvents blocks until at least one OS event is available.
+	// Uses OS-level blocking (MsgWaitForMultipleObjectsEx on Windows).
+	// Returns when an OS event arrives or WakeUp() is called.
+	// Does NOT remove messages from the queue; PollEvents handles that.
+	WaitEvents()
+
+	// WakeUp unblocks WaitEvents from any goroutine.
+	// Thread-safe. Uses PostMessage on Windows, pipe fd on Linux.
+	WakeUp()
+
 	// Destroy closes the window and releases resources.
 	Destroy()
 

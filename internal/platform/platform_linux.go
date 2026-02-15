@@ -153,6 +153,18 @@ func (p *x11Platform) SetKeyCallback(_ func(key gpucontext.Key, mods gpucontext.
 // X11 doesn't have modal resize loops.
 func (p *x11Platform) SetModalFrameCallback(_ func()) {}
 
+// WaitEvents blocks until at least one OS event is available.
+// TODO: Implement using XNextEvent or poll on ConnectionNumber(display).
+func (p *x11Platform) WaitEvents() {
+	time.Sleep(time.Millisecond) // Stub: poll at 1ms until proper X11 impl
+}
+
+// WakeUp unblocks WaitEvents from any goroutine.
+// TODO: Implement using a self-pipe or XSendEvent to wake the event loop.
+func (p *x11Platform) WakeUp() {
+	// Stub: no-op until proper X11 implementation
+}
+
 // Init creates the Wayland window.
 func (p *waylandPlatform) Init(config Config) error {
 	// Check if Wayland is available
@@ -1237,6 +1249,18 @@ func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucon
 // SetModalFrameCallback is a no-op on Wayland.
 // Wayland uses async configure events — resize is never blocking.
 func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}
+
+// WaitEvents blocks until at least one OS event is available.
+// TODO: Implement using poll/epoll on the Wayland display fd.
+func (p *waylandPlatform) WaitEvents() {
+	time.Sleep(time.Millisecond) // Stub: poll at 1ms until proper Wayland impl
+}
+
+// WakeUp unblocks WaitEvents from any goroutine.
+// TODO: Implement using a self-pipe or eventfd to wake the poll/epoll.
+func (p *waylandPlatform) WakeUp() {
+	// Stub: no-op until proper Wayland implementation
+}
 
 // waylandPlatform provider stubs
 
