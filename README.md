@@ -31,10 +31,12 @@
 | Category | Capabilities |
 |----------|--------------|
 | **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
-| **Platforms** | Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal) |
-| **Graphics** | Windowing, input handling, texture loading |
+| **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
+| **Platforms** | Windows (Vulkan/DX12/GLES), Linux (Vulkan/GLES), macOS (Metal) |
+| **Graphics** | Windowing, input handling, texture loading, zero-copy surface rendering |
 | **Compute** | Full compute shader support |
-| **Integration** | DeviceProvider, WindowProvider, PlatformProvider for external libraries |
+| **Integration** | DeviceProvider, HalProvider, WindowProvider, PlatformProvider, SurfaceView |
+| **Logging** | Structured logging via `log/slog`, silent by default |
 | **Build** | Zero CGO with Pure Go backend |
 
 ---
@@ -115,6 +117,33 @@ app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
 | **Rust** | `-tags rust` | wgpu-native via FFI | Maximum performance (Windows only) |
 
 > **Note:** Rust backend requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) DLL.
+
+### Graphics API Selection
+
+Backend (Rust/Native) and Graphics API (Vulkan/DX12/Metal/GLES) are independent choices:
+
+```go
+// Force Vulkan on Windows (instead of auto-detected default)
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithGraphicsAPI(gogpu.GraphicsAPIVulkan))
+
+// Force DirectX 12 on Windows
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithGraphicsAPI(gogpu.GraphicsAPIDX12))
+
+// Force GLES (useful for testing or compatibility)
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithGraphicsAPI(gogpu.GraphicsAPIGLES))
+```
+
+| Graphics API | Platforms | Constant |
+|--------------|-----------|----------|
+| **Auto** | All (default) | `gogpu.GraphicsAPIAuto` |
+| **Vulkan** | Windows, Linux | `gogpu.GraphicsAPIVulkan` |
+| **DX12** | Windows | `gogpu.GraphicsAPIDX12` |
+| **Metal** | macOS | `gogpu.GraphicsAPIMetal` |
+| **GLES** | Windows, Linux | `gogpu.GraphicsAPIGLES` |
+| **Software** | All | `gogpu.GraphicsAPISoftware` |
 
 ---
 
@@ -198,6 +227,19 @@ if hp, ok := provider.(gpucontext.HalProvider); ok {
 ```
 
 Used by [gogpu/gg](https://github.com/gogpu/gg) GPU SDF accelerator for compute shader dispatch on shared device.
+
+### SurfaceView (Zero-Copy Rendering)
+
+For direct GPU rendering without CPU readback:
+
+```go
+app.OnDraw(func(dc *gogpu.Context) {
+    view := dc.SurfaceView() // Current frame's GPU texture view
+    // Pass to ggcanvas.RenderDirect() for zero-copy compositing
+})
+```
+
+This eliminates the GPU→CPU→GPU round-trip when integrating with gg/ggcanvas.
 
 ### Window & Platform Integration
 
@@ -285,6 +327,29 @@ queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0)
 
 ---
 
+## Logging
+
+GoGPU uses `log/slog` for structured logging, silent by default:
+
+```go
+import "log/slog"
+
+// Enable info-level logging
+gogpu.SetLogger(slog.Default())
+
+// Enable debug-level logging for full diagnostics
+gogpu.SetLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+})))
+
+// Get current logger
+logger := gogpu.Logger()
+```
+
+Log levels: `Debug` (texture creation, pipeline state), `Info` (backend selected, adapter info), `Warn` (resource cleanup errors).
+
+---
+
 ## Architecture
 
 GoGPU uses **multi-thread architecture** (Ebiten/Gio pattern) for professional responsiveness:
@@ -316,9 +381,9 @@ User Application
 │  WebGPU)    │  │ Win32/Cocoa │
 └──────┬──────┘  └─────────────┘
        │
- ┌─────┴─────┬───────────┐
- ▼           ▼           ▼
-Vulkan     Metal     Software
+ ┌─────┴─────┬─────┬─────┬─────────┐
+ ▼           ▼     ▼     ▼         ▼
+Vulkan     DX12  Metal  GLES   Software
 ```
 
 ### Package Structure
@@ -327,7 +392,7 @@ Vulkan     Metal     Software
 |---------|---------|
 | `gogpu` (root) | App, Config, Context, Renderer, Texture |
 | `gpu/` | Backend selection (HAL-based) |
-| `gpu/types/` | Backend type enum (BackendType) |
+| `gpu/types/` | BackendType, GraphicsAPI enums |
 | `gpu/backend/rust/` | Rust backend via wgpu-native FFI (opt-in, `-tags rust`) |
 | `gpu/backend/native/` | HAL backend creation (Vulkan/Metal selection) |
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-02-15
+
+### Added
+
+- **GraphicsAPI selection** — Runtime selection of graphics API, orthogonal to backend choice.
+  `Config.WithGraphicsAPI(api)` accepts `GraphicsAPIVulkan`, `GraphicsAPIDX12`, `GraphicsAPIMetal`,
+  `GraphicsAPIGLES`, `GraphicsAPISoftware`, or `GraphicsAPIAuto` (default).
+  Windows supports Vulkan/DX12/GLES, Linux supports Vulkan/GLES, macOS uses Metal.
+  - Re-exported constants: `gogpu.GraphicsAPIVulkan`, `gogpu.GraphicsAPIDX12`, etc.
+  - `types.GraphicsAPI` enum type with `String()` method
+
+- **SurfaceView for zero-copy rendering** — `Context.SurfaceView()` exposes the current frame's
+  surface texture view for direct GPU rendering. Enables zero-copy integration with gg/ggcanvas
+  `RenderDirect`, bypassing the GPU→CPU→GPU readback path.
+
+- **DX12 device health diagnostics** — `Context.CheckDeviceHealth()` returns detailed error
+  information when the DX12 device is removed. Uses `DXGI_ERROR_DEVICE_REMOVED` reason codes
+  for debugging GPU crashes.
+
+- **Structured logging via log/slog** — `SetLogger(*slog.Logger)` and `Logger()` for
+  configurable structured logging. Silent by default (nop handler). Thread-safe via
+  `atomic.Pointer`. Log levels: Debug (diagnostics), Info (lifecycle), Warn (non-fatal issues).
+
+- **GLES triangle rendering test example** — `examples/gles_test/` demonstrates GLES backend
+  selection via `WithGraphicsAPI(gogpu.GraphicsAPIGLES)`.
+
 ### Fixed
 
 - **DX12 deferred clear** — `ClearColor` + `DrawTexture` merged into a single render
@@ -15,9 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Refactored
 
-- **Eliminate handle-based Backend abstraction** — Renderer now uses `hal.Device`/`hal.Queue`
-  directly instead of going through `gpu.Backend` + `ResourceRegistry` handle maps.
-  This removes ~2700 net lines of indirection code and enables proper error propagation.
+- **Complete HAL migration** — Renderer now uses `hal.Device`/`hal.Queue` directly instead
+  of going through `gpu.Backend` + `ResourceRegistry` handle maps. This removes ~2700 net
+  lines of indirection code and enables proper error propagation.
   - `Renderer` fields changed from `types.*` (uintptr handles) to `hal.*` (Go interfaces)
   - `Texture` uses `hal.Texture`/`hal.TextureView`/`hal.Sampler` directly
   - `FencePool` uses `hal.Device`/`hal.Fence` directly
@@ -25,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All GPU errors propagated via `fmt.Errorf("context: %w", err)` chains
   - Resolves [#84](https://github.com/gogpu/gogpu/issues/84)
 
-- **Rust backend: HAL adapter** — Rewritten `gpu/backend/rust/rust.go` from handle-based
+- **Rust backend as thin HAL adapter** — Rewritten `gpu/backend/rust/rust.go` from handle-based
   `gpu.Backend` (17 handle maps, 1136 LOC) to thin wrapper structs implementing `hal.*`
   interfaces (24 wrappers, 1580 LOC, zero handle maps). Each `rust*` struct holds a
   `*wgpu.*` pointer and delegates directly — no map lookups, no uintptr handles.
@@ -35,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `rustRenderPass`/`rustComputePass` implement render/compute pass encoders
   - Fences: stub implementation (wgpu-native uses `device.Poll()`)
   - Backend selection in `renderer.init()`: Auto/Native/Rust via build-tagged files
+
+- **Removed diagnostic logging from renderer** — Replaced ad-hoc `fmt.Printf`/`log.Printf`
+  calls with structured `slog` logger. All diagnostic output now goes through the
+  configurable logging system (silent by default).
 
 ### Removed
 
@@ -48,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   All code now uses `hal.*` descriptor types. Deleted 175 LOC.
 - **`gpu/backend_darwin_test.go`** — Metal integration test using legacy `gpu.Backend` API.
   Deleted 233 LOC.
+- **`gpu/sdf` package** — GPU SDF accelerator moved to gg repository where it belongs.
+- **Total: -1623 lines** of legacy indirection code removed.
 
 ## [0.17.0] - 2026-02-10
 
@@ -197,7 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Render-on-Demand Mode** — Power-efficient UI rendering
-  - `Config.WithRenderOnDemand(true)` — Only render on events
+  - `Config.WithContinuousRender(false)` — Only render on events
   - `App.RequestRedraw()` — Explicitly request frame redraw
   - Reduces GPU usage from ~100% to ~8% for static UI
 
@@ -828,7 +860,10 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.15.7...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/gogpu/gogpu/compare/v0.17.0...v0.18.0
+[0.17.0]: https://github.com/gogpu/gogpu/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/gogpu/gogpu/compare/v0.15.7...v0.16.0
 [0.15.7]: https://github.com/gogpu/gogpu/compare/v0.15.6...v0.15.7
 [0.15.6]: https://github.com/gogpu/gogpu/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/gogpu/gogpu/compare/v0.15.4...v0.15.5
