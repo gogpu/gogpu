@@ -835,8 +835,13 @@ func (r *Renderer) WaitForGPU() {
 // Destroy releases all GPU resources.
 func (r *Renderer) Destroy() {
 	// Wait for all GPU work to complete before destroying resources.
-	// This prevents crashes from destroying resources that are still in use.
-	// FencePool.Destroy() waits for all active submissions to complete.
+	// With per-frame fence tracking (SYNC-OPT), the last frame may still be
+	// in-flight. WaitIdle() ensures all GPU work is done before releasing resources.
+	if r.device != nil {
+		_ = r.device.WaitIdle()
+	}
+
+	// FencePool.Destroy() waits for all active user fence submissions to complete.
 	if r.fencePool != nil {
 		r.fencePool.Destroy()
 		r.fencePool = nil
