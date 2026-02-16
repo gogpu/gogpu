@@ -13,7 +13,7 @@ const (
 	BackendNative
 
 	// BackendRust uses wgpu-gpu (Rust) via go-webgpu/webgpu.
-	// Maximum performance, requires gpu library. Windows only.
+	// Maximum performance, requires wgpu-native shared library.
 	BackendRust
 
 	// BackendGo is an alias for BackendNative.

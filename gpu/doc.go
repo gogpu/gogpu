@@ -6,7 +6,7 @@
 // Backend selection determines which HAL implementation to use:
 //
 //   - Native (Pure Go): Uses gogpu/wgpu with Vulkan (Windows/Linux) or Metal (macOS)
-//   - Rust: Uses wgpu-native via go-webgpu/webgpu (Windows only, build with -tags rust)
+//   - Rust: Uses wgpu-native via go-webgpu/webgpu (build with -tags rust)
 //
 // # Backend Selection
 //
@@ -20,5 +20,5 @@
 //
 //   - gpu/types: BackendType enum and related constants
 //   - gpu/backend/native: Pure Go HAL backend (Vulkan/Metal)
-//   - gpu/backend/rust: Rust HAL backend (wgpu-native, Windows only)
+//   - gpu/backend/rust: Rust HAL backend (wgpu-native, all platforms)
 package gpu

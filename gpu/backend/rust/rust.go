@@ -1,8 +1,8 @@
-//go:build rust && windows
+//go:build rust
 
 // Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
 // This backend offers maximum performance and is battle-tested in production.
-// Currently only available on Windows due to go-webgpu/goffi limitations.
+// Supported on Windows, macOS, and Linux.
 //
 // Build with: go build -tags rust
 package rust
@@ -26,8 +26,8 @@ import (
 // rustBackend implements hal.Backend for the Rust (wgpu-native) backend.
 type rustBackend struct{}
 
-// Variant returns the backend type identifier.
-func (b rustBackend) Variant() gputypes.Backend { return gputypes.BackendVulkan }
+// Variant returns the backend type identifier for the current platform.
+func (b rustBackend) Variant() gputypes.Backend { return platformVariant() }
 
 // CreateInstance creates a new GPU instance via wgpu-native.
 func (b rustBackend) CreateInstance(desc *hal.InstanceDescriptor) (hal.Instance, error) {
@@ -48,13 +48,9 @@ type rustInstance struct {
 }
 
 // CreateSurface creates a rendering surface from platform handles.
-// On Windows, displayHandle is HINSTANCE and windowHandle is HWND.
+// Platform-specific implementation is in rust_{windows,darwin,linux}.go.
 func (i *rustInstance) CreateSurface(displayHandle, windowHandle uintptr) (hal.Surface, error) {
-	surf, err := i.inst.CreateSurfaceFromWindowsHWND(displayHandle, windowHandle)
-	if err != nil {
-		return nil, fmt.Errorf("rust backend: create surface: %w", err)
-	}
-	return &rustSurface{surf: surf}, nil
+	return i.createPlatformSurface(displayHandle, windowHandle)
 }
 
 // EnumerateAdapters returns compatible GPU adapters.
@@ -1554,7 +1550,8 @@ func convertSurfaceError(err error) error {
 // Public API — used by init.go for HAL backend registration
 // ---------------------------------------------------------------------------
 
-// IsAvailable returns true on Windows where go-webgpu/goffi is supported.
+// IsAvailable returns true on platforms where go-webgpu/goffi is supported
+// (Windows, macOS, Linux).
 func IsAvailable() bool {
 	return true
 }
@@ -1566,7 +1563,7 @@ func NewHalBackend() hal.Backend { return rustBackend{} }
 func HalBackendName() string { return "Rust (wgpu-native)" }
 
 // HalBackendVariant returns the backend variant for instance creation.
-func HalBackendVariant() gputypes.Backend { return gputypes.BackendVulkan }
+func HalBackendVariant() gputypes.Backend { return platformVariant() }
 
 // ---------------------------------------------------------------------------
 // Interface compliance checks

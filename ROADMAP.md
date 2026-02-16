@@ -25,10 +25,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.18.2
+## Current State: v0.19.0
 
 ✅ **Production-ready** with full feature set:
-- Dual backend (Rust/Pure Go)
+- Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration

@@ -95,7 +95,7 @@ GoGPU supports two WebGPU implementations, selectable at compile time or runtime
 # Pure Go backend (default, zero dependencies)
 go build ./...
 
-# Enable Rust backend (requires wgpu-gpu DLL, Windows only)
+# Enable Rust backend (requires wgpu-native shared library)
 go build -tags rust ./...
 ```
 
@@ -115,7 +115,7 @@ app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
 | Backend | Build Tag | Library | Use Case |
 |---------|-----------|---------|----------|
 | **Native Go** | (default) | gogpu/wgpu | Zero dependencies, simple deployment |
-| **Rust** | `-tags rust` | wgpu-native via FFI | Maximum performance (Windows only) |
+| **Rust** | `-tags rust` | wgpu-native via FFI | Maximum performance (all platforms) |
 
 > **Note:** Rust backend requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) DLL.
 

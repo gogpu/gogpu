@@ -1,4 +1,4 @@
-//go:build rust && windows
+//go:build rust
 
 package gogpu
 

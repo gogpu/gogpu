@@ -1,11 +1,10 @@
-//go:build rust && windows
+//go:build rust
 
 // Package rust provides the WebGPU backend using wgpu-native (Rust) via go-webgpu/webgpu.
-// This backend offers maximum performance but requires wgpu_native.dll.
+// This backend offers maximum performance but requires the wgpu-native shared library
+// (wgpu_native.dll on Windows, libwgpu_native.dylib on macOS, libwgpu_native.so on Linux).
 //
 // Build with: go build -tags rust
-//
-// Currently only supported on Windows due to go-webgpu/goffi limitations.
 //
 // The renderer imports this package via build-tag-guarded files and calls:
 //   - NewHalBackend() to get the hal.Backend

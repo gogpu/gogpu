@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-02-16
+
+### Added
+- **Cross-platform Rust backend** — Rust (wgpu-native) backend now supports macOS (Metal)
+  and Linux (Vulkan, X11/Wayland) in addition to Windows. Build with `-tags rust`
+  on any platform. Platform surface creation delegated to `rust_{windows,darwin,linux}.go`.
+  Linux auto-detects Wayland vs X11 via `WAYLAND_DISPLAY` environment variable.
+
+### Dependencies
+- wgpu v0.16.1 → v0.16.2 (Metal autorelease pool LIFO fix for macOS Tahoe)
+
 ## [0.18.2] - 2026-02-15
 
 ### Dependencies

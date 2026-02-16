@@ -107,7 +107,7 @@ func (r *Renderer) init(backendType types.BackendType, graphicsAPI types.Graphic
 	switch backendType {
 	case types.BackendRust:
 		if !rustHalAvailable() {
-			return fmt.Errorf("gogpu: rust backend requested but not available (build with -tags rust on Windows)")
+			return fmt.Errorf("gogpu: rust backend requested but not available (build with -tags rust)")
 		}
 		r.halBackend, r.backendName, backendVariant = newRustHalBackend()
 
