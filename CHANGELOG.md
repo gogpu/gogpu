@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-02-16
+
+### Fixed
+
+- **GPU resource cleanup on exit** — `Renderer.Destroy()` now calls `device.WaitIdle()` before
+  releasing pipelines, textures, and other GPU resources. Ensures the last frame completes on
+  the GPU before destruction. Fixes DX12 crash (Exception 0x87d in `ID3D12PipelineState.Release`)
+  on window close when using per-frame fence tracking.
+
+### Dependencies
+
+- wgpu v0.16.2 → v0.16.3 (per-frame fence tracking, GLES VSync fix)
+
 ## [0.19.0] - 2026-02-16
 
 ### Added

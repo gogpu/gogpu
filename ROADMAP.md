@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.19.0
+## Current State: v0.19.1
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -36,6 +36,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.19.1:**
+- `WaitIdle()` call before GPU resource destruction — fixes DX12 crash on exit
 
 ### v0.18.x Features
 - ✅ **Event-driven three-state model** — IDLE (0% CPU) / ANIMATING (VSync) / CONTINUOUS
