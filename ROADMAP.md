@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.19.2
+## Current State: v0.19.3
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -36,6 +36,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.19.3:**
+- wgpu v0.16.5 (per-encoder command pools, fixes VkCommandBuffer crash)
 
 **New in v0.19.2:**
 - 52 enterprise hot-path benchmarks (zero-allocation math confirmed)
