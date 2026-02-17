@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.19.1
+## Current State: v0.19.2
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -36,6 +36,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.19.2:**
+- 52 enterprise hot-path benchmarks (zero-allocation math confirmed)
+- wgpu v0.16.4 (timeline semaphore, FencePool, −32% naga allocations)
 
 **New in v0.19.1:**
 - `WaitIdle()` call before GPU resource destruction — fixes DX12 crash on exit
@@ -127,7 +131,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.18.2** | 2026-02 | Update wgpu v0.16.1 (Vulkan framebuffer cache fix) |
+| **v0.19.2** | 2026-02 | Hot-path benchmarks, wgpu v0.16.4 (timeline semaphore, FencePool) |
+| v0.19.1 | 2026-02 | WaitIdle cleanup, wgpu v0.16.3 |
+| v0.19.0 | 2026-02 | Cross-platform Rust backend, wgpu v0.16.2 |
+| v0.18.2 | 2026-02 | Update wgpu v0.16.1 (Vulkan framebuffer cache fix) |
 | v0.18.1 | 2026-02 | Event-driven three-state model, native WaitEvents, AnimationToken |
 | v0.18.0 | 2026-02 | HAL-direct, GraphicsAPI selection, SurfaceView, slog |
 | v0.17.0 | 2026-02 | HalProvider, compute support, unified native backend |

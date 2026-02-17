@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.2] - 2026-02-18
+
+### Added
+
+- **Enterprise hot-path benchmarks** — 52 benchmarks with `ReportAllocs()` across gmath (31 — Vec2/3/4,
+  Mat4, Color operations, batch transforms), input (17 — keyboard/mouse polling, frame update),
+  gpu/types (4 — backend enum operations), window (6 — config, events), root (11 — Config, Texture,
+  AnimationController). All math operations confirmed **zero-allocation**. Mat4×Vec4 vertex
+  transform: 5ns/op, 0 allocs.
+
+### Dependencies
+
+- wgpu v0.16.3 → v0.16.4 (timeline semaphore, FencePool, hot-path allocation optimization)
+- naga v0.13.0 → v0.13.1 (OpArrayLength fix, −32% compiler allocations)
 
 ## [0.19.1] - 2026-02-16
 
@@ -929,7 +942,10 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.19.2...HEAD
+[0.19.2]: https://github.com/gogpu/gogpu/compare/v0.19.1...v0.19.2
+[0.19.1]: https://github.com/gogpu/gogpu/compare/v0.19.0...v0.19.1
+[0.19.0]: https://github.com/gogpu/gogpu/compare/v0.18.2...v0.19.0
 [0.18.2]: https://github.com/gogpu/gogpu/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/gogpu/gogpu/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/gogpu/gogpu/compare/v0.17.0...v0.18.0
