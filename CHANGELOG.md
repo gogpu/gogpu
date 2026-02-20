@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.6] - 2026-02-20
+
+### Fixed
+
+- **Rust backend HAL compliance** — implement `CreateQuerySet`, `DestroyQuerySet`,
+  `ResolveQuerySet`, and `WaitIdle` in the Rust backend. The HAL interface was extended
+  but the Rust backend wasn't updated, causing `-tags rust` compilation failure.
+  Reported by @amortaza in [Discussion #47](https://github.com/gogpu/gogpu/discussions/47).
+
 ## [0.19.5] - 2026-02-18
 
 ### Dependencies

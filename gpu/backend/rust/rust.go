@@ -597,6 +597,26 @@ func (d *rustDevice) DestroyComputePipeline(pipeline hal.ComputePipeline) {
 	}
 }
 
+// CreateQuerySet creates a query set for timestamp or occlusion queries.
+func (d *rustDevice) CreateQuerySet(desc *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	qs := d.dev.CreateQuerySet(&wgpu.QuerySetDescriptor{
+		Type:  halQueryTypeToWGPU(desc.Type),
+		Count: desc.Count,
+	})
+	if qs == nil {
+		return nil, fmt.Errorf("rust backend: failed to create query set")
+	}
+	return &rustQuerySet{qs: qs}, nil
+}
+
+// DestroyQuerySet destroys a query set.
+func (d *rustDevice) DestroyQuerySet(querySet hal.QuerySet) {
+	if rq, ok := querySet.(*rustQuerySet); ok && rq.qs != nil {
+		rq.qs.Release()
+		rq.qs = nil
+	}
+}
+
 // CreateCommandEncoder creates a command encoder.
 func (d *rustDevice) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
 	enc := d.dev.CreateCommandEncoder(nil)
@@ -682,6 +702,15 @@ func (d *rustDevice) GetFenceStatus(fence hal.Fence) (bool, error) {
 	// Poll without blocking. Returns true when queue is empty.
 	d.dev.Poll(false)
 	return true, nil
+}
+
+// WaitIdle waits for all GPU work to complete.
+// Uses device.poll(wait=true) to block until the GPU is idle.
+func (d *rustDevice) WaitIdle() error {
+	if d.dev != nil {
+		d.dev.Poll(true)
+	}
+	return nil
 }
 
 // Destroy releases the device.
@@ -1057,6 +1086,16 @@ func (e *rustCommandEncoder) CopyTextureToTexture(src, dst hal.Texture, regions 
 	}
 }
 
+// ResolveQuerySet copies query results from a query set into a buffer.
+func (e *rustCommandEncoder) ResolveQuerySet(querySet hal.QuerySet, firstQuery, queryCount uint32, destination hal.Buffer, destinationOffset uint64) {
+	rq, ok1 := querySet.(*rustQuerySet)
+	rb, ok2 := destination.(*rustBuffer)
+	if !ok1 || !ok2 || rq.qs == nil || rb.buf == nil {
+		return
+	}
+	e.enc.ResolveQuerySet(rq.qs, firstQuery, queryCount, rb.buf, destinationOffset)
+}
+
 // BeginRenderPass begins a render pass.
 func (e *rustCommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
 	attachments := make([]wgpu.RenderPassColorAttachment, len(desc.ColorAttachments))
@@ -1414,6 +1453,13 @@ type rustComputePipeline struct {
 
 func (p *rustComputePipeline) Destroy() { p.pipeline.Release() }
 
+// rustQuerySet wraps wgpu.QuerySet to implement hal.QuerySet.
+type rustQuerySet struct {
+	qs *wgpu.QuerySet
+}
+
+func (q *rustQuerySet) Destroy() { q.qs.Release() }
+
 // rustCommandBuffer wraps wgpu.CommandBuffer to implement hal.CommandBuffer.
 type rustCommandBuffer struct {
 	buf *wgpu.CommandBuffer
@@ -1443,6 +1489,20 @@ func (b *rustRenderBundle) Destroy() { b.bundle.Release() }
 // gputypes: Undefined=0, Keep=1, Zero=2, ..., DecrementWrap=8
 func halStencilOpToGPUTypes(op hal.StencilOperation) gputypes.StencilOperation {
 	return gputypes.StencilOperation(op + 1)
+}
+
+// halQueryTypeToWGPU converts hal.QueryType (iota from 0) to wgpu.QueryType (WebGPU spec values).
+// HAL: Occlusion=0, Timestamp=1
+// wgpu: Occlusion=0x1, Timestamp=0x2
+func halQueryTypeToWGPU(qt hal.QueryType) wgpu.QueryType {
+	switch qt {
+	case hal.QueryTypeOcclusion:
+		return wgpu.QueryTypeOcclusion
+	case hal.QueryTypeTimestamp:
+		return wgpu.QueryTypeTimestamp
+	default:
+		return wgpu.QueryTypeOcclusion
+	}
 }
 
 // bindGroupEntryToWGPU converts a hal BindGroupEntry to wgpu BindGroupEntry.
@@ -1590,6 +1650,7 @@ var (
 	_ hal.PipelineLayout      = (*rustPipelineLayout)(nil)
 	_ hal.RenderPipeline      = (*rustRenderPipeline)(nil)
 	_ hal.ComputePipeline     = (*rustComputePipeline)(nil)
+	_ hal.QuerySet            = (*rustQuerySet)(nil)
 	_ hal.CommandBuffer       = (*rustCommandBuffer)(nil)
 	_ hal.Fence               = (*rustFence)(nil)
 	_ hal.RenderBundle        = (*rustRenderBundle)(nil)

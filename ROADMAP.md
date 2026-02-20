@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.19.5
+## Current State: v0.19.6
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -36,6 +36,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.19.6:**
+- Rust backend: implement CreateQuerySet, DestroyQuerySet, ResolveQuerySet, WaitIdle (fixes `-tags rust`)
 
 **New in v0.19.5:**
 - go-webgpu/webgpu v0.3.1 (Rust backend: ARM64 callback trampoline fix)
