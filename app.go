@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"io"
 	"runtime"
 	"time"
 
@@ -46,6 +47,9 @@ type App struct {
 
 	// Input state for Ebiten-style polling (KeyJustPressed, etc.)
 	inputState *input.State
+
+	// Resource tracker for automatic GPU resource cleanup on shutdown.
+	tracker *resourceTracker
 }
 
 // NewApp creates a new application with the given configuration.
@@ -84,6 +88,41 @@ func (a *App) OnClose(fn func()) *App {
 	a.onClose = fn
 	return a
 }
+
+// TrackResource registers an io.Closer for automatic cleanup during shutdown.
+// Tracked resources are closed in LIFO (reverse) order after WaitIdle and
+// before the renderer is destroyed, so the GPU device is still alive.
+//
+// Use this instead of OnClose for automatic resource lifecycle management.
+// Resources that implement io.Closer (like ggcanvas.Canvas) can be tracked.
+//
+// Safe to call from any goroutine. If called after shutdown, the resource
+// is closed immediately.
+//
+// Example:
+//
+//	canvas, _ := ggcanvas.New(provider, 800, 600)
+//	app.TrackResource(canvas)
+//	// canvas.Close() will be called automatically on shutdown
+func (a *App) TrackResource(c io.Closer) {
+	if a.tracker == nil {
+		a.tracker = &resourceTracker{}
+	}
+	a.tracker.Track(c, "")
+}
+
+// UntrackResource removes a resource from automatic cleanup tracking.
+// Call this when you close a resource manually before shutdown to prevent
+// double-close.
+func (a *App) UntrackResource(c io.Closer) {
+	if a.tracker == nil {
+		return
+	}
+	a.tracker.Untrack(c)
+}
+
+// Compile-time check that App implements ResourceTracker.
+var _ ResourceTracker = (*App)(nil)
 
 // Run starts the application main loop with multi-thread architecture.
 // This function blocks until the application quits.
@@ -150,15 +189,22 @@ func (a *App) Run() error {
 		return initErr
 	}
 	defer func() {
-		// Wait for GPU idle, then call onClose callback before destroying
-		// renderer so user code can release GPU resources (ggcanvas,
-		// textures, etc.) while the device is still alive.
-		if a.onClose != nil {
-			a.renderLoop.RunOnRenderThreadVoid(func() {
-				a.renderer.WaitForGPU()
+		// Shutdown sequence (all on render thread for GPU safety):
+		// 1. WaitIdle — ensure all GPU work completes
+		// 2. DrainDeferredDestroys — release GC-enqueued resources
+		// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
+		// 4. onClose callback — manual cleanup (legacy pattern)
+		// 5. Renderer.Destroy() — release GPU device
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.WaitForGPU()
+			a.renderer.DrainDeferredDestroys()
+			if a.tracker != nil {
+				_ = a.tracker.CloseAll()
+			}
+			if a.onClose != nil {
 				a.onClose()
-			})
-		}
+			}
+		})
 		a.renderLoop.RunOnRenderThreadVoid(func() {
 			a.renderer.Destroy()
 		})

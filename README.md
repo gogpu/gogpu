@@ -148,6 +148,23 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 
 ---
 
+## Resource Management
+
+GPU resources are automatically cleaned up on shutdown when registered with `TrackResource`:
+
+```go
+canvas, _ := ggcanvas.New(provider, 800, 600)
+app.TrackResource(canvas) // auto-closed on shutdown, no OnClose needed
+```
+
+Resources are closed in LIFO (reverse) order after GPU idle, before device destruction. The shutdown sequence is: `WaitIdle → tracked resources → OnClose → Renderer.Destroy()`.
+
+**ggcanvas auto-registration:** When created via a provider that implements `ResourceTracker` (like `App`), ggcanvas auto-registers — no `TrackResource` call needed.
+
+**GC safety net:** Textures use `runtime.AddCleanup` as a fallback — if you forget `Destroy()`, the GC will eventually clean up GPU resources. This is a safety net, not a replacement for explicit cleanup.
+
+---
+
 ## Texture Loading
 
 ```go

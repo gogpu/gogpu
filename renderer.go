@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
@@ -74,6 +75,12 @@ type Renderer struct {
 
 	// Texture bind group cache - avoids creating new bind groups per draw call
 	texBindGroupCache map[hal.TextureView]hal.BindGroup
+
+	// Deferred destruction queue for resources enqueued by runtime.AddCleanup.
+	// These are resources that were garbage collected without explicit Close/Destroy.
+	// Drained at the start of each frame (BeginFrame) when GPU is idle.
+	deferredDestroys   []func()
+	deferredDestroysMu sync.Mutex
 
 	// Platform reference
 	platform platform.Platform
@@ -247,6 +254,11 @@ func (r *Renderer) BeginFrame() bool {
 	if !r.surfaceConfigured {
 		return false
 	}
+
+	// Drain deferred destruction queue at frame boundary.
+	// Resources enqueued by runtime.AddCleanup are destroyed here
+	// on the render thread where GPU operations are safe.
+	r.DrainDeferredDestroys()
 
 	// Acquire the next surface texture via HAL.
 	// Pass nil fence — we don't need a fence for acquisition.
@@ -829,6 +841,34 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 func (r *Renderer) WaitForGPU() {
 	if r.fencePool != nil {
 		r.fencePool.WaitAll(time.Second)
+	}
+}
+
+// EnqueueDeferredDestroy adds a destruction function to the deferred queue.
+// This is called from runtime.AddCleanup callbacks when a GPU resource is
+// garbage collected without explicit Destroy/Close. The actual destruction
+// happens on the render thread during DrainDeferredDestroys.
+//
+// Safe to call from any goroutine (including GC finalizer goroutines).
+func (r *Renderer) EnqueueDeferredDestroy(fn func()) {
+	r.deferredDestroysMu.Lock()
+	r.deferredDestroys = append(r.deferredDestroys, fn)
+	r.deferredDestroysMu.Unlock()
+}
+
+// DrainDeferredDestroys executes all pending deferred destruction functions.
+// Called during shutdown and optionally at frame boundaries to release
+// GPU resources that were enqueued by runtime.AddCleanup.
+//
+// Must be called on the render thread.
+func (r *Renderer) DrainDeferredDestroys() {
+	r.deferredDestroysMu.Lock()
+	fns := r.deferredDestroys
+	r.deferredDestroys = nil
+	r.deferredDestroysMu.Unlock()
+
+	for _, fn := range fns {
+		fn()
 	}
 }
 

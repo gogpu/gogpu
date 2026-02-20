@@ -222,6 +222,7 @@ gogpu/
 ├── animation.go        # AnimationController + AnimationToken
 ├── invalidator.go      # Goroutine-safe redraw coalescing
 ├── event_source.go     # gpucontext.EventSource adapter
+├── resource_tracker.go  # ResourceTracker: automatic GPU resource cleanup (LIFO)
 ├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
 ├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
@@ -467,6 +468,61 @@ The refactoring eliminates the indirection entirely:
 - All GPU errors propagate via `fmt.Errorf("context: %w", err)` chains
 - ~2700 net lines removed
 - Rust backend rewritten as thin HAL adapter (24 wrapper structs, zero handle maps)
+
+## Resource Lifecycle
+
+GPU resources (textures, buffers, pipeline states) require explicit cleanup because
+the Go garbage collector cannot release GPU memory. GoGPU provides three layers of
+resource lifecycle management:
+
+### 1. TrackResource — Automatic LIFO Cleanup
+
+```go
+app := gogpu.NewApp(config)
+
+// Resources tracked on App are destroyed automatically at shutdown
+texture := app.CreateTexture(desc)
+app.TrackResource(texture)   // LIFO: last tracked = first destroyed
+```
+
+`App.TrackResource(io.Closer)` registers a resource for automatic destruction.
+On shutdown, all tracked resources are closed in **reverse registration order** (LIFO),
+matching the dependency order of GPU resources (child resources destroyed before parents).
+
+Key properties:
+- **Thread-safe** — `Track`/`Untrack` can be called from any goroutine
+- **Panic recovery** — a panicking `Close()` does not prevent remaining resources from closing
+- **Idempotent** — double `CloseAll` is a no-op; tracking after shutdown closes immediately
+- **Untrack** — `UntrackResource()` removes a resource (e.g., when manually destroyed early)
+
+### 2. Deferred Destruction Queue
+
+GPU resources must be destroyed on the render thread. `Renderer.EnqueueDeferredDestroy(fn)`
+accepts a cleanup function from any goroutine; the queue is drained at the start of each
+`BeginFrame()` call on the render thread.
+
+### 3. runtime.AddCleanup Safety Net
+
+`Texture` registers a `runtime.AddCleanup` callback (Go 1.24+) that enqueues deferred
+destruction if the texture is garbage-collected without an explicit `Destroy()` call.
+This is a **safety net only** — explicit `Destroy()` (or `TrackResource`) is the correct pattern.
+
+### Shutdown Sequence
+
+```
+App.Run() exits
+  → WaitForGPU()                    // fence-based GPU idle
+  → DrainDeferredDestroys()         // process any pending cleanup
+  → tracker.CloseAll()              // LIFO resource destruction
+  → OnClose() callback              // user cleanup
+  → Renderer.Destroy()              // release GPU device
+```
+
+### Auto-Registration (ggcanvas)
+
+`ggcanvas.Canvas` auto-registers itself with the tracker via duck-typed interface detection.
+When the `gpucontext.DeviceProvider` also implements `TrackResource(io.Closer)`, the canvas
+registers at creation and unregisters at `Close()` — no manual `OnClose` wiring needed.
 
 ## SurfaceView (Zero-Copy Rendering)
 

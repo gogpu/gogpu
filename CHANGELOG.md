@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-02-20
+
+### Added
+
+- **Automatic GPU resource lifecycle management** — `App.TrackResource(io.Closer)` registers
+  resources for automatic cleanup during shutdown. Resources are closed in LIFO (reverse)
+  order after GPU idle, before renderer destruction. Eliminates manual `OnClose` callbacks.
+- **ResourceTracker interface** — optional interface for auto-registration. ggcanvas.Canvas
+  auto-registers when created via a provider that implements ResourceTracker.
+- **runtime.AddCleanup safety net on Texture** — GC-triggered cleanup enqueues deferred
+  GPU resource destruction, drained at frame boundaries. Catches forgotten `Destroy()` calls.
+- **Deferred destruction queue on Renderer** — `EnqueueDeferredDestroy()`/`DrainDeferredDestroys()`
+  for thread-safe GPU resource cleanup from arbitrary goroutines.
+
 ## [0.19.6] - 2026-02-20
 
 ### Fixed

@@ -1,6 +1,8 @@
 package gogpu
 
 import (
+	"io"
+
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 )
@@ -10,6 +12,7 @@ import (
 // through the standard gpucontext interface.
 type gpuContextAdapter struct {
 	renderer *Renderer
+	tracker  *resourceTracker
 }
 
 // Device returns the GPU device implementing gpucontext.Device.
@@ -64,6 +67,22 @@ func (a *gpuContextAdapter) HalQueue() any {
 	}
 	// Return the HAL queue directly — no more duck-typing via backend.
 	return a.renderer.queue
+}
+
+// TrackResource registers an io.Closer for automatic cleanup during shutdown.
+// This forwards to the App's resourceTracker, enabling ggcanvas and other
+// libraries to auto-register via duck typing without importing gogpu.
+func (a *gpuContextAdapter) TrackResource(c io.Closer) {
+	if a.tracker != nil {
+		a.tracker.Track(c, "")
+	}
+}
+
+// UntrackResource removes a resource from automatic cleanup tracking.
+func (a *gpuContextAdapter) UntrackResource(c io.Closer) {
+	if a.tracker != nil {
+		a.tracker.Untrack(c)
+	}
 }
 
 // Ensure gpuContextAdapter implements gpucontext.DeviceProvider.
@@ -140,5 +159,9 @@ func (a *App) GPUContextProvider() gpucontext.DeviceProvider {
 	if a.renderer == nil {
 		return nil
 	}
-	return &gpuContextAdapter{renderer: a.renderer}
+	// Initialize tracker lazily so it is available for auto-registration.
+	if a.tracker == nil {
+		a.tracker = &resourceTracker{}
+	}
+	return &gpuContextAdapter{renderer: a.renderer, tracker: a.tracker}
 }

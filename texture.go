@@ -9,10 +9,22 @@ import (
 	_ "image/png"  // Register PNG decoder
 	"io"
 	"os"
+	"runtime"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )
+
+// textureCleanupHandle holds the data needed to destroy a texture's GPU
+// resources from a runtime.AddCleanup callback. The handle stores interface
+// values (not pointers to the Texture) so the cleanup can run after the
+// Texture is garbage collected.
+type textureCleanupHandle struct {
+	texture  hal.Texture
+	view     hal.TextureView
+	sampler  hal.Sampler
+	renderer *Renderer
+}
 
 // Texture update errors.
 var (
@@ -45,6 +57,10 @@ type Texture struct {
 
 	// Reference to renderer for resource management
 	renderer *Renderer
+
+	// cleanup is the handle returned by runtime.AddCleanup.
+	// Calling Stop() prevents the GC cleanup from running after explicit Destroy.
+	cleanup runtime.Cleanup
 }
 
 // Width returns the texture width in pixels.
@@ -153,6 +169,9 @@ func bytesPerPixelForFormat(format gputypes.TextureFormat) int {
 // Destroy releases all GPU resources associated with this texture.
 // After calling Destroy, the texture should not be used.
 func (t *Texture) Destroy() {
+	// Stop the GC cleanup — we are destroying explicitly.
+	t.cleanup.Stop()
+
 	if t.renderer == nil || t.renderer.device == nil {
 		return
 	}
@@ -354,7 +373,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		return nil, fmt.Errorf("gogpu: failed to create sampler: %w", err)
 	}
 
-	return &Texture{
+	tex := &Texture{
 		texture:       texture,
 		view:          view,
 		sampler:       sampler,
@@ -363,7 +382,33 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		format:        gputypes.TextureFormatRGBA8Unorm,
 		premultiplied: opts.Premultiplied,
 		renderer:      r,
-	}, nil
+	}
+
+	// Safety net: if the texture is garbage collected without Destroy(),
+	// enqueue deferred destruction on the render thread.
+	// runtime.AddCleanup runs on a GC goroutine, so we cannot call GPU
+	// APIs directly — instead we enqueue a closure for DrainDeferredDestroys.
+	handle := textureCleanupHandle{
+		texture:  texture,
+		view:     view,
+		sampler:  sampler,
+		renderer: r,
+	}
+	tex.cleanup = runtime.AddCleanup(tex, func(h textureCleanupHandle) {
+		h.renderer.EnqueueDeferredDestroy(func() {
+			if h.sampler != nil {
+				h.renderer.device.DestroySampler(h.sampler)
+			}
+			if h.view != nil {
+				h.renderer.device.DestroyTextureView(h.view)
+			}
+			if h.texture != nil {
+				h.renderer.device.DestroyTexture(h.texture)
+			}
+		})
+	}, handle)
+
+	return tex, nil
 }
 
 // UpdateData uploads new pixel data to the entire texture.

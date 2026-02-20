@@ -25,17 +25,24 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.19.6
+## Current State: v0.20.0
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
+- **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.20.0:**
+- `App.TrackResource(io.Closer)` — automatic GPU resource cleanup on shutdown (LIFO order)
+- `ResourceTracker` interface — ggcanvas auto-registers, no manual OnClose needed
+- `runtime.AddCleanup` safety net on Texture — GC catches forgotten Destroy()
+- Deferred destruction queue on Renderer — thread-safe GPU cleanup from any goroutine
 
 **New in v0.19.6:**
 - Rust backend: implement CreateQuerySet, DestroyQuerySet, ResolveQuerySet, WaitIdle (fixes `-tags rust`)
