@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 
-- wgpu v0.16.6 → v0.16.8 (Metal presentDrawable fix [#89](https://github.com/gogpu/gogpu/issues/89), naga v0.14.0)
-- naga v0.13.1 → v0.14.0 (Essential 15/15 reference shaders, 48 type aliases, 25 math ops)
+- wgpu v0.16.6 → v0.16.9 (Metal presentDrawable fix [#89](https://github.com/gogpu/gogpu/issues/89), naga v0.14.1)
+- naga v0.13.1 → v0.14.1 (Essential 15/15 reference shaders, HLSL row_major matrices, GLSL namedExpressions fix)
 
 ## [0.19.6] - 2026-02-20
 
