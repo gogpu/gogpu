@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deferred destruction queue on Renderer** — `EnqueueDeferredDestroy()`/`DrainDeferredDestroys()`
   for thread-safe GPU resource cleanup from arbitrary goroutines.
 
+### Fixed
+
+- **Wayland: missing globals on SOCK_STREAM sockets** ([#74](https://github.com/gogpu/gogpu/issues/74)) —
+  `Display.RecvMessage()` only decoded the first message from each `recvmsg()` call. Wayland uses
+  `SOCK_STREAM` sockets which don't preserve message boundaries — a single read can contain
+  multiple protocol messages. Now decodes all messages and queues extras, preventing loss of
+  critical globals like `xdg_wm_base`.
+
+### Dependencies
+
+- wgpu v0.16.6 → v0.16.8 (Metal presentDrawable fix [#89](https://github.com/gogpu/gogpu/issues/89), naga v0.14.0)
+- naga v0.13.1 → v0.14.0 (Essential 15/15 reference shaders, 48 type aliases, 25 math ops)
+
 ## [0.19.6] - 2026-02-20
 
 ### Fixed

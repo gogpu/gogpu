@@ -75,6 +75,9 @@ type Display struct {
 
 	// Delete ID tracking
 	deletedIDs []ObjectID
+
+	// Buffered messages from previous recvmsg (SOCK_STREAM multi-message fix)
+	pendingMsgs []*Message
 }
 
 // Connect establishes a connection to the Wayland compositor.
@@ -292,9 +295,21 @@ func (d *Display) sendWithFDs(data []byte, fds []int) error {
 
 // RecvMessage receives a message from the compositor.
 // It may block if no message is available.
+//
+// Wayland uses SOCK_STREAM sockets which do not preserve message boundaries.
+// A single recvmsg() call may return multiple messages. We decode all messages
+// from the buffer and queue extras for subsequent calls, preventing message loss
+// that caused missing globals like xdg_wm_base (gogpu#74).
 func (d *Display) RecvMessage() (*Message, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	// Return buffered message from a previous recvmsg if available
+	if len(d.pendingMsgs) > 0 {
+		msg := d.pendingMsgs[0]
+		d.pendingMsgs = d.pendingMsgs[1:]
+		return msg, nil
+	}
 
 	if d.closed {
 		return nil, ErrDisplayNotConnected
@@ -326,7 +341,7 @@ func (d *Display) RecvMessage() (*Message, error) {
 		return nil, err
 	}
 
-	// Decode message
+	// Decode ALL messages from the buffer (SOCK_STREAM may deliver multiple)
 	decoder := NewDecoder(d.readBuf[:n])
 	decoder.fds = fds
 
@@ -334,8 +349,17 @@ func (d *Display) RecvMessage() (*Message, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	msg.FDs = fds
+
+	// Decode remaining messages and queue them
+	for decoder.Remaining() >= headerSize {
+		extra, extraErr := decoder.DecodeMessage()
+		if extraErr != nil {
+			break
+		}
+		d.pendingMsgs = append(d.pendingMsgs, extra)
+	}
+
 	return msg, nil
 }
 
