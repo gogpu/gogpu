@@ -165,14 +165,14 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.buttons |= gpucontext.ButtonsLeft
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonLeft, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonLeft, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	case darwin.NSEventTypeRightMouseDown:
 		p.buttons |= gpucontext.ButtonsRight
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonRight, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonRight, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	case darwin.NSEventTypeOtherMouseDown:
@@ -180,7 +180,7 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.buttons |= buttonsFromNumber(info.ButtonNumber)
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerDown, btn, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerDown, btn, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	// Mouse button up events
@@ -188,14 +188,14 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.buttons &^= gpucontext.ButtonsLeft
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonLeft, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonLeft, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	case darwin.NSEventTypeRightMouseUp:
 		p.buttons &^= gpucontext.ButtonsRight
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonRight, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonRight, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	case darwin.NSEventTypeOtherMouseUp:
@@ -203,7 +203,7 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.buttons &^= buttonsFromNumber(info.ButtonNumber)
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerUp, btn, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerUp, btn, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	// Mouse move events
@@ -218,16 +218,16 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 
 		if inWindow && !wasInWindow {
 			p.mouseInWindow = true
-			ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info.LocationX, y)
+			ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info, y)
 			p.dispatchPointerEventUnlocked(ev)
 		} else if !inWindow && wasInWindow {
 			p.mouseInWindow = false
-			ev := p.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info.LocationX, y)
+			ev := p.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info, y)
 			p.dispatchPointerEventUnlocked(ev)
 		}
 
 		// Always send move event
-		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	// Mouse drag events (move with button pressed)
@@ -236,7 +236,7 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		darwin.NSEventTypeOtherMouseDragged:
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	// Mouse enter/exit events (for tracking areas)
@@ -244,14 +244,14 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.mouseInWindow = true
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	case darwin.NSEventTypeMouseExited:
 		p.mouseInWindow = false
 		p.pointerX = info.LocationX
 		p.pointerY = y
-		ev := p.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info.LocationX, y)
+		ev := p.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info, y)
 		p.dispatchPointerEventUnlocked(ev)
 
 	// Scroll wheel
@@ -565,29 +565,46 @@ func buttonsFromNumber(buttonNumber int64) gpucontext.Buttons {
 }
 
 // createPointerEvent creates a PointerEvent with common fields filled in.
+// Detects pen/tablet input from NSEvent subtype and sets PointerType,
+// Pressure, TiltX, TiltY, and Twist accordingly.
 func (p *darwinPlatform) createPointerEvent(
 	eventType gpucontext.PointerEventType,
 	button gpucontext.Button,
-	x, y float64,
+	info darwin.EventInfo,
+	y float64,
 ) gpucontext.PointerEvent {
-	// For button down/up, set pressure based on button state
+	pointerType := gpucontext.PointerTypeMouse
 	var pressure float32
-	if eventType == gpucontext.PointerDown || p.buttons != gpucontext.ButtonsNone {
-		pressure = 0.5 // Default pressure for mouse
+	var tiltX, tiltY float32
+	var twist float32
+
+	// Detect pen/tablet input from NSEvent subtype
+	if info.Subtype == darwin.NSEventSubtypeTabletPoint {
+		pointerType = gpucontext.PointerTypePen
+		pressure = float32(info.Pressure)
+		// NSEvent tilt is -1.0 to 1.0, PointerEvent tiltX/Y is degrees -90 to 90
+		tiltX = float32(info.TiltX * 90.0)
+		tiltY = float32(info.TiltY * 90.0)
+		twist = float32(info.Rotation)
+	} else {
+		// Regular mouse: default pressure when buttons are active
+		if eventType == gpucontext.PointerDown || p.buttons != gpucontext.ButtonsNone {
+			pressure = 0.5
+		}
 	}
 
 	return gpucontext.PointerEvent{
 		Type:        eventType,
-		PointerID:   1, // Mouse always has ID 1
-		X:           x,
+		PointerID:   1,
+		X:           info.LocationX,
 		Y:           y,
 		Pressure:    pressure,
-		TiltX:       0,
-		TiltY:       0,
-		Twist:       0,
+		TiltX:       tiltX,
+		TiltY:       tiltY,
+		Twist:       twist,
 		Width:       1,
 		Height:      1,
-		PointerType: gpucontext.PointerTypeMouse,
+		PointerType: pointerType,
 		IsPrimary:   true,
 		Button:      button,
 		Buttons:     p.buttons,

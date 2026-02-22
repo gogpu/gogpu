@@ -117,9 +117,26 @@ const (
 	NSEventTypeFlagsChanged       NSEventType = 12
 	NSEventTypeScrollWheel        NSEventType = 22
 	NSEventTypeApplicationDefined NSEventType = 15
+	NSEventTypeTabletPoint        NSEventType = 23
+	NSEventTypeTabletProximity    NSEventType = 24
 	NSEventTypeOtherMouseDown     NSEventType = 25
 	NSEventTypeOtherMouseUp       NSEventType = 26
 	NSEventTypeOtherMouseDragged  NSEventType = 27
+)
+
+// NSEvent subtypes for mouse events carrying tablet data.
+const (
+	NSEventSubtypeMouseEvent      NSUInteger = 0
+	NSEventSubtypeTabletPoint     NSUInteger = 1
+	NSEventSubtypeTabletProximity NSUInteger = 2
+)
+
+// NSPointingDeviceType values from NSEvent.
+const (
+	NSPointingDeviceTypeUnknown NSUInteger = 0
+	NSPointingDeviceTypePen     NSUInteger = 1
+	NSPointingDeviceTypeCursor  NSUInteger = 2
+	NSPointingDeviceTypeEraser  NSUInteger = 3
 )
 
 // NSEventModifierFlags are the modifier key flags in an NSEvent.

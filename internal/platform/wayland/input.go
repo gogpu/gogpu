@@ -136,6 +136,26 @@ func (s *WlSeat) GetKeyboard() (*WlKeyboard, error) {
 	return NewWlKeyboard(s.display, keyboardID), nil
 }
 
+// GetTouch creates a wl_touch object for this seat.
+// Returns an error if the seat does not have touch capability.
+func (s *WlSeat) GetTouch() (*WlTouch, error) {
+	if !s.HasTouch() {
+		return nil, fmt.Errorf("wayland: seat %d does not have touch capability", s.id)
+	}
+
+	touchID := s.display.AllocID()
+
+	builder := NewMessageBuilder()
+	builder.PutNewID(touchID)
+	msg := builder.BuildMessage(s.id, seatGetTouch)
+
+	if err := s.display.SendMessage(msg); err != nil {
+		return nil, err
+	}
+
+	return NewWlTouch(s.display, touchID), nil
+}
+
 // Release destroys the seat object (v5+).
 // This releases any resources held by the server for this seat binding.
 func (s *WlSeat) Release() error {
@@ -1194,6 +1214,303 @@ func (k *WlKeyboard) handleRepeatInfo(msg *Message) error {
 			Rate:  rate,
 			Delay: delay,
 		})
+	}
+
+	return nil
+}
+
+// wl_touch opcodes (requests).
+const (
+	touchRelease Opcode = 0 // release() [v3+]
+)
+
+// wl_touch event opcodes.
+const (
+	touchEventDown        Opcode = 0 // down(serial: uint, time: uint, surface: object, id: int, x: fixed, y: fixed)
+	touchEventUp          Opcode = 1 // up(serial: uint, time: uint, id: int)
+	touchEventMotion      Opcode = 2 // motion(time: uint, id: int, x: fixed, y: fixed)
+	touchEventFrame       Opcode = 3 // frame()
+	touchEventCancel      Opcode = 4 // cancel()
+	touchEventShape       Opcode = 5 // shape(id: int, major: fixed, minor: fixed) [v6+]
+	touchEventOrientation Opcode = 6 // orientation(id: int, orientation: fixed) [v6+]
+)
+
+// TouchDownEvent contains data for the touch down event.
+type TouchDownEvent struct {
+	Serial  uint32   // Serial number.
+	Time    uint32   // Timestamp in milliseconds.
+	Surface ObjectID // The surface that was touched.
+	ID      int32    // Touch point ID.
+	X       float64  // Surface-local X coordinate.
+	Y       float64  // Surface-local Y coordinate.
+}
+
+// TouchUpEvent contains data for the touch up event.
+type TouchUpEvent struct {
+	Serial uint32 // Serial number.
+	Time   uint32 // Timestamp in milliseconds.
+	ID     int32  // Touch point ID.
+}
+
+// TouchMotionEvent contains data for the touch motion event.
+type TouchMotionEvent struct {
+	Time uint32  // Timestamp in milliseconds.
+	ID   int32   // Touch point ID.
+	X    float64 // Surface-local X coordinate.
+	Y    float64 // Surface-local Y coordinate.
+}
+
+// WlTouch represents the wl_touch interface.
+// This interface provides access to touch input events.
+type WlTouch struct {
+	display *Display
+	id      ObjectID
+
+	mu sync.Mutex
+
+	lastSerial uint32
+
+	// Event handlers
+	onDown   func(event *TouchDownEvent)
+	onUp     func(event *TouchUpEvent)
+	onMotion func(event *TouchMotionEvent)
+	onFrame  func()
+	onCancel func()
+}
+
+// NewWlTouch creates a WlTouch from an object ID.
+func NewWlTouch(display *Display, objectID ObjectID) *WlTouch {
+	return &WlTouch{
+		display: display,
+		id:      objectID,
+	}
+}
+
+// ID returns the object ID of the touch.
+func (t *WlTouch) ID() ObjectID {
+	return t.id
+}
+
+// LastSerial returns the last event serial.
+func (t *WlTouch) LastSerial() uint32 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastSerial
+}
+
+// Release destroys the touch object (v3+).
+func (t *WlTouch) Release() error {
+	builder := NewMessageBuilder()
+	msg := builder.BuildMessage(t.id, touchRelease)
+
+	return t.display.SendMessage(msg)
+}
+
+// SetDownHandler sets a callback for the touch down event.
+func (t *WlTouch) SetDownHandler(handler func(event *TouchDownEvent)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onDown = handler
+}
+
+// SetUpHandler sets a callback for the touch up event.
+func (t *WlTouch) SetUpHandler(handler func(event *TouchUpEvent)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onUp = handler
+}
+
+// SetMotionHandler sets a callback for the touch motion event.
+func (t *WlTouch) SetMotionHandler(handler func(event *TouchMotionEvent)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onMotion = handler
+}
+
+// SetFrameHandler sets a callback for the touch frame event.
+// The frame event marks the end of a group of related touch events.
+func (t *WlTouch) SetFrameHandler(handler func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onFrame = handler
+}
+
+// SetCancelHandler sets a callback for the touch cancel event.
+// Cancel indicates that the compositor has taken over touch processing.
+func (t *WlTouch) SetCancelHandler(handler func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onCancel = handler
+}
+
+// dispatch handles wl_touch events.
+func (t *WlTouch) dispatch(msg *Message) error {
+	switch msg.Opcode {
+	case touchEventDown:
+		return t.handleDown(msg)
+	case touchEventUp:
+		return t.handleUp(msg)
+	case touchEventMotion:
+		return t.handleMotion(msg)
+	case touchEventFrame:
+		return t.handleFrame(msg)
+	case touchEventCancel:
+		return t.handleCancel(msg)
+	case touchEventShape, touchEventOrientation:
+		return nil // v6+ events, silently ignore
+	default:
+		return nil
+	}
+}
+
+func (t *WlTouch) handleDown(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+
+	serial, err := decoder.Uint32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.down: failed to decode serial: %w", err)
+	}
+
+	time, err := decoder.Uint32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.down: failed to decode time: %w", err)
+	}
+
+	surface, err := decoder.Object()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.down: failed to decode surface: %w", err)
+	}
+
+	id, err := decoder.Int32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.down: failed to decode id: %w", err)
+	}
+
+	xFixed, err := decoder.Fixed()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.down: failed to decode x: %w", err)
+	}
+
+	yFixed, err := decoder.Fixed()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.down: failed to decode y: %w", err)
+	}
+
+	t.mu.Lock()
+	t.lastSerial = serial
+	handler := t.onDown
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler(&TouchDownEvent{
+			Serial:  serial,
+			Time:    time,
+			Surface: surface,
+			ID:      id,
+			X:       xFixed.Float(),
+			Y:       yFixed.Float(),
+		})
+	}
+
+	return nil
+}
+
+func (t *WlTouch) handleUp(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+
+	serial, err := decoder.Uint32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.up: failed to decode serial: %w", err)
+	}
+
+	time, err := decoder.Uint32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.up: failed to decode time: %w", err)
+	}
+
+	id, err := decoder.Int32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.up: failed to decode id: %w", err)
+	}
+
+	t.mu.Lock()
+	t.lastSerial = serial
+	handler := t.onUp
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler(&TouchUpEvent{
+			Serial: serial,
+			Time:   time,
+			ID:     id,
+		})
+	}
+
+	return nil
+}
+
+func (t *WlTouch) handleMotion(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+
+	time, err := decoder.Uint32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.motion: failed to decode time: %w", err)
+	}
+
+	id, err := decoder.Int32()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.motion: failed to decode id: %w", err)
+	}
+
+	xFixed, err := decoder.Fixed()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.motion: failed to decode x: %w", err)
+	}
+
+	yFixed, err := decoder.Fixed()
+	if err != nil {
+		return fmt.Errorf("wayland: wl_touch.motion: failed to decode y: %w", err)
+	}
+
+	t.mu.Lock()
+	handler := t.onMotion
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler(&TouchMotionEvent{
+			Time: time,
+			ID:   id,
+			X:    xFixed.Float(),
+			Y:    yFixed.Float(),
+		})
+	}
+
+	return nil
+}
+
+func (t *WlTouch) handleFrame(msg *Message) error {
+	_ = msg // frame event has no arguments
+
+	t.mu.Lock()
+	handler := t.onFrame
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler()
+	}
+
+	return nil
+}
+
+func (t *WlTouch) handleCancel(msg *Message) error {
+	_ = msg // cancel event has no arguments
+
+	t.mu.Lock()
+	handler := t.onCancel
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler()
 	}
 
 	return nil

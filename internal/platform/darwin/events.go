@@ -65,6 +65,13 @@ type EventInfo struct {
 	ScrollDeltaY  float64
 	IsPrecise     bool
 	KeyCode       uint16 // Virtual key code for keyboard events
+	// Tablet/pen properties
+	Subtype            NSUInteger
+	Pressure           float64 // 0.0-1.0 (pen pressure)
+	TiltX              float64 // -1.0 to 1.0
+	TiltY              float64 // -1.0 to 1.0
+	Rotation           float64 // 0-360 degrees
+	PointingDeviceType NSUInteger
 }
 
 // GetEventInfo extracts pointer-relevant information from an NSEvent.
@@ -93,6 +100,24 @@ func GetEventInfo(event ID) EventInfo {
 		info.ButtonNumber = 1
 	case NSEventTypeOtherMouseDown, NSEventTypeOtherMouseUp, NSEventTypeOtherMouseDragged:
 		info.ButtonNumber = event.GetInt64(selectors.buttonNumber)
+	}
+
+	// Tablet/pen properties for mouse events
+	switch info.Type {
+	case NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp, NSEventTypeLeftMouseDragged,
+		NSEventTypeRightMouseDown, NSEventTypeRightMouseUp, NSEventTypeRightMouseDragged,
+		NSEventTypeOtherMouseDown, NSEventTypeOtherMouseUp, NSEventTypeOtherMouseDragged,
+		NSEventTypeMouseMoved,
+		NSEventTypeTabletPoint:
+		info.Subtype = NSUInteger(event.GetUint64(selectors.subtype))
+		if info.Subtype == NSEventSubtypeTabletPoint || info.Type == NSEventTypeTabletPoint {
+			info.Pressure = event.GetDouble(selectors.pressure)
+			tilt := event.GetPoint(selectors.tilt)
+			info.TiltX = tilt.X
+			info.TiltY = tilt.Y
+			info.Rotation = event.GetDouble(selectors.rotation)
+			info.PointingDeviceType = NSUInteger(event.GetUint64(selectors.pointingDeviceType))
+		}
 	}
 
 	// Scroll deltas

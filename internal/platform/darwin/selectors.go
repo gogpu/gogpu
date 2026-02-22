@@ -112,6 +112,13 @@ var selectors struct {
 	deltaX                      SEL
 	deltaY                      SEL
 
+	// NSEvent - tablet/pen properties
+	pressure           SEL
+	tilt               SEL // Returns NSPoint {x, y} each -1.0 to 1.0
+	rotation           SEL // Degrees 0-360
+	subtype            SEL
+	pointingDeviceType SEL
+
 	// NSEvent - creation and posting
 	otherEventWithType SEL
 	postEventAtStart   SEL
@@ -252,6 +259,13 @@ func initSelectors() {
 		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
 		selectors.deltaX = RegisterSelector("deltaX")
 		selectors.deltaY = RegisterSelector("deltaY")
+
+		// NSEvent - tablet/pen properties
+		selectors.pressure = RegisterSelector("pressure")
+		selectors.tilt = RegisterSelector("tilt")
+		selectors.rotation = RegisterSelector("rotation")
+		selectors.subtype = RegisterSelector("subtype")
+		selectors.pointingDeviceType = RegisterSelector("pointingDeviceType")
 
 		// NSEvent - creation and posting
 		selectors.otherEventWithType = RegisterSelector(

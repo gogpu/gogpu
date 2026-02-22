@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-02-22
+
+### Added
+
+- **Win32 touch/pen input via WM_POINTER*** — touch events with `PointerTypeTouch`, pen events
+  with pressure (0-1024 normalized to 0.0-1.0), tiltX/Y via `GetPointerPenInfo`. Existing
+  WM_MOUSE* handlers preserved for mouse input.
+- **macOS pen/tablet detection** — detects pen input via NSEvent `subtype == NSEventSubtypeTabletPoint`
+  on mouse events. Reads pressure (0.0-1.0), tilt [-1,1] converted to degrees [-90,90],
+  rotation as twist, pointing device type (pen/eraser/cursor).
+- **Wayland wl_touch support** — full `WlTouch` implementation with down/up/motion/frame/cancel
+  handlers. Touch IDs offset +2 from mouse, first touch marked primary. Integrated with
+  `WlSeat.GetTouch()`.
+
+### Dependencies
+
+- wgpu v0.16.9 → v0.16.10
+- naga v0.14.1 → v0.14.2
+
 ## [0.20.0] - 2026-02-20
 
 ### Added

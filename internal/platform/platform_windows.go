@@ -74,6 +74,27 @@ const (
 	// TrackMouseEvent flags
 	tmeLeave = 0x0002
 
+	// Pointer messages (WM_POINTER*, Windows 8+)
+	wmPointerDown           = 0x0246
+	wmPointerUp             = 0x0247
+	wmPointerUpdate         = 0x0245
+	wmPointerEnter          = 0x0249
+	wmPointerLeave          = 0x024A
+	wmPointerCaptureChanged = 0x024C
+
+	// Pointer types (from GetPointerType)
+	ptPointer = 0x00000001 // PT_POINTER (generic)
+	ptTouch   = 0x00000002 // PT_TOUCH
+	ptPen     = 0x00000003 // PT_PEN
+	ptMouse   = 0x00000004 // PT_MOUSE
+
+	// Pointer flags in POINTER_INFO
+	pointerFlagInContact    = 0x00000004
+	pointerFlagPrimary      = 0x00002000
+	pointerFlagFirstButton  = 0x00000010
+	pointerFlagSecondButton = 0x00000020
+	pointerFlagThirdButton  = 0x00000040
+
 	// Keyboard lParam flags (GLFW/Ebiten pattern)
 	kfExtended = 0x0100 // Extended key flag (bit 24 of lParam >> 16)
 
@@ -168,6 +189,7 @@ var (
 	procGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 	procDestroyWindow      = user32.NewProc("DestroyWindow")
 	procGetClientRect      = user32.NewProc("GetClientRect")
+	procClientToScreen     = user32.NewProc("ClientToScreen")
 	procTrackMouseEvent    = user32.NewProc("TrackMouseEvent")
 	procGetMessageTime     = user32.NewProc("GetMessageTime")
 	procSetTimer           = user32.NewProc("SetTimer")
@@ -190,6 +212,11 @@ var (
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
 	procGlobalFree       = kernel32.NewProc("GlobalFree")
+
+	// Pointer input (WM_POINTER*, Windows 8+)
+	procGetPointerType    = user32.NewProc("GetPointerType")
+	procGetPointerInfo    = user32.NewProc("GetPointerInfo")
+	procGetPointerPenInfo = user32.NewProc("GetPointerPenInfo")
 
 	// System preferences
 	procSystemParametersInfoW = user32.NewProc("SystemParametersInfoW")
@@ -238,6 +265,42 @@ type msg struct {
 // RECT is the Win32 RECT structure.
 type rect struct {
 	left, top, right, bottom int32
+}
+
+// POINT is the Win32 POINT structure.
+type point struct {
+	x, y int32
+}
+
+// pointerInfo is the Win32 POINTER_INFO structure.
+type pointerInfo struct {
+	pointerType           uint32
+	pointerID             uint32
+	frameID               uint32
+	pointerFlags          uint32
+	sourceDevice          uintptr
+	hwndTarget            uintptr
+	ptPixelLocation       point
+	ptHimetricLocation    point
+	ptPixelLocationRaw    point
+	ptHimetricLocationRaw point
+	dwTime                uint32
+	historyCount          uint32
+	inputData             int32
+	dwKeyStates           uint32
+	performanceCount      uint64
+	buttonChangeType      int32
+}
+
+// pointerPenInfo is the Win32 POINTER_PEN_INFO structure.
+type pointerPenInfo struct {
+	pointerInfo pointerInfo
+	penFlags    uint32
+	penMask     uint32
+	pressure    uint32 // 0-1024
+	rotation    uint32
+	tiltX       int32 // -90 to +90
+	tiltY       int32 // -90 to +90
 }
 
 // windowsPlatform implements Platform for Windows.
@@ -1185,6 +1248,140 @@ func (p *windowsPlatform) createPointerEvent(
 	}
 }
 
+// getPointerID extracts pointer ID from wParam (LOWORD).
+func getPointerID(wParam uintptr) uint32 {
+	return uint32(wParam & 0xFFFF)
+}
+
+// mapWin32PointerType maps Win32 PT_* constants to gpucontext.PointerType.
+func mapWin32PointerType(ptType uint32) gpucontext.PointerType {
+	switch ptType {
+	case ptTouch:
+		return gpucontext.PointerTypeTouch
+	case ptPen:
+		return gpucontext.PointerTypePen
+	default:
+		return gpucontext.PointerTypeMouse
+	}
+}
+
+// buttonsFromPointerFlags extracts button state from POINTER_INFO.pointerFlags.
+func buttonsFromPointerFlags(flags uint32) gpucontext.Buttons {
+	var btns gpucontext.Buttons
+	if flags&pointerFlagFirstButton != 0 {
+		btns |= gpucontext.ButtonsLeft
+	}
+	if flags&pointerFlagSecondButton != 0 {
+		btns |= gpucontext.ButtonsRight
+	}
+	if flags&pointerFlagThirdButton != 0 {
+		btns |= gpucontext.ButtonsMiddle
+	}
+	return btns
+}
+
+// buttonFromEventType determines which single button changed for down/up events.
+func buttonFromEventType(eventType gpucontext.PointerEventType, flags uint32) gpucontext.Button {
+	if eventType == gpucontext.PointerDown || eventType == gpucontext.PointerUp {
+		if flags&pointerFlagFirstButton != 0 {
+			return gpucontext.ButtonLeft
+		}
+		if flags&pointerFlagSecondButton != 0 {
+			return gpucontext.ButtonRight
+		}
+		if flags&pointerFlagThirdButton != 0 {
+			return gpucontext.ButtonMiddle
+		}
+	}
+	return gpucontext.ButtonNone
+}
+
+// createPointerEventFromWMPointer creates a PointerEvent from WM_POINTER* message data.
+// It calls GetPointerInfo to retrieve pointer details, and for pen input also
+// calls GetPointerPenInfo to get pressure and tilt data.
+func (p *windowsPlatform) createPointerEventFromWMPointer(
+	eventType gpucontext.PointerEventType,
+	wParam, lParam uintptr,
+) gpucontext.PointerEvent {
+	pointerID := getPointerID(wParam)
+
+	// Get pointer info
+	var info pointerInfo
+	ret, _, _ := procGetPointerInfo.Call(uintptr(pointerID), uintptr(unsafe.Pointer(&info)))
+	if ret == 0 {
+		// Fallback: use lParam coordinates
+		x, y := extractMousePos(lParam)
+		return gpucontext.PointerEvent{
+			Type:        eventType,
+			PointerID:   int(pointerID),
+			X:           x,
+			Y:           y,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeMouse,
+			IsPrimary:   true,
+			Timestamp:   p.eventTimestamp(),
+		}
+	}
+
+	// Convert screen coordinates to client coordinates.
+	// ClientToScreen(0,0) gives us the client area origin in screen coords;
+	// subtract it from the pointer's screen position.
+	var origin point
+	procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+	x := float64(info.ptPixelLocation.x - origin.x)
+	y := float64(info.ptPixelLocation.y - origin.y)
+
+	pointerType := mapWin32PointerType(info.pointerType)
+	isPrimary := info.pointerFlags&pointerFlagPrimary != 0
+	buttons := buttonsFromPointerFlags(info.pointerFlags)
+	button := buttonFromEventType(eventType, info.pointerFlags)
+	modifiers := getKeyModifiers()
+
+	// Default pressure
+	var pressure float32
+	if info.pointerFlags&pointerFlagInContact != 0 {
+		pressure = 0.5
+	}
+
+	var tiltX, tiltY float32
+	var width, height float32 = 1, 1
+
+	// For pen input, get detailed pen info
+	if pointerType == gpucontext.PointerTypePen {
+		var penInfo pointerPenInfo
+		ret, _, _ = procGetPointerPenInfo.Call(uintptr(pointerID), uintptr(unsafe.Pointer(&penInfo)))
+		if ret != 0 {
+			// Pressure: 0-1024 → 0.0-1.0
+			pressure = float32(penInfo.pressure) / 1024.0
+			tiltX = float32(penInfo.tiltX)
+			tiltY = float32(penInfo.tiltY)
+		}
+	}
+
+	// For touch input, pressure is 0.5 when in contact (already set above)
+	// Width/Height could come from contact rect, but GetPointerTouchInfo
+	// would be needed — keep defaults for now
+
+	return gpucontext.PointerEvent{
+		Type:        eventType,
+		PointerID:   int(pointerID),
+		X:           x,
+		Y:           y,
+		Pressure:    pressure,
+		TiltX:       tiltX,
+		TiltY:       tiltY,
+		Width:       width,
+		Height:      height,
+		PointerType: pointerType,
+		IsPrimary:   isPrimary,
+		Button:      button,
+		Buttons:     buttons,
+		Modifiers:   modifiers,
+		Timestamp:   p.eventTimestamp(),
+	}
+}
+
 // wndProc is the window procedure callback.
 //
 //nolint:maintidx,gocognit // message dispatch functions inherently have high complexity
@@ -1376,6 +1573,34 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Let Windows handle non-client area cursors
 		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return ret
+
+	// Pointer input (touch/pen via WM_POINTER*, Windows 8+)
+	// WM_POINTER* fires for touch and pen input by default.
+	// Mouse continues via WM_MOUSE* messages (no EnableMouseInPointer).
+	case wmPointerDown:
+		ev := p.createPointerEventFromWMPointer(gpucontext.PointerDown, wParam, lParam)
+		p.dispatchPointerEvent(ev)
+		return 0
+
+	case wmPointerUp:
+		ev := p.createPointerEventFromWMPointer(gpucontext.PointerUp, wParam, lParam)
+		p.dispatchPointerEvent(ev)
+		return 0
+
+	case wmPointerUpdate:
+		ev := p.createPointerEventFromWMPointer(gpucontext.PointerMove, wParam, lParam)
+		p.dispatchPointerEvent(ev)
+		return 0
+
+	case wmPointerEnter:
+		ev := p.createPointerEventFromWMPointer(gpucontext.PointerEnter, wParam, lParam)
+		p.dispatchPointerEvent(ev)
+		return 0
+
+	case wmPointerLeave:
+		ev := p.createPointerEventFromWMPointer(gpucontext.PointerLeave, wParam, lParam)
+		p.dispatchPointerEvent(ev)
+		return 0
 
 	// Mouse movement
 	case wmMouseMove:

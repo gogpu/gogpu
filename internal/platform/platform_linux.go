@@ -36,6 +36,7 @@ type waylandPlatform struct {
 	seat     *wayland.WlSeat
 	keyboard *wayland.WlKeyboard
 	pointer  *wayland.WlPointer
+	touch    *wayland.WlTouch
 
 	// Window state
 	width       int
@@ -446,6 +447,15 @@ func (p *waylandPlatform) bindSeat() error {
 		}
 	}
 
+	// Get touch if available
+	if p.seat.HasTouch() {
+		touch, err := p.seat.GetTouch()
+		if err == nil {
+			p.touch = touch
+			p.setupTouchHandlers()
+		}
+	}
+
 	return nil
 }
 
@@ -637,6 +647,79 @@ func (p *waylandPlatform) setupPointerHandlers() {
 			DeltaMode: gpucontext.ScrollDeltaPixel, // Wayland provides pixel values
 			Modifiers: p.getModifiers(),
 			Timestamp: p.eventTimestamp(),
+		})
+	})
+}
+
+// setupTouchHandlers configures Wayland touch event handlers.
+func (p *waylandPlatform) setupTouchHandlers() {
+	if p.touch == nil {
+		return
+	}
+
+	p.touch.SetDownHandler(func(event *wayland.TouchDownEvent) {
+		if p.surface == nil || event.Surface != p.surface.ID() {
+			return
+		}
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerDown,
+			PointerID:   int(event.ID) + 2, // Touch IDs start at 2 (mouse=1)
+			X:           event.X,
+			Y:           event.Y,
+			Pressure:    0.5,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeTouch,
+			IsPrimary:   event.ID == 0,
+			Button:      gpucontext.ButtonLeft,
+			Buttons:     gpucontext.ButtonsLeft,
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	p.touch.SetUpHandler(func(event *wayland.TouchUpEvent) {
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerUp,
+			PointerID:   int(event.ID) + 2,
+			Pressure:    0,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeTouch,
+			IsPrimary:   event.ID == 0,
+			Button:      gpucontext.ButtonLeft,
+			Buttons:     gpucontext.ButtonsNone,
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	p.touch.SetMotionHandler(func(event *wayland.TouchMotionEvent) {
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerMove,
+			PointerID:   int(event.ID) + 2,
+			X:           event.X,
+			Y:           event.Y,
+			Pressure:    0.5,
+			Width:       1,
+			Height:      1,
+			PointerType: gpucontext.PointerTypeTouch,
+			IsPrimary:   event.ID == 0,
+			Button:      gpucontext.ButtonNone,
+			Buttons:     gpucontext.ButtonsLeft,
+			Modifiers:   p.getModifiers(),
+			Timestamp:   p.eventTimestamp(),
+		})
+	})
+
+	p.touch.SetCancelHandler(func() {
+		// Touch cancel: dispatch PointerLeave to signal compositor took over
+		p.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerLeave,
+			PointerID:   2,
+			PointerType: gpucontext.PointerTypeTouch,
+			IsPrimary:   true,
+			Timestamp:   p.eventTimestamp(),
 		})
 	})
 }
@@ -1228,6 +1311,11 @@ func (p *waylandPlatform) Destroy() {
 	}
 
 	// Destroy in reverse order of creation
+
+	if p.touch != nil {
+		_ = p.touch.Release()
+		p.touch = nil
+	}
 
 	if p.pointer != nil {
 		_ = p.pointer.Release()
