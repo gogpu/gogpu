@@ -50,11 +50,14 @@ go get github.com/gogpu/gogpu
 
 **Requirements:**
 - Go 1.25+
+- `CGO_ENABLED=0` (Pure Go FFI requires CGO disabled)
 
 **Zero dependencies — just works:**
 ```bash
-go run .
+CGO_ENABLED=0 go run .
 ```
+
+> **Note:** On macOS and some Linux distros, CGO is enabled by default. Always set `CGO_ENABLED=0` when building GoGPU projects.
 
 ---
 
