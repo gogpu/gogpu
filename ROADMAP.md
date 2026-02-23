@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.20.2
+## Current State: v0.20.3
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -37,6 +37,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.20.3:**
+- wgpu v0.16.12 (Vulkan debug object naming — eliminates false-positive validation errors, #98)
 
 **New in v0.20.2:**
 - Renderer: unconfigure surface on minimize (VK-VAL-001) — prevents stale swapchain (#98)
