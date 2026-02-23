@@ -211,6 +211,12 @@ func (r *Renderer) init(backendType types.BackendType, graphicsAPI types.Graphic
 // first becomes visible with valid dimensions (especially important on macOS).
 func (r *Renderer) Resize(width, height int) {
 	if width <= 0 || height <= 0 {
+		// Window minimized or invisible -- unconfigure surface to prevent
+		// zero-extent swapchain creation on the next frame (VK-VAL-001).
+		if r.surfaceConfigured {
+			r.surface.Unconfigure(r.device)
+			r.surfaceConfigured = false
+		}
 		return
 	}
 
