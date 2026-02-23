@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.20.0
+## Current State: v0.20.2
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -37,6 +37,14 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.20.2:**
+- Renderer: unconfigure surface on minimize (VK-VAL-001) — prevents stale swapchain (#98)
+- wgpu v0.16.11 (Vulkan zero-extent swapchain fix, unconditional viewport/scissor)
+
+**New in v0.20.1:**
+- Touch/pen input for Win32, macOS, Wayland
+- wgpu v0.16.10, naga v0.14.2
 
 **New in v0.20.0:**
 - `App.TrackResource(io.Closer)` — automatic GPU resource cleanup on shutdown (LIFO order)
