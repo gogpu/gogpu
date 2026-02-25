@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.20.8
+## Current State: v0.20.9
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -38,6 +38,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Software backend** — always available, Windows screen presentation via GDI
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.20.9:**
+- wgpu v0.16.17 — load platform Vulkan surface creation functions (the real fix for #106)
 
 **New in v0.20.8:**
 - X11 Vulkan surface pointer fix — root cause of #106 was `unsafe.Pointer(&display)` in wgpu CreateSurface
