@@ -126,7 +126,8 @@ func openXlibDisplay() (*xlibHandle, error) {
 	}
 
 	// XOpenDisplay(const char* display_name) -> Display*
-	cifOpen, err := ffi.PrepareCallInterface(types.PointerTypeDescriptor, []*types.TypeDescriptor{
+	cifOpen := &types.CallInterface{}
+	err = ffi.PrepareCallInterface(cifOpen, types.DefaultCall, types.PointerTypeDescriptor, []*types.TypeDescriptor{
 		types.PointerTypeDescriptor,
 	})
 	if err != nil {
@@ -134,7 +135,8 @@ func openXlibDisplay() (*xlibHandle, error) {
 	}
 
 	// XCloseDisplay(Display*) -> int
-	cifClose, err := ffi.PrepareCallInterface(types.SintTypeDescriptor, []*types.TypeDescriptor{
+	cifClose := &types.CallInterface{}
+	err = ffi.PrepareCallInterface(cifClose, types.DefaultCall, types.SInt32TypeDescriptor, []*types.TypeDescriptor{
 		types.PointerTypeDescriptor,
 	})
 	if err != nil {
