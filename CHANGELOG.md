@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.7] - 2026-02-25
+
+### Fixed
+
+- **X11 Vulkan surface creation** — `GetHandle()` now returns a real Xlib `Display*` pointer instead
+  of a raw socket file descriptor. `VK_KHR_xlib_surface` requires `Display*` from `XOpenDisplay()`,
+  but our pure Go X11 implementation was passing the socket FD, causing null surfaces on the native
+  backend and SIGSEGV on the Rust backend. libX11 is loaded dynamically via goffi (no CGO).
+  ([#106](https://github.com/gogpu/gogpu/issues/106))
+
 ## [0.20.6] - 2026-02-25
 
 ### Fixed

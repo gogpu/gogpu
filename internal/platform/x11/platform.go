@@ -4,9 +4,13 @@ package x11
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
+	"unsafe"
 
+	"github.com/go-webgpu/goffi/ffi"
+	"github.com/go-webgpu/goffi/types"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -37,12 +41,27 @@ type PlatformEvent struct {
 	Height int
 }
 
+// xlibHandle holds the Xlib Display* pointer required for Vulkan surface creation.
+// VK_KHR_xlib_surface expects a real Display* from XOpenDisplay(), not a socket FD.
+// We load libX11 dynamically via goffi (no CGO) and open a parallel Xlib connection.
+// The window ID is shared between our pure Go X11 wire protocol and Xlib because
+// X11 window IDs are server-side resources visible to all connections.
+type xlibHandle struct {
+	lib           unsafe.Pointer // libX11.so.6 handle
+	display       uintptr        // Display* from XOpenDisplay
+	xCloseDisplay unsafe.Pointer // XCloseDisplay symbol
+	cifClose      *types.CallInterface
+}
+
 // Platform implements X11 windowing support.
 type Platform struct {
 	mu sync.Mutex
 
-	// X11 connection
+	// X11 connection (pure Go wire protocol for events)
 	conn *Connection
+
+	// Xlib Display* for Vulkan surface creation
+	xlib *xlibHandle
 
 	// Standard atoms
 	atoms *StandardAtoms
@@ -85,6 +104,78 @@ func NewPlatform() *Platform {
 	return &Platform{
 		startTime: time.Now(),
 	}
+}
+
+// openXlibDisplay loads libX11.so.6 via goffi and calls XOpenDisplay to obtain
+// a real Display* pointer for Vulkan surface creation (VK_KHR_xlib_surface).
+// Returns nil if libX11 is not available (software-only fallback).
+func openXlibDisplay() (*xlibHandle, error) {
+	lib, err := ffi.LoadLibrary("libX11.so.6")
+	if err != nil {
+		return nil, fmt.Errorf("x11: failed to load libX11.so.6: %w", err)
+	}
+
+	xOpenDisplay, err := ffi.GetSymbol(lib, "XOpenDisplay")
+	if err != nil {
+		return nil, fmt.Errorf("x11: XOpenDisplay symbol not found: %w", err)
+	}
+
+	xCloseDisplay, err := ffi.GetSymbol(lib, "XCloseDisplay")
+	if err != nil {
+		return nil, fmt.Errorf("x11: XCloseDisplay symbol not found: %w", err)
+	}
+
+	// XOpenDisplay(const char* display_name) -> Display*
+	cifOpen, err := ffi.PrepareCallInterface(types.PointerTypeDescriptor, []*types.TypeDescriptor{
+		types.PointerTypeDescriptor,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("x11: failed to prepare XOpenDisplay CIF: %w", err)
+	}
+
+	// XCloseDisplay(Display*) -> int
+	cifClose, err := ffi.PrepareCallInterface(types.SintTypeDescriptor, []*types.TypeDescriptor{
+		types.PointerTypeDescriptor,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("x11: failed to prepare XCloseDisplay CIF: %w", err)
+	}
+
+	// Pass DISPLAY env var to XOpenDisplay (NULL uses $DISPLAY automatically,
+	// but we pass it explicitly for clarity in error messages).
+	displayEnv := os.Getenv("DISPLAY")
+	var displayArg uintptr
+	if displayEnv != "" {
+		// Convert Go string to null-terminated C string on the stack.
+		cstr := append([]byte(displayEnv), 0)
+		displayArg = uintptr(unsafe.Pointer(&cstr[0]))
+	}
+
+	var display uintptr
+	args := [1]unsafe.Pointer{unsafe.Pointer(&displayArg)}
+	ffi.CallFunction(cifOpen, xOpenDisplay, unsafe.Pointer(&display), args[:])
+
+	if display == 0 {
+		return nil, fmt.Errorf("x11: XOpenDisplay(%q) returned NULL", displayEnv)
+	}
+
+	return &xlibHandle{
+		lib:           lib,
+		display:       display,
+		xCloseDisplay: xCloseDisplay,
+		cifClose:      cifClose,
+	}, nil
+}
+
+// close calls XCloseDisplay and releases the Xlib resources.
+func (h *xlibHandle) close() {
+	if h == nil || h.display == 0 {
+		return
+	}
+	var result int
+	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
+	ffi.CallFunction(h.cifClose, h.xCloseDisplay, unsafe.Pointer(&result), args[:])
+	h.display = 0
 }
 
 // Init creates the X11 window.
@@ -182,6 +273,17 @@ func (p *Platform) Init(config Config) error {
 
 	// Sync to ensure window is created
 	_ = conn.Sync()
+
+	// Open Xlib Display* for Vulkan surface creation.
+	// VK_KHR_xlib_surface requires a real Display* pointer, not a socket FD.
+	// Non-fatal: if libX11 is unavailable, GPU rendering won't work but
+	// the software backend can still function.
+	xlib, err := openXlibDisplay()
+	if err != nil {
+		// Log but continue — software backend doesn't need Display*
+		fmt.Fprintf(os.Stderr, "gogpu: warning: %v (GPU rendering unavailable)\n", err)
+	}
+	p.xlib = xlib
 
 	return nil
 }
@@ -521,16 +623,19 @@ func (p *Platform) GetSize() (width, height int) {
 }
 
 // GetHandle returns platform-specific handles for Vulkan surface creation.
-// Returns (display_fd, window_id).
-func (p *Platform) GetHandle() (instance, window uintptr) {
+// Returns (Display* pointer, X11 Window ID) for use with VK_KHR_xlib_surface.
+// The Display* comes from XOpenDisplay (loaded via goffi), not from our pure Go
+// X11 wire protocol connection. Window IDs are server-side resources shared
+// across all connections to the same X server.
+func (p *Platform) GetHandle() (display, window uintptr) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.conn == nil {
+	if p.xlib == nil || p.xlib.display == 0 {
 		return 0, 0
 	}
 
-	return uintptr(p.conn.Fd()), uintptr(p.window)
+	return p.xlib.display, uintptr(p.window)
 }
 
 // Fd returns the X11 connection file descriptor.
@@ -549,6 +654,12 @@ func (p *Platform) Fd() int {
 func (p *Platform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	// Close Xlib Display* (Vulkan surface handle)
+	if p.xlib != nil {
+		p.xlib.close()
+		p.xlib = nil
+	}
 
 	if p.conn != nil {
 		if p.window != 0 {
