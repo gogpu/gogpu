@@ -54,8 +54,9 @@ const (
 	// GraphicsAPIGLES forces OpenGL ES. Available on Windows and Linux.
 	GraphicsAPIGLES
 
-	// GraphicsAPISoftware forces the software rasterizer.
-	// Requires building with -tags software.
+	// GraphicsAPISoftware forces the CPU-based software rasterizer.
+	// Always available — no build tags or GPU hardware required.
+	// Useful for headless rendering, CI/CD, and systems without GPU.
 	GraphicsAPISoftware
 )
 

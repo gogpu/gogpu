@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.6] - 2026-02-25
+
+### Fixed
+
+- **Software backend selection** — `WithGraphicsAPI(GraphicsAPISoftware)` now correctly selects the
+  software backend on all platforms (Windows, Linux, macOS). Previously silently fell back to Vulkan
+  due to missing switch case. ([#106](https://github.com/gogpu/gogpu/issues/106))
+
+- **Software backend screen presentation (Windows)** — software-rendered pixels are now displayed
+  on screen via GDI `SetDIBitsToDevice`. The renderer detects software surfaces and blits the
+  framebuffer to the window after each `Present()`. RGBA→BGRA conversion handled automatically.
+
+### Added
+
+- **PixelBlitter interface** — optional platform interface for direct pixel blitting to a window.
+  Implemented on Windows; Linux and macOS platforms gracefully skip blitting (headless mode).
+
+### Dependencies
+
+- wgpu v0.16.14 → v0.16.15 (software backend always compiled, no build tags)
+
 ## [0.20.5] - 2026-02-25
 
 ### Dependencies

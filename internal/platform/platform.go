@@ -122,6 +122,14 @@ type Platform interface {
 	FontScale() float32
 }
 
+// PixelBlitter is an optional interface for platforms that support
+// direct pixel blitting to the window (software backend presentation).
+// Platforms that do not implement this interface will not display
+// software-rendered frames (headless mode still works).
+type PixelBlitter interface {
+	BlitPixels(pixels []byte, width, height int) error
+}
+
 // New creates a platform-specific implementation.
 // This is implemented in platform-specific files.
 func New() Platform {

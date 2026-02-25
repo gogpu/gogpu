@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.20.3
+## Current State: v0.20.6
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -35,8 +35,21 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
+- **Software backend** — always available, Windows screen presentation via GDI
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.20.6:**
+- Software backend selection fix — `WithGraphicsAPI(GraphicsAPISoftware)` works correctly (#106)
+- Software backend Windows presentation — GDI pixel blitting via `SetDIBitsToDevice`
+- PixelBlitter platform interface for software framebuffer display
+- wgpu v0.16.15 (software backend always compiled, no build tags)
+
+**New in v0.20.5:**
+- wgpu v0.16.14 (Vulkan null surface handle guard, naga v0.14.3)
+
+**New in v0.20.4:**
+- wgpu v0.16.13 (Vulkan debug_utils via GetInstanceProcAddr, #98)
 
 **New in v0.20.3:**
 - wgpu v0.16.12 (Vulkan debug object naming — eliminates false-positive validation errors, #98)
@@ -161,7 +174,15 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.19.5** | 2026-02 | webgpu v0.3.1 (Rust backend: ARM64 callback fix) |
+| **v0.20.6** | 2026-02 | Software backend fix + Windows presentation (GDI blit, #106) |
+| v0.20.5 | 2026-02 | wgpu v0.16.14 (Vulkan null surface guard, naga v0.14.3) |
+| v0.20.4 | 2026-02 | wgpu v0.16.13 (Vulkan debug_utils, #98) |
+| v0.20.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming, #98) |
+| v0.20.2 | 2026-02 | Surface unconfigure on minimize, wgpu v0.16.11 |
+| v0.20.1 | 2026-02 | Touch/pen input (Win32, macOS, Wayland), wgpu v0.16.10 |
+| v0.20.0 | 2026-02 | TrackResource, ResourceTracker, deferred destruction queue |
+| v0.19.6 | 2026-02 | Rust backend: QuerySet, WaitIdle |
+| v0.19.5 | 2026-02 | webgpu v0.3.1 (Rust backend: ARM64 callback fix) |
 | v0.19.4 | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
 | v0.19.3 | 2026-02 | wgpu v0.16.5 (per-encoder command pools) |
 | v0.19.2 | 2026-02 | Hot-path benchmarks, wgpu v0.16.4 (timeline semaphore, FencePool) |

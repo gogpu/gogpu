@@ -226,6 +226,12 @@ var (
 	procRegOpenKeyExW    = advapi32.NewProc("RegOpenKeyExW")
 	procRegQueryValueExW = advapi32.NewProc("RegQueryValueExW")
 	procRegCloseKey      = advapi32.NewProc("RegCloseKey")
+
+	// GDI32 (software backend pixel blitting)
+	gdi32                 = windows.NewLazyDLL("gdi32.dll")
+	procGetDC             = user32.NewProc("GetDC")
+	procReleaseDC         = user32.NewProc("ReleaseDC")
+	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
 )
 
 // trackMouseEventStruct is the TRACKMOUSEEVENT structure.
@@ -301,6 +307,21 @@ type pointerPenInfo struct {
 	rotation    uint32
 	tiltX       int32 // -90 to +90
 	tiltY       int32 // -90 to +90
+}
+
+// bitmapInfoHeader is the Win32 BITMAPINFOHEADER structure for DIB operations.
+type bitmapInfoHeader struct {
+	biSize          uint32
+	biWidth         int32
+	biHeight        int32 // negative = top-down DIB
+	biPlanes        uint16
+	biBitCount      uint16
+	biCompression   uint32 // BI_RGB = 0
+	biSizeImage     uint32
+	biXPelsPerMeter int32
+	biYPelsPerMeter int32
+	biClrUsed       uint32
+	biClrImportant  uint32
 }
 
 // windowsPlatform implements Platform for Windows.
@@ -1747,4 +1768,44 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 	return ret
+}
+
+// BlitPixels copies RGBA pixel data to the window using GDI SetDIBitsToDevice.
+// Implements the PixelBlitter interface for software backend presentation.
+func (p *windowsPlatform) BlitPixels(pixels []byte, width, height int) error {
+	hdc, _, _ := procGetDC.Call(uintptr(p.hwnd))
+	if hdc == 0 {
+		return fmt.Errorf("gogpu: GetDC failed")
+	}
+	defer procReleaseDC.Call(uintptr(p.hwnd), hdc)
+
+	bmi := bitmapInfoHeader{
+		biSize:     40,
+		biWidth:    int32(width),
+		biHeight:   -int32(height), // negative = top-down
+		biPlanes:   1,
+		biBitCount: 32,
+	}
+
+	// Software backend stores RGBA, Windows DIB expects BGRA -- swap R<->B
+	bgra := make([]byte, len(pixels))
+	for i := 0; i < len(pixels)-3; i += 4 {
+		bgra[i+0] = pixels[i+2] // B
+		bgra[i+1] = pixels[i+1] // G
+		bgra[i+2] = pixels[i+0] // R
+		bgra[i+3] = pixels[i+3] // A
+	}
+
+	procSetDIBitsToDevice.Call(
+		hdc,
+		0, 0, // dest x, y
+		uintptr(width), uintptr(height),
+		0, 0, // src x, y
+		0, uintptr(height), // start scan, num scans
+		uintptr(unsafe.Pointer(&bgra[0])),
+		uintptr(unsafe.Pointer(&bmi)),
+		0, // DIB_RGB_COLORS
+	)
+
+	return nil
 }

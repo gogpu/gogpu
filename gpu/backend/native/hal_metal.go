@@ -7,10 +7,16 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/metal"
+	"github.com/gogpu/wgpu/hal/software"
 )
 
-// NewHalBackend returns the Metal HAL backend for macOS.
-// macOS only supports Metal, so the api parameter is ignored.
+// NewHalBackend returns the HAL backend for macOS.
+// Defaults to Metal, supports software fallback.
 func NewHalBackend(api types.GraphicsAPI) (hal.Backend, string, gputypes.Backend) {
-	return metal.Backend{}, "Pure Go (gogpu/wgpu/metal)", gputypes.BackendMetal
+	switch api {
+	case types.GraphicsAPISoftware:
+		return software.API{}, "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
+	default: // Metal (default on macOS)
+		return metal.Backend{}, "Pure Go (gogpu/wgpu/metal)", gputypes.BackendMetal
+	}
 }

@@ -138,6 +138,11 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 // Force GLES (useful for testing or compatibility)
 app := gogpu.NewApp(gogpu.DefaultConfig().
     WithGraphicsAPI(gogpu.GraphicsAPIGLES))
+
+// Software backend — no GPU required, always available
+// Windows: renders to screen via GDI. Linux/macOS: headless.
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithGraphicsAPI(gogpu.GraphicsAPISoftware))
 ```
 
 | Graphics API | Platforms | Constant |
@@ -147,7 +152,7 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 | **DX12** | Windows | `gogpu.GraphicsAPIDX12` |
 | **Metal** | macOS | `gogpu.GraphicsAPIMetal` |
 | **GLES** | Windows, Linux | `gogpu.GraphicsAPIGLES` |
-| **Software** | All | `gogpu.GraphicsAPISoftware` |
+| **Software** | All (no GPU needed) | `gogpu.GraphicsAPISoftware` |
 
 ---
 
@@ -473,15 +478,15 @@ Vulkan     DX12  Metal  GLES   Software
 
 ### Windows
 
-Native Win32 windowing with Vulkan and DirectX 12 backends.
+Native Win32 windowing with Vulkan, DirectX 12, GLES, and Software backends.
 
 ### Linux
 
-X11 and Wayland support with Vulkan backend.
+X11 and Wayland support with Vulkan, GLES, and Software (headless) backends.
 
 ### macOS
 
-Pure Go Cocoa implementation via goffi Objective-C runtime:
+Pure Go Cocoa implementation via goffi Objective-C runtime, with Metal and Software (headless) backends:
 
 ```
 internal/platform/darwin/

@@ -14,6 +14,12 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// framebufferReader is an optional interface for surfaces that support
+// direct framebuffer readback (software backend).
+type framebufferReader interface {
+	GetFramebuffer() []byte
+}
+
 // texQuadUniformSize is the size of the uniform buffer for textured quads.
 // Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + premultiplied(1 float) = 32 bytes
 const texQuadUniformSize = 32
@@ -316,6 +322,7 @@ func (r *Renderer) EndFrame() {
 		// Note: We pass nil cmdBuffer here because Present doesn't need it.
 		// Metal's presentDrawable is handled internally by queue.Present.
 		_ = r.queue.Present(r.surface, r.currentSurfaceTexture)
+		r.blitSoftwareFramebuffer()
 	}
 
 	// Non-blocking submission tracking: poll completed submissions.
@@ -334,6 +341,25 @@ func (r *Renderer) EndFrame() {
 	}
 	// SurfaceTexture is consumed by Present, no need to destroy it
 	r.currentSurfaceTexture = nil
+}
+
+// blitSoftwareFramebuffer copies software-rendered pixels to the window.
+// Called from EndFrame after Present. Uses interface type assertions to
+// avoid importing the software package -- clean separation.
+func (r *Renderer) blitSoftwareFramebuffer() {
+	fbr, ok := r.surface.(framebufferReader)
+	if !ok {
+		return // Not software backend
+	}
+	blitter, ok := r.platform.(platform.PixelBlitter)
+	if !ok {
+		return // Platform doesn't support blitting
+	}
+	pixels := fbr.GetFramebuffer()
+	if pixels == nil {
+		return
+	}
+	_ = blitter.BlitPixels(pixels, int(r.width), int(r.height))
 }
 
 // Clear defers a clear command to be applied at the start of the next render pass.

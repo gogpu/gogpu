@@ -102,24 +102,24 @@ When gogpu is present, gg receives the shared device via `gpucontext.HalProvider
 
 ### wgpu HAL Backends
 
-| Backend      | Description                | Platform       |
-|--------------|----------------------------|----------------|
-| **Vulkan**   | Vulkan 1.x                 | Windows, Linux |
-| **Metal**    | Metal 2.x                  | macOS, iOS     |
-| **DX12**     | DirectX 12                 | Windows        |
-| **GLES**     | OpenGL ES 3.x              | Windows, Linux, Android |
-| **Software** | CPU emulation              | All platforms  |
+| Backend      | Description                | Platform       | GPU Required |
+|--------------|----------------------------|----------------|--------------|
+| **Vulkan**   | Vulkan 1.x                 | Windows, Linux | Yes          |
+| **Metal**    | Metal 2.x                  | macOS, iOS     | Yes          |
+| **DX12**     | DirectX 12                 | Windows        | Yes          |
+| **GLES**     | OpenGL ES 3.x              | Windows, Linux, Android | Yes |
+| **Software** | CPU rasterizer             | All platforms  | No           |
 
 ### Software Rendering: Two Levels
 
 There are **two different** software rendering options:
 
-| Component            | Level     | Purpose                              |
-|----------------------|-----------|--------------------------------------|
-| `wgpu/hal/software`  | HAL       | Full WebGPU emulation on CPU         |
-| `gg/internal/raster` | Core      | CPU 2D rasterizer (always available) |
+| Component            | Level     | Purpose                              | Always Compiled |
+|----------------------|-----------|--------------------------------------|-----------------|
+| `wgpu/hal/software`  | HAL       | Full WebGPU emulation on CPU         | Yes             |
+| `gg/internal/raster` | Core      | CPU 2D rasterizer (always available) | Yes             |
 
-- **wgpu/hal/software** — Emulates GPU operations for testing or headless environments
+- **wgpu/hal/software** — Full WebGPU HAL implementation on CPU. Always compiled (no build tags). Used for headless rendering, CI/CD, servers without GPU, and as last-resort fallback. On Windows, software-rendered frames are displayed via GDI `SetDIBitsToDevice` (PixelBlitter interface).
 - **gg/internal/raster** — CPU rasterization core with analytic AA, always works without GPU
 
 ## Backend Selection
@@ -139,6 +139,11 @@ app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
 //          GraphicsAPIMetal, GraphicsAPIGLES, GraphicsAPISoftware
 app := gogpu.NewApp(gogpu.DefaultConfig().
     WithGraphicsAPI(gogpu.GraphicsAPIVulkan))
+
+// Software backend — no GPU required, works everywhere
+// On Windows: renders to screen via GDI. Linux/macOS: headless (no screen output yet).
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithGraphicsAPI(gogpu.GraphicsAPISoftware))
 
 // Combined: specific backend + specific graphics API
 app := gogpu.NewApp(gogpu.DefaultConfig().
@@ -403,7 +408,8 @@ Platform Layer          InputState               Game Loop
 2. init()          → Instance → Surface → Adapter → Device (hal.Device) → Queue (hal.Queue)
 3. BeginFrame()    → surface.AcquireTexture() → device.CreateTextureView()
 4. User draws      → Via Context in OnDraw callback
-5. EndFrame()      → queue.Submit() → queue.Present() (with fence-based tracking)
+5. EndFrame()      → queue.Submit() → queue.Present() → blitSoftwareFramebuffer()
+                     (software backend: reads framebuffer, blits to window via PixelBlitter)
 ```
 
 ## Why Different GPU Models?
@@ -566,12 +572,12 @@ inherit the logger configuration when registered.
 
 ## Platform Support
 
-| Platform | Status       | GPU Backends       |
-|----------|--------------|--------------------|
-| Windows  | Full support | Vulkan, DX12, GLES |
-| macOS    | Full support | Metal              |
-| Linux    | Full support | Vulkan, GLES       |
-| Web      | Planned      | WebGPU             |
+| Platform | Status       | GPU Backends                   |
+|----------|--------------|--------------------------------|
+| Windows  | Full support | Vulkan, DX12, GLES, Software   |
+| macOS    | Full support | Metal, Software (headless)     |
+| Linux    | Full support | Vulkan, GLES, Software (headless) |
+| Web      | Planned      | WebGPU                         |
 
 ## See Also
 
