@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.20.6
+## Current State: v0.20.8
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -38,6 +38,11 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Software backend** — always available, Windows screen presentation via GDI
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+
+**New in v0.20.8:**
+- X11 Vulkan surface pointer fix — root cause of #106 was `unsafe.Pointer(&display)` in wgpu CreateSurface
+- Platform diagnostic logging via slog (silent by default)
+- wgpu v0.16.16
 
 **New in v0.20.6:**
 - Software backend selection fix — `WithGraphicsAPI(GraphicsAPISoftware)` works correctly (#106)
@@ -174,7 +179,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.20.6** | 2026-02 | Software backend fix + Windows presentation (GDI blit, #106) |
+| **v0.20.8** | 2026-02 | X11 Vulkan surface pointer fix (root cause #106), platform logging |
+| v0.20.7 | 2026-02 | X11 GetHandle returns Display* via goffi (#106) |
+| v0.20.6 | 2026-02 | Software backend fix + Windows presentation (GDI blit, #106) |
 | v0.20.5 | 2026-02 | wgpu v0.16.14 (Vulkan null surface guard, naga v0.14.3) |
 | v0.20.4 | 2026-02 | wgpu v0.16.13 (Vulkan debug_utils, #98) |
 | v0.20.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming, #98) |

@@ -161,6 +161,8 @@ func openXlibDisplay() (*xlibHandle, error) {
 		return nil, fmt.Errorf("x11: XOpenDisplay(%q) returned NULL", displayEnv)
 	}
 
+	logger().Info("XOpenDisplay succeeded", "DISPLAY", displayEnv, "display_ptr", fmt.Sprintf("%#x", display))
+
 	return &xlibHandle{
 		lib:           lib,
 		display:       display,
@@ -286,6 +288,12 @@ func (p *Platform) Init(config Config) error {
 		fmt.Fprintf(os.Stderr, "gogpu: warning: %v (GPU rendering unavailable)\n", err)
 	}
 	p.xlib = xlib
+
+	if xlib != nil {
+		logger().Info("x11 init complete", "window", fmt.Sprintf("%#x", p.window), "display", fmt.Sprintf("%#x", xlib.display))
+	} else {
+		logger().Warn("x11 init without xlib", "window", fmt.Sprintf("%#x", p.window))
+	}
 
 	return nil
 }
@@ -634,9 +642,11 @@ func (p *Platform) GetHandle() (display, window uintptr) {
 	defer p.mu.Unlock()
 
 	if p.xlib == nil || p.xlib.display == 0 {
+		logger().Warn("GetHandle returning zero handles", "reason", "no xlib display")
 		return 0, 0
 	}
 
+	logger().Debug("GetHandle", "display", fmt.Sprintf("%#x", p.xlib.display), "window", fmt.Sprintf("%#x", uintptr(p.window)))
 	return p.xlib.display, uintptr(p.window)
 }
 

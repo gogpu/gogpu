@@ -79,15 +79,19 @@ type x11Platform struct {
 func newPlatform() Platform {
 	// Prefer Wayland if WAYLAND_DISPLAY is set
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		logger().Info("platform selected", "type", "wayland", "WAYLAND_DISPLAY", os.Getenv("WAYLAND_DISPLAY"))
 		return &waylandPlatform{
 			startTime: time.Now(),
 		}
 	}
 	// Fall back to X11 if DISPLAY is set
 	if os.Getenv("DISPLAY") != "" {
+		logger().Info("platform selected", "type", "x11", "DISPLAY", os.Getenv("DISPLAY"))
+		x11.SetLogger(loggerPtr.Load().WithGroup("x11"))
 		return &x11Platform{inner: x11.NewPlatform()}
 	}
 	// Default to Wayland (will fail in Init if not available)
+	logger().Info("platform selected", "type", "wayland", "reason", "default (no WAYLAND_DISPLAY or DISPLAY)")
 	return &waylandPlatform{
 		startTime: time.Now(),
 	}

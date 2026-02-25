@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.8] - 2026-02-25
+
+### Fixed
+
+- **X11 Vulkan surface creation (root cause)** — the actual bug was in wgpu's `CreateSurface`:
+  `unsafe.Pointer(&display)` passed the Go stack address of the local variable instead of the
+  `Display*` value. Vulkan received a Go stack pointer instead of the real Xlib Display, causing
+  null surfaces (native) and SIGSEGV (Rust). The v0.20.7 `GetHandle()` fix was necessary but
+  insufficient — the Display* value never reached Vulkan due to this pointer indirection bug.
+  ([#106](https://github.com/gogpu/gogpu/issues/106))
+
+### Added
+
+- **Platform diagnostic logging** — X11 platform now logs initialization details (platform
+  selection, Display* pointer, window ID, GetHandle values) via slog. Silent by default;
+  enable with `gogpu.SetLogger(slog.Default())`.
+
+### Dependencies
+
+- wgpu v0.16.15 → v0.16.16 (Vulkan X11/macOS surface pointer fix)
+
 ## [0.20.7] - 2026-02-25
 
 ### Fixed

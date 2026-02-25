@@ -140,6 +140,7 @@ func (a *App) Run() error {
 	defer runtime.UnlockOSThread()
 
 	// Initialize platform (window) - must be on main thread
+	platform.SetLogger(slogger())
 	a.platform = platform.New()
 	if err := a.platform.Init(platform.Config{
 		Title:      a.config.Title,
