@@ -48,6 +48,12 @@ var (
 	ErrNoMessage           = errors.New("wayland: no message available")
 )
 
+// ObjectHandler is implemented by Wayland objects that receive events.
+// Objects register themselves with Display to receive event dispatch.
+type ObjectHandler interface {
+	dispatch(msg *Message) error
+}
+
 // Display represents a connection to the Wayland compositor.
 // It is always object ID 1 in the Wayland protocol.
 type Display struct {
@@ -72,6 +78,9 @@ type Display struct {
 	// Event handlers
 	registry *Registry
 	onError  func(objectID ObjectID, code uint32, message string)
+
+	// Object dispatch routing — registered objects receive events
+	objects map[ObjectID]ObjectHandler
 
 	// Delete ID tracking
 	deletedIDs []ObjectID
@@ -119,6 +128,7 @@ func ConnectTo(socketPath string) (*Display, error) {
 		writeBuf:  make([]byte, 0, 4096),
 		fdBuf:     make([]int, 0, 16),
 		callbacks: make(map[ObjectID]chan uint32),
+		objects:   make(map[ObjectID]ObjectHandler),
 	}
 
 	// wl_display is always object ID 1, so start allocating from 2
@@ -426,6 +436,15 @@ func (d *Display) dispatch(msg *Message) error {
 			return d.registry.dispatch(msg)
 		}
 
+		// Check registered object handlers (xdg_wm_base, xdg_surface, xdg_toplevel, etc.)
+		d.mu.Lock()
+		handler, hasHandler := d.objects[msg.ObjectID]
+		d.mu.Unlock()
+
+		if hasHandler {
+			return handler.dispatch(msg)
+		}
+
 		// Unknown object - this is not necessarily an error
 		// The object might have been created by application code
 		return nil
@@ -522,6 +541,21 @@ func (d *Display) Flush() error {
 	// In a production implementation, you might want to buffer
 	// messages and flush them together for efficiency.
 	return nil
+}
+
+// RegisterObject registers an object handler for event dispatch.
+// Events sent to the given object ID will be routed to the handler.
+func (d *Display) RegisterObject(id ObjectID, handler ObjectHandler) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.objects[id] = handler
+}
+
+// UnregisterObject removes an object handler from event dispatch.
+func (d *Display) UnregisterObject(id ObjectID) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.objects, id)
 }
 
 // DisplayID returns the object ID of the display (always 1).

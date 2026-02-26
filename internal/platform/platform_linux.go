@@ -23,7 +23,7 @@ type waylandPlatform struct {
 	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
 	wakePipe [2]int
 
-	// Wayland core objects
+	// Wayland core objects (pure Go protocol)
 	display    *wayland.Display
 	registry   *wayland.Registry
 	compositor *wayland.WlCompositor
@@ -214,9 +214,16 @@ func (p *x11Platform) WakeUp() {
 func (p *waylandPlatform) Init(config Config) error {
 	// Check if Wayland is available
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
-		return fmt.Errorf("wayland: WAYLAND_DISPLAY not set (X11 not yet supported)")
+		return fmt.Errorf("wayland: WAYLAND_DISPLAY not set")
 	}
 
+	return p.initPureGoDisplay(config)
+}
+
+// initPureGoDisplay initializes using pure Go Wayland protocol.
+// Uses software backend with wl_shm for screen presentation.
+// Vulkan on Wayland requires libwayland-client C pointers (future: goffi TASK-012 fix).
+func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 	// Connect to Wayland display
 	display, err := wayland.Connect()
 	if err != nil {
@@ -250,8 +257,15 @@ func (p *waylandPlatform) Init(config Config) error {
 	}
 	p.compositor = wayland.NewWlCompositor(display, compositorID)
 
-	// Bind to xdg_wm_base
-	xdgWmBaseID, err := registry.BindXdgWmBase(2)
+	// Bind to xdg_wm_base (use available version, max 2)
+	xdgVersion := registry.GlobalVersion(wayland.InterfaceXdgWmBase)
+	if xdgVersion > 2 {
+		xdgVersion = 2
+	}
+	if xdgVersion == 0 {
+		xdgVersion = 1
+	}
+	xdgWmBaseID, err := registry.BindXdgWmBase(xdgVersion)
 	if err != nil {
 		_ = display.Close()
 		return fmt.Errorf("wayland: failed to bind xdg_wm_base: %w", err)
@@ -1288,18 +1302,13 @@ func (p *waylandPlatform) GetSize() (width, height int) {
 }
 
 // GetHandle returns platform-specific handles for Vulkan surface creation.
-// On Linux/Wayland, returns (wl_display fd, wl_surface id).
-// Note: For VK_KHR_wayland_surface, you need the actual C pointers.
-// This pure Go implementation provides the underlying IDs/FDs.
+// Pure Go Wayland returns (0, 0) because Vulkan requires real C pointers
+// from libwayland-client. Software backend is used on Wayland instead.
+// Future: goffi TASK-012 (crosscall2 integration) will enable Vulkan on Wayland.
 func (p *waylandPlatform) GetHandle() (instance, window uintptr) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.display == nil || p.surface == nil {
-		return 0, 0
-	}
-
-	return p.display.Ptr(), p.surface.Ptr()
+	// Pure Go Wayland cannot provide C pointers for Vulkan.
+	// Return (0, 0) to signal that GPU surface creation is unavailable.
+	return 0, 0
 }
 
 // Destroy closes the window and releases resources.
@@ -1314,7 +1323,7 @@ func (p *waylandPlatform) Destroy() {
 		p.wakePipe = [2]int{}
 	}
 
-	// Destroy in reverse order of creation
+	// Destroy pure Go objects in reverse order of creation
 
 	if p.touch != nil {
 		_ = p.touch.Release()
@@ -1408,7 +1417,6 @@ func (p *waylandPlatform) WaitEvents() {
 		{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN},
 	}
 	// Block indefinitely until an event arrives or WakeUp is called.
-	// EINTR from signal delivery is harmless — returns as spurious wakeup.
 	_, _ = unix.Poll(fds, -1)
 
 	// Drain the wakeup pipe so it is ready for the next WakeUp call.

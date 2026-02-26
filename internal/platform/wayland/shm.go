@@ -180,12 +180,15 @@ type WlShm struct {
 
 // NewWlShm creates a WlShm from a bound object ID.
 // The objectID should be obtained from Registry.BindShm().
+// It auto-registers with Display for event dispatch (format events).
 func NewWlShm(display *Display, objectID ObjectID) *WlShm {
-	return &WlShm{
+	s := &WlShm{
 		display: display,
 		id:      objectID,
 		formats: make([]ShmFormat, 0, 16),
 	}
+	display.RegisterObject(objectID, s)
+	return s
 }
 
 // ID returns the object ID of the shm.
@@ -366,11 +369,14 @@ type WlBuffer struct {
 }
 
 // NewWlBuffer creates a WlBuffer from an object ID.
+// It auto-registers with Display for event dispatch (release events).
 func NewWlBuffer(display *Display, objectID ObjectID) *WlBuffer {
-	return &WlBuffer{
+	b := &WlBuffer{
 		display: display,
 		id:      objectID,
 	}
+	display.RegisterObject(objectID, b)
+	return b
 }
 
 // ID returns the object ID of the buffer.

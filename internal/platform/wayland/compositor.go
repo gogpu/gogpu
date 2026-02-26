@@ -89,11 +89,14 @@ type WlSurface struct {
 }
 
 // NewWlSurface creates a WlSurface from an object ID.
+// It auto-registers with Display for event dispatch (enter, leave events).
 func NewWlSurface(display *Display, objectID ObjectID) *WlSurface {
-	return &WlSurface{
+	s := &WlSurface{
 		display: display,
 		id:      objectID,
 	}
+	display.RegisterObject(objectID, s)
+	return s
 }
 
 // ID returns the object ID of the surface.

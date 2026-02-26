@@ -101,11 +101,14 @@ type XdgWmBase struct {
 
 // NewXdgWmBase creates an XdgWmBase from a bound object ID.
 // The objectID should be obtained from Registry.BindXdgWmBase().
+// It auto-registers with Display for event dispatch (ping events).
 func NewXdgWmBase(display *Display, objectID ObjectID) *XdgWmBase {
-	return &XdgWmBase{
+	x := &XdgWmBase{
 		display: display,
 		id:      objectID,
 	}
+	display.RegisterObject(objectID, x)
+	return x
 }
 
 // ID returns the object ID of the xdg_wm_base.
@@ -230,12 +233,15 @@ type XdgSurface struct {
 }
 
 // NewXdgSurface creates an XdgSurface from an object ID.
+// It auto-registers with Display for event dispatch (configure events).
 func NewXdgSurface(display *Display, objectID ObjectID, surface *WlSurface) *XdgSurface {
-	return &XdgSurface{
+	s := &XdgSurface{
 		display: display,
 		id:      objectID,
 		surface: surface,
 	}
+	display.RegisterObject(objectID, s)
+	return s
 }
 
 // ID returns the object ID of the xdg_surface.
@@ -435,12 +441,15 @@ type XdgToplevel struct {
 }
 
 // NewXdgToplevel creates an XdgToplevel from an object ID.
+// It auto-registers with Display for event dispatch (configure, close events).
 func NewXdgToplevel(display *Display, objectID ObjectID, xdgSurface *XdgSurface) *XdgToplevel {
-	return &XdgToplevel{
+	t := &XdgToplevel{
 		display:    display,
 		id:         objectID,
 		xdgSurface: xdgSurface,
 	}
+	display.RegisterObject(objectID, t)
+	return t
 }
 
 // ID returns the object ID of the xdg_toplevel.
@@ -774,12 +783,15 @@ const (
 )
 
 // NewXdgPopup creates an XdgPopup from an object ID.
+// It auto-registers with Display for event dispatch (configure, popup_done, repositioned events).
 func NewXdgPopup(display *Display, objectID ObjectID, xdgSurface *XdgSurface) *XdgPopup {
-	return &XdgPopup{
+	p := &XdgPopup{
 		display:    display,
 		id:         objectID,
 		xdgSurface: xdgSurface,
 	}
+	display.RegisterObject(objectID, p)
+	return p
 }
 
 // ID returns the object ID of the xdg_popup.
