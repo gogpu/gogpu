@@ -484,7 +484,7 @@ Native Win32 windowing with Vulkan, DirectX 12, GLES, and Software backends.
 
 X11 and Wayland support with Vulkan, GLES, and Software (headless) backends.
 
-- **X11** — pure Go X11 protocol with libX11 loaded via goffi for Vulkan surface creation
+- **X11** — pure Go X11 protocol with libX11 loaded via goffi for Vulkan surface creation. Multi-touch input via XInput2 wire protocol.
 - **Wayland** — pure Go Wayland protocol (object dispatch) with libwayland-client via goffi for Vulkan surfaces. Server-side decorations via `zxdg_decoration_manager_v1`. Tested on WSLg, GNOME, KDE, sway.
 
 ### macOS

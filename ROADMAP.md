@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.20.9
+## Current State: v0.22.0
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -34,10 +34,22 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
-- Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan), macOS (Metal)
+- Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan/Wayland), macOS (Metal)
 - **Software backend** — always available, Windows screen presentation via GDI
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
+- **X11 multi-touch** via XInput2 pure Go wire protocol
+
+**New in v0.22.0:**
+- X11 multi-touch input via XInput2 — pure Go wire protocol (XIQueryVersion 2.2, touch events → PointerEvent)
+- X11 extension query infrastructure — `QueryExtension(name)` with caching
+- GenericEvent (type 35) variable-length event support
+- wgpu v0.18.0 (public API root package)
+
+**New in v0.21.0:**
+- Wayland Vulkan surface via libwayland-client (goffi dynamic loading)
+- Wayland server-side decorations (zxdg_decoration_manager_v1)
+- Wayland non-blocking socket and fd propagation fix
 
 **New in v0.20.9:**
 - wgpu v0.16.17 — load platform Vulkan surface creation functions (the real fix for #106)
@@ -109,7 +121,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Upcoming
 
-### v0.19.0 — API Polish
+### v0.23.0 — Input & Platform Polish
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
 - [ ] macOS/Linux PlatformProvider native implementations
