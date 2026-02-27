@@ -69,6 +69,9 @@ type Platform struct {
 	// Window
 	window ResourceID
 
+	// XInput2 extension (nil if unavailable)
+	xi *XIExtension
+
 	// Keyboard mapping
 	keymap *KeyboardMapping
 
@@ -90,6 +93,11 @@ type Platform struct {
 	modifiers     gpucontext.Modifiers
 	mouseInWindow bool
 
+	// Touch tracking: first active touchID is primary
+	activeTouches map[uint32]bool
+	primaryTouch  uint32
+	hasPrimary    bool
+
 	// Callbacks for pointer and scroll events
 	pointerCallback func(gpucontext.PointerEvent)
 	scrollCallback  func(gpucontext.ScrollEvent)
@@ -102,7 +110,8 @@ type Platform struct {
 // NewPlatform creates a new X11 platform instance.
 func NewPlatform() *Platform {
 	return &Platform{
-		startTime: time.Now(),
+		startTime:     time.Now(),
+		activeTouches: make(map[uint32]bool),
 	}
 }
 
@@ -261,6 +270,20 @@ func (p *Platform) Init(config Config) error {
 	// Get keyboard mapping (non-fatal - keyboard input may not work correctly without it)
 	keymap, _ := conn.GetKeyboardMapping()
 	p.keymap = keymap
+
+	// Initialize XInput2 for touch support (non-fatal)
+	xi, err := conn.InitXInput2()
+	if err != nil {
+		logger().Info("XInput2 touch not available", "error", err)
+	} else {
+		p.xi = xi
+		if xiErr := conn.XISelectTouchEvents(xi, window); xiErr != nil {
+			logger().Warn("failed to select touch events", "error", xiErr)
+			p.xi = nil
+		} else {
+			logger().Info("XInput2 touch enabled", "version", fmt.Sprintf("%d.%d", xi.MajorVer, xi.MinorVer))
+		}
+	}
 
 	// Set fullscreen if requested (non-fatal, will fail if WM doesn't support EWMH)
 	if config.Fullscreen {
@@ -428,6 +451,9 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 	case *LeaveNotifyEvent:
 		p.handleLeaveNotify(e)
+
+	case *GenericEvent:
+		p.handleGenericEvent(e)
 	}
 
 	return PlatformEvent{Type: EventTypeNone}
@@ -615,6 +641,80 @@ func (p *Platform) handleLeaveNotify(e *LeaveNotifyEvent) {
 		Modifiers:   extractModifiers(e.State),
 		Timestamp:   p.eventTimestamp(),
 	}
+	p.dispatchPointerEvent(ev)
+}
+
+// handleGenericEvent processes X11 GenericEvent (type 35) for extension events.
+func (p *Platform) handleGenericEvent(ge *GenericEvent) {
+	if p.xi == nil || ge.Extension != p.xi.MajorOpcode {
+		return
+	}
+
+	switch ge.EventType {
+	case XITouchBegin, XITouchUpdate, XITouchEnd:
+		dev, err := p.conn.ParseXIDeviceEvent(ge)
+		if err != nil {
+			return
+		}
+		p.handleXITouchEvent(dev)
+	}
+}
+
+// handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.
+func (p *Platform) handleXITouchEvent(e *XIDeviceEvent) {
+	var pointerType gpucontext.PointerEventType
+
+	p.mu.Lock()
+	switch e.EventType {
+	case XITouchBegin:
+		pointerType = gpucontext.PointerDown
+		p.activeTouches[e.Detail] = true
+		if !p.hasPrimary {
+			p.primaryTouch = e.Detail
+			p.hasPrimary = true
+		}
+	case XITouchUpdate:
+		pointerType = gpucontext.PointerMove
+	case XITouchEnd:
+		pointerType = gpucontext.PointerUp
+		delete(p.activeTouches, e.Detail)
+		if p.hasPrimary && p.primaryTouch == e.Detail {
+			p.hasPrimary = false
+		}
+	default:
+		p.mu.Unlock()
+		return
+	}
+	isPrimary := p.hasPrimary && p.primaryTouch == e.Detail
+	mods := p.modifiers
+	p.mu.Unlock()
+
+	var pressure float32
+	if e.EventType == XITouchBegin || e.EventType == XITouchUpdate {
+		pressure = 0.5 // Default for touch without pressure axis
+	}
+
+	ev := gpucontext.PointerEvent{
+		Type:        pointerType,
+		PointerID:   int(e.Detail),
+		X:           e.EventX,
+		Y:           e.EventY,
+		Pressure:    pressure,
+		Width:       1,
+		Height:      1,
+		PointerType: gpucontext.PointerTypeTouch,
+		IsPrimary:   isPrimary,
+		Button:      gpucontext.ButtonLeft,
+		Buttons:     gpucontext.ButtonsLeft,
+		Modifiers:   mods,
+		Timestamp:   p.eventTimestamp(),
+	}
+
+	// For PointerUp, clear button
+	if e.EventType == XITouchEnd {
+		ev.Buttons = gpucontext.ButtonsNone
+	}
+
 	p.dispatchPointerEvent(ev)
 }
 

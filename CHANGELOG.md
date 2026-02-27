@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **X11 multi-touch input via XInput2** — pure Go wire protocol implementation of XInput2
+  extension for multi-touch support on X11/Linux. Includes QueryExtension infrastructure
+  (reusable for any X11 extension), GenericEvent (type 35) variable-length event parsing,
+  XIQueryVersion 2.2 negotiation, XISelectEvents for touch subscription, and XIDeviceEvent
+  decoding with FP16.16/FP32.32 sub-pixel coordinates. Touch events map to
+  `gpucontext.PointerEvent` with `PointerTypeTouch` and multi-touch tracking (primary touch,
+  per-touch IDs). Graceful fallback when XInput2 is unavailable.
+- **X11 extension query infrastructure** — `Connection.QueryExtension(name)` with result caching,
+  enabling future extensions (XRandR, DPMS, etc.) without additional work.
+- **GenericEvent support** — fixed `readResponse()` and `WaitForEvent()` to handle variable-length
+  X11 GenericEvents (type 35), preventing wire protocol desync when extensions send events.
+
 ## [0.21.0] - 2026-02-27
 
 ### Added

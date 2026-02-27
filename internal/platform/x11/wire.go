@@ -262,7 +262,16 @@ const (
 	EventColormapNotify   = 32
 	EventClientMessage    = 33
 	EventMappingNotify    = 34
+	EventGenericEvent     = 35
 )
+
+// ExtensionInfo holds the result of a QueryExtension request.
+type ExtensionInfo struct {
+	Present     bool
+	MajorOpcode uint8
+	FirstEvent  uint8
+	FirstError  uint8
+}
 
 // X11 error codes.
 const (

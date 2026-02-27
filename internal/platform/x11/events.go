@@ -256,6 +256,17 @@ type MappingNotifyEvent struct {
 
 func (*MappingNotifyEvent) eventMarker() {}
 
+// GenericEvent represents an X11 Generic Event Extension event (type 35).
+// These are variable-length events used by extensions like XInput2.
+type GenericEvent struct {
+	Extension uint8  // Extension major opcode
+	Sequence  uint16 // Sequence number
+	EventType uint16 // Extension-specific event subtype
+	Data      []byte // Full event data (32-byte header + additional payload)
+}
+
+func (*GenericEvent) eventMarker() {}
+
 // UnknownEvent represents an unrecognized event type.
 type UnknownEvent struct {
 	Type uint8
@@ -274,6 +285,8 @@ func (c *Connection) parseEvent(buf []byte) (Event, error) {
 	eventType := buf[0] & 0x7F
 
 	switch eventType {
+	case EventGenericEvent:
+		return c.parseGenericEvent(buf)
 	case EventKeyPress:
 		return c.parseKeyEvent(buf, true)
 	case EventKeyRelease:
@@ -673,6 +686,29 @@ func (c *Connection) parseMappingNotifyEvent(buf []byte) (Event, error) {
 	}, nil
 }
 
+// parseGenericEvent parses a GenericEvent (type 35) from wire format.
+// The buf must contain the complete event data (32-byte header + additional payload
+// already read by readResponse/WaitForEvent).
+func (c *Connection) parseGenericEvent(buf []byte) (Event, error) {
+	if len(buf) < 32 {
+		return nil, fmt.Errorf("x11: generic event buffer too short")
+	}
+
+	d := NewDecoder(c.byteOrder, buf)
+	_, _ = d.Uint8()          // type (35)
+	extension, _ := d.Uint8() // extension major opcode
+	seq, _ := d.Uint16()      // sequence number
+	_, _ = d.Uint32()         // length (already used to read payload)
+	evtype, _ := d.Uint16()   // extension-specific event subtype
+
+	return &GenericEvent{
+		Extension: extension,
+		Sequence:  seq,
+		EventType: evtype,
+		Data:      buf,
+	}, nil
+}
+
 // WaitForEvent reads and returns the next event from the server.
 // This call blocks until an event is available.
 func (c *Connection) WaitForEvent() (Event, error) {
@@ -697,9 +733,37 @@ func (c *Connection) WaitForEvent() (Event, error) {
 			additionalLen, _ := d.Uint32()
 			if additionalLen > 0 {
 				additional := make([]byte, additionalLen*4)
-				_, _ = c.conn.Read(additional)
+				totalRead := 0
+				for totalRead < len(additional) {
+					n, err := c.conn.Read(additional[totalRead:])
+					if err != nil {
+						return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
+					}
+					totalRead += n
+				}
 			}
 			continue
+		}
+
+		// GenericEvent (type 35) — variable-length, read additional payload
+		if responseType&0x7F == EventGenericEvent {
+			d := NewDecoder(c.byteOrder, buf[4:8])
+			additionalLen, _ := d.Uint32()
+			if additionalLen > 0 {
+				additional := make([]byte, additionalLen*4)
+				totalRead := 0
+				for totalRead < len(additional) {
+					n, err := c.conn.Read(additional[totalRead:])
+					if err != nil {
+						return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
+					}
+					totalRead += n
+				}
+				combined := make([]byte, 0, 32+len(additional))
+				combined = append(combined, buf...)
+				combined = append(combined, additional...)
+				buf = combined
+			}
 		}
 
 		// Event

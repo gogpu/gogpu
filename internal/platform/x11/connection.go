@@ -57,6 +57,10 @@ type Connection struct {
 	// Pending replies
 	pendingReplies     map[uint16]chan []byte
 	pendingRepliesLock sync.Mutex
+
+	// Extension registry (major opcode → extension name)
+	extensions     map[string]*ExtensionInfo
+	extensionsLock sync.RWMutex
 }
 
 // Connect establishes a connection to the X server using the DISPLAY environment variable.
@@ -105,6 +109,7 @@ func ConnectTo(display string) (*Connection, error) {
 		atomCache:      make(map[string]Atom),
 		screenNum:      screenNum,
 		pendingReplies: make(map[uint16]chan []byte),
+		extensions:     make(map[string]*ExtensionInfo),
 	}
 
 	// Get file descriptor for raw socket operations
@@ -433,7 +438,29 @@ func (c *Connection) readResponse() ([]byte, error) {
 		return buf, nil
 	}
 
-	// Event (type 2-127)
+	// GenericEvent (type 35) — variable-length, used by extensions (XInput2, etc.)
+	if responseType&0x7F == EventGenericEvent {
+		d := NewDecoder(c.byteOrder, buf[4:8])
+		additionalLen, _ := d.Uint32()
+		if additionalLen > 0 {
+			additional := make([]byte, additionalLen*4)
+			totalRead := 0
+			for totalRead < len(additional) {
+				n, err := c.conn.Read(additional[totalRead:])
+				if err != nil {
+					return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
+				}
+				totalRead += n
+			}
+			combined := make([]byte, 0, 32+len(additional))
+			combined = append(combined, buf...)
+			combined = append(combined, additional...)
+			buf = combined
+		}
+		return buf, nil
+	}
+
+	// Event (type 2-34, 36-127)
 	return buf, nil
 }
 
@@ -449,6 +476,57 @@ func (c *Connection) parseError(buf []byte) error {
 
 	return fmt.Errorf("%w: code=%d seq=%d resource=%d major=%d minor=%d",
 		ErrProtocolError, errorCode, seq, resourceID, majorOpcode, minorOpcode)
+}
+
+// QueryExtension queries the X server for an extension by name.
+// Returns ExtensionInfo with Present=false if the extension is not available.
+// Results are cached so subsequent calls for the same extension are fast.
+func (c *Connection) QueryExtension(name string) (*ExtensionInfo, error) {
+	// Check cache first
+	c.extensionsLock.RLock()
+	if ext, ok := c.extensions[name]; ok {
+		c.extensionsLock.RUnlock()
+		return ext, nil
+	}
+	c.extensionsLock.RUnlock()
+
+	// Build QueryExtension request
+	nameBytes := []byte(name)
+	nameLen := len(nameBytes)
+	padLen := pad(nameLen)
+	reqLen := requestLength(8 + nameLen + padLen)
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeQueryExtension)
+	e.PutUint8(0) // unused
+	e.PutUint16(reqLen)
+	e.PutUint16(uint16(nameLen))
+	e.PutUint16(0) // unused
+	e.PutBytes(nameBytes)
+	e.PutPad()
+
+	reply, err := c.sendRequestWithReply(e.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("x11: QueryExtension(%q) failed: %w", name, err)
+	}
+
+	if len(reply) < 32 {
+		return nil, fmt.Errorf("x11: QueryExtension(%q) reply too short", name)
+	}
+
+	ext := &ExtensionInfo{
+		Present:     reply[8] != 0,
+		MajorOpcode: reply[9],
+		FirstEvent:  reply[10],
+		FirstError:  reply[11],
+	}
+
+	// Cache the result
+	c.extensionsLock.Lock()
+	c.extensions[name] = ext
+	c.extensionsLock.Unlock()
+
+	return ext, nil
 }
 
 // Flush ensures all buffered data is sent to the server.
