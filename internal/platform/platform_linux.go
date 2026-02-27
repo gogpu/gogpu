@@ -1287,6 +1287,7 @@ func (p *waylandPlatform) PollEvents() Event {
 	// Dispatch pending Wayland events (non-blocking)
 	if err := p.display.Dispatch(); err != nil {
 		// Connection error - treat as close
+		logger().Error("wayland dispatch error", "error", err)
 		p.mu.Lock()
 		p.shouldClose = true
 		p.mu.Unlock()
