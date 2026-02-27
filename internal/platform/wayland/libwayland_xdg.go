@@ -26,8 +26,6 @@ import (
 )
 
 // cWlMessage matches C struct wl_message on 64-bit Linux (24 bytes).
-//
-//nolint:unused // Fields accessed via unsafe pointer arithmetic matching C layout
 type cWlMessage struct {
 	Name      uintptr // const char *name
 	Signature uintptr // const char *signature
@@ -35,8 +33,6 @@ type cWlMessage struct {
 }
 
 // cWlInterface matches C struct wl_interface on 64-bit Linux (40 bytes).
-//
-//nolint:unused // Fields accessed via unsafe pointer arithmetic matching C layout
 type cWlInterface struct {
 	Name        uintptr // const char *name
 	Version     int32   // int version
@@ -51,7 +47,7 @@ type cWlInterface struct {
 // The string MUST contain an embedded null terminator (\x00) at the end.
 // String constants are in the program's read-only data segment — stable for program lifetime.
 func cstr(s string) uintptr {
-	return uintptr(unsafe.Pointer(unsafe.StringData(s))) //nolint:gosec // C string pointer from Go constant
+	return uintptr(unsafe.Pointer(unsafe.StringData(s)))
 }
 
 // xdg interface descriptors — constructed once, live for program lifetime.
@@ -195,7 +191,7 @@ var xdgCallbackHandle *LibwaylandHandle
 // xdgSurfaceConfigureCb handles xdg_surface.configure(data, xdg_surface, serial).
 // Called from C via goffi trampoline during wl_display_roundtrip.
 // Acks the configure event so the compositor maps the surface.
-func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) { //nolint:revive // C callback params
+func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 	h := xdgCallbackHandle
 	if h == nil {
 		return
@@ -206,7 +202,7 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) { //nolint:revive /
 
 // xdgWmBasePingCb handles xdg_wm_base.ping(data, xdg_wm_base, serial).
 // Responds with pong to keep the connection alive.
-func xdgWmBasePingCb(data, wmBase, serial uintptr) { //nolint:revive // C callback params
+func xdgWmBasePingCb(data, wmBase, serial uintptr) {
 	h := xdgCallbackHandle
 	if h == nil {
 		return
@@ -251,8 +247,7 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 	if version > 6 {
 		version = 6
 	}
-	xdgIfaceAddr := uintptr(unsafe.Pointer(&xdg.wmBase))
-	wmBase, err := h.registryBind(xdgName, xdgIfaceAddr, version)
+	wmBase, err := h.registryBind(xdgName, unsafe.Pointer(&xdg.wmBase), version)
 	if err != nil {
 		return fmt.Errorf("wayland: failed to bind xdg_wm_base: %w", err)
 	}
@@ -264,8 +259,7 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 	}
 
 	// Create xdg_surface — opcode 2, signature "no" (new_id, object)
-	xdgSurfaceIface := uintptr(unsafe.Pointer(&xdg.surface))
-	xdgSurf, err := h.marshalConstructorObj(wmBase, 2, xdgSurfaceIface, h.surface)
+	xdgSurf, err := h.marshalConstructorObj(wmBase, 2, unsafe.Pointer(&xdg.surface), h.surface)
 	if err != nil {
 		return fmt.Errorf("wayland: failed to create xdg_surface: %w", err)
 	}
@@ -277,8 +271,7 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 	}
 
 	// Create xdg_toplevel — opcode 1, signature "n" (new_id)
-	xdgToplevelIface := uintptr(unsafe.Pointer(&xdg.toplevel))
-	toplevel, err := h.marshalConstructor(xdgSurf, 1, xdgToplevelIface)
+	toplevel, err := h.marshalConstructor(xdgSurf, 1, unsafe.Pointer(&xdg.toplevel))
 	if err != nil {
 		return fmt.Errorf("wayland: failed to create xdg_toplevel: %w", err)
 	}
@@ -323,18 +316,19 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 
 // marshalConstructorObj calls wl_proxy_marshal_array_constructor for requests
 // with signature "no" (new_id + object). Used for xdg_wm_base.get_xdg_surface.
-func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, iface uintptr, obj uintptr) (uintptr, error) {
+func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, iface unsafe.Pointer, obj uintptr) (uintptr, error) {
 	var argBuf [2]uintptr
 	argBuf[0] = 0   // new_id placeholder
 	argBuf[1] = obj // object argument (wl_surface proxy)
 	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	ifaceAddr := uintptr(iface)
 
 	var result uintptr
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&proxy),
 		unsafe.Pointer(&opcode),
 		unsafe.Pointer(&argPtr),
-		unsafe.Pointer(&iface),
+		unsafe.Pointer(&ifaceAddr),
 	}
 	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
@@ -348,9 +342,7 @@ func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, i
 // but the message is still marshaled and sent).
 func (h *LibwaylandHandle) marshalVoid(proxy uintptr, opcode uint32, args ...uintptr) {
 	var argBuf [8]uintptr
-	for i, a := range args {
-		argBuf[i] = a
-	}
+	copy(argBuf[:], args)
 	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
 	var nullIface uintptr
 	var dummyResult uintptr
@@ -401,16 +393,14 @@ func (h *LibwaylandHandle) setupDecorations(decorName, decorVersion uint32) {
 		version = 1
 	}
 
-	decorIfaceAddr := uintptr(unsafe.Pointer(&xdg.decorManager))
-	decorMgr, err := h.registryBind(decorName, decorIfaceAddr, version)
+	decorMgr, err := h.registryBind(decorName, unsafe.Pointer(&xdg.decorManager), version)
 	if err != nil {
 		return
 	}
 	h.decorManager = decorMgr
 
 	// get_toplevel_decoration: opcode 1, signature "no" (new_id + object)
-	toplevelDecorIface := uintptr(unsafe.Pointer(&xdg.toplevelDecor))
-	decoration, err := h.marshalConstructorObj(decorMgr, 1, toplevelDecorIface, h.xdgToplevel)
+	decoration, err := h.marshalConstructorObj(decorMgr, 1, unsafe.Pointer(&xdg.toplevelDecor), h.xdgToplevel)
 	if err != nil {
 		return
 	}

@@ -54,9 +54,9 @@ type LibwaylandHandle struct {
 	fnRoundtrip      unsafe.Pointer // wl_display_roundtrip
 
 	// Data symbols (interface descriptors — pointers to static C structs)
-	registryInterface   uintptr // &wl_registry_interface
-	compositorInterface uintptr // &wl_compositor_interface
-	surfaceInterface    uintptr // &wl_surface_interface
+	registryInterface   unsafe.Pointer // &wl_registry_interface
+	compositorInterface unsafe.Pointer // &wl_compositor_interface
+	surfaceInterface    unsafe.Pointer // &wl_surface_interface
 
 	// Call interfaces (goffi call descriptors, prepared once)
 	cifConnect     types.CallInterface
@@ -240,7 +240,7 @@ func (h *LibwaylandHandle) resolveSymbols() error {
 	// Data symbols — these are pointers TO the interface struct (we need the address)
 	datasyms := []struct {
 		name string
-		dst  *uintptr
+		dst  *unsafe.Pointer
 	}{
 		{"wl_registry_interface", &h.registryInterface},
 		{"wl_compositor_interface", &h.compositorInterface},
@@ -255,7 +255,7 @@ func (h *LibwaylandHandle) resolveSymbols() error {
 		if sym == nil {
 			return fmt.Errorf("wayland: symbol %s is nil", s.name)
 		}
-		*s.dst = uintptr(sym)
+		*s.dst = sym
 	}
 
 	return nil
@@ -302,17 +302,18 @@ func (h *LibwaylandHandle) prepareCIFs() error {
 // marshalConstructor calls wl_proxy_marshal_array_constructor for typed new_id requests.
 // Used for get_registry (display opcode 1) and create_surface (compositor opcode 0).
 // The single argument is a NULL placeholder for the new object ID (filled by the constructor).
-func (h *LibwaylandHandle) marshalConstructor(proxy uintptr, opcode uint32, iface uintptr) (uintptr, error) {
+func (h *LibwaylandHandle) marshalConstructor(proxy uintptr, opcode uint32, iface unsafe.Pointer) (uintptr, error) {
 	// wl_argument array: one entry = NULL (new_id placeholder)
 	var argBuf [1]uintptr // wl_argument is union of 8 bytes; uintptr on 64-bit
 	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	ifaceAddr := uintptr(iface)
 
 	var result uintptr
 	args := [4]unsafe.Pointer{
 		unsafe.Pointer(&proxy),
 		unsafe.Pointer(&opcode),
 		unsafe.Pointer(&argPtr),
-		unsafe.Pointer(&iface),
+		unsafe.Pointer(&ifaceAddr),
 	}
 	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
@@ -323,7 +324,7 @@ func (h *LibwaylandHandle) marshalConstructor(proxy uintptr, opcode uint32, ifac
 
 // registryBind calls wl_proxy_marshal_array_constructor_versioned for untyped new_id (registry.bind).
 // Wire format "usun": name(uint), interface(string), version(uint), new_id.
-func (h *LibwaylandHandle) registryBind(name uint32, iface uintptr, version uint32) (uintptr, error) {
+func (h *LibwaylandHandle) registryBind(name uint32, iface unsafe.Pointer, version uint32) (uintptr, error) {
 	// Build wl_argument array for registry::bind (opcode 0).
 	// Wire format "usun" = 4 arguments:
 	//   [0] uint32: global name
@@ -333,7 +334,7 @@ func (h *LibwaylandHandle) registryBind(name uint32, iface uintptr, version uint
 	//
 	// wl_interface struct layout: { const char *name; int version; ... }
 	// So *(const char**)iface gives us the interface name C string.
-	ifaceNamePtr := *(*uintptr)(unsafe.Pointer(iface)) //nolint:gosec // reading wl_interface.name field
+	ifaceNamePtr := *(*uintptr)(iface)
 
 	var argBuf [4]uintptr
 	argBuf[0] = uintptr(name)
@@ -343,13 +344,14 @@ func (h *LibwaylandHandle) registryBind(name uint32, iface uintptr, version uint
 
 	opcode := uint32(0) // wl_registry::bind
 	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	ifaceAddr := uintptr(iface)
 
 	var result uintptr
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&h.registry),
 		unsafe.Pointer(&opcode),
 		unsafe.Pointer(&argPtr),
-		unsafe.Pointer(&iface),
+		unsafe.Pointer(&ifaceAddr),
 		unsafe.Pointer(&version),
 	}
 	_ = ffi.CallFunction(&h.cifMarshalV, h.fnProxyMarshalV, unsafe.Pointer(&result), args[:])
