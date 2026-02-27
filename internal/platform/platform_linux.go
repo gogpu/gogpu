@@ -36,6 +36,10 @@ type waylandPlatform struct {
 	// nil if libwayland-client.so.0 is unavailable (software backend fallback).
 	libwl *wayland.LibwaylandHandle
 
+	// Decorations (optional, zxdg_decoration_manager_v1)
+	decorationManager  *wayland.ZxdgDecorationManager
+	toplevelDecoration *wayland.ZxdgToplevelDecoration
+
 	// Input devices
 	seat     *wayland.WlSeat
 	keyboard *wayland.WlKeyboard
@@ -324,6 +328,19 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 		if err := toplevel.SetMaxSize(int32(config.Width), int32(config.Height)); err != nil {
 			_ = display.Close()
 			return fmt.Errorf("wayland: failed to set max size: %w", err)
+		}
+	}
+
+	// Request server-side decorations if compositor supports it
+	if registry.HasGlobal(wayland.InterfaceZxdgDecorationManagerV1) {
+		decorMgrID, err := registry.BindZxdgDecorationManager(1)
+		if err == nil {
+			p.decorationManager = wayland.NewZxdgDecorationManager(display, decorMgrID)
+			decoration, err := p.decorationManager.GetToplevelDecoration(toplevel)
+			if err == nil {
+				p.toplevelDecoration = decoration
+				_ = decoration.SetMode(wayland.DecorationModeServerSide)
+			}
 		}
 	}
 
@@ -1378,6 +1395,16 @@ func (p *waylandPlatform) Destroy() {
 	if p.seat != nil {
 		// Don't call Release() unless we have version 5+
 		p.seat = nil
+	}
+
+	if p.toplevelDecoration != nil {
+		_ = p.toplevelDecoration.Destroy()
+		p.toplevelDecoration = nil
+	}
+
+	if p.decorationManager != nil {
+		_ = p.decorationManager.Destroy()
+		p.decorationManager = nil
 	}
 
 	if p.toplevel != nil {

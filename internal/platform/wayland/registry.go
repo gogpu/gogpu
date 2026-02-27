@@ -27,7 +27,8 @@ const (
 	InterfaceXdgWmBase           = "xdg_wm_base"
 	InterfaceWlSubcompositor     = "wl_subcompositor"
 	InterfaceWlDataDeviceManager = "wl_data_device_manager"
-	InterfaceZwpLinuxDmabuf      = "zwp_linux_dmabuf_v1"
+	InterfaceZwpLinuxDmabuf             = "zwp_linux_dmabuf_v1"
+	InterfaceZxdgDecorationManagerV1 = "zxdg_decoration_manager_v1"
 )
 
 // Global represents a Wayland global interface advertised by the compositor.
@@ -148,6 +149,15 @@ func (r *Registry) BindXdgWmBase(version uint32) (ObjectID, error) {
 		return 0, err
 	}
 	return r.Bind(name, InterfaceXdgWmBase, version)
+}
+
+// BindZxdgDecorationManager binds to the zxdg_decoration_manager_v1 global.
+func (r *Registry) BindZxdgDecorationManager(version uint32) (ObjectID, error) {
+	name, err := r.FindGlobal(InterfaceZxdgDecorationManagerV1)
+	if err != nil {
+		return 0, err
+	}
+	return r.Bind(name, InterfaceZxdgDecorationManagerV1, version)
 }
 
 // FindGlobal finds a global by interface name and returns its name.
