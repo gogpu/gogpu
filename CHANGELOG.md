@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 
+- wgpu v0.16.17 → v0.17.0 (Wayland Vulkan surface creation)
 - goffi v0.3.9 → v0.4.0 (crosscall2 callback support from any thread)
 - webgpu v0.3.2 → v0.4.0 (FFI null handle guards, go vet cleanup, WGPU_NATIVE_PATH)
 
