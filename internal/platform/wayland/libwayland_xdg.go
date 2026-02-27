@@ -216,7 +216,7 @@ func xdgWmBasePingCb(data, wmBase, serial uintptr) {
 var (
 	xdgSurfaceListener [1]uintptr // [0] = configure callback
 	xdgWmBaseListener  [1]uintptr // [0] = ping callback
-	listenersOnce       sync.Once
+	listenersOnce      sync.Once
 )
 
 func initXdgListeners() {

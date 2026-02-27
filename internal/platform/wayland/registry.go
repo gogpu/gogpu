@@ -20,14 +20,14 @@ const (
 
 // Well-known Wayland interface names.
 const (
-	InterfaceWlCompositor        = "wl_compositor"
-	InterfaceWlShm               = "wl_shm"
-	InterfaceWlSeat              = "wl_seat"
-	InterfaceWlOutput            = "wl_output"
-	InterfaceXdgWmBase           = "xdg_wm_base"
-	InterfaceWlSubcompositor     = "wl_subcompositor"
-	InterfaceWlDataDeviceManager = "wl_data_device_manager"
-	InterfaceZwpLinuxDmabuf             = "zwp_linux_dmabuf_v1"
+	InterfaceWlCompositor            = "wl_compositor"
+	InterfaceWlShm                   = "wl_shm"
+	InterfaceWlSeat                  = "wl_seat"
+	InterfaceWlOutput                = "wl_output"
+	InterfaceXdgWmBase               = "xdg_wm_base"
+	InterfaceWlSubcompositor         = "wl_subcompositor"
+	InterfaceWlDataDeviceManager     = "wl_data_device_manager"
+	InterfaceZwpLinuxDmabuf          = "zwp_linux_dmabuf_v1"
 	InterfaceZxdgDecorationManagerV1 = "zxdg_decoration_manager_v1"
 )
 

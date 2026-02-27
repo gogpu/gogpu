@@ -35,8 +35,8 @@ type LibwaylandHandle struct {
 	compositor uintptr // wl_compositor* proxy
 
 	// xdg-shell objects (required for Vulkan presentation)
-	xdgWmBase  uintptr // xdg_wm_base* proxy
-	xdgSurface uintptr // xdg_surface* proxy
+	xdgWmBase   uintptr // xdg_wm_base* proxy
+	xdgSurface  uintptr // xdg_surface* proxy
 	xdgToplevel uintptr // xdg_toplevel* proxy
 
 	// Decoration objects (optional, zxdg_decoration_manager_v1)
