@@ -18,6 +18,7 @@ package wayland
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -63,15 +64,26 @@ var xdg struct {
 	surface  cWlInterface
 	toplevel cWlInterface
 
+	// Decoration interface descriptors (optional, zxdg_decoration_manager_v1)
+	decorManager  cWlInterface
+	toplevelDecor cWlInterface
+
 	// Method arrays (indexed by opcode)
 	wmBaseMethods   [4]cWlMessage // destroy, create_positioner, get_xdg_surface, pong
 	surfaceMethods  [5]cWlMessage // destroy, get_toplevel, get_popup, set_window_geometry, ack_configure
-	toplevelMethods [3]cWlMessage // destroy, set_parent, set_title
+	toplevelMethods [4]cWlMessage // destroy, set_parent, set_title, set_app_id
+
+	// Decoration method arrays
+	decorManagerMethods  [2]cWlMessage // destroy, get_toplevel_decoration
+	toplevelDecorMethods [3]cWlMessage // destroy, set_mode, unset_mode
 
 	// Event arrays (indexed by event opcode)
 	wmBaseEvents   [1]cWlMessage // ping
 	surfaceEvents  [1]cWlMessage // configure
 	toplevelEvents [2]cWlMessage // configure, close
+
+	// Decoration event arrays
+	toplevelDecorEvents [1]cWlMessage // configure
 
 	// NULL types array (shared by all messages)
 	nullTypes [8]uintptr
@@ -122,10 +134,11 @@ func initXdgInterfaces() {
 			Events:      uintptr(unsafe.Pointer(&xdg.surfaceEvents[0])),
 		}
 
-		// === xdg_toplevel methods (minimal — we only call set_title at most) ===
+		// === xdg_toplevel methods ===
 		xdg.toplevelMethods[0] = cWlMessage{cstr("destroy\x00"), cstr("\x00"), nt}
 		xdg.toplevelMethods[1] = cWlMessage{cstr("set_parent\x00"), cstr("?o\x00"), nt}
 		xdg.toplevelMethods[2] = cWlMessage{cstr("set_title\x00"), cstr("s\x00"), nt}
+		xdg.toplevelMethods[3] = cWlMessage{cstr("set_app_id\x00"), cstr("s\x00"), nt}
 
 		// xdg_toplevel events
 		xdg.toplevelEvents[0] = cWlMessage{cstr("configure\x00"), cstr("iia\x00"), nt}
@@ -135,10 +148,42 @@ func initXdgInterfaces() {
 		xdg.toplevel = cWlInterface{
 			Name:        cstr("xdg_toplevel\x00"),
 			Version:     6,
-			MethodCount: 3,
+			MethodCount: 4,
 			Methods:     uintptr(unsafe.Pointer(&xdg.toplevelMethods[0])),
 			EventCount:  2,
 			Events:      uintptr(unsafe.Pointer(&xdg.toplevelEvents[0])),
+		}
+
+		// === zxdg_decoration_manager_v1 methods ===
+		xdg.decorManagerMethods[0] = cWlMessage{cstr("destroy\x00"), cstr("\x00"), nt}
+		xdg.decorManagerMethods[1] = cWlMessage{cstr("get_toplevel_decoration\x00"), cstr("no\x00"), nt}
+
+		// zxdg_decoration_manager_v1 interface
+		xdg.decorManager = cWlInterface{
+			Name:        cstr("zxdg_decoration_manager_v1\x00"),
+			Version:     1,
+			MethodCount: 2,
+			Methods:     uintptr(unsafe.Pointer(&xdg.decorManagerMethods[0])),
+			EventCount:  0,
+			Events:      0,
+		}
+
+		// === zxdg_toplevel_decoration_v1 methods ===
+		xdg.toplevelDecorMethods[0] = cWlMessage{cstr("destroy\x00"), cstr("\x00"), nt}
+		xdg.toplevelDecorMethods[1] = cWlMessage{cstr("set_mode\x00"), cstr("u\x00"), nt}
+		xdg.toplevelDecorMethods[2] = cWlMessage{cstr("unset_mode\x00"), cstr("\x00"), nt}
+
+		// zxdg_toplevel_decoration_v1 events
+		xdg.toplevelDecorEvents[0] = cWlMessage{cstr("configure\x00"), cstr("u\x00"), nt}
+
+		// zxdg_toplevel_decoration_v1 interface
+		xdg.toplevelDecor = cWlInterface{
+			Name:        cstr("zxdg_toplevel_decoration_v1\x00"),
+			Version:     1,
+			MethodCount: 3,
+			Methods:     uintptr(unsafe.Pointer(&xdg.toplevelDecorMethods[0])),
+			EventCount:  1,
+			Events:      uintptr(unsafe.Pointer(&xdg.toplevelDecorEvents[0])),
 		}
 	})
 }
@@ -197,7 +242,7 @@ func initXdgListeners() {
 //  5. Initial commit (empty, per xdg-shell spec)
 //  6. Roundtrip (processes configure event, callback acks it)
 //  7. Second commit (surface is now configured)
-func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion uint32) error {
+func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVersion uint32) error {
 	initXdgInterfaces()
 	initXdgListeners()
 
@@ -238,6 +283,12 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion uint32) error {
 		return fmt.Errorf("wayland: failed to create xdg_toplevel: %w", err)
 	}
 	h.xdgToplevel = toplevel
+
+	// Request server-side decorations if compositor supports them.
+	// Must be done BEFORE the initial commit per xdg-decoration protocol.
+	if decorName != 0 {
+		h.setupDecorations(decorName, decorVersion)
+	}
 
 	// Initial empty commit (required by xdg-shell spec before configure)
 	h.marshalVoid(h.surface, 6) // wl_surface::commit = opcode 6
@@ -339,4 +390,56 @@ func (h *LibwaylandHandle) roundtrip() error {
 		return fmt.Errorf("wl_display_roundtrip failed: %d", result)
 	}
 	return nil
+}
+
+// setupDecorations binds zxdg_decoration_manager_v1 and requests server-side
+// decorations for the C xdg_toplevel. Non-fatal: if binding fails, the window
+// simply won't have compositor-drawn decorations.
+func (h *LibwaylandHandle) setupDecorations(decorName, decorVersion uint32) {
+	version := decorVersion
+	if version > 1 {
+		version = 1
+	}
+
+	decorIfaceAddr := uintptr(unsafe.Pointer(&xdg.decorManager))
+	decorMgr, err := h.registryBind(decorName, decorIfaceAddr, version)
+	if err != nil {
+		return
+	}
+	h.decorManager = decorMgr
+
+	// get_toplevel_decoration: opcode 1, signature "no" (new_id + object)
+	toplevelDecorIface := uintptr(unsafe.Pointer(&xdg.toplevelDecor))
+	decoration, err := h.marshalConstructorObj(decorMgr, 1, toplevelDecorIface, h.xdgToplevel)
+	if err != nil {
+		return
+	}
+	h.toplevelDecor = decoration
+
+	// set_mode(SERVER_SIDE=2): opcode 1, signature "u"
+	h.marshalVoid(decoration, 1, 2)
+}
+
+// SetTitle sets the window title on the C xdg_toplevel.
+// Uses xdg_toplevel.set_title (opcode 2, signature "s").
+func (h *LibwaylandHandle) SetTitle(title string) {
+	if h.xdgToplevel == 0 || title == "" {
+		return
+	}
+	buf := make([]byte, len(title)+1)
+	copy(buf, title)
+	h.marshalVoid(h.xdgToplevel, 2, uintptr(unsafe.Pointer(&buf[0])))
+	runtime.KeepAlive(buf)
+}
+
+// SetAppID sets the application ID on the C xdg_toplevel.
+// Uses xdg_toplevel.set_app_id (opcode 3, signature "s").
+func (h *LibwaylandHandle) SetAppID(appID string) {
+	if h.xdgToplevel == 0 || appID == "" {
+		return
+	}
+	buf := make([]byte, len(appID)+1)
+	copy(buf, appID)
+	h.marshalVoid(h.xdgToplevel, 3, uintptr(unsafe.Pointer(&buf[0])))
+	runtime.KeepAlive(buf)
 }

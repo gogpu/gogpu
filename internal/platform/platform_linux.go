@@ -333,6 +333,7 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 
 	// Request server-side decorations if compositor supports it
 	if registry.HasGlobal(wayland.InterfaceZxdgDecorationManagerV1) {
+		logger().Info("zxdg_decoration_manager_v1 found in pure Go registry")
 		decorMgrID, err := registry.BindZxdgDecorationManager(1)
 		if err == nil {
 			p.decorationManager = wayland.NewZxdgDecorationManager(display, decorMgrID)
@@ -340,8 +341,11 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 			if err == nil {
 				p.toplevelDecoration = decoration
 				_ = decoration.SetMode(wayland.DecorationModeServerSide)
+				logger().Info("pure Go: server-side decorations requested")
 			}
 		}
+	} else {
+		logger().Info("zxdg_decoration_manager_v1 NOT found in registry")
 	}
 
 	// Set up event handlers
@@ -377,19 +381,38 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 
 	// Try loading libwayland-client for Vulkan surface support.
 	// Non-fatal: if unavailable, software backend is used (same pattern as X11/libX11).
-	// We pass compositor and xdg_wm_base global names/versions from our pure Go registry —
-	// global names are server-assigned and identical across all client connections.
+	// We pass compositor, xdg_wm_base, and decoration manager global names/versions
+	// from our pure Go registry — global names are server-assigned and identical
+	// across all client connections.
 	compGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceWlCompositor)
 	xdgGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceXdgWmBase)
 	if compGlobal != nil && xdgGlobal != nil {
+		// Get decoration manager global (optional — 0 means not available)
+		var decorName, decorVersion uint32
+		decorGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceZxdgDecorationManagerV1)
+		if decorGlobal != nil {
+			decorName = decorGlobal.Name
+			decorVersion = decorGlobal.Version
+			logger().Info("libwayland: decoration manager global found",
+				"name", decorName, "version", decorVersion)
+		} else {
+			logger().Info("libwayland: decoration manager global NOT found")
+		}
+
 		libwl, err := wayland.OpenLibwayland(
 			compGlobal.Name, compGlobal.Version,
 			xdgGlobal.Name, xdgGlobal.Version,
+			decorName, decorVersion,
 		)
 		if err != nil {
 			logger().Warn("libwayland-client not available, using software backend", "error", err)
 		} else {
 			p.libwl = libwl
+
+			// Set title and app_id on the C xdg_toplevel (shown in decoration bar)
+			libwl.SetTitle(config.Title)
+			libwl.SetAppID("gogpu")
+
 			logger().Info("Vulkan surface ready via libwayland-client",
 				"display", fmt.Sprintf("%#x", libwl.Display()),
 				"surface", fmt.Sprintf("%#x", libwl.Surface()))

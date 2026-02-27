@@ -32,7 +32,7 @@
 |----------|--------------|
 | **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
-| **Platforms** | Windows (Vulkan/DX12/GLES), Linux (Vulkan/GLES), macOS (Metal) |
+| **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering |
 | **Graphics** | Windowing, input handling, texture loading |
 | **Compute** | Full compute shader support |
@@ -483,6 +483,9 @@ Native Win32 windowing with Vulkan, DirectX 12, GLES, and Software backends.
 ### Linux
 
 X11 and Wayland support with Vulkan, GLES, and Software (headless) backends.
+
+- **X11** — pure Go X11 protocol with libX11 loaded via goffi for Vulkan surface creation
+- **Wayland** — pure Go Wayland protocol (object dispatch) with libwayland-client via goffi for Vulkan surfaces. Server-side decorations via `zxdg_decoration_manager_v1`. Tested on WSLg, GNOME, KDE, sway.
 
 ### macOS
 

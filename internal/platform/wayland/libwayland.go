@@ -39,6 +39,10 @@ type LibwaylandHandle struct {
 	xdgSurface uintptr // xdg_surface* proxy
 	xdgToplevel uintptr // xdg_toplevel* proxy
 
+	// Decoration objects (optional, zxdg_decoration_manager_v1)
+	decorManager  uintptr // zxdg_decoration_manager_v1* proxy
+	toplevelDecor uintptr // zxdg_toplevel_decoration_v1* proxy
+
 	// Function symbols
 	fnDisplayConnect unsafe.Pointer
 	fnDisplayDisconn unsafe.Pointer
@@ -76,7 +80,7 @@ func (h *LibwaylandHandle) Surface() uintptr { return h.surface }
 // registry — global names are server-assigned and identical across all client connections.
 // The xdg-shell role is required for Vulkan presentation (without it, the compositor
 // won't composite the surface and vkQueuePresentKHR blocks forever).
-func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseVersion uint32) (*LibwaylandHandle, error) {
+func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion uint32) (*LibwaylandHandle, error) {
 	h := &LibwaylandHandle{}
 
 	// Step 1: Load library
@@ -146,7 +150,7 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 	// Step 9: Set up xdg-shell role (xdg_surface + xdg_toplevel).
 	// Without a role, the compositor won't composite the surface,
 	// buffer release events never arrive, and vkQueuePresentKHR blocks forever.
-	if err := h.setupXdgRole(xdgWmBaseName, xdgWmBaseVersion); err != nil {
+	if err := h.setupXdgRole(xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion); err != nil {
 		h.disconnectDisplay()
 		return nil, err
 	}
@@ -159,6 +163,16 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 func (h *LibwaylandHandle) Close() {
 	if h == nil {
 		return
+	}
+
+	// Destroy decoration objects (reverse order: decoration → manager)
+	if h.toplevelDecor != 0 {
+		h.proxyDestroy(h.toplevelDecor)
+		h.toplevelDecor = 0
+	}
+	if h.decorManager != 0 {
+		h.proxyDestroy(h.decorManager)
+		h.decorManager = 0
 	}
 
 	// Destroy xdg objects (reverse order: toplevel → surface → wm_base)

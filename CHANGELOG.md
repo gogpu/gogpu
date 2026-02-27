@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callbacks for configure/ping events. Without a role, the compositor won't composite the surface
   and `vkQueuePresentKHR` blocks forever. Falls back to software backend if libwayland-client
   is unavailable.
+- **Wayland server-side decorations** — requests window decorations (title bar, close/minimize/maximize
+  buttons) from the compositor via `zxdg_decoration_manager_v1` protocol. Falls back gracefully
+  if the compositor does not support this extension.
+
+### Fixed
+
+- **Wayland non-blocking socket** — fixed fd propagation for multi-message batches. The Wayland
+  socket now uses non-blocking I/O to prevent blocking when the compositor sends multiple events
+  in a single batch.
 
 ### Changed
 
