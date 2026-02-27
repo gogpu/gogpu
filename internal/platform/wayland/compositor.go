@@ -95,7 +95,9 @@ func NewWlSurface(display *Display, objectID ObjectID) *WlSurface {
 		display: display,
 		id:      objectID,
 	}
-	display.RegisterObject(objectID, s)
+	if display != nil {
+		display.RegisterObject(objectID, s)
+	}
 	return s
 }
 

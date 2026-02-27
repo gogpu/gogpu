@@ -15,7 +15,7 @@ const (
 
 // zxdg_decoration_manager_v1 opcodes (requests)
 const (
-	zxdgDecorationManagerDestroy              Opcode = 0 // destroy()
+	zxdgDecorationManagerDestroy               Opcode = 0 // destroy()
 	zxdgDecorationManagerGetToplevelDecoration Opcode = 1 // get_toplevel_decoration(new_id, toplevel)
 )
 
@@ -95,7 +95,9 @@ func NewZxdgToplevelDecoration(display *Display, objectID ObjectID) *ZxdgTopleve
 		display: display,
 		id:      objectID,
 	}
-	display.RegisterObject(objectID, d)
+	if display != nil {
+		display.RegisterObject(objectID, d)
+	}
 	return d
 }
 

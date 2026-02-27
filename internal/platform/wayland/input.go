@@ -56,7 +56,9 @@ func NewWlSeat(display *Display, objectID ObjectID, version uint32) *WlSeat {
 		id:      objectID,
 		version: version,
 	}
-	display.RegisterObject(objectID, s)
+	if display != nil {
+		display.RegisterObject(objectID, s)
+	}
 	return s
 }
 
@@ -359,7 +361,9 @@ func NewWlPointer(display *Display, objectID ObjectID) *WlPointer {
 		display: display,
 		id:      objectID,
 	}
-	display.RegisterObject(objectID, p)
+	if display != nil {
+		display.RegisterObject(objectID, p)
+	}
 	return p
 }
 
@@ -885,7 +889,9 @@ func NewWlKeyboard(display *Display, objectID ObjectID) *WlKeyboard {
 		repeatRate:  25,  // Default: 25 chars/sec
 		repeatDelay: 400, // Default: 400ms
 	}
-	display.RegisterObject(objectID, k)
+	if display != nil {
+		display.RegisterObject(objectID, k)
+	}
 	return k
 }
 
@@ -1294,7 +1300,9 @@ func NewWlTouch(display *Display, objectID ObjectID) *WlTouch {
 		display: display,
 		id:      objectID,
 	}
-	display.RegisterObject(objectID, t)
+	if display != nil {
+		display.RegisterObject(objectID, t)
+	}
 	return t
 }
 

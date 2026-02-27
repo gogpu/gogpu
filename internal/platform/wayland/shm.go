@@ -187,7 +187,9 @@ func NewWlShm(display *Display, objectID ObjectID) *WlShm {
 		id:      objectID,
 		formats: make([]ShmFormat, 0, 16),
 	}
-	display.RegisterObject(objectID, s)
+	if display != nil {
+		display.RegisterObject(objectID, s)
+	}
 	return s
 }
 
@@ -375,7 +377,9 @@ func NewWlBuffer(display *Display, objectID ObjectID) *WlBuffer {
 		display: display,
 		id:      objectID,
 	}
-	display.RegisterObject(objectID, b)
+	if display != nil {
+		display.RegisterObject(objectID, b)
+	}
 	return b
 }
 

@@ -107,7 +107,9 @@ func NewXdgWmBase(display *Display, objectID ObjectID) *XdgWmBase {
 		display: display,
 		id:      objectID,
 	}
-	display.RegisterObject(objectID, x)
+	if display != nil {
+		display.RegisterObject(objectID, x)
+	}
 	return x
 }
 
@@ -240,7 +242,9 @@ func NewXdgSurface(display *Display, objectID ObjectID, surface *WlSurface) *Xdg
 		id:      objectID,
 		surface: surface,
 	}
-	display.RegisterObject(objectID, s)
+	if display != nil {
+		display.RegisterObject(objectID, s)
+	}
 	return s
 }
 
@@ -448,7 +452,9 @@ func NewXdgToplevel(display *Display, objectID ObjectID, xdgSurface *XdgSurface)
 		id:         objectID,
 		xdgSurface: xdgSurface,
 	}
-	display.RegisterObject(objectID, t)
+	if display != nil {
+		display.RegisterObject(objectID, t)
+	}
 	return t
 }
 
@@ -790,7 +796,9 @@ func NewXdgPopup(display *Display, objectID ObjectID, xdgSurface *XdgSurface) *X
 		id:         objectID,
 		xdgSurface: xdgSurface,
 	}
-	display.RegisterObject(objectID, p)
+	if display != nil {
+		display.RegisterObject(objectID, p)
+	}
 	return p
 }
 
