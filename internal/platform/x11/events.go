@@ -709,6 +709,32 @@ func (c *Connection) parseGenericEvent(buf []byte) (Event, error) {
 	}, nil
 }
 
+// readAdditional reads additional data from the connection based on the length
+// field at offset 4 of the 32-byte header. Returns the extended buffer if
+// additional data was present, or the original buffer otherwise.
+func (c *Connection) readAdditional(buf []byte) ([]byte, error) {
+	d := NewDecoder(c.byteOrder, buf[4:8])
+	additionalLen, _ := d.Uint32()
+	if additionalLen == 0 {
+		return buf, nil
+	}
+
+	additional := make([]byte, additionalLen*4)
+	totalRead := 0
+	for totalRead < len(additional) {
+		n, err := c.conn.Read(additional[totalRead:])
+		if err != nil {
+			return nil, err
+		}
+		totalRead += n
+	}
+
+	combined := make([]byte, 0, 32+len(additional))
+	combined = append(combined, buf...)
+	combined = append(combined, additional...)
+	return combined, nil
+}
+
 // WaitForEvent reads and returns the next event from the server.
 // This call blocks until an event is available.
 func (c *Connection) WaitForEvent() (Event, error) {
@@ -718,7 +744,6 @@ func (c *Connection) WaitForEvent() (Event, error) {
 			return nil, fmt.Errorf("x11: failed to read event: %w", err)
 		}
 
-		// Check response type
 		responseType := buf[0]
 
 		// Error response
@@ -728,45 +753,21 @@ func (c *Connection) WaitForEvent() (Event, error) {
 
 		// Reply response - skip (we're looking for events)
 		if responseType == 1 {
-			// Read additional data
-			d := NewDecoder(c.byteOrder, buf[4:8])
-			additionalLen, _ := d.Uint32()
-			if additionalLen > 0 {
-				additional := make([]byte, additionalLen*4)
-				totalRead := 0
-				for totalRead < len(additional) {
-					n, err := c.conn.Read(additional[totalRead:])
-					if err != nil {
-						return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
-					}
-					totalRead += n
-				}
+			if _, err := c.readAdditional(buf); err != nil {
+				return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
 			}
 			continue
 		}
 
 		// GenericEvent (type 35) — variable-length, read additional payload
 		if responseType&0x7F == EventGenericEvent {
-			d := NewDecoder(c.byteOrder, buf[4:8])
-			additionalLen, _ := d.Uint32()
-			if additionalLen > 0 {
-				additional := make([]byte, additionalLen*4)
-				totalRead := 0
-				for totalRead < len(additional) {
-					n, err := c.conn.Read(additional[totalRead:])
-					if err != nil {
-						return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
-					}
-					totalRead += n
-				}
-				combined := make([]byte, 0, 32+len(additional))
-				combined = append(combined, buf...)
-				combined = append(combined, additional...)
-				buf = combined
+			var err error
+			buf, err = c.readAdditional(buf)
+			if err != nil {
+				return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
 			}
 		}
 
-		// Event
 		return c.parseEvent(buf)
 	}
 }
