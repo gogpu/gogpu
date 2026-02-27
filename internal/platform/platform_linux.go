@@ -32,6 +32,10 @@ type waylandPlatform struct {
 	xdgSurface *wayland.XdgSurface
 	toplevel   *wayland.XdgToplevel
 
+	// C pointers from libwayland-client for Vulkan surface creation.
+	// nil if libwayland-client.so.0 is unavailable (software backend fallback).
+	libwl *wayland.LibwaylandHandle
+
 	// Input devices
 	seat     *wayland.WlSeat
 	keyboard *wayland.WlKeyboard
@@ -221,8 +225,9 @@ func (p *waylandPlatform) Init(config Config) error {
 }
 
 // initPureGoDisplay initializes using pure Go Wayland protocol.
-// Uses software backend with wl_shm for screen presentation.
-// Vulkan on Wayland requires libwayland-client C pointers (future: goffi TASK-012 fix).
+// After creating the window, tries to load libwayland-client.so.0 via goffi
+// to get real C pointers (wl_display*, wl_surface*) for Vulkan surface creation.
+// If unavailable, software backend is used instead.
 func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 	// Connect to Wayland display
 	display, err := wayland.Connect()
@@ -351,6 +356,29 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 	// Set fullscreen if requested
 	if config.Fullscreen {
 		_ = toplevel.SetFullscreen(0) // Non-fatal, continue
+	}
+
+	// Try loading libwayland-client for Vulkan surface support.
+	// Non-fatal: if unavailable, software backend is used (same pattern as X11/libX11).
+	// We pass compositor and xdg_wm_base global names/versions from our pure Go registry —
+	// global names are server-assigned and identical across all client connections.
+	compGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceWlCompositor)
+	xdgGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceXdgWmBase)
+	if compGlobal != nil && xdgGlobal != nil {
+		libwl, err := wayland.OpenLibwayland(
+			compGlobal.Name, compGlobal.Version,
+			xdgGlobal.Name, xdgGlobal.Version,
+		)
+		if err != nil {
+			logger().Warn("libwayland-client not available, using software backend", "error", err)
+		} else {
+			p.libwl = libwl
+			logger().Info("Vulkan surface ready via libwayland-client",
+				"display", fmt.Sprintf("%#x", libwl.Display()),
+				"surface", fmt.Sprintf("%#x", libwl.Surface()))
+		}
+	} else {
+		logger().Warn("wl_compositor or xdg_wm_base not found in registry, Vulkan surface unavailable")
 	}
 
 	return nil
@@ -1302,12 +1330,12 @@ func (p *waylandPlatform) GetSize() (width, height int) {
 }
 
 // GetHandle returns platform-specific handles for Vulkan surface creation.
-// Pure Go Wayland returns (0, 0) because Vulkan requires real C pointers
-// from libwayland-client. Software backend is used on Wayland instead.
-// Future: goffi TASK-012 (crosscall2 integration) will enable Vulkan on Wayland.
+// Returns (wl_display*, wl_surface*) from libwayland-client if available.
+// Returns (0, 0) if libwayland-client was not loaded (software backend fallback).
 func (p *waylandPlatform) GetHandle() (instance, window uintptr) {
-	// Pure Go Wayland cannot provide C pointers for Vulkan.
-	// Return (0, 0) to signal that GPU surface creation is unavailable.
+	if p.libwl != nil {
+		return p.libwl.Display(), p.libwl.Surface()
+	}
 	return 0, 0
 }
 
@@ -1321,6 +1349,12 @@ func (p *waylandPlatform) Destroy() {
 		_ = unix.Close(p.wakePipe[0])
 		_ = unix.Close(p.wakePipe[1])
 		p.wakePipe = [2]int{}
+	}
+
+	// Close libwayland-client C connection (Vulkan surface handle)
+	if p.libwl != nil {
+		p.libwl.Close()
+		p.libwl = nil
 	}
 
 	// Destroy pure Go objects in reverse order of creation
