@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2026-02-27
+
+### Fixed
+
+- **Vulkan: rounded rectangle pixel corruption** — update wgpu v0.18.0 → v0.18.1 which fixes
+  buffer-to-image copy row stride corruption on non-power-of-2 width textures. Previously,
+  `BytesPerRow / Width` integer division inferred wrong bytes-per-texel when BytesPerRow was
+  padded to 256-byte alignment. Affected 126 out of 204 possible widths for RGBA8 textures.
+  ([#96](https://github.com/gogpu/gogpu/discussions/96))
+
 ## [0.22.0] - 2026-02-27
 
 ### Added

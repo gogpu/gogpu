@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.22.0
+## Current State: v0.22.1
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
@@ -39,6 +39,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Structured logging via log/slog
 - HAL-direct architecture (no handle maps)
 - **X11 multi-touch** via XInput2 pure Go wire protocol
+
+**New in v0.22.1:**
+- Fix Vulkan rounded rectangle pixel corruption — wgpu v0.18.1 (buffer-to-image copy row stride fix)
 
 **New in v0.22.0:**
 - X11 multi-touch input via XInput2 — pure Go wire protocol (XIQueryVersion 2.2, touch events → PointerEvent)
