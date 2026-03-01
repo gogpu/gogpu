@@ -328,7 +328,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 	}
 
 	// Upload pixel data via HAL queue
-	r.queue.WriteTexture(
+	if err := r.queue.WriteTexture(
 		&hal.ImageCopyTexture{
 			Texture:  texture,
 			MipLevel: 0,
@@ -346,7 +346,10 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
 		},
-	)
+	); err != nil {
+		r.device.DestroyTexture(texture)
+		return nil, fmt.Errorf("gogpu: failed to upload texture data: %w", err)
+	}
 
 	// Create texture view via HAL device
 	view, err := r.device.CreateTextureView(texture, nil)
@@ -434,7 +437,7 @@ func (t *Texture) UpdateData(data []byte) error {
 			ErrInvalidDataSize, expectedSize, t.width, t.height, bpp, len(data))
 	}
 
-	t.renderer.queue.WriteTexture(
+	if err := t.renderer.queue.WriteTexture(
 		&hal.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
@@ -452,7 +455,9 @@ func (t *Texture) UpdateData(data []byte) error {
 			Height:             uint32(t.height), //nolint:gosec // G115: height validated in constructor
 			DepthOrArrayLayers: 1,
 		},
-	)
+	); err != nil {
+		return fmt.Errorf("gogpu: failed to upload texture data: %w", err)
+	}
 
 	return nil
 }
@@ -501,7 +506,7 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 			ErrInvalidDataSize, expectedSize, w, h, bpp, len(data))
 	}
 
-	t.renderer.queue.WriteTexture(
+	if err := t.renderer.queue.WriteTexture(
 		&hal.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
@@ -523,7 +528,9 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 			Height:             uint32(h), //nolint:gosec // G115: h validated positive above
 			DepthOrArrayLayers: 1,
 		},
-	)
+	); err != nil {
+		return fmt.Errorf("gogpu: failed to upload texture region: %w", err)
+	}
 
 	return nil
 }

@@ -815,7 +815,9 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(r.height)))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
-	r.queue.WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData)
+	if err := r.queue.WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData); err != nil {
+		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
+	}
 
 	// Determine LoadOp: consume pending clear if available, otherwise preserve content.
 	// This merges ClearColor + DrawTexture into a single render pass, avoiding

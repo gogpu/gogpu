@@ -746,10 +746,12 @@ func (q *rustQueue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, 
 }
 
 // WriteBuffer writes data to a buffer immediately.
-func (q *rustQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) {
-	if rb, ok := buffer.(*rustBuffer); ok && rb.buf != nil {
-		q.q.WriteBuffer(rb.buf, offset, data)
+func (q *rustQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	rb, ok := buffer.(*rustBuffer)
+	if !ok || rb.buf == nil {
+		return fmt.Errorf("rust backend: invalid buffer for WriteBuffer")
 	}
+	return q.q.WriteBuffer(rb.buf, offset, data)
 }
 
 // ReadBuffer reads data from a GPU buffer.
@@ -788,10 +790,10 @@ func (q *rustQueue) ReadBuffer(buffer hal.Buffer, offset uint64, data []byte) er
 }
 
 // WriteTexture writes data to a texture immediately.
-func (q *rustQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) {
+func (q *rustQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
 	rt, ok := dst.Texture.(*rustTexture)
 	if !ok || rt.tex == nil {
-		return
+		return fmt.Errorf("rust backend: invalid texture for WriteTexture")
 	}
 
 	wgpuDst := &wgpu.TexelCopyTextureInfo{
@@ -817,7 +819,7 @@ func (q *rustQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout 
 		DepthOrArrayLayers: size.DepthOrArrayLayers,
 	}
 
-	q.q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
+	return q.q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
 }
 
 // Present presents a surface texture to the screen.

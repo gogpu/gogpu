@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.22.2] - 2026-03-01
+
+### Fixed
+
+- **Error propagation for `WriteTexture`** — all 3 call sites in `texture.go` now check
+  errors and destroy the texture on upload failure instead of silently continuing with
+  uninitialized GPU textures.
+- **Error propagation for `WriteBuffer`** — `renderer.go` uniform buffer upload now propagates
+  errors instead of silently swallowing them.
+- **Rust backend error propagation** — `rustQueue.WriteBuffer` and `rustQueue.WriteTexture`
+  now return errors from the underlying wgpu calls instead of discarding them.
+
+### Changed
+
+- Update wgpu v0.18.1 → v0.19.0 — `WriteBuffer` and `WriteTexture` breaking interface changes
+
 ## [0.22.1] - 2026-02-27
 
 ### Fixed
