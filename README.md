@@ -563,8 +563,37 @@ go test ./...
 
 ### Contributors
 
-- [@ppoage](https://github.com/ppoage) — macOS ARM64 testing (M1/M4)
-- [@Nickrocky](https://github.com/Nickrocky) — macOS testing and feedback
+| Contributor | Contributions |
+|-------------|---------------|
+| [@ppoage](https://github.com/ppoage) | macOS ARM64 (Apple Silicon) support — 3 merged PRs across gogpu, wgpu, and naga with ~3,500 lines of code. Made Metal backend work on M1/M4 |
+| [@JanGordon](https://github.com/JanGordon) | Documentation fix (wgpu) |
+
+### Community Champions
+
+| Champion | Contributions |
+|----------|---------------|
+| [@darkliquid](https://github.com/darkliquid) · Andrew Montgomery | Linux platform hero — 3 bug reports, 13+ comments with detailed stack traces and diagnostics. His persistence uncovered the critical [goffi stack spill bug](https://github.com/go-webgpu/goffi/issues/19) affecting all Linux/macOS users |
+| [@i2534](https://github.com/i2534) | Most prolific gg tester — 7 bug reports covering alpha blending, patterns, transforms, and line joins. Shaped the quality of the 2D renderer |
+| [@qq1792569310](https://github.com/qq1792569310) · luomo | Early stress-tester — 3 issues and 9 comments. Found memory leak and event system bugs that improved framework stability |
+| [@rcarlier](https://github.com/rcarlier) · Richard Carlier | Cross-platform tester — 4 issues across gg and ui. Active tester of text rendering, image handling, and UI on macOS Apple Silicon (M3) |
+| [@amortaza](https://github.com/amortaza) · Afshin Mortazavi-Nia | Architecture contributor — deep multi-week engagement in gg+gogpu integration discussions. Author of [go-bellina](https://github.com/amortaza/go-bellina) UI library |
+| [@cyberbeast](https://github.com/cyberbeast) · Sandesh Gade | macOS Tahoe debugger — thorough Metal backend debugging on Apple M2 Max with detailed diagnostics |
+| [@crsolver](https://github.com/crsolver) | UI architecture advisor — significant input on the UI toolkit RFC with 8+ discussion comments |
+| [@neurlang](https://github.com/neurlang) | Wayland expert — author of [neurlang/wayland](https://github.com/neurlang/wayland), provided expert consultation on Wayland protocol issues |
+
+### Early Adopters
+
+These developers tested GoGPU on Day 1 — when nothing worked and every platform was broken. Their bug reports shaped the project:
+
+- [@Nickrocky](https://github.com/Nickrocky) — First macOS tester (Dec 25, 2025). The very first external user to try GoGPU
+- [@facemcgee](https://github.com/facemcgee) — Early Linux tester (Dec 29, 2025)
+- [@soypat](https://github.com/soypat) — Early naga interest, [gsdf](https://github.com/soypat/gsdf) integration exploration
+- [@jan53n](https://github.com/jan53n) — Linux X11 testing
+- [@davidmichaelkarr](https://github.com/davidmichaelkarr) — Windows 11 testing
+- [@martinarisk](https://github.com/martinarisk) — Wayland testing, report that led to major protocol fixes
+- [@adamsanclemente](https://github.com/adamsanclemente) — Found transform rendering bug in gg
+- [@beikege](https://github.com/beikege) — Touch input advocacy, UI toolkit feedback
+- [@joeblew999](https://github.com/joeblew999) — WASM/browser platform interest
 
 ---
 
