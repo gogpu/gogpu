@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.5] - 2026-03-04
+
+### Fixed
+
+- **x86_64 macOS: SIGSEGV in GetRect** — use `objc_msgSend_stret` for NSRect (32-byte)
+  struct returns on Intel Macs. The x86_64 SysV ABI requires `_stret` for struct returns
+  exceeding 16 bytes; ARM64 is unaffected ([#125](https://github.com/gogpu/gogpu/issues/125))
+
+### Changed
+
+- **Update webgpu v0.4.1 → v0.4.2** — goffi purego compatibility fix (nofakecgo build tag),
+  x/sys v0.41.0
+- **Update goffi v0.4.1 → v0.4.2**
+
 ## [0.22.4] - 2026-03-02
 
 ### Changed

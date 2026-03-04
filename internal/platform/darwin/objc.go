@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -162,10 +163,10 @@ func loadRuntime() error {
 		objcRT.objcMsgSendFpret = objcRT.objcMsgSend
 	}
 
-	// Resolve objc_msgSend_stret (for struct returns)
+	// Resolve objc_msgSend_stret (for struct returns on x86_64).
+	// On ARM64, this symbol doesn't exist — fall back to objc_msgSend.
 	objcRT.objcMsgSendStret, err = ffi.GetSymbol(objcRT.libobjc, "objc_msgSend_stret")
 	if err != nil {
-		// ARM64 doesn't use stret, fall back to objc_msgSend
 		objcRT.objcMsgSendStret = objcRT.objcMsgSend
 	}
 
@@ -208,6 +209,18 @@ func loadRuntime() error {
 	}
 
 	return nil
+}
+
+// objcMsgSendFn returns the correct objc_msgSend variant for the given return type.
+// On x86_64, struct returns > 16 bytes require objc_msgSend_stret per the SysV ABI.
+// On ARM64, objc_msgSend handles all return types directly.
+func objcMsgSendFn(retType *types.TypeDescriptor) unsafe.Pointer {
+	if retType != nil && retType.Kind == types.StructType && runtime.GOARCH == "amd64" {
+		if objcRT.objcMsgSendStret != nil && retType.Size > 16 {
+			return objcRT.objcMsgSendStret
+		}
+	}
+	return objcRT.objcMsgSend
 }
 
 // GetClass returns the Objective-C class with the given name.
@@ -721,8 +734,8 @@ func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backin
 }
 
 // GetRect receives an NSRect return value from a method like frame.
-// On x86_64, small structs may be returned in registers.
-// On ARM64, the behavior differs.
+// On x86_64, NSRect (32 bytes) exceeds the 16-byte register-return limit,
+// so objc_msgSend_stret is used. On ARM64, objc_msgSend handles all returns.
 func (id ID) GetRect(sel SEL) NSRect {
 	if id == 0 || sel == 0 {
 		return NSRect{}
@@ -765,7 +778,7 @@ func (id ID) GetRect(sel SEL) NSRect {
 	var result [4]float64
 	err = ffi.CallFunction(
 		cif,
-		objcRT.objcMsgSend,
+		objcMsgSendFn(nsRectType),
 		unsafe.Pointer(&result),
 		argPtrs,
 	)
