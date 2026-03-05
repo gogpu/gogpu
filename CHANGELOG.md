@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.6] - 2026-03-05
+
+### Changed
+
+- **Update wgpu v0.19.4 → v0.19.5** — Metal vertex descriptor fix: add
+  `MTLVertexDescriptor` to render pipeline creation, complete vertex format
+  mapping ([wgpu#93](https://github.com/gogpu/wgpu/pull/93),
+  [ui#23](https://github.com/gogpu/ui/issues/23))
+- **Update naga v0.14.4 → v0.14.5**
+
 ## [0.22.5] - 2026-03-04
 
 ### Fixed
