@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.7] - 2026-03-05
+
+### Changed
+
+- **Update wgpu v0.19.5 → v0.19.6** — Metal MSAA resolve store action fix
+  ([wgpu#94](https://github.com/gogpu/wgpu/pull/94),
+  [ui#23](https://github.com/gogpu/ui/issues/23))
+
 ## [0.22.6] - 2026-03-05
 
 ### Changed
