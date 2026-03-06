@@ -182,9 +182,8 @@ func (p *x11Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 }
 
 // SetKeyCallback registers a callback for keyboard events.
-// X11 keyboard events not yet implemented - only Wayland is supported.
-func (p *x11Platform) SetKeyCallback(_ func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	// TODO: Implement X11 keyboard events
+func (p *x11Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	p.inner.SetKeyCallback(fn)
 }
 
 // SetModalFrameCallback is a no-op on X11.

@@ -98,10 +98,11 @@ type Platform struct {
 	primaryTouch  uint32
 	hasPrimary    bool
 
-	// Callbacks for pointer and scroll events
-	pointerCallback func(gpucontext.PointerEvent)
-	scrollCallback  func(gpucontext.ScrollEvent)
-	callbackMu      sync.RWMutex
+	// Callbacks for pointer, scroll, and keyboard events
+	pointerCallback  func(gpucontext.PointerEvent)
+	scrollCallback   func(gpucontext.ScrollEvent)
+	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
+	callbackMu       sync.RWMutex
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -436,6 +437,12 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		p.mu.Lock()
 		p.configured = true
 		p.mu.Unlock()
+
+	case *KeyPressEvent:
+		p.handleKeyEvent(e.Detail, e.State, true)
+
+	case *KeyReleaseEvent:
+		p.handleKeyEvent(e.Detail, e.State, false)
 
 	case *MotionNotifyEvent:
 		p.handleMotionNotify(e)
@@ -800,6 +807,13 @@ func (p *Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 	p.callbackMu.Unlock()
 }
 
+// SetKeyCallback registers a callback for keyboard events.
+func (p *Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	p.callbackMu.Lock()
+	p.keyboardCallback = fn
+	p.callbackMu.Unlock()
+}
+
 // dispatchPointerEvent dispatches a pointer event to the registered callback.
 func (p *Platform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	p.callbackMu.RLock()
@@ -820,6 +834,274 @@ func (p *Platform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
 	if callback != nil {
 		callback(ev)
 	}
+}
+
+// dispatchKeyEvent dispatches a keyboard event to the registered callback.
+func (p *Platform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	p.callbackMu.RLock()
+	callback := p.keyboardCallback
+	p.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(key, mods, pressed)
+	}
+}
+
+// handleKeyEvent processes a key press or release event.
+// X11 keycodes = evdev keycodes + 8.
+func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
+	mods := extractModifiers(state)
+
+	p.mu.Lock()
+	p.modifiers = mods
+	p.mu.Unlock()
+
+	// X11 keycodes are evdev keycodes offset by 8
+	key := x11KeycodeToKey(keycode)
+	if key == gpucontext.KeyUnknown {
+		return
+	}
+
+	p.dispatchKeyEvent(key, mods, pressed)
+}
+
+// x11KeycodeToKey converts an X11 keycode to a gpucontext.Key.
+// X11 keycodes = Linux evdev keycodes + 8.
+//
+//nolint:maintidx // large switch for keycode mapping is inherently complex
+func x11KeycodeToKey(keycode uint8) gpucontext.Key {
+	// X11 keycode offset: X11 keycode = evdev keycode + 8
+	const x11Offset = 8
+
+	if keycode < x11Offset {
+		return gpucontext.KeyUnknown
+	}
+	evdev := keycode - x11Offset
+
+	// Linux evdev keycodes from linux/input-event-codes.h
+	switch evdev {
+	// Letters (evdev 30-49, 16-25)
+	case 16:
+		return gpucontext.KeyQ
+	case 17:
+		return gpucontext.KeyW
+	case 18:
+		return gpucontext.KeyE
+	case 19:
+		return gpucontext.KeyR
+	case 20:
+		return gpucontext.KeyT
+	case 21:
+		return gpucontext.KeyY
+	case 22:
+		return gpucontext.KeyU
+	case 23:
+		return gpucontext.KeyI
+	case 24:
+		return gpucontext.KeyO
+	case 25:
+		return gpucontext.KeyP
+	case 30:
+		return gpucontext.KeyA
+	case 31:
+		return gpucontext.KeyS
+	case 32:
+		return gpucontext.KeyD
+	case 33:
+		return gpucontext.KeyF
+	case 34:
+		return gpucontext.KeyG
+	case 35:
+		return gpucontext.KeyH
+	case 36:
+		return gpucontext.KeyJ
+	case 37:
+		return gpucontext.KeyK
+	case 38:
+		return gpucontext.KeyL
+	case 44:
+		return gpucontext.KeyZ
+	case 45:
+		return gpucontext.KeyX
+	case 46:
+		return gpucontext.KeyC
+	case 47:
+		return gpucontext.KeyV
+	case 48:
+		return gpucontext.KeyB
+	case 49:
+		return gpucontext.KeyN
+	case 50:
+		return gpucontext.KeyM
+
+	// Numbers
+	case 2:
+		return gpucontext.Key1
+	case 3:
+		return gpucontext.Key2
+	case 4:
+		return gpucontext.Key3
+	case 5:
+		return gpucontext.Key4
+	case 6:
+		return gpucontext.Key5
+	case 7:
+		return gpucontext.Key6
+	case 8:
+		return gpucontext.Key7
+	case 9:
+		return gpucontext.Key8
+	case 10:
+		return gpucontext.Key9
+	case 11:
+		return gpucontext.Key0
+
+	// Function keys
+	case 59:
+		return gpucontext.KeyF1
+	case 60:
+		return gpucontext.KeyF2
+	case 61:
+		return gpucontext.KeyF3
+	case 62:
+		return gpucontext.KeyF4
+	case 63:
+		return gpucontext.KeyF5
+	case 64:
+		return gpucontext.KeyF6
+	case 65:
+		return gpucontext.KeyF7
+	case 66:
+		return gpucontext.KeyF8
+	case 67:
+		return gpucontext.KeyF9
+	case 68:
+		return gpucontext.KeyF10
+	case 87:
+		return gpucontext.KeyF11
+	case 88:
+		return gpucontext.KeyF12
+
+	// Navigation
+	case 1:
+		return gpucontext.KeyEscape
+	case 15:
+		return gpucontext.KeyTab
+	case 14:
+		return gpucontext.KeyBackspace
+	case 28:
+		return gpucontext.KeyEnter
+	case 57:
+		return gpucontext.KeySpace
+	case 110:
+		return gpucontext.KeyInsert
+	case 111:
+		return gpucontext.KeyDelete
+	case 102:
+		return gpucontext.KeyHome
+	case 107:
+		return gpucontext.KeyEnd
+	case 104:
+		return gpucontext.KeyPageUp
+	case 109:
+		return gpucontext.KeyPageDown
+	case 105:
+		return gpucontext.KeyLeft
+	case 106:
+		return gpucontext.KeyRight
+	case 103:
+		return gpucontext.KeyUp
+	case 108:
+		return gpucontext.KeyDown
+
+	// Modifiers
+	case 42:
+		return gpucontext.KeyLeftShift
+	case 54:
+		return gpucontext.KeyRightShift
+	case 29:
+		return gpucontext.KeyLeftControl
+	case 97:
+		return gpucontext.KeyRightControl
+	case 56:
+		return gpucontext.KeyLeftAlt
+	case 100:
+		return gpucontext.KeyRightAlt
+	case 125:
+		return gpucontext.KeyLeftSuper
+	case 126:
+		return gpucontext.KeyRightSuper
+
+	// Punctuation
+	case 12:
+		return gpucontext.KeyMinus
+	case 13:
+		return gpucontext.KeyEqual
+	case 26:
+		return gpucontext.KeyLeftBracket
+	case 27:
+		return gpucontext.KeyRightBracket
+	case 43:
+		return gpucontext.KeyBackslash
+	case 39:
+		return gpucontext.KeySemicolon
+	case 40:
+		return gpucontext.KeyApostrophe
+	case 41:
+		return gpucontext.KeyGrave
+	case 51:
+		return gpucontext.KeyComma
+	case 52:
+		return gpucontext.KeyPeriod
+	case 53:
+		return gpucontext.KeySlash
+
+	// Numpad
+	case 82:
+		return gpucontext.KeyNumpad0
+	case 79:
+		return gpucontext.KeyNumpad1
+	case 80:
+		return gpucontext.KeyNumpad2
+	case 81:
+		return gpucontext.KeyNumpad3
+	case 75:
+		return gpucontext.KeyNumpad4
+	case 76:
+		return gpucontext.KeyNumpad5
+	case 77:
+		return gpucontext.KeyNumpad6
+	case 71:
+		return gpucontext.KeyNumpad7
+	case 72:
+		return gpucontext.KeyNumpad8
+	case 73:
+		return gpucontext.KeyNumpad9
+	case 83:
+		return gpucontext.KeyNumpadDecimal
+	case 98:
+		return gpucontext.KeyNumpadDivide
+	case 55:
+		return gpucontext.KeyNumpadMultiply
+	case 74:
+		return gpucontext.KeyNumpadSubtract
+	case 78:
+		return gpucontext.KeyNumpadAdd
+	case 96:
+		return gpucontext.KeyEnter // KP Enter
+
+	// Lock keys
+	case 58:
+		return gpucontext.KeyCapsLock
+	case 70:
+		return gpucontext.KeyScrollLock
+	case 69:
+		return gpucontext.KeyNumLock
+	case 119:
+		return gpucontext.KeyPause
+	}
+
+	return gpucontext.KeyUnknown
 }
 
 // eventTimestamp returns the event timestamp as duration since start.

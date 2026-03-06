@@ -3,7 +3,10 @@
 package x11
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"time"
 )
 
 // Event is the interface implemented by all X11 events.
@@ -336,7 +339,7 @@ func (c *Connection) parseKeyEvent(buf []byte, press bool) (Event, error) {
 	_, _ = d.Uint8() // event type
 	detail, _ := d.Uint8()
 	seq, _ := d.Uint16()
-	time, _ := d.Uint32()
+	tstamp, _ := d.Uint32()
 	root, _ := d.Uint32()
 	event, _ := d.Uint32()
 	child, _ := d.Uint32()
@@ -350,7 +353,7 @@ func (c *Connection) parseKeyEvent(buf []byte, press bool) (Event, error) {
 	ke := KeyEvent{
 		Detail:     detail,
 		Sequence:   seq,
-		Time:       Timestamp(time),
+		Time:       Timestamp(tstamp),
 		Root:       ResourceID(root),
 		Event:      ResourceID(event),
 		Child:      ResourceID(child),
@@ -374,7 +377,7 @@ func (c *Connection) parseButtonEvent(buf []byte, press bool) (Event, error) {
 	_, _ = d.Uint8() // event type
 	detail, _ := d.Uint8()
 	seq, _ := d.Uint16()
-	time, _ := d.Uint32()
+	tstamp, _ := d.Uint32()
 	root, _ := d.Uint32()
 	event, _ := d.Uint32()
 	child, _ := d.Uint32()
@@ -388,7 +391,7 @@ func (c *Connection) parseButtonEvent(buf []byte, press bool) (Event, error) {
 	be := ButtonEvent{
 		Detail:     detail,
 		Sequence:   seq,
-		Time:       Timestamp(time),
+		Time:       Timestamp(tstamp),
 		Root:       ResourceID(root),
 		Event:      ResourceID(event),
 		Child:      ResourceID(child),
@@ -412,7 +415,7 @@ func (c *Connection) parseMotionNotifyEvent(buf []byte) (Event, error) {
 	_, _ = d.Uint8() // event type
 	detail, _ := d.Uint8()
 	seq, _ := d.Uint16()
-	time, _ := d.Uint32()
+	tstamp, _ := d.Uint32()
 	root, _ := d.Uint32()
 	event, _ := d.Uint32()
 	child, _ := d.Uint32()
@@ -426,7 +429,7 @@ func (c *Connection) parseMotionNotifyEvent(buf []byte) (Event, error) {
 	return &MotionNotifyEvent{
 		Detail:     detail,
 		Sequence:   seq,
-		Time:       Timestamp(time),
+		Time:       Timestamp(tstamp),
 		Root:       ResourceID(root),
 		Event:      ResourceID(event),
 		Child:      ResourceID(child),
@@ -445,7 +448,7 @@ func (c *Connection) parseCrossingEvent(buf []byte, enter bool) (Event, error) {
 	_, _ = d.Uint8() // event type
 	detail, _ := d.Uint8()
 	seq, _ := d.Uint16()
-	time, _ := d.Uint32()
+	tstamp, _ := d.Uint32()
 	root, _ := d.Uint32()
 	event, _ := d.Uint32()
 	child, _ := d.Uint32()
@@ -460,7 +463,7 @@ func (c *Connection) parseCrossingEvent(buf []byte, enter bool) (Event, error) {
 	ce := CrossingEvent{
 		Detail:          detail,
 		Sequence:        seq,
-		Time:            Timestamp(time),
+		Time:            Timestamp(tstamp),
 		Root:            ResourceID(root),
 		Event:           ResourceID(event),
 		Child:           ResourceID(child),
@@ -615,14 +618,14 @@ func (c *Connection) parsePropertyNotifyEvent(buf []byte) (Event, error) {
 	seq, _ := d.Uint16()
 	window, _ := d.Uint32()
 	atom, _ := d.Uint32()
-	time, _ := d.Uint32()
+	tstamp, _ := d.Uint32()
 	state, _ := d.Uint8()
 
 	return &PropertyNotifyEvent{
 		Sequence: seq,
 		Window:   ResourceID(window),
 		Atom:     Atom(atom),
-		Time:     Timestamp(time),
+		Time:     Timestamp(tstamp),
 		State:    state,
 	}, nil
 }
@@ -656,13 +659,13 @@ func (c *Connection) parseSelectionClearEvent(buf []byte) (Event, error) {
 	_, _ = d.Uint8() // event type
 	_, _ = d.Uint8() // unused
 	seq, _ := d.Uint16()
-	time, _ := d.Uint32()
+	tstamp, _ := d.Uint32()
 	owner, _ := d.Uint32()
 	selection, _ := d.Uint32()
 
 	return &SelectionClearEvent{
 		Sequence:  seq,
-		Time:      Timestamp(time),
+		Time:      Timestamp(tstamp),
 		Owner:     ResourceID(owner),
 		Selection: Atom(selection),
 	}, nil
@@ -778,20 +781,60 @@ func (c *Connection) WaitForEvent() (Event, error) {
 //
 //nolint:nilnil // nil,nil is intentional to indicate "no event available"
 func (c *Connection) PollEvent() (Event, error) {
-	// Set read deadline to avoid blocking
-	// This is a simple approach - a production implementation
-	// would use poll/epoll for proper non-blocking I/O
-
-	// For now, we'll use a non-blocking approach by checking
-	// if data is available
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
+		c.mu.Unlock()
 		return nil, ErrConnectionClosed
 	}
+	c.mu.Unlock()
 
-	// Try to read with a very short timeout
-	// This is a simplified approach - returns nil event when no data available
-	return nil, nil
+	// Set a very short read deadline so Read returns immediately if no data.
+	if err := c.conn.SetReadDeadline(time.Now().Add(time.Microsecond)); err != nil {
+		return nil, nil //nolint:nilerr // deadline not supported = no polling
+	}
+
+	buf := make([]byte, 32)
+	_, err := io.ReadFull(c.conn, buf)
+
+	// Clear deadline for subsequent blocking reads.
+	_ = c.conn.SetReadDeadline(time.Time{})
+
+	if err != nil {
+		// Timeout = no data available (normal case).
+		if isTimeoutError(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("x11: poll read: %w", err)
+	}
+
+	responseType := buf[0]
+
+	// Error response
+	if responseType == 0 {
+		return nil, c.parseError(buf)
+	}
+
+	// Reply response — skip (we're looking for events).
+	if responseType == 1 {
+		if _, err := c.readAdditional(buf); err != nil {
+			return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
+		}
+		return nil, nil
+	}
+
+	// GenericEvent (type 35) — variable-length, read additional payload.
+	if responseType&0x7F == EventGenericEvent {
+		buf, err = c.readAdditional(buf)
+		if err != nil {
+			return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
+		}
+	}
+
+	return c.parseEvent(buf)
+}
+
+// isTimeoutError checks if an error is a network timeout (deadline exceeded).
+func isTimeoutError(err error) bool {
+	var netErr interface{ Timeout() bool }
+	return errors.As(err, &netErr) && netErr.Timeout()
 }

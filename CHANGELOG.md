@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.8] - 2026-03-06
+
+### Fixed
+
+- **X11 input handling** — keyboard and mouse events now work under Linux X11
+  ([#129](https://github.com/gogpu/gogpu/issues/129))
+  - Implement non-blocking `PollEvent()` via `SetReadDeadline` (was a stub returning nil)
+  - Add keyboard event handling (`KeyPress`/`KeyRelease`) with X11 keycode → evdev → `gpucontext.Key` mapping
+  - Wire `SetKeyCallback` through x11Platform to x11.Platform
+
 ## [0.22.7] - 2026-03-05
 
 ### Changed
