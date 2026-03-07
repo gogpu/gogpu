@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.9] - 2026-03-07
+
+### Changed
+
+- **Update wgpu v0.19.6 → v0.19.7** — Queue.WriteTexture public API
+  ([wgpu#95](https://github.com/gogpu/wgpu/pull/95) by [@Carmen-Shannon](https://github.com/Carmen-Shannon)),
+  naga v0.14.6 MSL pass-through globals fix
+  ([naga#40](https://github.com/gogpu/naga/pull/40))
+
 ## [0.22.8] - 2026-03-06
 
 ### Fixed
