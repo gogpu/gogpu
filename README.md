@@ -273,7 +273,8 @@ This eliminates the GPU→CPU→GPU round-trip when integrating with gg/ggcanvas
 
 ```go
 // Window geometry and DPI
-w, h := app.Size()              // physical pixels
+w, h := app.Size()              // logical points (DIP)
+fw, fh := app.PhysicalSize()    // physical pixels (framebuffer)
 scale := app.ScaleFactor()      // 1.0 = standard, 2.0 = Retina/HiDPI
 
 // Clipboard

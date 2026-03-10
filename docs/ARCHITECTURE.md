@@ -260,6 +260,61 @@ wgpu/
     └── noop/           # No-op (testing)
 ```
 
+## HiDPI/Retina Support
+
+GoGPU properly separates logical coordinates (points/DIP) from physical pixels
+(framebuffer), following the industry-standard pattern used by GLFW, winit, SDL,
+and every enterprise graphics library.
+
+### Platform Interface
+
+```go
+type Platform interface {
+    // LogicalSize returns window size in platform points (DIP).
+    // 800x600 on Retina 2x. Use for layout and UI coordinates.
+    LogicalSize() (width, height int)
+
+    // PhysicalSize returns GPU framebuffer size in device pixels.
+    // 1600x1200 on Retina 2x. Use for surface configuration.
+    PhysicalSize() (width, height int)
+
+    // ScaleFactor returns the DPI scale factor.
+    // 2.0 on macOS Retina, 1.0-3.0 on Windows HiDPI, 1.0 on most Linux.
+    ScaleFactor() float64
+}
+```
+
+### User-Facing API
+
+```go
+app := gogpu.NewApp(gogpu.DefaultConfig().WithSize(800, 600))
+
+// In callbacks:
+w, h := app.Size()              // 800, 600 (logical points)
+fw, fh := app.PhysicalSize()    // 1600, 1200 (physical pixels on Retina 2x)
+scale := app.ScaleFactor()      // 2.0
+
+// Context also exposes both:
+ctx.Width()              // 800 (logical)
+ctx.FramebufferWidth()   // 1600 (physical)
+```
+
+### Platform Implementation
+
+| Platform | LogicalSize | PhysicalSize | ScaleFactor |
+|----------|-------------|-------------|-------------|
+| **macOS** | NSView bounds (points) | bounds × backingScaleFactor | `backingScaleFactor` |
+| **Windows** | Client rect / DPI scale | Client rect (raw pixels) | `GetDpiForWindow() / 96` |
+| **Linux X11** | Window geometry | Same (scale=1.0 baseline) | 1.0 |
+| **Linux Wayland** | Window geometry | Same (scale=1.0 baseline) | 1.0 |
+
+### Thread Safety
+
+Surface reconfiguration happens exclusively on the render thread.
+`PollEvents()` detects size changes and emits resize events, but does NOT
+resize the GPU surface directly. The render thread handles surface
+reconfiguration via `RequestResize()`.
+
 ## Multi-Thread Architecture
 
 GoGPU uses enterprise-level multi-thread architecture (Ebiten/Gio pattern):

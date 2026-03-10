@@ -109,25 +109,28 @@ func (p *darwinPlatform) PollEvents() Event {
 		return Event{Type: EventClose}
 	}
 
-	// Update window size and check for resize
+	// Update window size and check for resize.
+	// RETINA-002: Do NOT call p.surface.Resize() here. PollEvents runs on the
+	// main thread while the render thread operates on wgpu surface. Surface
+	// reconfiguration is handled by the render thread via RequestResize.
 	if p.window != nil {
 		oldWidth, oldHeight := p.config.Width, p.config.Height
 		p.window.UpdateSize()
-		newWidth, newHeight := p.window.Size()
+		newWidth, newHeight := p.window.Size() // logical points
 
 		if newWidth != oldWidth || newHeight != oldHeight {
 			p.config.Width = newWidth
 			p.config.Height = newHeight
 
-			// Update surface size
-			if p.surface != nil {
-				p.surface.Resize(newWidth, newHeight)
-			}
+			// Get physical pixel size for GPU surface reconfiguration
+			physW, physH := p.window.FramebufferSize()
 
 			return Event{
-				Type:   EventResize,
-				Width:  newWidth,
-				Height: newHeight,
+				Type:           EventResize,
+				Width:          newWidth,
+				Height:         newHeight,
+				PhysicalWidth:  physW,
+				PhysicalHeight: physH,
 			}
 		}
 	}
@@ -151,23 +154,12 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 	// Get event info
 	info := darwin.GetEventInfo(event)
 
-	// Scale factor for converting logical points to physical pixels.
-	// macOS event coordinates are in logical points; our coordinate system
-	// uses physical pixels (matching GetSize() and the GPU surface).
-	scale := 1.0
-	if p.window != nil {
-		scale = p.window.BackingScaleFactor()
-	}
+	// RETINA-001: Coordinates are in logical points (Cocoa points / DIP).
+	// p.config.Width/Height are now logical, matching NSEvent coordinates.
+	// No scaling needed — the coordinate system is consistently logical.
 
-	// Get window height for Y coordinate flip.
-	// macOS uses bottom-left origin, we need top-left.
-	// p.config.Height is in physical pixels; NSEvent coordinates are in logical
-	// points. Compute the flip in points first, then scale to physical pixels.
-	windowHeightPts := float64(p.config.Height) / scale
-	y := (windowHeightPts - info.LocationY) * scale
-
-	// Scale X coordinate to physical pixels.
-	info.LocationX *= scale
+	// Y coordinate flip: macOS uses bottom-left origin, we need top-left.
+	y := float64(p.config.Height) - info.LocationY
 
 	// Update modifiers
 	p.modifiers = extractModifiers(info.ModifierFlags)
@@ -225,8 +217,8 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.pointerX = info.LocationX
 		p.pointerY = y
 
-		// Detect enter/leave based on position (in physical pixel coordinates).
-		// p.config.Width/Height are already in physical pixels after UpdateSize().
+		// Detect enter/leave based on position (in logical point coordinates).
+		// p.config.Width/Height are in logical points after RETINA-001.
 		inWindow := info.LocationX >= 0 && info.LocationX <= float64(p.config.Width) &&
 			y >= 0 && y <= float64(p.config.Height)
 
@@ -276,10 +268,8 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		deltaY := -info.ScrollDeltaY // Invert Y: natural scrolling convention
 		if info.IsPrecise {
 			deltaMode = gpucontext.ScrollDeltaPixel
-			// Precise (trackpad) deltas are in logical points; scale to physical
-			// pixels to match position coordinates.
-			deltaX *= scale
-			deltaY *= scale
+			// Precise (trackpad) deltas are in logical points, matching our
+			// logical coordinate system. No scaling needed.
 		}
 
 		ev := gpucontext.ScrollEvent{
@@ -361,12 +351,25 @@ func (p *darwinPlatform) ShouldClose() bool {
 	return p.shouldClose
 }
 
-func (p *darwinPlatform) GetSize() (width, height int) {
+// LogicalSize returns the window size in Cocoa points (DIP).
+func (p *darwinPlatform) LogicalSize() (width, height int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.window != nil {
 		return p.window.Size()
+	}
+	return p.config.Width, p.config.Height
+}
+
+// PhysicalSize returns the GPU framebuffer size in device pixels.
+// On Retina displays this is LogicalSize * BackingScaleFactor.
+func (p *darwinPlatform) PhysicalSize() (width, height int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.window != nil {
+		return p.window.FramebufferSize()
 	}
 	return p.config.Width, p.config.Height
 }
@@ -475,7 +478,9 @@ func (p *darwinPlatform) WakeUp() {
 	}
 }
 
-// checkResize checks for window size changes and updates the surface.
+// checkResize checks for window size changes and queues a resize event.
+// RETINA-002: Does NOT call p.surface.Resize(). Surface reconfiguration
+// is handled by the render thread via RequestResize to avoid race conditions.
 // Must be called with p.mu held.
 func (p *darwinPlatform) checkResize() {
 	if p.window == nil {
@@ -484,20 +489,20 @@ func (p *darwinPlatform) checkResize() {
 
 	oldWidth, oldHeight := p.config.Width, p.config.Height
 	p.window.UpdateSize()
-	newWidth, newHeight := p.window.Size()
+	newWidth, newHeight := p.window.Size() // logical points
 
 	if newWidth != oldWidth || newHeight != oldHeight {
 		p.config.Width = newWidth
 		p.config.Height = newHeight
 
-		if p.surface != nil {
-			p.surface.Resize(newWidth, newHeight)
-		}
+		physW, physH := p.window.FramebufferSize()
 
 		p.queueEvent(Event{
-			Type:   EventResize,
-			Width:  newWidth,
-			Height: newHeight,
+			Type:           EventResize,
+			Width:          newWidth,
+			Height:         newHeight,
+			PhysicalWidth:  physW,
+			PhysicalHeight: physH,
 		})
 	}
 }

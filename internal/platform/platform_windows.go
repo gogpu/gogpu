@@ -479,10 +479,36 @@ func (p *windowsPlatform) ShouldClose() bool {
 	return p.shouldClose
 }
 
-func (p *windowsPlatform) GetSize() (width, height int) {
+// LogicalSize returns the window client area in DIP (device-independent pixels).
+// On Windows with DPI awareness, this is the client rect divided by DPI scale.
+// For most Windows apps at 100% scaling, this equals PhysicalSize.
+func (p *windowsPlatform) LogicalSize() (width, height int) {
+	p.sizeMu.RLock()
+	defer p.sizeMu.RUnlock()
+
+	scale := p.scaleFactor()
+	if scale <= 0 || scale == 1.0 {
+		return p.width, p.height
+	}
+	return int(float64(p.width) / scale), int(float64(p.height) / scale)
+}
+
+// PhysicalSize returns the GPU framebuffer size in device pixels.
+// On Windows this is the actual client rect size (GetClientRect).
+func (p *windowsPlatform) PhysicalSize() (width, height int) {
 	p.sizeMu.RLock()
 	defer p.sizeMu.RUnlock()
 	return p.width, p.height
+}
+
+// scaleFactor returns the DPI scale factor for the window.
+// Must NOT hold sizeMu (calls syscall).
+func (p *windowsPlatform) scaleFactor() float64 {
+	dpi, _, _ := procGetDpiForWindow.Call(uintptr(p.hwnd))
+	if dpi == 0 {
+		return 1.0
+	}
+	return float64(dpi) / 96.0
 }
 
 // InSizeMove returns true if the window is in a modal resize/move loop.
@@ -568,12 +594,10 @@ func (p *windowsPlatform) WakeUp() {
 
 // ScaleFactor returns the DPI scale factor for the window.
 // 1.0 = 96 DPI (standard), 2.0 = 192 DPI (HiDPI).
+// ScaleFactor returns the DPI scale factor.
+// 1.0 = 96 DPI (standard), 1.25 = 120 DPI, 1.5 = 144 DPI, 2.0 = 192 DPI.
 func (p *windowsPlatform) ScaleFactor() float64 {
-	dpi, _, _ := procGetDpiForWindow.Call(uintptr(p.hwnd))
-	if dpi == 0 {
-		return 1.0
-	}
-	return float64(dpi) / 96.0
+	return p.scaleFactor()
 }
 
 // ClipboardRead reads text from the system clipboard.
@@ -1462,10 +1486,21 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// stretched and correctly-sized frames) because DWM stretches BEFORE our
 		// render can complete.
 		if sizeChanged && !inSizeMove {
+			// On Windows, WM_SIZE provides physical pixels (client rect).
+			// Compute logical size from DPI scale for the event.
+			logW, logH := newWidth, newHeight
+			dpi, _, _ := procGetDpiForWindow.Call(uintptr(p.hwnd))
+			if dpi > 0 && dpi != 96 {
+				scale := float64(dpi) / 96.0
+				logW = int(float64(newWidth) / scale)
+				logH = int(float64(newHeight) / scale)
+			}
 			p.queueEvent(Event{
-				Type:   EventResize,
-				Width:  newWidth,
-				Height: newHeight,
+				Type:           EventResize,
+				Width:          logW,
+				Height:         logH,
+				PhysicalWidth:  newWidth,
+				PhysicalHeight: newHeight,
 			})
 		}
 		return 0
@@ -1511,11 +1546,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 		// Queue final resize event when resize ends
 		p.updateSize()
-		width, height := p.GetSize()
+		physW, physH := p.PhysicalSize()
+		logW, logH := p.LogicalSize()
 		p.queueEvent(Event{
-			Type:   EventResize,
-			Width:  width,
-			Height: height,
+			Type:           EventResize,
+			Width:          logW,
+			Height:         logH,
+			PhysicalWidth:  physW,
+			PhysicalHeight: physH,
 		})
 		return 0
 

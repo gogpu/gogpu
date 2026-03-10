@@ -5,7 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.23.0] - 2026-03-11
+
+### Added
+
+- **`App.PhysicalSize()`** — returns GPU framebuffer size in device pixels
+- **`Context.FramebufferWidth()`/`FramebufferHeight()`/`FramebufferSize()`** — physical pixel dimensions for GPU rendering
+- **`gpuContextAdapter` implements `gpucontext.WindowProvider`** — enables ggcanvas
+  and other libraries to auto-detect HiDPI scale via standard ecosystem interface
+
+### Changed
+
+- **Platform API: logical/physical pixel split** — redesigned Platform interface
+  to properly distinguish logical points (DIP) from physical pixels (framebuffer).
+  New internal methods: `LogicalSize()`, `PhysicalSize()`, `ScaleFactor()`.
+  `App.Size()` / `Context.Width()`/`Height()` now return logical dimensions.
+  ([gg#171](https://github.com/gogpu/gg/issues/171),
+  [gg#175](https://github.com/gogpu/gg/issues/175))
+  - macOS: `Window.UpdateSize()` stores logical points (not physical pixels)
+  - macOS: new `Window.FramebufferSize()` for physical pixel dimensions
+  - Windows: real DPI awareness via `GetDpiForWindow()`
+  - Event coordinates are now consistently in logical points on all platforms
+
+### Fixed
+
+- **macOS Retina race condition** — removed `surface.Resize()` from `PollEvents()`
+  which ran on the main thread while the render thread operated on the wgpu surface.
+  Surface reconfiguration now happens exclusively on the render thread via
+  `RequestResize()`. Fixes content disappearing periodically on macOS.
+  ([gg#171](https://github.com/gogpu/gg/issues/171))
 
 ## [0.22.11] - 2026-03-10
 

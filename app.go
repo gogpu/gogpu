@@ -295,12 +295,13 @@ func (a *App) processEventsMultiThread() bool {
 	// Queue resize for render thread (deferred pattern)
 	// Don't apply resize during modal resize loop (Windows)
 	if lastResize != nil && !a.platform.InSizeMove() {
-		// Queue resize for render thread
-		if lastResize.Width > 0 && lastResize.Height > 0 {
-			a.renderLoop.RequestResize(uint32(lastResize.Width), uint32(lastResize.Height)) //nolint:gosec // G115: validated positive
+		// Queue PHYSICAL size for render thread (GPU surface reconfiguration)
+		physW, physH := lastResize.PhysicalWidth, lastResize.PhysicalHeight
+		if physW > 0 && physH > 0 {
+			a.renderLoop.RequestResize(uint32(physW), uint32(physH)) //nolint:gosec // G115: validated positive
 		}
 
-		// Call user callback immediately (for UI updates)
+		// Call user callback with LOGICAL size (what user expects for layout)
 		if a.onResize != nil {
 			a.onResize(lastResize.Width, lastResize.Height)
 		}
@@ -317,14 +318,15 @@ func (a *App) processEventsMultiThread() bool {
 // renderFrameMultiThread renders a frame using the render thread.
 // All GPU operations happen on the render thread to keep main thread responsive.
 func (a *App) renderFrameMultiThread() {
-	// Skip rendering if window is minimized (zero dimensions)
-	width, height := a.platform.GetSize()
+	// Skip rendering if window is minimized (zero physical dimensions)
+	width, height := a.platform.PhysicalSize()
 	if width <= 0 || height <= 0 {
 		return // Window minimized, skip frame
 	}
 
-	// Capture callback for render thread
+	// Capture callback and scale factor for render thread
 	onDraw := a.onDraw
+	scale := a.platform.ScaleFactor()
 
 	// Execute GPU operations on render thread
 	a.renderLoop.RunOnRenderThreadVoid(func() {
@@ -340,7 +342,7 @@ func (a *App) renderFrameMultiThread() {
 
 		// Create context and call draw callback
 		if onDraw != nil {
-			ctx := newContext(a.renderer)
+			ctx := newContext(a.renderer, scale)
 			onDraw(ctx)
 		}
 
@@ -375,10 +377,10 @@ func (a *App) modalFrameTick() {
 		a.onUpdate(deltaTime)
 	}
 
-	// Propagate window size to render thread for swapchain resize.
+	// Propagate PHYSICAL window size to render thread for swapchain resize.
 	// During modal loop, processEventsMultiThread doesn't run, so
 	// RequestResize wouldn't be called otherwise.
-	width, height := a.platform.GetSize()
+	width, height := a.platform.PhysicalSize()
 	if width > 0 && height > 0 {
 		a.renderLoop.RequestResize(uint32(width), uint32(height)) //nolint:gosec // G115: validated positive
 	}
@@ -412,10 +414,20 @@ func (a *App) StartAnimation() *AnimationToken {
 	return token
 }
 
-// Size returns the current window size.
+// Size returns the current window size in logical points (DIP).
+// Use this for layout, UI coordinates, and user-facing dimensions.
 func (a *App) Size() (width, height int) {
 	if a.platform != nil {
-		return a.platform.GetSize()
+		return a.platform.LogicalSize()
+	}
+	return a.config.Width, a.config.Height
+}
+
+// PhysicalSize returns the current GPU framebuffer size in device pixels.
+// On Retina/HiDPI displays this is larger than Size() by ScaleFactor().
+func (a *App) PhysicalSize() (width, height int) {
+	if a.platform != nil {
+		return a.platform.PhysicalSize()
 	}
 	return a.config.Width, a.config.Height
 }

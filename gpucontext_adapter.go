@@ -13,6 +13,7 @@ import (
 type gpuContextAdapter struct {
 	renderer *Renderer
 	tracker  *resourceTracker
+	app      *App
 }
 
 // Device returns the GPU device implementing gpucontext.Device.
@@ -69,6 +70,32 @@ func (a *gpuContextAdapter) HalQueue() any {
 	return a.renderer.queue
 }
 
+// Size returns the current window size in logical points (DIP).
+// Implements gpucontext.WindowProvider.
+func (a *gpuContextAdapter) Size() (width, height int) {
+	if a.app != nil {
+		return a.app.Size()
+	}
+	return 0, 0
+}
+
+// ScaleFactor returns the DPI scale factor from the platform.
+// Implements gpucontext.WindowProvider.
+func (a *gpuContextAdapter) ScaleFactor() float64 {
+	if a.app != nil {
+		return a.app.ScaleFactor()
+	}
+	return 1.0
+}
+
+// RequestRedraw requests the host to render a new frame.
+// Implements gpucontext.WindowProvider.
+func (a *gpuContextAdapter) RequestRedraw() {
+	if a.app != nil {
+		a.app.RequestRedraw()
+	}
+}
+
 // TrackResource registers an io.Closer for automatic cleanup during shutdown.
 // This forwards to the App's resourceTracker, enabling ggcanvas and other
 // libraries to auto-register via duck typing without importing gogpu.
@@ -90,6 +117,9 @@ var _ gpucontext.DeviceProvider = (*gpuContextAdapter)(nil)
 
 // Ensure gpuContextAdapter implements gpucontext.HalProvider.
 var _ gpucontext.HalProvider = (*gpuContextAdapter)(nil)
+
+// Ensure gpuContextAdapter implements gpucontext.WindowProvider.
+var _ gpucontext.WindowProvider = (*gpuContextAdapter)(nil)
 
 // deviceAdapter wraps gogpu renderer to implement gpucontext.Device.
 type deviceAdapter struct {
@@ -163,5 +193,5 @@ func (a *App) GPUContextProvider() gpucontext.DeviceProvider {
 	if a.tracker == nil {
 		a.tracker = &resourceTracker{}
 	}
-	return &gpuContextAdapter{renderer: a.renderer, tracker: a.tracker}
+	return &gpuContextAdapter{renderer: a.renderer, tracker: a.tracker, app: a}
 }

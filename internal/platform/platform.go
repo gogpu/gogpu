@@ -16,9 +16,11 @@ type Config struct {
 
 // Event represents a platform event.
 type Event struct {
-	Type   EventType
-	Width  int // for resize events
-	Height int // for resize events
+	Type           EventType
+	Width          int // for resize events: logical size (platform points/DIP)
+	Height         int // for resize events: logical size (platform points/DIP)
+	PhysicalWidth  int // for resize events: physical pixels (GPU framebuffer)
+	PhysicalHeight int // for resize events: physical pixels (GPU framebuffer)
 }
 
 // EventType represents the type of platform event.
@@ -42,8 +44,15 @@ type Platform interface {
 	// ShouldClose returns true if window close was requested.
 	ShouldClose() bool
 
-	// GetSize returns current window size in pixels.
-	GetSize() (width, height int)
+	// LogicalSize returns the window size in platform points (DIP).
+	// On macOS these are Cocoa points, on Windows they are DIP (96 DPI base).
+	// Use this for layout, UI coordinates, and user-facing dimensions.
+	LogicalSize() (width, height int)
+
+	// PhysicalSize returns the GPU framebuffer size in device pixels.
+	// On Retina/HiDPI displays this is larger than LogicalSize by ScaleFactor.
+	// Use this for surface configuration, texture allocation, and GPU operations.
+	PhysicalSize() (width, height int)
 
 	// GetHandle returns platform-specific handles for surface creation.
 	// On Windows: (hinstance, hwnd)

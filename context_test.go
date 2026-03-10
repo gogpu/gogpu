@@ -8,6 +8,7 @@ import (
 
 // newTestContext creates a Context with a mock Renderer for testing.
 // Only sets up the fields needed for read-only wrapper methods.
+// Uses scale=1.0 so logical == physical dimensions.
 func newTestContext(width, height uint32, format gputypes.TextureFormat, backendName string) *Context {
 	r := &Renderer{
 		width:       width,
@@ -15,7 +16,7 @@ func newTestContext(width, height uint32, format gputypes.TextureFormat, backend
 		format:      format,
 		backendName: backendName,
 	}
-	return newContext(r)
+	return newContext(r, 1.0)
 }
 
 func TestContextSize(t *testing.T) {
@@ -174,7 +175,7 @@ func TestContextCheckDeviceHealthNonChecker(t *testing.T) {
 		backendName: "test",
 		device:      &mockFenceDevice{}, // does not implement healthChecker
 	}
-	ctx := newContext(r)
+	ctx := newContext(r, 1.0)
 
 	err := ctx.CheckDeviceHealth()
 	if err != nil {
@@ -210,7 +211,7 @@ func TestContextRenderer(t *testing.T) {
 		height:      600,
 		backendName: "test",
 	}
-	ctx := newContext(r)
+	ctx := newContext(r, 1.0)
 
 	if ctx.Renderer() != r {
 		t.Error("Renderer() did not return the expected Renderer instance")
@@ -242,7 +243,7 @@ func TestNewContext(t *testing.T) {
 		format:      gputypes.TextureFormatRGBA8Unorm,
 		backendName: "native",
 	}
-	ctx := newContext(r)
+	ctx := newContext(r, 1.0)
 
 	if ctx == nil {
 		t.Fatal("newContext returned nil")

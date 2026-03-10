@@ -313,8 +313,8 @@ func (w *Window) BackingScaleFactor() float64 {
 }
 
 // UpdateSize updates the cached size from the actual window size.
-// Returns physical pixel dimensions (bounds * backingScaleFactor) to
-// match the Platform.GetSize() contract of returning pixels, not points.
+// Stores LOGICAL size in platform points (not physical pixels).
+// Use FramebufferSize() for physical pixel dimensions.
 func (w *Window) UpdateSize() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -323,12 +323,25 @@ func (w *Window) UpdateSize() {
 		return
 	}
 
-	// Get bounds of content view (logical points on macOS).
+	// Get bounds of content view in logical points (macOS Cocoa points).
+	// On Retina displays, 800x600 points maps to 1600x1200 physical pixels,
+	// but we store the logical size here. Physical size is derived on demand.
 	bounds := w.contentView.GetRect(selectors.bounds)
+	w.width = int(bounds.Size.Width)
+	w.height = int(bounds.Size.Height)
+}
 
-	// Convert to physical pixels using backing scale factor.
-	// On Retina displays (2x), 800x600 points → 1600x1200 pixels.
-	// On standard displays (1x), this is a no-op multiplication.
+// FramebufferSize returns the GPU framebuffer size in physical device pixels.
+// On Retina displays this is LogicalSize * BackingScaleFactor.
+func (w *Window) FramebufferSize() (width, height int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.contentView.IsNil() {
+		return w.width, w.height
+	}
+
+	bounds := w.contentView.GetRect(selectors.bounds)
 	scale := 1.0
 	if !w.nsWindow.IsNil() {
 		s := w.nsWindow.GetDouble(selectors.backingScaleFactor)
@@ -336,8 +349,7 @@ func (w *Window) UpdateSize() {
 			scale = s
 		}
 	}
-	w.width = int(float64(bounds.Size.Width) * scale)
-	w.height = int(float64(bounds.Size.Height) * scale)
+	return int(float64(bounds.Size.Width) * scale), int(float64(bounds.Size.Height) * scale)
 }
 
 // Frame returns the window's frame rectangle (position and size).

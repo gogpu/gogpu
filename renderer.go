@@ -177,11 +177,12 @@ func (r *Renderer) init(backendType types.BackendType, graphicsAPI types.Graphic
 	// Each submission gets its own fence, enabling true non-blocking completion checks.
 	r.fencePool = NewFencePool(r.device)
 
-	// Configure surface
-	// Get current window dimensions. On some platforms (especially macOS),
-	// the window may not have valid dimensions immediately after creation.
-	// In that case, we defer surface configuration until the first Resize event.
-	width, height := r.platform.GetSize()
+	// Configure surface with PHYSICAL pixel dimensions.
+	// GPU surfaces operate in device pixels, not logical points.
+	// On some platforms (especially macOS), the window may not have valid
+	// dimensions immediately after creation. In that case, we defer surface
+	// configuration until the first Resize event.
+	width, height := r.platform.PhysicalSize()
 
 	// Use BGRA8Unorm which is common across platforms
 	r.format = gputypes.TextureFormatBGRA8Unorm

@@ -134,7 +134,14 @@ func (p *x11Platform) PollEvents() Event {
 	case x11.EventTypeClose:
 		return Event{Type: EventClose}
 	case x11.EventTypeResize:
-		return Event{Type: EventResize, Width: event.Width, Height: event.Height}
+		// X11: scale=1.0 baseline, logical == physical
+		return Event{
+			Type:           EventResize,
+			Width:          event.Width,
+			Height:         event.Height,
+			PhysicalWidth:  event.Width,
+			PhysicalHeight: event.Height,
+		}
 	default:
 		return Event{Type: EventNone}
 	}
@@ -145,8 +152,15 @@ func (p *x11Platform) ShouldClose() bool {
 	return p.inner.ShouldClose()
 }
 
-// GetSize returns current window size in pixels.
-func (p *x11Platform) GetSize() (width, height int) {
+// LogicalSize returns the window size in platform points.
+// X11 baseline: scale=1.0, logical == physical.
+func (p *x11Platform) LogicalSize() (width, height int) {
+	return p.inner.GetSize()
+}
+
+// PhysicalSize returns the GPU framebuffer size in device pixels.
+// X11 baseline: scale=1.0, logical == physical.
+func (p *x11Platform) PhysicalSize() (width, height int) {
 	return p.inner.GetSize()
 }
 
@@ -1312,9 +1326,11 @@ func (p *waylandPlatform) PollEvents() Event {
 		p.mu.Unlock()
 
 		return Event{
-			Type:   EventResize,
-			Width:  p.pendingWidth,
-			Height: p.pendingHeight,
+			Type:           EventResize,
+			Width:          p.pendingWidth,
+			Height:         p.pendingHeight,
+			PhysicalWidth:  p.pendingWidth,
+			PhysicalHeight: p.pendingHeight,
 		}
 	}
 
@@ -1345,9 +1361,11 @@ func (p *waylandPlatform) PollEvents() Event {
 		p.height = p.pendingHeight
 		p.hasResize = false
 		return Event{
-			Type:   EventResize,
-			Width:  p.pendingWidth,
-			Height: p.pendingHeight,
+			Type:           EventResize,
+			Width:          p.pendingWidth,
+			Height:         p.pendingHeight,
+			PhysicalWidth:  p.pendingWidth,
+			PhysicalHeight: p.pendingHeight,
 		}
 	}
 
@@ -1365,8 +1383,17 @@ func (p *waylandPlatform) ShouldClose() bool {
 	return p.shouldClose
 }
 
-// GetSize returns current window size in pixels.
-func (p *waylandPlatform) GetSize() (width, height int) {
+// LogicalSize returns the window size in platform points.
+// Wayland baseline: scale=1.0, logical == physical.
+func (p *waylandPlatform) LogicalSize() (width, height int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.width, p.height
+}
+
+// PhysicalSize returns the GPU framebuffer size in device pixels.
+// Wayland baseline: scale=1.0, logical == physical.
+func (p *waylandPlatform) PhysicalSize() (width, height int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.width, p.height

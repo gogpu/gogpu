@@ -286,9 +286,9 @@ func NewSurface(window *Window) (*Surface, error) {
 		layer.SetContentsScale(scale)
 	}
 
-	// Set drawable size using physical pixel dimensions from window.
-	// Window.Size() now returns physical pixels (bounds * scaleFactor).
-	width, height := window.Size()
+	// Set drawable size using physical pixel dimensions.
+	// Window.Size() returns logical points; FramebufferSize() returns physical pixels.
+	width, height := window.FramebufferSize()
 	if width > 0 && height > 0 {
 		layer.SetDrawableSize(width, height)
 	}
@@ -351,7 +351,7 @@ func (s *Surface) UpdateSize() {
 
 	// Get physical pixel dimensions and update drawable size.
 	s.window.UpdateSize()
-	width, height := s.window.Size()
+	width, height := s.window.FramebufferSize()
 	if width > 0 && height > 0 {
 		s.layer.SetDrawableSize(width, height)
 	}

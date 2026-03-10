@@ -8,14 +8,19 @@ import (
 // Context provides drawing operations for a single frame.
 // It is only valid during the OnDraw callback and should not be stored.
 type Context struct {
-	renderer *Renderer
-	cleared  bool
+	renderer    *Renderer
+	scaleFactor float64 // DPI scale factor (1.0 = standard, 2.0 = Retina/HiDPI)
+	cleared     bool
 }
 
 // newContext creates a new drawing context for a frame.
-func newContext(renderer *Renderer) *Context {
+func newContext(renderer *Renderer, scaleFactor float64) *Context {
+	if scaleFactor <= 0 {
+		scaleFactor = 1.0
+	}
 	return &Context{
-		renderer: renderer,
+		renderer:    renderer,
+		scaleFactor: scaleFactor,
 	}
 }
 
@@ -31,26 +36,53 @@ func (c *Context) ClearColor(color gmath.Color) {
 	c.Clear(color.R, color.G, color.B, color.A)
 }
 
-// Size returns the current framebuffer dimensions in pixels.
+// Size returns the window dimensions in logical points (DIP).
+// Use this for layout, UI coordinates, and user-facing dimensions.
+// On Retina/HiDPI displays, this is smaller than FramebufferSize by ScaleFactor.
 func (c *Context) Size() (width, height int) {
+	pw, ph := c.renderer.Size()
+	return int(float64(pw) / c.scaleFactor), int(float64(ph) / c.scaleFactor)
+}
+
+// Width returns the window width in logical points (DIP).
+func (c *Context) Width() int {
+	w, _ := c.Size()
+	return w
+}
+
+// Height returns the window height in logical points (DIP).
+func (c *Context) Height() int {
+	_, h := c.Size()
+	return h
+}
+
+// FramebufferSize returns the GPU framebuffer dimensions in physical device pixels.
+// Use this for GPU operations, texture allocation, and pixel-precise rendering.
+func (c *Context) FramebufferSize() (width, height int) {
 	return c.renderer.Size()
 }
 
-// Width returns the framebuffer width in pixels.
-func (c *Context) Width() int {
+// FramebufferWidth returns the GPU framebuffer width in physical device pixels.
+func (c *Context) FramebufferWidth() int {
 	w, _ := c.renderer.Size()
 	return w
 }
 
-// Height returns the framebuffer height in pixels.
-func (c *Context) Height() int {
+// FramebufferHeight returns the GPU framebuffer height in physical device pixels.
+func (c *Context) FramebufferHeight() int {
 	_, h := c.renderer.Size()
 	return h
 }
 
-// AspectRatio returns width/height as a float32.
+// ScaleFactor returns the DPI scale factor.
+// 1.0 = standard (96 DPI on Windows), 2.0 = Retina/HiDPI.
+func (c *Context) ScaleFactor() float64 {
+	return c.scaleFactor
+}
+
+// AspectRatio returns width/height as a float32 (based on logical size).
 func (c *Context) AspectRatio() float32 {
-	w, h := c.renderer.Size()
+	w, h := c.Size()
 	if h == 0 {
 		return 1.0
 	}
@@ -115,7 +147,8 @@ func (c *Context) CheckDeviceHealth() error {
 	return nil // Backend doesn't support health check
 }
 
-// SurfaceSize returns the current surface dimensions in pixels.
+// SurfaceSize returns the current GPU surface dimensions in physical device pixels.
+// This is the same as FramebufferSize but returns uint32 for GPU API compatibility.
 func (c *Context) SurfaceSize() (width, height uint32) {
 	w, h := c.renderer.Size()
 	return uint32(w), uint32(h) //nolint:gosec // G115: renderer validates dimensions

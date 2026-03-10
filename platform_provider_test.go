@@ -21,10 +21,17 @@ type mockPlatform struct {
 	fontScale     float32
 }
 
-func (m *mockPlatform) Init(platform.Config) error                                      { return nil }
-func (m *mockPlatform) PollEvents() platform.Event                                      { return platform.Event{} }
-func (m *mockPlatform) ShouldClose() bool                                               { return false }
-func (m *mockPlatform) GetSize() (int, int)                                             { return m.width, m.height }
+func (m *mockPlatform) Init(platform.Config) error { return nil }
+func (m *mockPlatform) PollEvents() platform.Event { return platform.Event{} }
+func (m *mockPlatform) ShouldClose() bool          { return false }
+func (m *mockPlatform) LogicalSize() (int, int)    { return m.width, m.height }
+func (m *mockPlatform) PhysicalSize() (int, int) {
+	s := m.scaleFactor
+	if s <= 0 {
+		s = 1.0
+	}
+	return int(float64(m.width) * s), int(float64(m.height) * s)
+}
 func (m *mockPlatform) GetHandle() (uintptr, uintptr)                                   { return 0, 0 }
 func (m *mockPlatform) InSizeMove() bool                                                { return false }
 func (m *mockPlatform) SetPointerCallback(func(gpucontext.PointerEvent))                {}
