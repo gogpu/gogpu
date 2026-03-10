@@ -151,10 +151,23 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 	// Get event info
 	info := darwin.GetEventInfo(event)
 
-	// Get window height for Y coordinate flip
-	// macOS uses bottom-left origin, we need top-left
-	windowHeight := float64(p.config.Height)
-	y := windowHeight - info.LocationY
+	// Scale factor for converting logical points to physical pixels.
+	// macOS event coordinates are in logical points; our coordinate system
+	// uses physical pixels (matching GetSize() and the GPU surface).
+	scale := 1.0
+	if p.window != nil {
+		scale = p.window.BackingScaleFactor()
+	}
+
+	// Get window height for Y coordinate flip.
+	// macOS uses bottom-left origin, we need top-left.
+	// p.config.Height is in physical pixels; NSEvent coordinates are in logical
+	// points. Compute the flip in points first, then scale to physical pixels.
+	windowHeightPts := float64(p.config.Height) / scale
+	y := (windowHeightPts - info.LocationY) * scale
+
+	// Scale X coordinate to physical pixels.
+	info.LocationX *= scale
 
 	// Update modifiers
 	p.modifiers = extractModifiers(info.ModifierFlags)
@@ -212,9 +225,10 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		p.pointerX = info.LocationX
 		p.pointerY = y
 
-		// Detect enter/leave based on position
+		// Detect enter/leave based on position (in physical pixel coordinates).
+		// p.config.Width/Height are already in physical pixels after UpdateSize().
 		inWindow := info.LocationX >= 0 && info.LocationX <= float64(p.config.Width) &&
-			y >= 0 && y <= windowHeight
+			y >= 0 && y <= float64(p.config.Height)
 
 		if inWindow && !wasInWindow {
 			p.mouseInWindow = true
@@ -258,15 +272,21 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 	case darwin.NSEventTypeScrollWheel:
 		// Determine delta mode based on precision
 		deltaMode := gpucontext.ScrollDeltaLine
+		deltaX := info.ScrollDeltaX
+		deltaY := -info.ScrollDeltaY // Invert Y: natural scrolling convention
 		if info.IsPrecise {
 			deltaMode = gpucontext.ScrollDeltaPixel
+			// Precise (trackpad) deltas are in logical points; scale to physical
+			// pixels to match position coordinates.
+			deltaX *= scale
+			deltaY *= scale
 		}
 
 		ev := gpucontext.ScrollEvent{
 			X:         info.LocationX,
 			Y:         y,
-			DeltaX:    info.ScrollDeltaX,
-			DeltaY:    -info.ScrollDeltaY, // Invert Y: natural scrolling convention
+			DeltaX:    deltaX,
+			DeltaY:    deltaY,
 			DeltaMode: deltaMode,
 			Modifiers: p.modifiers,
 			Timestamp: p.eventTimestamp(),
@@ -836,8 +856,13 @@ func macKeyCodeToKey(keyCode uint16) gpucontext.Key {
 }
 
 // ScaleFactor returns the DPI scale factor.
-// TODO: Implement using NSWindow backingScaleFactor.
-func (p *darwinPlatform) ScaleFactor() float64 { return 1.0 }
+// On Retina displays returns 2.0, on standard displays 1.0.
+func (p *darwinPlatform) ScaleFactor() float64 {
+	if p.window == nil {
+		return 1.0
+	}
+	return p.window.BackingScaleFactor()
+}
 
 // ClipboardRead reads text from the system clipboard.
 // TODO: Implement using NSPasteboard.

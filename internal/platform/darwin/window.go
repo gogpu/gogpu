@@ -294,8 +294,27 @@ func (w *Window) MetalLayer() ID {
 	return w.metalLayer
 }
 
+// BackingScaleFactor returns the window's backing scale factor.
+// On Retina displays this is 2.0, on standard displays 1.0.
+// Returns 1.0 if the window is nil or the query fails.
+func (w *Window) BackingScaleFactor() float64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return 1.0
+	}
+
+	scale := w.nsWindow.GetDouble(selectors.backingScaleFactor)
+	if scale <= 0 {
+		return 1.0
+	}
+	return scale
+}
+
 // UpdateSize updates the cached size from the actual window size.
-// Call this after resize events.
+// Returns physical pixel dimensions (bounds * backingScaleFactor) to
+// match the Platform.GetSize() contract of returning pixels, not points.
 func (w *Window) UpdateSize() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -304,10 +323,21 @@ func (w *Window) UpdateSize() {
 		return
 	}
 
-	// Get bounds of content view
+	// Get bounds of content view (logical points on macOS).
 	bounds := w.contentView.GetRect(selectors.bounds)
-	w.width = int(bounds.Size.Width)
-	w.height = int(bounds.Size.Height)
+
+	// Convert to physical pixels using backing scale factor.
+	// On Retina displays (2x), 800x600 points → 1600x1200 pixels.
+	// On standard displays (1x), this is a no-op multiplication.
+	scale := 1.0
+	if !w.nsWindow.IsNil() {
+		s := w.nsWindow.GetDouble(selectors.backingScaleFactor)
+		if s > 0 {
+			scale = s
+		}
+	}
+	w.width = int(float64(bounds.Size.Width) * scale)
+	w.height = int(float64(bounds.Size.Height) * scale)
 }
 
 // Frame returns the window's frame rectangle (position and size).

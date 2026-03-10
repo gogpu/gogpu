@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.10] - 2026-03-10
+
+### Fixed
+
+- **macOS Retina scaling** — window size, pointer coordinates, scroll deltas,
+  and Metal surface drawable dimensions now correctly account for
+  `backingScaleFactor` on Retina displays (2x). Previously all coordinates
+  and sizes used logical points, causing half-resolution rendering and
+  misaligned input on HiDPI screens.
+  ([gg#171](https://github.com/gogpu/gg/issues/171))
+  - `GetSize()` returns physical pixels (bounds × scaleFactor)
+  - `CAMetalLayer.contentsScale` set to match backing scale factor
+  - Pointer events scaled from logical points to physical pixels
+  - Y-coordinate flip computed in points before scaling (correct order)
+  - In-window bounds check uses physical pixel dimensions
+  - Trackpad scroll deltas scaled for pixel-mode precision
+
+### Changed
+
+- **Update wgpu v0.19.7 → v0.19.8** — Metal buffer storage mode fix for CopyDst
+  buffers on Apple Silicon + staging buffer fallback
+  ([wgpu#99](https://github.com/gogpu/wgpu/pull/99),
+  [gg#170](https://github.com/gogpu/gg/issues/170))
+
 ## [0.22.9] - 2026-03-07
 
 ### Changed

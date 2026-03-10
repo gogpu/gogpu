@@ -50,6 +50,7 @@ var selectors struct {
 	setStyleMask                             SEL
 	setAcceptsMouseMovedEvents               SEL
 	makeFirstResponder                       SEL
+	backingScaleFactor                       SEL
 	isKeyWindow                              SEL
 	isVisible                                SEL
 	isMiniaturized                           SEL
@@ -197,6 +198,7 @@ func initSelectors() {
 		selectors.styleMask = RegisterSelector("styleMask")
 		selectors.setStyleMask = RegisterSelector("setStyleMask:")
 		selectors.setAcceptsMouseMovedEvents = RegisterSelector("setAcceptsMouseMovedEvents:")
+		selectors.backingScaleFactor = RegisterSelector("backingScaleFactor")
 		selectors.makeFirstResponder = RegisterSelector("makeFirstResponder:")
 		selectors.isKeyWindow = RegisterSelector("isKeyWindow")
 		selectors.isVisible = RegisterSelector("isVisible")

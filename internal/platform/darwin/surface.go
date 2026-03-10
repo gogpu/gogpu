@@ -278,9 +278,16 @@ func NewSurface(window *Window) (*Surface, error) {
 	// may report warnings about invalid dimensions.
 	window.SetMetalLayer(layer.ID())
 
-	// Now set drawable size. Get actual size from window.
-	// If dimensions are still 0 (window not yet visible), skip -
-	// the size will be set correctly on first resize event.
+	// Set contentsScale to match Retina backing scale factor.
+	// Without this, CAMetalLayer defaults to 1.0 and the drawable
+	// resolution doesn't match the physical pixel count on Retina displays.
+	scale := window.BackingScaleFactor()
+	if scale > 0 {
+		layer.SetContentsScale(scale)
+	}
+
+	// Set drawable size using physical pixel dimensions from window.
+	// Window.Size() now returns physical pixels (bounds * scaleFactor).
 	width, height := window.Size()
 	if width > 0 && height > 0 {
 		layer.SetDrawableSize(width, height)
@@ -306,10 +313,19 @@ func (s *Surface) LayerPtr() uintptr {
 }
 
 // Resize updates the surface size.
-// Call this when the window is resized.
+// Call this when the window is resized. Width and height should be in
+// physical pixels (already scaled by backing scale factor).
 func (s *Surface) Resize(width, height int) {
 	if s == nil || s.layer == nil {
 		return
+	}
+
+	// Update contentsScale (may have changed if window moved between monitors).
+	if s.window != nil {
+		scale := s.window.BackingScaleFactor()
+		if scale > 0 {
+			s.layer.SetContentsScale(scale)
+		}
 	}
 
 	// Only set drawable size if dimensions are valid.
@@ -321,12 +337,19 @@ func (s *Surface) Resize(width, height int) {
 
 // UpdateSize updates the surface size from the current window dimensions.
 // Call this after the window becomes visible to ensure correct sizing.
+// Sets both contentsScale and drawableSize to match Retina backing.
 func (s *Surface) UpdateSize() {
 	if s == nil || s.window == nil || s.layer == nil {
 		return
 	}
 
-	// Get actual window size and update layer
+	// Update contentsScale in case scale factor changed (e.g., moved between monitors).
+	scale := s.window.BackingScaleFactor()
+	if scale > 0 {
+		s.layer.SetContentsScale(scale)
+	}
+
+	// Get physical pixel dimensions and update drawable size.
 	s.window.UpdateSize()
 	width, height := s.window.Size()
 	if width > 0 && height > 0 {
