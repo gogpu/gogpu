@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.11] - 2026-03-10
+
+### Changed
+
+- **Update wgpu v0.19.8 → v0.20.0** — enterprise-grade validation layer:
+  core validation (30+ WebGPU spec rules), 7 typed error types with `errors.As()`,
+  WebGPU deferred error pattern, HAL defense-in-depth.
+- **Update gputypes v0.2.0 → v0.3.0** — `TextureUsage.ContainsUnknownBits()`.
+
 ## [0.22.10] - 2026-03-10
 
 ### Fixed
