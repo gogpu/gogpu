@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-03-11
+
+### Fixed
+
+- **macOS Retina: CAMetalLayer frame/bounds not set** — the Metal layer was
+  created with zero-sized bounds (`CGRectZero`) and never given spatial dimensions.
+  In layer-hosting mode (`setWantsLayer` + `setLayer`), macOS does not automatically
+  manage the layer's geometry, so the drawable-to-screen mapping was undefined.
+  This caused circles to render as horizontally-stretched ellipses and content
+  to appear offset on Retina displays.
+  ([gg#171](https://github.com/gogpu/gg/issues/171))
+
+  Fix (following Skia and Gio patterns):
+  - Set `autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable`
+    so the layer auto-resizes with the view
+  - Set `contentsGravity = kCAGravityTopLeft` to prevent non-uniform stretching
+  - Explicitly set layer `frame` to match content view bounds before attaching
+  - Update layer frame in `Resize()` and `UpdateSize()` on window resize
+
 ## [0.23.0] - 2026-03-11
 
 ### Added

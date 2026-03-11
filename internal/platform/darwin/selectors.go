@@ -85,6 +85,9 @@ var selectors struct {
 	drain SEL
 
 	// CALayer / CAMetalLayer
+	setLayerFrame           SEL // CALayer setFrame: (distinct from NSWindow setFrame:display:)
+	setAutoresizingMask     SEL
+	setContentsGravity      SEL
 	setContentsScale        SEL
 	contentsScale           SEL
 	setDrawableSize         SEL
@@ -234,6 +237,9 @@ func initSelectors() {
 		selectors.drain = RegisterSelector("drain")
 
 		// CALayer / CAMetalLayer
+		selectors.setLayerFrame = RegisterSelector("setFrame:")
+		selectors.setAutoresizingMask = RegisterSelector("setAutoresizingMask:")
+		selectors.setContentsGravity = RegisterSelector("setContentsGravity:")
 		selectors.setContentsScale = RegisterSelector("setContentsScale:")
 		selectors.contentsScale = RegisterSelector("contentsScale")
 		selectors.setDrawableSize = RegisterSelector("setDrawableSize:")

@@ -128,6 +128,53 @@ func (l *MetalLayer) DrawableSize() (width, height int) {
 	return 0, 0
 }
 
+// SetFrame sets the layer's frame rectangle in the superlayer's coordinate space.
+// This must be called to give the layer spatial dimensions; without it, the layer
+// defaults to CGRectZero and content presentation is undefined on Retina displays.
+func (l *MetalLayer) SetFrame(rect NSRect) {
+	if l == nil || l.id.IsNil() {
+		return
+	}
+
+	l.id.SendRect(selectors.setLayerFrame, rect)
+}
+
+// SetAutoresizingMask sets the bitmask that controls how the layer resizes
+// when its superlayer's bounds change. Use kCALayerWidthSizable (2) |
+// kCALayerHeightSizable (16) = 18 for auto-resize with the view.
+func (l *MetalLayer) SetAutoresizingMask(mask uint) {
+	if l == nil || l.id.IsNil() {
+		return
+	}
+
+	l.id.SendUint(selectors.setAutoresizingMask, uint64(mask))
+}
+
+// SetContentsGravity sets how the layer's content is positioned within its bounds.
+// Use "topLeft" (kCAGravityTopLeft) to prevent stretching during resize.
+func (l *MetalLayer) SetContentsGravity(gravity string) {
+	if l == nil || l.id.IsNil() {
+		return
+	}
+
+	nsStr := NewNSString(gravity)
+	if nsStr == nil {
+		return
+	}
+	defer nsStr.Release()
+
+	l.id.SendPtr(selectors.setContentsGravity, nsStr.ID().Ptr())
+}
+
+// CALayer autoresizing mask constants.
+const (
+	// CALayerWidthSizable allows the layer to resize horizontally with its superlayer.
+	CALayerWidthSizable uint = 1 << 1 // 2
+
+	// CALayerHeightSizable allows the layer to resize vertically with its superlayer.
+	CALayerHeightSizable uint = 1 << 4 // 16
+)
+
 // SetFramebufferOnly sets whether textures are used only for rendering.
 // Setting this to true may improve performance.
 func (l *MetalLayer) SetFramebufferOnly(framebufferOnly bool) {
@@ -267,16 +314,21 @@ func NewSurface(window *Window) (*Surface, error) {
 		return nil, err
 	}
 
-	// Set default configuration
+	// Set default configuration.
 	layer.SetPixelFormat(MetalPixelFormatBGRA8UNorm)
 	layer.SetFramebufferOnly(true)
 	layer.SetMaximumDrawableCount(3) // Triple buffering
 
-	// Attach layer to window FIRST (before setting drawable size).
-	// This is the correct order for macOS - the layer must be attached
-	// to a view before setting drawable size, otherwise CAMetalLayer
-	// may report warnings about invalid dimensions.
-	window.SetMetalLayer(layer.ID())
+	// Set autoresizingMask so the layer auto-resizes with the view.
+	// Without this, the layer's bounds stay at CGRectZero in layer-hosting mode,
+	// causing broken presentation on Retina displays (circles appear as ellipses).
+	// Pattern from Skia (GaneshMetalWindowContext_mac.mm) and Gio (metal_macos.go).
+	layer.SetAutoresizingMask(CALayerWidthSizable | CALayerHeightSizable)
+
+	// Prevent content stretching during resize transitions.
+	// Default kCAGravityResize scales content non-uniformly when layer bounds
+	// change before drawableSize is updated.
+	layer.SetContentsGravity("topLeft")
 
 	// Set contentsScale to match Retina backing scale factor.
 	// Without this, CAMetalLayer defaults to 1.0 and the drawable
@@ -285,6 +337,20 @@ func NewSurface(window *Window) (*Surface, error) {
 	if scale > 0 {
 		layer.SetContentsScale(scale)
 	}
+
+	// Set layer frame to match the content view's bounds BEFORE attaching.
+	// In layer-hosting mode (setWantsLayer + setLayer), macOS does not
+	// automatically manage the layer's frame. Without this, the layer has
+	// zero-sized bounds and the drawable-to-screen mapping is broken.
+	window.mu.Lock()
+	viewBounds := window.contentView.GetRect(selectors.bounds)
+	window.mu.Unlock()
+	if viewBounds.Size.Width > 0 && viewBounds.Size.Height > 0 {
+		layer.SetFrame(viewBounds)
+	}
+
+	// Attach layer to window (setWantsLayer + setLayer).
+	window.SetMetalLayer(layer.ID())
 
 	// Set drawable size using physical pixel dimensions.
 	// Window.Size() returns logical points; FramebufferSize() returns physical pixels.
@@ -326,6 +392,14 @@ func (s *Surface) Resize(width, height int) {
 		if scale > 0 {
 			s.layer.SetContentsScale(scale)
 		}
+
+		// Update layer frame to match current view bounds.
+		s.window.mu.Lock()
+		viewBounds := s.window.contentView.GetRect(selectors.bounds)
+		s.window.mu.Unlock()
+		if viewBounds.Size.Width > 0 && viewBounds.Size.Height > 0 {
+			s.layer.SetFrame(viewBounds)
+		}
 	}
 
 	// Only set drawable size if dimensions are valid.
@@ -337,7 +411,7 @@ func (s *Surface) Resize(width, height int) {
 
 // UpdateSize updates the surface size from the current window dimensions.
 // Call this after the window becomes visible to ensure correct sizing.
-// Sets both contentsScale and drawableSize to match Retina backing.
+// Sets contentsScale, layer frame, and drawableSize to match Retina backing.
 func (s *Surface) UpdateSize() {
 	if s == nil || s.window == nil || s.layer == nil {
 		return
@@ -347,6 +421,14 @@ func (s *Surface) UpdateSize() {
 	scale := s.window.BackingScaleFactor()
 	if scale > 0 {
 		s.layer.SetContentsScale(scale)
+	}
+
+	// Update layer frame to match current view bounds.
+	s.window.mu.Lock()
+	viewBounds := s.window.contentView.GetRect(selectors.bounds)
+	s.window.mu.Unlock()
+	if viewBounds.Size.Width > 0 && viewBounds.Size.Height > 0 {
+		s.layer.SetFrame(viewBounds)
 	}
 
 	// Get physical pixel dimensions and update drawable size.
