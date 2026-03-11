@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.2] - 2026-03-11
+
+### Fixed
+
+- **macOS Retina: CAMetalLayer contentsScale not maintained across frames** —
+  in layer-hosting mode (`setWantsLayer` + `setLayer`), macOS does not manage
+  the layer and may reset `contentsScale` to 1.0 during layout passes. The
+  drawable-to-screen mapping then drifts, causing progressive stretching and
+  offset of rendered content on Retina displays. Now `contentsScale` is re-set
+  from `BackingScaleFactor()` before every `nextDrawable` call, matching Gio's
+  `displayLayer:` pattern and Skia's `resize()` approach.
+  ([gg#171](https://github.com/gogpu/gg/issues/171))
+
 ## [0.23.1] - 2026-03-11
 
 ### Fixed
