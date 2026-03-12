@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.3] - 2026-03-12
+
+### Fixed
+
+- **Wayland/Sway: SIGSEGV during Vulkan surface initialization** — the xdg_toplevel
+  C interface descriptor declared `Version=6` but `EventCount=2`, missing the
+  `configure_bounds` (v4) and `wm_capabilities` (v5) events. When Sway sent
+  `wm_capabilities` (event opcode 3), libwayland-client could not find the event
+  signature in the descriptor array, failed to deserialize the wire message, and
+  broke the roundtrip. This left the `wl_surface` in an unconfigured state, causing
+  `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` to crash with SIGSEGV (addr=0x18).
+  ([ui#45](https://github.com/gogpu/ui/issues/45))
+
+  Fix (following GLFW v3.3 pattern — declare all v6 events, handle selectively):
+  - Expanded `toplevelEvents` from 2 to 4 entries with correct wire signatures
+  - Added `configure_bounds` and `wm_capabilities` event handling in Pure Go dispatch
+  - Added `XdgToplevelBounds`, `XdgToplevelWmCapability*` types and public API
+  - Added `HasWmCapability()` for compositor feature detection
+
+### Added
+
+- **xdg-shell v4/v5 event support** — `configure_bounds` (recommended window bounds
+  from compositor) and `wm_capabilities` (compositor feature advertisement) events
+  are now properly declared in the C interface descriptor and handled in Pure Go
+  dispatch. Handlers: `SetConfigureBoundsHandler()`, `SetWmCapabilitiesHandler()`.
+  Accessors: `Bounds()`, `WmCapabilities()`, `HasWmCapability()`.
+
+### Changed
+
+- Updated `github.com/gogpu/wgpu` v0.20.0 → v0.20.2 (WSI validation)
+- Updated `golang.org/x/sys` v0.41.0 → v0.42.0
+
 ## [0.23.2] - 2026-03-11
 
 ### Fixed

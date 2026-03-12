@@ -108,6 +108,8 @@ func TestXdgToplevelEventOpcodes(t *testing.T) {
 	}{
 		{"configure", xdgToplevelEventConfigure, 0},
 		{"close", xdgToplevelEventClose, 1},
+		{"configure_bounds", xdgToplevelEventConfigureBounds, 2},
+		{"wm_capabilities", xdgToplevelEventWmCapabilities, 3},
 	}
 
 	for _, tt := range tests {
@@ -167,6 +169,28 @@ func TestXdgToplevelResizeEdgeConstants(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.edge != tt.expected {
 				t.Errorf("resize edge %s = %d, want %d", tt.name, tt.edge, tt.expected)
+			}
+		})
+	}
+}
+
+// TestXdgToplevelWmCapabilityConstants verifies wm_capabilities enum values match protocol spec (v5+).
+func TestXdgToplevelWmCapabilityConstants(t *testing.T) {
+	tests := []struct {
+		name     string
+		cap      uint32
+		expected uint32
+	}{
+		{"window_menu", XdgToplevelWmCapabilityWindowMenu, 1},
+		{"maximize", XdgToplevelWmCapabilityMaximize, 2},
+		{"fullscreen", XdgToplevelWmCapabilityFullscreen, 3},
+		{"minimize", XdgToplevelWmCapabilityMinimize, 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.cap != tt.expected {
+				t.Errorf("wm_capability %s = %d, want %d", tt.name, tt.cap, tt.expected)
 			}
 		})
 	}
@@ -1010,6 +1034,127 @@ func TestXdgToplevelCloseDispatch(t *testing.T) {
 
 	if !closeCalled {
 		t.Error("close handler was not called")
+	}
+}
+
+// TestXdgToplevelConfigureBoundsDispatch verifies handling of the configure_bounds event (v4+).
+func TestXdgToplevelConfigureBoundsDispatch(t *testing.T) {
+	surface := &WlSurface{id: ObjectID(10)}
+	xdgSurface := NewXdgSurface(nil, ObjectID(11), surface)
+	toplevel := NewXdgToplevel(nil, ObjectID(12), xdgSurface)
+
+	var handlerCalled bool
+	var gotWidth, gotHeight int32
+
+	toplevel.SetConfigureBoundsHandler(func(bounds *XdgToplevelBounds) {
+		handlerCalled = true
+		gotWidth = bounds.Width
+		gotHeight = bounds.Height
+	})
+
+	// Build configure_bounds event: width=1920, height=1048 (1080 minus panel)
+	builder := NewMessageBuilder()
+	builder.PutInt32(1920)
+	builder.PutInt32(1048)
+	msg := builder.BuildMessage(toplevel.id, xdgToplevelEventConfigureBounds)
+
+	err := toplevel.dispatch(msg)
+	if err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+
+	if !handlerCalled {
+		t.Error("configure_bounds handler was not called")
+	}
+	if gotWidth != 1920 || gotHeight != 1048 {
+		t.Errorf("configure_bounds = (%d, %d), want (1920, 1048)", gotWidth, gotHeight)
+	}
+
+	// Verify stored bounds
+	bounds := toplevel.Bounds()
+	if bounds.Width != 1920 || bounds.Height != 1048 {
+		t.Errorf("stored Bounds() = (%d, %d), want (1920, 1048)", bounds.Width, bounds.Height)
+	}
+}
+
+// TestXdgToplevelWmCapabilitiesDispatch verifies handling of the wm_capabilities event (v5+).
+func TestXdgToplevelWmCapabilitiesDispatch(t *testing.T) {
+	surface := &WlSurface{id: ObjectID(10)}
+	xdgSurface := NewXdgSurface(nil, ObjectID(11), surface)
+	toplevel := NewXdgToplevel(nil, ObjectID(12), xdgSurface)
+
+	var handlerCalled bool
+	var gotCaps []uint32
+
+	toplevel.SetWmCapabilitiesHandler(func(capabilities []uint32) {
+		handlerCalled = true
+		gotCaps = capabilities
+	})
+
+	// Build wm_capabilities event: window_menu, maximize, fullscreen, minimize
+	caps := []uint32{
+		XdgToplevelWmCapabilityWindowMenu,
+		XdgToplevelWmCapabilityMaximize,
+		XdgToplevelWmCapabilityFullscreen,
+		XdgToplevelWmCapabilityMinimize,
+	}
+	capsData := make([]byte, len(caps)*4)
+	for i, c := range caps {
+		binary.LittleEndian.PutUint32(capsData[i*4:], c)
+	}
+
+	builder := NewMessageBuilder()
+	builder.PutArray(capsData)
+	msg := builder.BuildMessage(toplevel.id, xdgToplevelEventWmCapabilities)
+
+	err := toplevel.dispatch(msg)
+	if err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+
+	if !handlerCalled {
+		t.Error("wm_capabilities handler was not called")
+	}
+	if len(gotCaps) != 4 {
+		t.Fatalf("got %d capabilities, want 4", len(gotCaps))
+	}
+	for i, c := range caps {
+		if gotCaps[i] != c {
+			t.Errorf("capability[%d] = %d, want %d", i, gotCaps[i], c)
+		}
+	}
+
+	// Verify HasWmCapability
+	if !toplevel.HasWmCapability(XdgToplevelWmCapabilityMaximize) {
+		t.Error("HasWmCapability(maximize) should be true")
+	}
+	if toplevel.HasWmCapability(99) {
+		t.Error("HasWmCapability(99) should be false")
+	}
+
+	// Verify stored capabilities
+	storedCaps := toplevel.WmCapabilities()
+	if len(storedCaps) != 4 {
+		t.Errorf("stored WmCapabilities() len = %d, want 4", len(storedCaps))
+	}
+}
+
+// TestXdgToplevelUnknownEventIgnored verifies that unknown event opcodes are silently ignored.
+func TestXdgToplevelUnknownEventIgnored(t *testing.T) {
+	surface := &WlSurface{id: ObjectID(10)}
+	xdgSurface := NewXdgSurface(nil, ObjectID(11), surface)
+	toplevel := NewXdgToplevel(nil, ObjectID(12), xdgSurface)
+
+	// Hypothetical future event opcode 99
+	msg := &Message{
+		ObjectID: toplevel.id,
+		Opcode:   99,
+		Args:     nil,
+	}
+
+	err := toplevel.dispatch(msg)
+	if err != nil {
+		t.Errorf("unknown event should not return error, got: %v", err)
 	}
 }
 

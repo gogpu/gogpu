@@ -76,7 +76,7 @@ var xdg struct {
 	// Event arrays (indexed by event opcode)
 	wmBaseEvents   [1]cWlMessage // ping
 	surfaceEvents  [1]cWlMessage // configure
-	toplevelEvents [2]cWlMessage // configure, close
+	toplevelEvents [4]cWlMessage // configure, close, configure_bounds (v4), wm_capabilities (v5)
 
 	// Decoration event arrays
 	toplevelDecorEvents [1]cWlMessage // configure
@@ -136,9 +136,11 @@ func initXdgInterfaces() {
 		xdg.toplevelMethods[2] = cWlMessage{cstr("set_title\x00"), cstr("s\x00"), nt}
 		xdg.toplevelMethods[3] = cWlMessage{cstr("set_app_id\x00"), cstr("s\x00"), nt}
 
-		// xdg_toplevel events
+		// xdg_toplevel events (all 4 events per xdg-shell v6 protocol spec)
 		xdg.toplevelEvents[0] = cWlMessage{cstr("configure\x00"), cstr("iia\x00"), nt}
 		xdg.toplevelEvents[1] = cWlMessage{cstr("close\x00"), cstr("\x00"), nt}
+		xdg.toplevelEvents[2] = cWlMessage{cstr("configure_bounds\x00"), cstr("4ii\x00"), nt} // since v4
+		xdg.toplevelEvents[3] = cWlMessage{cstr("wm_capabilities\x00"), cstr("5a\x00"), nt}   // since v5
 
 		// xdg_toplevel interface
 		xdg.toplevel = cWlInterface{
@@ -146,7 +148,7 @@ func initXdgInterfaces() {
 			Version:     6,
 			MethodCount: 4,
 			Methods:     uintptr(unsafe.Pointer(&xdg.toplevelMethods[0])),
-			EventCount:  2,
+			EventCount:  4,
 			Events:      uintptr(unsafe.Pointer(&xdg.toplevelEvents[0])),
 		}
 

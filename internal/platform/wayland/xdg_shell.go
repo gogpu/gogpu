@@ -55,8 +55,10 @@ const (
 
 // xdg_toplevel event opcodes
 const (
-	xdgToplevelEventConfigure Opcode = 0 // configure(width: int, height: int, states: array)
-	xdgToplevelEventClose     Opcode = 1 // close()
+	xdgToplevelEventConfigure       Opcode = 0 // configure(width: int, height: int, states: array)
+	xdgToplevelEventClose           Opcode = 1 // close()
+	xdgToplevelEventConfigureBounds Opcode = 2 // configure_bounds(width: int, height: int) [v4]
+	xdgToplevelEventWmCapabilities  Opcode = 3 // wm_capabilities(capabilities: array) [v5]
 )
 
 // XdgToplevel state values.
@@ -71,6 +73,25 @@ const (
 	XdgToplevelStateTiledTop    uint32 = 7 // Window is tiled on top edge
 	XdgToplevelStateTiledBottom uint32 = 8 // Window is tiled on bottom edge
 )
+
+// XdgToplevelWmCapability values (v5+).
+// Advertised by the compositor via wm_capabilities event to indicate
+// which window management features are supported.
+const (
+	XdgToplevelWmCapabilityWindowMenu uint32 = 1 // show_window_menu is available
+	XdgToplevelWmCapabilityMaximize   uint32 = 2 // set_maximized / unset_maximized are available
+	XdgToplevelWmCapabilityFullscreen uint32 = 3 // set_fullscreen / unset_fullscreen are available
+	XdgToplevelWmCapabilityMinimize   uint32 = 4 // set_minimized is available
+)
+
+// XdgToplevelBounds holds the recommended window geometry bounds
+// from a configure_bounds event (v4+).
+type XdgToplevelBounds struct {
+	// Width is the recommended maximum width (0 means unknown).
+	Width int32
+	// Height is the recommended maximum height (0 means unknown).
+	Height int32
+}
 
 // xdg_positioner opcodes (requests)
 const (
@@ -436,12 +457,16 @@ type XdgToplevel struct {
 	mu sync.Mutex
 
 	// Event handlers
-	onConfigure func(config *XdgToplevelConfig)
-	onClose     func()
+	onConfigure       func(config *XdgToplevelConfig)
+	onClose           func()
+	onConfigureBounds func(bounds *XdgToplevelBounds)
+	onWmCapabilities  func(capabilities []uint32)
 
 	// Current state
-	title string
-	appID string
+	title        string
+	appID        string
+	bounds       XdgToplevelBounds // last configure_bounds (v4+)
+	capabilities []uint32          // last wm_capabilities (v5+)
 }
 
 // NewXdgToplevel creates an XdgToplevel from an object ID.
@@ -696,6 +721,10 @@ func (t *XdgToplevel) dispatch(msg *Message) error {
 		return t.handleConfigure(msg)
 	case xdgToplevelEventClose:
 		return t.handleClose(msg)
+	case xdgToplevelEventConfigureBounds:
+		return t.handleConfigureBounds(msg)
+	case xdgToplevelEventWmCapabilities:
+		return t.handleWmCapabilities(msg)
 	default:
 		return nil
 	}
@@ -757,6 +786,113 @@ func (t *XdgToplevel) handleClose(msg *Message) error {
 	}
 
 	return nil
+}
+
+// handleConfigureBounds handles the xdg_toplevel.configure_bounds event (v4+).
+// The compositor sends this before configure to recommend maximum window bounds,
+// typically the usable screen area excluding panels and shell components.
+func (t *XdgToplevel) handleConfigureBounds(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+
+	width, err := decoder.Int32()
+	if err != nil {
+		return fmt.Errorf("wayland: xdg_toplevel.configure_bounds: failed to decode width: %w", err)
+	}
+
+	height, err := decoder.Int32()
+	if err != nil {
+		return fmt.Errorf("wayland: xdg_toplevel.configure_bounds: failed to decode height: %w", err)
+	}
+
+	bounds := &XdgToplevelBounds{
+		Width:  width,
+		Height: height,
+	}
+
+	t.mu.Lock()
+	t.bounds = *bounds
+	handler := t.onConfigureBounds
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler(bounds)
+	}
+
+	return nil
+}
+
+// handleWmCapabilities handles the xdg_toplevel.wm_capabilities event (v5+).
+// The compositor sends this to advertise which window management features
+// are supported (maximize, fullscreen, minimize, window menu).
+func (t *XdgToplevel) handleWmCapabilities(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+
+	capsData, err := decoder.Array()
+	if err != nil {
+		return fmt.Errorf("wayland: xdg_toplevel.wm_capabilities: failed to decode capabilities: %w", err)
+	}
+
+	caps := make([]uint32, len(capsData)/4)
+	for i := range caps {
+		caps[i] = binary.LittleEndian.Uint32(capsData[i*4:])
+	}
+
+	t.mu.Lock()
+	t.capabilities = caps
+	handler := t.onWmCapabilities
+	t.mu.Unlock()
+
+	if handler != nil {
+		handler(caps)
+	}
+
+	return nil
+}
+
+// SetConfigureBoundsHandler sets a callback for the configure_bounds event (v4+).
+// The handler receives the recommended maximum window bounds from the compositor.
+func (t *XdgToplevel) SetConfigureBoundsHandler(handler func(bounds *XdgToplevelBounds)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onConfigureBounds = handler
+}
+
+// SetWmCapabilitiesHandler sets a callback for the wm_capabilities event (v5+).
+// The handler receives the list of supported window management capabilities.
+func (t *XdgToplevel) SetWmCapabilitiesHandler(handler func(capabilities []uint32)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onWmCapabilities = handler
+}
+
+// Bounds returns the last configure_bounds values (v4+).
+// Returns zero values if no configure_bounds event has been received.
+func (t *XdgToplevel) Bounds() XdgToplevelBounds {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.bounds
+}
+
+// WmCapabilities returns the last wm_capabilities values (v5+).
+// Returns nil if no wm_capabilities event has been received.
+func (t *XdgToplevel) WmCapabilities() []uint32 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.capabilities
+}
+
+// HasWmCapability returns true if the compositor supports the given capability (v5+).
+func (t *XdgToplevel) HasWmCapability(capability uint32) bool {
+	t.mu.Lock()
+	caps := t.capabilities
+	t.mu.Unlock()
+
+	for _, c := range caps {
+		if c == capability {
+			return true
+		}
+	}
+	return false
 }
 
 // XdgPopup represents the xdg_popup interface.
