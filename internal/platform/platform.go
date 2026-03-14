@@ -32,6 +32,23 @@ const (
 	EventResize
 )
 
+// PrepareFrameResult contains per-frame surface state from the platform layer.
+// Returned by PrepareFrame to inform the renderer about scale/size changes.
+type PrepareFrameResult struct {
+	// ScaleChanged indicates the DPI scale factor changed since last frame.
+	// When true, the renderer should reconfigure the surface with new physical dimensions.
+	ScaleChanged bool
+
+	// ScaleFactor is the current DPI scale factor (1.0 = standard, 2.0 = Retina/HiDPI).
+	ScaleFactor float64
+
+	// PhysicalWidth is the current surface width in physical device pixels.
+	PhysicalWidth uint32
+
+	// PhysicalHeight is the current surface height in physical device pixels.
+	PhysicalHeight uint32
+}
+
 // Platform abstracts OS-specific windowing.
 type Platform interface {
 	// Init creates the window.
@@ -107,6 +124,15 @@ type Platform interface {
 	// ScaleFactor returns the DPI scale factor.
 	// 1.0 = standard (96 DPI on Windows), 2.0 = HiDPI.
 	ScaleFactor() float64
+
+	// PrepareFrame updates platform-specific surface state before frame acquisition.
+	// Called by the renderer before each Surface.AcquireTexture().
+	//
+	// On macOS: refreshes CAMetalLayer.contentsScale from BackingScaleFactor.
+	// On Windows: returns current DPI state (future: apply pending WM_DPICHANGED).
+	// On Wayland: returns current scale (future: apply pending wl_output.scale).
+	// On X11: returns static DPI state (no dynamic scaling).
+	PrepareFrame() PrepareFrameResult
 
 	// ClipboardRead reads text from system clipboard.
 	ClipboardRead() (string, error)

@@ -42,13 +42,21 @@ func (m *mockPlatform) WaitEvents()                                             
 func (m *mockPlatform) WakeUp()                                                         {}
 func (m *mockPlatform) Destroy()                                                        {}
 func (m *mockPlatform) ScaleFactor() float64                                            { return m.scaleFactor }
-func (m *mockPlatform) ClipboardRead() (string, error)                                  { return m.clipboardText, nil }
-func (m *mockPlatform) ClipboardWrite(text string) error                                { m.clipboardText = text; return nil }
-func (m *mockPlatform) SetCursor(cursorID int)                                          { m.cursorID = cursorID }
-func (m *mockPlatform) DarkMode() bool                                                  { return m.darkMode }
-func (m *mockPlatform) ReduceMotion() bool                                              { return m.reduceMotion }
-func (m *mockPlatform) HighContrast() bool                                              { return m.highContrast }
-func (m *mockPlatform) FontScale() float32                                              { return m.fontScale }
+func (m *mockPlatform) PrepareFrame() platform.PrepareFrameResult {
+	w, h := m.PhysicalSize()
+	return platform.PrepareFrameResult{
+		ScaleFactor:    m.scaleFactor,
+		PhysicalWidth:  uint32(w),
+		PhysicalHeight: uint32(h),
+	}
+}
+func (m *mockPlatform) ClipboardRead() (string, error)   { return m.clipboardText, nil }
+func (m *mockPlatform) ClipboardWrite(text string) error { m.clipboardText = text; return nil }
+func (m *mockPlatform) SetCursor(cursorID int)           { m.cursorID = cursorID }
+func (m *mockPlatform) DarkMode() bool                   { return m.darkMode }
+func (m *mockPlatform) ReduceMotion() bool               { return m.reduceMotion }
+func (m *mockPlatform) HighContrast() bool               { return m.highContrast }
+func (m *mockPlatform) FontScale() float32               { return m.fontScale }
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {

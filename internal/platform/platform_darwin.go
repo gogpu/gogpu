@@ -34,6 +34,9 @@ type darwinPlatform struct {
 
 	// Timestamp reference for event timing
 	startTime time.Time
+
+	// Last known scale factor for change detection in PrepareFrame.
+	lastScale float64
 }
 
 func newPlatform() Platform {
@@ -867,6 +870,39 @@ func (p *darwinPlatform) ScaleFactor() float64 {
 		return 1.0
 	}
 	return p.window.BackingScaleFactor()
+}
+
+// PrepareFrame updates macOS surface state before frame acquisition.
+// Refreshes CAMetalLayer.contentsScale from the window's BackingScaleFactor
+// every frame. In layer-hosting mode, macOS does not manage the layer and may
+// reset contentsScale during layout passes. This matches Gio's approach of
+// re-setting contentsScale in displayLayer: every frame.
+func (p *darwinPlatform) PrepareFrame() PrepareFrameResult {
+	if p.window == nil {
+		return PrepareFrameResult{ScaleFactor: 1.0}
+	}
+
+	scale := p.window.BackingScaleFactor()
+	physW, physH := p.window.FramebufferSize()
+
+	// Detect scale change (skip first frame where lastScale is zero).
+	scaleChanged := false
+	if p.lastScale != 0 && p.lastScale != scale {
+		scaleChanged = true
+	}
+	p.lastScale = scale
+
+	// Re-set contentsScale every frame (defense-in-depth for Retina drift).
+	if p.surface != nil && scale > 0 {
+		p.surface.Layer().SetContentsScale(scale)
+	}
+
+	return PrepareFrameResult{
+		ScaleChanged:   scaleChanged,
+		ScaleFactor:    scale,
+		PhysicalWidth:  uint32(physW),
+		PhysicalHeight: uint32(physH),
+	}
 }
 
 // ClipboardRead reads text from the system clipboard.

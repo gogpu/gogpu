@@ -600,6 +600,17 @@ func (p *windowsPlatform) ScaleFactor() float64 {
 	return p.scaleFactor()
 }
 
+// PrepareFrame returns current DPI state for the Windows platform.
+// Future: apply pending WM_DPICHANGED here.
+func (p *windowsPlatform) PrepareFrame() PrepareFrameResult {
+	w, h := p.PhysicalSize()
+	return PrepareFrameResult{
+		ScaleFactor:    p.scaleFactor(),
+		PhysicalWidth:  uint32(w),
+		PhysicalHeight: uint32(h),
+	}
+}
+
 // ClipboardRead reads text from the system clipboard.
 func (p *windowsPlatform) ClipboardRead() (string, error) {
 	ret, _, _ := procOpenClipboard.Call(uintptr(p.hwnd))

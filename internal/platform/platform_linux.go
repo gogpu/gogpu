@@ -1562,6 +1562,17 @@ func drainPipe(fd int) {
 // TODO: Implement using wl_output scale and fractional_scale_v1.
 func (p *waylandPlatform) ScaleFactor() float64 { return 1.0 }
 
+// PrepareFrame returns current scale/size state for the Wayland platform.
+// Future: apply pending wl_output.scale here.
+func (p *waylandPlatform) PrepareFrame() PrepareFrameResult {
+	w, h := p.PhysicalSize()
+	return PrepareFrameResult{
+		ScaleFactor:    p.ScaleFactor(),
+		PhysicalWidth:  uint32(w),
+		PhysicalHeight: uint32(h),
+	}
+}
+
 // ClipboardRead reads text from the system clipboard.
 // TODO: Implement using wl_data_device and wl_data_offer.
 func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
@@ -1595,6 +1606,17 @@ func (p *waylandPlatform) FontScale() float32 { return 1.0 }
 // ScaleFactor returns the DPI scale factor.
 // TODO: Implement using Xft.dpi or XRandR.
 func (p *x11Platform) ScaleFactor() float64 { return 1.0 }
+
+// PrepareFrame returns current scale/size state for the X11 platform.
+// X11 has static DPI — no per-frame updates needed.
+func (p *x11Platform) PrepareFrame() PrepareFrameResult {
+	w, h := p.PhysicalSize()
+	return PrepareFrameResult{
+		ScaleFactor:    p.ScaleFactor(),
+		PhysicalWidth:  uint32(w),
+		PhysicalHeight: uint32(h),
+	}
+}
 
 // ClipboardRead reads text from the system clipboard.
 // TODO: Implement using X11 selections (XA_CLIPBOARD).
