@@ -4,7 +4,20 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu"
 )
+
+// newTestWgpuDevice creates a *wgpu.Device wrapping a mock HAL device for testing.
+func newTestWgpuDevice(t *testing.T, mockDev *mockFenceDevice) (*wgpu.Device, error) {
+	t.Helper()
+	return wgpu.NewDeviceFromHAL(
+		mockDev,
+		&mockQueue{},
+		gputypes.Features(0),
+		gputypes.DefaultLimits(),
+		"test",
+	)
+}
 
 // newTestContext creates a Context with a mock Renderer for testing.
 // Only sets up the fields needed for read-only wrapper methods.
@@ -167,17 +180,24 @@ func TestContextCheckDeviceHealthNoDevice(t *testing.T) {
 }
 
 func TestContextCheckDeviceHealthNonChecker(t *testing.T) {
-	// Device that does NOT implement healthChecker interface
+	// Device that does NOT implement healthChecker interface.
+	// Create a wgpu.Device wrapping a mock HAL device (which doesn't implement healthChecker).
+	mockDev := &mockFenceDevice{}
+	wgpuDevice, err := newTestWgpuDevice(t, mockDev)
+	if err != nil {
+		t.Fatalf("newTestWgpuDevice() error = %v", err)
+	}
+
 	r := &Renderer{
 		width:       800,
 		height:      600,
 		format:      gputypes.TextureFormatBGRA8Unorm,
 		backendName: "test",
-		device:      &mockFenceDevice{}, // does not implement healthChecker
+		device:      wgpuDevice,
 	}
 	ctx := newContext(r, 1.0)
 
-	err := ctx.CheckDeviceHealth()
+	err = ctx.CheckDeviceHealth()
 	if err != nil {
 		t.Errorf("CheckDeviceHealth() = %v, want nil (device without health check)", err)
 	}

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Renderer migrated from HAL direct to wgpu public API** — The renderer now uses
+  `*wgpu.Device`, `*wgpu.Surface`, `*wgpu.Queue` instead of `hal.Device`, `hal.Surface`,
+  `hal.Queue` directly. All GPU operations go through the wgpu public API → wgpu/core →
+  wgpu/hal chain. This enables proper surface lifecycle management, PrepareFrame hooks
+  for HiDPI/DPI handling, and validation at the core layer. Both native (Pure Go) and
+  Rust (FFI) backends continue to work through the unified `gpu.Backend` interface.
+
+- **FencePool migrated to wgpu types** — Uses `*wgpu.Device`, `*wgpu.Fence`,
+  `*wgpu.CommandBuffer` instead of hal types. Non-blocking async submission through
+  `Queue.SubmitWithFence()`.
+
+- **Texture migrated to wgpu types** — Uses `*wgpu.Texture`, `*wgpu.TextureView`,
+  `*wgpu.Sampler`. Resource cleanup through `Release()` pattern instead of
+  `device.Destroy*()`.
+
+- **Native backend creates wgpu objects** — `gpu/backend/native/` now creates
+  `*wgpu.Instance` → `*wgpu.Adapter` → `*wgpu.Device` instead of hal objects directly.
+
+- **Context.SurfaceView() returns `*wgpu.TextureView`** — Was `any`, now typed.
+
 ## [0.23.3] - 2026-03-12
 
 ### Fixed

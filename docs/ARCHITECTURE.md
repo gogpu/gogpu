@@ -14,12 +14,12 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
               ┌─────────────────┴────────────────┐
               │                                  │
        ┌──────▼──────┐                    ┌──────▼──────┐
-       │   gogpu     │  ◄─HalProvider──►  │     gg      │
+       │   gogpu     │  ◄─DeviceProvider─►│     gg      │
        │  Framework  │  (device sharing)  │ 2D Graphics │
        └──────┬──────┘                    └──────┬──────┘
               │                                  │
-              │ Uses hal.Device/Queue            │
-              │ directly (Go interfaces)         │
+              │ Uses wgpu.Device/Queue           │
+              │ (wgpu public API)                │
               │                    ┌─────────────┼──────────────┐
               │                    │             │              │
               │             ┌──────▼────┐  ┌─────▼─────┐  ┌─────▼─────┐
@@ -31,8 +31,15 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
               └──────────────────────────────────┘
                               │
                        ┌──────▼──────┐
-                       │    wgpu     │
-                       │   hal.*     │
+                       │  wgpu API   │  ◄── public API (typed wrappers)
+                       └──────┬──────┘
+                              │
+                       ┌──────▼──────┐
+                       │  wgpu/core  │  ◄── validation, state machine, lifecycle
+                       └──────┬──────┘
+                              │
+                       ┌──────▼──────┐
+                       │  wgpu/hal   │  ◄── GPU API interfaces (advanced users)
                        └──────┬──────┘
                               │
            ┌──────────┬───────┼───────┬──────────┐
@@ -80,11 +87,11 @@ See the internal research document GPUCONTEXT_GPUTYPES_DECISION.md for full rati
 
 ### gogpu Backends
 
-The renderer uses `hal.Device`/`hal.Queue` Go interfaces directly — no handle-based abstraction layer.
+The renderer uses `*wgpu.Device`/`*wgpu.Queue` through the wgpu public API. All GPU operations go through the three-layer stack: wgpu API → wgpu/core → wgpu/hal.
 
 | Backend      | Description                | Build Tag      | GPU Required |
 |--------------|----------------------------|----------------|--------------|
-| **Native**   | Pure Go via gogpu/wgpu HAL | (default)      | Yes          |
+| **Native**   | Pure Go via wgpu API → core → hal | (default)      | Yes          |
 | **Rust**     | wgpu-native via FFI        | `-tags rust`   | Yes          |
 
 ### gg: CPU Core + GPU Accelerator (ARCH-008)
@@ -97,8 +104,8 @@ gg uses a fundamentally different model: **CPU is the core, GPU is an optional a
 | **internal/gpu/** | GPU three-tier rendering: SDF shapes (Tier 1), convex fast-path (Tier 2a), stencil-then-cover (Tier 2b) | Yes |
 | **gpu/** | Public opt-in registration (`import _ "gg/gpu"`) | Yes |
 
-GPU accelerator uses `hal.Queue` interface — works with any wgpu backend (Vulkan, Metal, DX12).
-When gogpu is present, gg receives the shared device via `gpucontext.HalProvider`.
+GPU accelerator uses wgpu API — works with any backend (Vulkan, Metal, DX12).
+When gogpu is present, gg receives the shared device via `gpucontext.DeviceProvider`.
 
 ### wgpu HAL Backends
 

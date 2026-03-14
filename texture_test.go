@@ -51,32 +51,24 @@ func TestTextureMetadata(t *testing.T) {
 	}
 }
 
-func TestTextureHandles(t *testing.T) {
-	// Create a texture with mock HAL interfaces
-	tex := &Texture{
-		texture: &mockTexture{},
-		view:    &mockTextureView{},
-		sampler: &mockSampler{},
-	}
+func TestTextureHandlesNil(t *testing.T) {
+	// Nil GPU resources — Handle/View/Sampler return nil
+	tex := &Texture{}
 
-	if tex.Handle() == nil {
-		t.Error("Handle() returned nil, want non-nil")
+	if tex.Handle() != nil {
+		t.Error("Handle() should be nil for empty texture")
 	}
-	if tex.View() == nil {
-		t.Error("View() returned nil, want non-nil")
+	if tex.View() != nil {
+		t.Error("View() should be nil for empty texture")
 	}
-	if tex.Sampler() == nil {
-		t.Error("Sampler() returned nil, want non-nil")
+	if tex.Sampler() != nil {
+		t.Error("Sampler() should be nil for empty texture")
 	}
 }
 
 func TestTextureDestroyWithNilRenderer(t *testing.T) {
-	// Destroy should be safe to call with nil renderer
-	tex := &Texture{
-		texture: &mockTexture{},
-		view:    &mockTextureView{},
-		sampler: &mockSampler{},
-	}
+	// Destroy should be safe to call with nil renderer and nil resources
+	tex := &Texture{}
 
 	// Should not panic
 	tex.Destroy()
@@ -85,9 +77,6 @@ func TestTextureDestroyWithNilRenderer(t *testing.T) {
 func TestTextureDestroyWithNilDevice(t *testing.T) {
 	// Destroy should be safe to call with nil device
 	tex := &Texture{
-		texture:  &mockTexture{},
-		view:     &mockTextureView{},
-		sampler:  &mockSampler{},
 		renderer: &Renderer{device: nil},
 	}
 
@@ -375,13 +364,12 @@ func TestUpdateDataDestroyedTexture(t *testing.T) {
 }
 
 func TestUpdateDataInvalidSize(t *testing.T) {
-	// Create a minimal mock texture (without actual GPU)
+	// Create a minimal texture (without actual GPU)
 	tex := &Texture{
-		width:   10,
-		height:  10,
-		format:  gputypes.TextureFormatRGBA8Unorm,
-		texture: &mockTexture{}, // non-nil to pass destroyed check
-		// Note: renderer is nil so it will fail at destroyed check first
+		width:  10,
+		height: 10,
+		format: gputypes.TextureFormatRGBA8Unorm,
+		// texture is nil, renderer is nil — will fail destroyed check
 	}
 
 	// UpdateData with nil renderer should return destroyed error first

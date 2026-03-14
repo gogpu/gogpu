@@ -5,18 +5,19 @@ package native
 import (
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/metal"
-	"github.com/gogpu/wgpu/hal/software"
+
+	// Importing HAL backends triggers their init() registration with hal.RegisterBackend().
+	_ "github.com/gogpu/wgpu/hal/metal"
+	_ "github.com/gogpu/wgpu/hal/software"
 )
 
-// NewHalBackend returns the HAL backend for macOS.
-// Defaults to Metal, supports software fallback.
-func NewHalBackend(api types.GraphicsAPI) (hal.Backend, string, gputypes.Backend) {
+// BackendInfo returns the backend display name and variant for the given graphics API.
+// The actual HAL backends are registered via init() imports above.
+func BackendInfo(api types.GraphicsAPI) (name string, variant gputypes.Backend) {
 	switch api {
 	case types.GraphicsAPISoftware:
-		return software.API{}, "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
+		return "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
 	default: // Metal (default on macOS)
-		return metal.Backend{}, "Pure Go (gogpu/wgpu/metal)", gputypes.BackendMetal
+		return "Pure Go (gogpu/wgpu/metal)", gputypes.BackendMetal
 	}
 }

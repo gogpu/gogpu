@@ -58,7 +58,7 @@ func TestDrawTextureScaledNegativeDimensions(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: &mockTexture{},
+		texture: newMockWgpuTexture(),
 		width:   64,
 		height:  64,
 	}
@@ -110,7 +110,7 @@ func TestDrawTextureExNegativeDimensions(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: &mockTexture{},
+		texture: newMockWgpuTexture(),
 		width:   64,
 		height:  64,
 	}
@@ -147,7 +147,7 @@ func TestDrawTextureExValidTexture(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: &mockTexture{},
+		texture: newMockWgpuTexture(),
 		width:   64,
 		height:  64,
 	}
@@ -171,7 +171,7 @@ func TestDrawTextureExDefaultValues(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: &mockTexture{},
+		texture: newMockWgpuTexture(),
 		width:   64,
 		height:  32,
 	}
@@ -214,7 +214,7 @@ func TestValidateTexture(t *testing.T) {
 		{
 			name: "valid texture",
 			tex: &Texture{
-				texture: &mockTexture{},
+				texture: newMockWgpuTexture(),
 				width:   64,
 				height:  64,
 			},
@@ -266,7 +266,7 @@ func TestDrawTextureExAlphaClamping(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
 
 	tex := &Texture{
-		texture: &mockTexture{},
+		texture: newMockWgpuTexture(),
 		width:   64,
 		height:  64,
 	}

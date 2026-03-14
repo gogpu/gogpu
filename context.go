@@ -3,6 +3,7 @@ package gogpu
 import (
 	"github.com/gogpu/gogpu/gmath"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu"
 )
 
 // Context provides drawing operations for a single frame.
@@ -130,7 +131,7 @@ func (c *Context) Renderer() *Renderer {
 //
 // Use this with ggcanvas.RenderDirect for zero-copy GPU rendering,
 // bypassing the GPU→CPU→GPU readback path.
-func (c *Context) SurfaceView() any {
+func (c *Context) SurfaceView() *wgpu.TextureView {
 	return c.renderer.currentView
 }
 
@@ -141,7 +142,12 @@ func (c *Context) CheckDeviceHealth() error {
 	type healthChecker interface {
 		CheckHealth(label string) error
 	}
-	if hc, ok := c.renderer.device.(healthChecker); ok {
+	// Check the underlying HAL device for health (e.g., DX12 DEVICE_REMOVED).
+	if c.renderer.device == nil {
+		return nil
+	}
+	halDev := c.renderer.device.HalDevice()
+	if hc, ok := halDev.(healthChecker); ok {
 		return hc.CheckHealth("Context.CheckDeviceHealth")
 	}
 	return nil // Backend doesn't support health check

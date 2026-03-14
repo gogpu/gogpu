@@ -1,19 +1,18 @@
 package gogpu
 
+import (
+	"github.com/gogpu/wgpu"
+)
+
 // mockTexture implements hal.Texture for testing.
 type mockTexture struct{}
 
 func (m *mockTexture) Destroy()              {}
 func (m *mockTexture) NativeHandle() uintptr { return 42 }
 
-// mockTextureView implements hal.TextureView for testing.
-type mockTextureView struct{}
-
-func (m *mockTextureView) Destroy()              {}
-func (m *mockTextureView) NativeHandle() uintptr { return 43 }
-
-// mockSampler implements hal.Sampler for testing.
-type mockSampler struct{}
-
-func (m *mockSampler) Destroy()              {}
-func (m *mockSampler) NativeHandle() uintptr { return 44 }
+// newMockWgpuTexture creates a *wgpu.Texture wrapping a mock HAL texture for testing.
+// The returned texture is non-nil (passes the "is destroyed" check) but
+// should not be used for actual GPU operations.
+func newMockWgpuTexture() *wgpu.Texture {
+	return wgpu.NewTextureFromHAL(&mockTexture{}, nil, 0)
+}

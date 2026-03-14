@@ -5,26 +5,29 @@ package native
 import (
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/dx12"
-	"github.com/gogpu/wgpu/hal/gles"
-	"github.com/gogpu/wgpu/hal/software"
-	"github.com/gogpu/wgpu/hal/vulkan"
+
+	// Importing HAL backends triggers their init() registration with hal.RegisterBackend().
+	// This is required for wgpu.CreateInstance() to discover available backends.
+	_ "github.com/gogpu/wgpu/hal/dx12"
+	_ "github.com/gogpu/wgpu/hal/gles"
+	_ "github.com/gogpu/wgpu/hal/software"
+	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
-// NewHalBackend returns the HAL backend for Windows.
-// Supports runtime selection between Vulkan (default), DX12, and GLES.
-func NewHalBackend(api types.GraphicsAPI) (hal.Backend, string, gputypes.Backend) {
+// BackendInfo returns the backend display name and variant for the given graphics API.
+// The actual HAL backends are registered via init() imports above.
+// The renderer uses wgpu.CreateInstance() with the returned variant mask.
+func BackendInfo(api types.GraphicsAPI) (name string, variant gputypes.Backend) {
 	switch api {
 	case types.GraphicsAPIDX12:
-		return dx12.Backend{}, "Pure Go (gogpu/wgpu/dx12)", gputypes.BackendDX12
+		return "Pure Go (gogpu/wgpu/dx12)", gputypes.BackendDX12
 	case types.GraphicsAPIGLES:
-		return gles.Backend{}, "Pure Go (gogpu/wgpu/gles)", gputypes.BackendGL
+		return "Pure Go (gogpu/wgpu/gles)", gputypes.BackendGL
 	case types.GraphicsAPIVulkan:
-		return vulkan.Backend{}, "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
+		return "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
 	case types.GraphicsAPISoftware:
-		return software.API{}, "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
+		return "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
 	default: // Auto — prefer Vulkan on Windows (proven stable)
-		return vulkan.Backend{}, "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
+		return "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
 	}
 }

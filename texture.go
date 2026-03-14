@@ -12,17 +12,16 @@ import (
 	"runtime"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // textureCleanupHandle holds the data needed to destroy a texture's GPU
-// resources from a runtime.AddCleanup callback. The handle stores interface
-// values (not pointers to the Texture) so the cleanup can run after the
-// Texture is garbage collected.
+// resources from a runtime.AddCleanup callback. The handle stores wgpu
+// pointers so the cleanup can run after the Texture is garbage collected.
 type textureCleanupHandle struct {
-	texture  hal.Texture
-	view     hal.TextureView
-	sampler  hal.Sampler
+	texture  *wgpu.Texture
+	view     *wgpu.TextureView
+	sampler  *wgpu.Sampler
 	renderer *Renderer
 }
 
@@ -44,10 +43,10 @@ var (
 // Texture represents a GPU texture resource with its associated view and sampler.
 // It provides a high-level interface for working with textures in GoGPU.
 type Texture struct {
-	// GPU resources (HAL interfaces)
-	texture hal.Texture
-	view    hal.TextureView
-	sampler hal.Sampler
+	// GPU resources (wgpu public API types)
+	texture *wgpu.Texture
+	view    *wgpu.TextureView
+	sampler *wgpu.Sampler
 
 	// Metadata
 	width         int
@@ -84,8 +83,6 @@ func (t *Texture) Premultiplied() bool {
 }
 
 // SetPremultiplied marks the texture as containing premultiplied alpha data.
-// This controls the shader behavior: premultiplied textures scale all channels
-// uniformly, while straight alpha textures are premultiplied in the shader.
 func (t *Texture) SetPremultiplied(premultiplied bool) {
 	t.premultiplied = premultiplied
 }
@@ -95,19 +92,19 @@ func (t *Texture) Format() gputypes.TextureFormat {
 	return t.format
 }
 
-// Handle returns the underlying HAL texture.
+// Handle returns the underlying wgpu texture.
 // For advanced use cases that need direct GPU access.
-func (t *Texture) Handle() hal.Texture {
+func (t *Texture) Handle() *wgpu.Texture {
 	return t.texture
 }
 
 // View returns the texture view.
-func (t *Texture) View() hal.TextureView {
+func (t *Texture) View() *wgpu.TextureView {
 	return t.view
 }
 
 // Sampler returns the sampler.
-func (t *Texture) Sampler() hal.Sampler {
+func (t *Texture) Sampler() *wgpu.Sampler {
 	return t.sampler
 }
 
@@ -161,7 +158,6 @@ func bytesPerPixelForFormat(format gputypes.TextureFormat) int {
 		gputypes.TextureFormatRGBA32Float:
 		return 16
 	default:
-		// Unknown format, return 0 (caller should handle)
 		return 0
 	}
 }
@@ -169,7 +165,7 @@ func bytesPerPixelForFormat(format gputypes.TextureFormat) int {
 // Destroy releases all GPU resources associated with this texture.
 // After calling Destroy, the texture should not be used.
 func (t *Texture) Destroy() {
-	// Stop the GC cleanup — we are destroying explicitly.
+	// Stop the GC cleanup -- we are destroying explicitly.
 	t.cleanup.Stop()
 
 	if t.renderer == nil || t.renderer.device == nil {
@@ -177,25 +173,23 @@ func (t *Texture) Destroy() {
 	}
 
 	// Evict from bind group cache before destroying the view.
-	// The cached bind group references this texture's view and sampler,
-	// so it must be destroyed before we destroy those resources.
 	if t.view != nil && t.renderer.texBindGroupCache != nil {
 		if bg, ok := t.renderer.texBindGroupCache[t.view]; ok {
-			t.renderer.device.DestroyBindGroup(bg)
+			bg.Release()
 			delete(t.renderer.texBindGroupCache, t.view)
 		}
 	}
 
 	if t.sampler != nil {
-		t.renderer.device.DestroySampler(t.sampler)
+		t.sampler.Release()
 		t.sampler = nil
 	}
 	if t.view != nil {
-		t.renderer.device.DestroyTextureView(t.view)
+		t.view.Release()
 		t.view = nil
 	}
 	if t.texture != nil {
-		t.renderer.device.DestroyTexture(t.texture)
+		t.texture.Release()
 		t.texture = nil
 	}
 }
@@ -218,8 +212,6 @@ type TextureOptions struct {
 	AddressModeV gputypes.AddressMode
 
 	// Premultiplied indicates the texture data uses premultiplied alpha.
-	// Controls shader behavior: premultiplied data is scaled uniformly,
-	// straight alpha data is premultiplied in the shader before blending.
 	Premultiplied bool
 }
 
@@ -273,10 +265,7 @@ func (r *Renderer) NewTextureFromImage(img image.Image) (*Texture, error) {
 }
 
 // NewTextureFromImageWithOptions creates a texture from a Go image.Image with custom options.
-// The resulting texture is always marked as premultiplied because Go's image.RGBA
-// stores premultiplied alpha data, and draw.Draw preserves this convention.
 func (r *Renderer) NewTextureFromImageWithOptions(img image.Image, opts TextureOptions) (*Texture, error) {
-	// Convert to RGBA if needed
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
@@ -289,14 +278,11 @@ func (r *Renderer) NewTextureFromImageWithOptions(img image.Image, opts TextureO
 		draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 	}
 
-	// Go's image.RGBA stores premultiplied alpha by specification.
-	// draw.Draw with draw.Src converts any source format to premultiplied.
 	opts.Premultiplied = true
 	return r.NewTextureFromRGBAWithOptions(width, height, rgba.Pix, opts)
 }
 
 // NewTextureFromRGBA creates a texture from raw RGBA pixel data.
-// The data must be width * height * 4 bytes (RGBA8).
 func (r *Renderer) NewTextureFromRGBA(width, height int, data []byte) (*Texture, error) {
 	return r.NewTextureFromRGBAWithOptions(width, height, data, DefaultTextureOptions())
 }
@@ -308,11 +294,10 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		return nil, fmt.Errorf("gogpu: invalid data size: expected %d bytes, got %d", expectedSize, len(data))
 	}
 
-	// Create GPU texture via HAL device
-	// Note: width/height validated above (expectedSize check ensures they are positive)
-	texture, err := r.device.CreateTexture(&hal.TextureDescriptor{
+	// Create GPU texture via wgpu Device
+	texture, err := r.device.CreateTexture(&wgpu.TextureDescriptor{
 		Label: opts.Label,
-		Size: hal.Extent3D{
+		Size: wgpu.Extent3D{
 			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
@@ -327,39 +312,39 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		return nil, fmt.Errorf("gogpu: failed to create texture: %w", err)
 	}
 
-	// Upload pixel data via HAL queue
-	if err := r.queue.WriteTexture(
-		&hal.ImageCopyTexture{
+	// Upload pixel data via wgpu Queue
+	if err := r.device.Queue().WriteTexture(
+		&wgpu.ImageCopyTexture{
 			Texture:  texture,
 			MipLevel: 0,
-			Origin:   hal.Origin3D{X: 0, Y: 0, Z: 0},
+			Origin:   wgpu.Origin3D{X: 0, Y: 0, Z: 0},
 			Aspect:   gputypes.TextureAspectAll,
 		},
 		data,
-		&hal.ImageDataLayout{
+		&wgpu.ImageDataLayout{
 			Offset:       0,
 			BytesPerRow:  uint32(width * 4), //nolint:gosec // G115: width validated positive above
 			RowsPerImage: uint32(height),    //nolint:gosec // G115: height validated positive above
 		},
-		&hal.Extent3D{
+		&wgpu.Extent3D{
 			Width:              uint32(width),  //nolint:gosec // G115: width validated positive above
 			Height:             uint32(height), //nolint:gosec // G115: height validated positive above
 			DepthOrArrayLayers: 1,
 		},
 	); err != nil {
-		r.device.DestroyTexture(texture)
+		texture.Release()
 		return nil, fmt.Errorf("gogpu: failed to upload texture data: %w", err)
 	}
 
-	// Create texture view via HAL device
+	// Create texture view
 	view, err := r.device.CreateTextureView(texture, nil)
 	if err != nil {
-		r.device.DestroyTexture(texture)
+		texture.Release()
 		return nil, fmt.Errorf("gogpu: failed to create texture view: %w", err)
 	}
 
-	// Create sampler via HAL device
-	sampler, err := r.device.CreateSampler(&hal.SamplerDescriptor{
+	// Create sampler
+	sampler, err := r.device.CreateSampler(&wgpu.SamplerDescriptor{
 		Label:        opts.Label,
 		AddressModeU: opts.AddressModeU,
 		AddressModeV: opts.AddressModeV,
@@ -371,8 +356,8 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		LodMaxClamp:  32,
 	})
 	if err != nil {
-		r.device.DestroyTextureView(view)
-		r.device.DestroyTexture(texture)
+		view.Release()
+		texture.Release()
 		return nil, fmt.Errorf("gogpu: failed to create sampler: %w", err)
 	}
 
@@ -389,8 +374,6 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 
 	// Safety net: if the texture is garbage collected without Destroy(),
 	// enqueue deferred destruction on the render thread.
-	// runtime.AddCleanup runs on a GC goroutine, so we cannot call GPU
-	// APIs directly — instead we enqueue a closure for DrainDeferredDestroys.
 	handle := textureCleanupHandle{
 		texture:  texture,
 		view:     view,
@@ -400,13 +383,13 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 	tex.cleanup = runtime.AddCleanup(tex, func(h textureCleanupHandle) {
 		h.renderer.EnqueueDeferredDestroy(func() {
 			if h.sampler != nil {
-				h.renderer.device.DestroySampler(h.sampler)
+				h.sampler.Release()
 			}
 			if h.view != nil {
-				h.renderer.device.DestroyTextureView(h.view)
+				h.view.Release()
 			}
 			if h.texture != nil {
-				h.renderer.device.DestroyTexture(h.texture)
+				h.texture.Release()
 			}
 		})
 	}, handle)
@@ -415,12 +398,6 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 }
 
 // UpdateData uploads new pixel data to the entire texture.
-// Data must be exactly width * height * bytesPerPixel bytes.
-// This is more efficient than recreating the texture for dynamic content
-// such as gg canvas rendering or video frames.
-//
-// Returns ErrTextureUpdateDestroyed if the texture has been destroyed.
-// Returns ErrInvalidDataSize if the data size doesn't match texture dimensions.
 func (t *Texture) UpdateData(data []byte) error {
 	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed
@@ -437,20 +414,20 @@ func (t *Texture) UpdateData(data []byte) error {
 			ErrInvalidDataSize, expectedSize, t.width, t.height, bpp, len(data))
 	}
 
-	if err := t.renderer.queue.WriteTexture(
-		&hal.ImageCopyTexture{
+	if err := t.renderer.device.Queue().WriteTexture(
+		&wgpu.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
-			Origin:   hal.Origin3D{X: 0, Y: 0, Z: 0},
+			Origin:   wgpu.Origin3D{X: 0, Y: 0, Z: 0},
 			Aspect:   gputypes.TextureAspectAll,
 		},
 		data,
-		&hal.ImageDataLayout{
+		&wgpu.ImageDataLayout{
 			Offset:       0,
 			BytesPerRow:  uint32(t.width * bpp), //nolint:gosec // G115: width validated in constructor
 			RowsPerImage: uint32(t.height),      //nolint:gosec // G115: height validated in constructor
 		},
-		&hal.Extent3D{
+		&wgpu.Extent3D{
 			Width:              uint32(t.width),  //nolint:gosec // G115: width validated in constructor
 			Height:             uint32(t.height), //nolint:gosec // G115: height validated in constructor
 			DepthOrArrayLayers: 1,
@@ -463,32 +440,16 @@ func (t *Texture) UpdateData(data []byte) error {
 }
 
 // UpdateRegion uploads pixel data to a rectangular region of the texture.
-// This is optimal for partial updates (dirty rectangles) where only a portion
-// of the texture content has changed.
-//
-// Parameters:
-//   - x, y: Top-left corner of the region in pixels (0,0 is top-left of texture)
-//   - w, h: Width and height of the region in pixels
-//   - data: Pixel data, must be exactly w * h * bytesPerPixel bytes
-//
-// The region must be within texture bounds.
-//
-// Returns ErrTextureUpdateDestroyed if the texture has been destroyed.
-// Returns ErrInvalidRegion if x, y are negative or w, h are not positive.
-// Returns ErrRegionOutOfBounds if the region exceeds texture dimensions.
-// Returns ErrInvalidDataSize if the data size doesn't match region dimensions.
 func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed
 	}
 
-	// Validate region parameters
 	if x < 0 || y < 0 || w <= 0 || h <= 0 {
 		return fmt.Errorf("%w: x=%d, y=%d, w=%d, h=%d (x,y must be non-negative; w,h must be positive)",
 			ErrInvalidRegion, x, y, w, h)
 	}
 
-	// Validate region bounds
 	if x+w > t.width || y+h > t.height {
 		return fmt.Errorf("%w: region (%d,%d)+(%d,%d) exceeds texture size (%d,%d)",
 			ErrRegionOutOfBounds, x, y, w, h, t.width, t.height)
@@ -499,18 +460,17 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 		return fmt.Errorf("%w: unsupported texture format", ErrInvalidDataSize)
 	}
 
-	// Validate data size
 	expectedSize := w * h * bpp
 	if len(data) != expectedSize {
 		return fmt.Errorf("%w: expected %d bytes (%dx%dx%d), got %d",
 			ErrInvalidDataSize, expectedSize, w, h, bpp, len(data))
 	}
 
-	if err := t.renderer.queue.WriteTexture(
-		&hal.ImageCopyTexture{
+	if err := t.renderer.device.Queue().WriteTexture(
+		&wgpu.ImageCopyTexture{
 			Texture:  t.texture,
 			MipLevel: 0,
-			Origin: hal.Origin3D{
+			Origin: wgpu.Origin3D{
 				X: uint32(x), //nolint:gosec // G115: x validated non-negative above
 				Y: uint32(y), //nolint:gosec // G115: y validated non-negative above
 				Z: 0,
@@ -518,12 +478,12 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 			Aspect: gputypes.TextureAspectAll,
 		},
 		data,
-		&hal.ImageDataLayout{
+		&wgpu.ImageDataLayout{
 			Offset:       0,
 			BytesPerRow:  uint32(w * bpp), //nolint:gosec // G115: w validated positive above
 			RowsPerImage: uint32(h),       //nolint:gosec // G115: h validated positive above
 		},
-		&hal.Extent3D{
+		&wgpu.Extent3D{
 			Width:              uint32(w), //nolint:gosec // G115: w validated positive above
 			Height:             uint32(h), //nolint:gosec // G115: h validated positive above
 			DepthOrArrayLayers: 1,

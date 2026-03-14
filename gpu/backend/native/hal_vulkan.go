@@ -5,23 +5,24 @@ package native
 import (
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/gles"
-	"github.com/gogpu/wgpu/hal/software"
-	"github.com/gogpu/wgpu/hal/vulkan"
+
+	// Importing HAL backends triggers their init() registration with hal.RegisterBackend().
+	_ "github.com/gogpu/wgpu/hal/gles"
+	_ "github.com/gogpu/wgpu/hal/software"
+	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
-// NewHalBackend returns the HAL backend for Linux.
-// Supports runtime selection between Vulkan (default) and GLES.
-func NewHalBackend(api types.GraphicsAPI) (hal.Backend, string, gputypes.Backend) {
+// BackendInfo returns the backend display name and variant for the given graphics API.
+// The actual HAL backends are registered via init() imports above.
+func BackendInfo(api types.GraphicsAPI) (name string, variant gputypes.Backend) {
 	switch api {
 	case types.GraphicsAPIGLES:
-		return gles.Backend{}, "Pure Go (gogpu/wgpu/gles)", gputypes.BackendGL
+		return "Pure Go (gogpu/wgpu/gles)", gputypes.BackendGL
 	case types.GraphicsAPIVulkan:
-		return vulkan.Backend{}, "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
+		return "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
 	case types.GraphicsAPISoftware:
-		return software.API{}, "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
+		return "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
 	default: // Auto — prefer Vulkan on Linux
-		return vulkan.Backend{}, "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
+		return "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
 	}
 }
