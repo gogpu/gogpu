@@ -439,36 +439,6 @@ func (s *Surface) UpdateSize() {
 	}
 }
 
-// AcquireDrawable acquires the next drawable for rendering.
-//
-// Before acquiring, contentsScale is re-set from the window's backing scale
-// factor. In layer-hosting mode (setWantsLayer + setLayer), macOS does not
-// manage the layer and may reset contentsScale during layout passes. Without
-// refreshing it every frame, the drawable-to-screen mapping drifts on Retina
-// displays. This matches Gio's approach of re-setting contentsScale in
-// displayLayer: every frame.
-func (s *Surface) AcquireDrawable() (*MetalDrawable, error) {
-	if s == nil || s.layer == nil {
-		return nil, ErrMetalLayerCreationFailed
-	}
-
-	// Re-set contentsScale before acquiring drawable to prevent Retina drift.
-	// Reference: Gio metal_macos.go (re-sets every frame),
-	// Skia GaneshMetalWindowContext_mac.mm (sets alongside drawableSize).
-	if s.window != nil {
-		if scale := s.window.BackingScaleFactor(); scale > 0 {
-			s.layer.SetContentsScale(scale)
-		}
-	}
-
-	drawableID := s.layer.NextDrawable()
-	if drawableID.IsNil() {
-		return nil, ErrNoDrawableAvailable
-	}
-
-	return NewMetalDrawableFromID(drawableID), nil
-}
-
 // Destroy releases surface resources.
 func (s *Surface) Destroy() {
 	if s == nil {
