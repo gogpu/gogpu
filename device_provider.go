@@ -3,7 +3,6 @@ package gogpu
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
 )
 
 // DeviceProvider provides access to GPU resources for external libraries.
@@ -18,13 +17,6 @@ type DeviceProvider interface {
 
 	// Queue returns the wgpu GPU command queue.
 	Queue() *wgpu.Queue
-
-	// HalDevice returns the underlying HAL device for direct GPU access.
-	// This is needed by gg's GPU accelerator which operates at the HAL level.
-	HalDevice() hal.Device
-
-	// HalQueue returns the underlying HAL queue for direct GPU access.
-	HalQueue() hal.Queue
 
 	// SurfaceFormat returns the preferred texture format for rendering.
 	SurfaceFormat() gputypes.TextureFormat
@@ -46,22 +38,6 @@ func (p *rendererDeviceProvider) Queue() *wgpu.Queue {
 		return nil
 	}
 	return p.renderer.device.Queue()
-}
-
-// HalDevice returns the underlying HAL device.
-func (p *rendererDeviceProvider) HalDevice() hal.Device {
-	if p.renderer.device == nil {
-		return nil
-	}
-	return p.renderer.device.HalDevice()
-}
-
-// HalQueue returns the underlying HAL queue.
-func (p *rendererDeviceProvider) HalQueue() hal.Queue {
-	if p.renderer.device == nil {
-		return nil
-	}
-	return p.renderer.device.HalQueue()
 }
 
 // SurfaceFormat returns the preferred texture format.

@@ -10,26 +10,35 @@ import (
 // gpuContextAdapter bridges gogpu to gpucontext.DeviceProvider interface.
 // This allows external libraries (like gg) to use gogpu's GPU resources
 // through the standard gpucontext interface.
+//
+// Device() and Queue() return the actual *wgpu.Device and *wgpu.Queue
+// wrapped as gpucontext.Device and gpucontext.Queue. Consumers type-assert
+// to the concrete wgpu types when they need the full API:
+//
+//	dev := provider.Device().(*wgpu.Device)
+//	halDevice := dev.HalDevice()
 type gpuContextAdapter struct {
 	renderer *Renderer
 	tracker  *resourceTracker
 	app      *App
 }
 
-// Device returns the GPU device implementing gpucontext.Device.
+// Device returns the underlying *wgpu.Device as gpucontext.Device.
+// Consumers should type-assert to *wgpu.Device for full API access.
 func (a *gpuContextAdapter) Device() gpucontext.Device {
-	if a.renderer == nil {
+	if a.renderer == nil || a.renderer.device == nil {
 		return nil
 	}
-	return &deviceAdapter{renderer: a.renderer}
+	return a.renderer.device
 }
 
-// Queue returns the GPU command queue implementing gpucontext.Queue.
+// Queue returns the underlying *wgpu.Queue as gpucontext.Queue.
+// Consumers should type-assert to *wgpu.Queue for full API access.
 func (a *gpuContextAdapter) Queue() gpucontext.Queue {
-	if a.renderer == nil {
+	if a.renderer == nil || a.renderer.device == nil {
 		return nil
 	}
-	return &queueAdapter{renderer: a.renderer}
+	return a.renderer.device.Queue()
 }
 
 // SurfaceFormat returns the preferred texture format for the surface.
@@ -40,32 +49,13 @@ func (a *gpuContextAdapter) SurfaceFormat() gputypes.TextureFormat {
 	return mapTextureFormat(a.renderer.format)
 }
 
-// Adapter returns the GPU adapter implementing gpucontext.Adapter.
+// Adapter returns the GPU adapter as gpucontext.Adapter.
+// Consumers should type-assert to *wgpu.Adapter for full API access.
 func (a *gpuContextAdapter) Adapter() gpucontext.Adapter {
-	if a.renderer == nil {
+	if a.renderer == nil || a.renderer.adapter == nil {
 		return nil
 	}
-	return &adapterAdapter{renderer: a.renderer}
-}
-
-// HalDevice returns the HAL device for direct GPU access.
-// Implements gpucontext.HalProvider.
-func (a *gpuContextAdapter) HalDevice() any {
-	if a.renderer == nil || a.renderer.device == nil {
-		return nil
-	}
-	// Access the underlying HAL device through the wgpu Device wrapper.
-	return a.renderer.device.HalDevice()
-}
-
-// HalQueue returns the HAL queue for direct GPU access.
-// Implements gpucontext.HalProvider.
-func (a *gpuContextAdapter) HalQueue() any {
-	if a.renderer == nil || a.renderer.device == nil {
-		return nil
-	}
-	// Access the underlying HAL queue through the wgpu Device wrapper.
-	return a.renderer.device.HalQueue()
+	return a.renderer.adapter
 }
 
 // Size returns the current window size in logical points (DIP).
@@ -111,45 +101,8 @@ func (a *gpuContextAdapter) UntrackResource(c io.Closer) {
 // Ensure gpuContextAdapter implements gpucontext.DeviceProvider.
 var _ gpucontext.DeviceProvider = (*gpuContextAdapter)(nil)
 
-// Ensure gpuContextAdapter implements gpucontext.HalProvider.
-var _ gpucontext.HalProvider = (*gpuContextAdapter)(nil)
-
 // Ensure gpuContextAdapter implements gpucontext.WindowProvider.
 var _ gpucontext.WindowProvider = (*gpuContextAdapter)(nil)
-
-// deviceAdapter wraps gogpu renderer to implement gpucontext.Device.
-type deviceAdapter struct {
-	renderer *Renderer
-}
-
-// Poll processes pending GPU operations.
-func (d *deviceAdapter) Poll(wait bool) {
-	_ = wait
-}
-
-// Destroy releases device resources.
-func (d *deviceAdapter) Destroy() {
-	// Device lifecycle is managed by Renderer.
-}
-
-// Ensure deviceAdapter implements gpucontext.Device.
-var _ gpucontext.Device = (*deviceAdapter)(nil)
-
-// queueAdapter wraps gogpu renderer to implement gpucontext.Queue.
-type queueAdapter struct {
-	renderer *Renderer
-}
-
-// Ensure queueAdapter implements gpucontext.Queue.
-var _ gpucontext.Queue = (*queueAdapter)(nil)
-
-// adapterAdapter wraps gogpu renderer to implement gpucontext.Adapter.
-type adapterAdapter struct {
-	renderer *Renderer
-}
-
-// Ensure adapterAdapter implements gpucontext.Adapter.
-var _ gpucontext.Adapter = (*adapterAdapter)(nil)
 
 // mapTextureFormat converts gogpu TextureFormat to gputypes TextureFormat.
 func mapTextureFormat(format gputypes.TextureFormat) gputypes.TextureFormat {
