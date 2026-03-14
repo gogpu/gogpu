@@ -352,6 +352,19 @@ func (r *Renderer) BeginFrame() bool {
 	// on the render thread where GPU operations are safe.
 	r.DrainDeferredDestroys()
 
+	// Before acquiring surface texture, let platform update surface state
+	// (e.g., CAMetalLayer.contentsScale on macOS for HiDPI/multi-monitor).
+	if r.platform != nil {
+		result := r.platform.PrepareFrame()
+		if result.ScaleChanged && result.PhysicalWidth > 0 && result.PhysicalHeight > 0 {
+			// Scale changed (window moved between monitors with different DPI).
+			// Reconfigure surface with new physical dimensions.
+			r.width = result.PhysicalWidth
+			r.height = result.PhysicalHeight
+			_ = r.configureSurface()
+		}
+	}
+
 	// Acquire the next surface texture via wgpu public API.
 	surfaceTexture, _, err := r.surface.GetCurrentTexture()
 	if err != nil {
