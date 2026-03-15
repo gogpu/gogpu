@@ -751,7 +751,8 @@ func (q *rustQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) e
 	if !ok || rb.buf == nil {
 		return fmt.Errorf("rust backend: invalid buffer for WriteBuffer")
 	}
-	return q.q.WriteBuffer(rb.buf, offset, data)
+	q.q.WriteBuffer(rb.buf, offset, data)
+	return nil
 }
 
 // ReadBuffer reads data from a GPU buffer.
@@ -819,7 +820,8 @@ func (q *rustQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout 
 		DepthOrArrayLayers: size.DepthOrArrayLayers,
 	}
 
-	return q.q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
+	q.q.WriteTexture(wgpuDst, data, wgpuLayout, wgpuSize)
+	return nil
 }
 
 // Present presents a surface texture to the screen.

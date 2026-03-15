@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-03-15
+
 ### Added
 
 - **Platform: SetCharCallback for Unicode text input** — New `Platform.SetCharCallback(func(rune))`
@@ -40,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*wgpu.Instance` → `*wgpu.Adapter` → `*wgpu.Device` instead of hal objects directly.
 
 - **Context.SurfaceView() returns `*wgpu.TextureView`** — Was `any`, now typed.
+
+### Fixed
+
+- **Rust backend: WriteBuffer/WriteTexture return type** — go-webgpu changed
+  these methods to void return. Adapted wrapper to match.
+
+### Dependencies
+
+- wgpu v0.20.2 → v0.21.0 (three-layer public API, proper type definitions)
+- gpucontext v0.9.0 → v0.10.0 (typed interfaces, HalProvider removed)
+- naga v0.14.6 → v0.14.7 (MSL binding index fix)
 
 ## [0.23.3] - 2026-03-12
 

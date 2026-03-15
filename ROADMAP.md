@@ -25,23 +25,28 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.22.1
+## Current State: v0.23.3+
 
 ✅ **Production-ready** with full feature set:
-- Dual backend (Rust/Pure Go) — **Rust backend now cross-platform** (Windows, macOS, Linux)
+- Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
+- **Three-layer wgpu API** — renderer uses `*wgpu.Device`/`*wgpu.Queue` (not HAL direct)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
+- **Unicode text input** — SetCharCallback with UTF-16 surrogate pairs (Windows)
 - **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan/Wayland), macOS (Metal)
 - **Software backend** — always available, Windows screen presentation via GDI
 - Structured logging via log/slog
-- HAL-direct architecture (no handle maps)
+- **PrepareFrame** platform hook for HiDPI/DPI handling
 - **X11 multi-touch** via XInput2 pure Go wire protocol
 
-**New in v0.22.1:**
-- Fix Vulkan rounded rectangle pixel corruption — wgpu v0.18.1 (buffer-to-image copy row stride fix)
+**New in v0.24.0 (pending):**
+- Renderer migrated from HAL direct to wgpu public API
+- SetCharCallback for Unicode text input (#138)
+- PrepareFrame platform architecture for macOS Retina
+- wgpu v0.21.0, gpucontext v0.10.0, naga v0.14.7
 
 **New in v0.22.0:**
 - X11 multi-touch input via XInput2 — pure Go wire protocol (XIQueryVersion 2.2, touch events → PointerEvent)
