@@ -863,6 +863,7 @@ func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
 
 	p.mu.Lock()
 	p.modifiers = mods
+	keymap := p.keymap
 	p.mu.Unlock()
 
 	// X11 keycodes are evdev keycodes offset by 8
@@ -872,6 +873,29 @@ func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
 	}
 
 	p.dispatchKeyEvent(key, mods, pressed)
+
+	// Dispatch character input on key press only.
+	// Skip when Ctrl/Alt/Super are held — those are shortcuts, not text input.
+	if pressed && keymap != nil &&
+		mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
+
+		shift := mods&gpucontext.ModShift != 0
+		capsLock := mods&gpucontext.ModCapsLock != 0
+		keysym := keymap.KeycodeToKeysym(keycode, shift, capsLock)
+		str := KeysymToString(keysym)
+		if len(str) > 0 {
+			p.callbackMu.RLock()
+			cb := p.charCallback
+			p.callbackMu.RUnlock()
+			if cb != nil {
+				for _, r := range str {
+					if r >= 32 && r != 127 {
+						cb(r)
+					}
+				}
+			}
+		}
+	}
 }
 
 // x11KeycodeToKey converts an X11 keycode to a gpucontext.Key.

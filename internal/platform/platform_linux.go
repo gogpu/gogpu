@@ -941,6 +941,21 @@ func (p *waylandPlatform) setupKeyboardHandlers() {
 		pressed := event.State == wayland.KeyStatePressed
 
 		p.dispatchKeyEvent(key, mods, pressed)
+
+		// Dispatch character input on key press only.
+		// Skip when Ctrl/Alt/Super are held — those are shortcuts, not text input.
+		if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
+			shift := mods&gpucontext.ModShift != 0
+			capsLock := mods&gpucontext.ModCapsLock != 0
+			if r := evdevKeycodeToRune(event.Key, shift, capsLock); r != 0 {
+				p.callbackMu.RLock()
+				cb := p.charCallback
+				p.callbackMu.RUnlock()
+				if cb != nil {
+					cb(r)
+				}
+			}
+		}
 	})
 
 	// Handle modifier events to update modifier state
@@ -1319,6 +1334,295 @@ func evdevToKey(keycode uint32) gpucontext.Key {
 	}
 
 	return gpucontext.KeyUnknown
+}
+
+// evdevKeycodeToRune converts a Linux evdev keycode to a printable rune.
+// Assumes US QWERTY layout. Returns 0 for non-printable keys.
+// This is a basic fallback; full Unicode support requires libxkbcommon.
+//
+//nolint:cyclop,maintidx // keycode-to-char mapping is inherently a large switch
+func evdevKeycodeToRune(keycode uint32, shift, capsLock bool) rune {
+	// Letters: apply shift XOR capsLock for case
+	upper := shift != capsLock
+	switch keycode {
+	case 30: // A
+		if upper {
+			return 'A'
+		}
+		return 'a'
+	case 48: // B
+		if upper {
+			return 'B'
+		}
+		return 'b'
+	case 46: // C
+		if upper {
+			return 'C'
+		}
+		return 'c'
+	case 32: // D
+		if upper {
+			return 'D'
+		}
+		return 'd'
+	case 18: // E
+		if upper {
+			return 'E'
+		}
+		return 'e'
+	case 33: // F
+		if upper {
+			return 'F'
+		}
+		return 'f'
+	case 34: // G
+		if upper {
+			return 'G'
+		}
+		return 'g'
+	case 35: // H
+		if upper {
+			return 'H'
+		}
+		return 'h'
+	case 23: // I
+		if upper {
+			return 'I'
+		}
+		return 'i'
+	case 36: // J
+		if upper {
+			return 'J'
+		}
+		return 'j'
+	case 37: // K
+		if upper {
+			return 'K'
+		}
+		return 'k'
+	case 38: // L
+		if upper {
+			return 'L'
+		}
+		return 'l'
+	case 50: // M
+		if upper {
+			return 'M'
+		}
+		return 'm'
+	case 49: // N
+		if upper {
+			return 'N'
+		}
+		return 'n'
+	case 24: // O
+		if upper {
+			return 'O'
+		}
+		return 'o'
+	case 25: // P
+		if upper {
+			return 'P'
+		}
+		return 'p'
+	case 16: // Q
+		if upper {
+			return 'Q'
+		}
+		return 'q'
+	case 19: // R
+		if upper {
+			return 'R'
+		}
+		return 'r'
+	case 31: // S
+		if upper {
+			return 'S'
+		}
+		return 's'
+	case 20: // T
+		if upper {
+			return 'T'
+		}
+		return 't'
+	case 22: // U
+		if upper {
+			return 'U'
+		}
+		return 'u'
+	case 47: // V
+		if upper {
+			return 'V'
+		}
+		return 'v'
+	case 17: // W
+		if upper {
+			return 'W'
+		}
+		return 'w'
+	case 45: // X
+		if upper {
+			return 'X'
+		}
+		return 'x'
+	case 21: // Y
+		if upper {
+			return 'Y'
+		}
+		return 'y'
+	case 44: // Z
+		if upper {
+			return 'Z'
+		}
+		return 'z'
+	}
+
+	// Numbers and symbols: shift changes the character
+	switch keycode {
+	case 2: // 1
+		if shift {
+			return '!'
+		}
+		return '1'
+	case 3: // 2
+		if shift {
+			return '@'
+		}
+		return '2'
+	case 4: // 3
+		if shift {
+			return '#'
+		}
+		return '3'
+	case 5: // 4
+		if shift {
+			return '$'
+		}
+		return '4'
+	case 6: // 5
+		if shift {
+			return '%'
+		}
+		return '5'
+	case 7: // 6
+		if shift {
+			return '^'
+		}
+		return '6'
+	case 8: // 7
+		if shift {
+			return '&'
+		}
+		return '7'
+	case 9: // 8
+		if shift {
+			return '*'
+		}
+		return '8'
+	case 10: // 9
+		if shift {
+			return '('
+		}
+		return '9'
+	case 11: // 0
+		if shift {
+			return ')'
+		}
+		return '0'
+
+	// Punctuation
+	case 12: // Minus
+		if shift {
+			return '_'
+		}
+		return '-'
+	case 13: // Equal
+		if shift {
+			return '+'
+		}
+		return '='
+	case 26: // Left bracket
+		if shift {
+			return '{'
+		}
+		return '['
+	case 27: // Right bracket
+		if shift {
+			return '}'
+		}
+		return ']'
+	case 43: // Backslash
+		if shift {
+			return '|'
+		}
+		return '\\'
+	case 39: // Semicolon
+		if shift {
+			return ':'
+		}
+		return ';'
+	case 40: // Apostrophe
+		if shift {
+			return '"'
+		}
+		return '\''
+	case 41: // Grave
+		if shift {
+			return '~'
+		}
+		return '`'
+	case 51: // Comma
+		if shift {
+			return '<'
+		}
+		return ','
+	case 52: // Period
+		if shift {
+			return '>'
+		}
+		return '.'
+	case 53: // Slash
+		if shift {
+			return '?'
+		}
+		return '/'
+	case 57: // Space
+		return ' '
+
+	// Numpad (when NumLock is on, these produce digits)
+	case 71: // KP7
+		return '7'
+	case 72: // KP8
+		return '8'
+	case 73: // KP9
+		return '9'
+	case 75: // KP4
+		return '4'
+	case 76: // KP5
+		return '5'
+	case 77: // KP6
+		return '6'
+	case 79: // KP1
+		return '1'
+	case 80: // KP2
+		return '2'
+	case 81: // KP3
+		return '3'
+	case 82: // KP0
+		return '0'
+	case 83: // KP Decimal
+		return '.'
+	case 98: // KP Slash
+		return '/'
+	case 55: // KP Asterisk
+		return '*'
+	case 74: // KP Minus
+		return '-'
+	case 78: // KP Plus
+		return '+'
+	}
+
+	return 0
 }
 
 // PollEvents processes pending Wayland events.
