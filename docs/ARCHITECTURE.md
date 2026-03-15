@@ -455,12 +455,12 @@ Platform Layer          InputState               Game Loop
 
 ### Platform Implementation
 
-| Platform | Pointer Events | Keyboard | Scroll |
-|----------|---------------|----------|--------|
-| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_MOUSEWHEEL |
-| Linux (Wayland) | wl_pointer | wl_keyboard | wl_pointer.axis |
-| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | Button 4-7 |
-| macOS    | NSEvent mouse | NSEvent key | NSEvent scroll |
+| Platform | Pointer Events | Keyboard | Text Input | Scroll |
+|----------|---------------|----------|------------|--------|
+| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates) | WM_MOUSEWHEEL |
+| Linux (Wayland) | wl_pointer | wl_keyboard | TODO: xkb_state_key_get_utf8 | wl_pointer.axis |
+| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | TODO: xkb_state_key_get_utf8 | Button 4-7 |
+| macOS    | NSEvent mouse | NSEvent key | NSEvent characters (UTF-8) | NSEvent scroll |
 
 ## Renderer Pipeline
 

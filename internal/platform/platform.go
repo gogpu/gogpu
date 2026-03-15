@@ -94,6 +94,11 @@ type Platform interface {
 	// The callback receives the key, modifiers, and whether the key was pressed (true) or released (false).
 	SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool))
 
+	// SetCharCallback registers a callback for Unicode character input.
+	// Called when the OS translates a key press into a Unicode character,
+	// supporting IME, compose sequences, and all keyboard layouts.
+	SetCharCallback(fn func(char rune))
+
 	// SetModalFrameCallback registers a callback invoked during platform modal
 	// operations (e.g., Win32 drag/resize loop) to keep rendering alive.
 	//

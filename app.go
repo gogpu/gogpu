@@ -605,6 +605,11 @@ func (a *App) setupInputEvents() {
 			}
 		}
 	})
+
+	// Wire character input from platform to eventSource
+	a.platform.SetCharCallback(func(char rune) {
+		a.eventSource.dispatchTextInput(string(char))
+	})
 }
 
 // gpucontextKeyToInputKey converts gpucontext.Key to input.Key.

@@ -102,6 +102,7 @@ type Platform struct {
 	pointerCallback  func(gpucontext.PointerEvent)
 	scrollCallback   func(gpucontext.ScrollEvent)
 	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
+	charCallback     func(rune)
 	callbackMu       sync.RWMutex
 
 	// Timestamp reference for event timing
@@ -811,6 +812,14 @@ func (p *Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 func (p *Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
 	p.callbackMu.Lock()
 	p.keyboardCallback = fn
+	p.callbackMu.Unlock()
+}
+
+// SetCharCallback registers a callback for Unicode character input.
+// TODO: Implement via libxkbcommon xkb_state_key_get_utf8 for full Unicode support.
+func (p *Platform) SetCharCallback(fn func(rune)) {
+	p.callbackMu.Lock()
+	p.charCallback = fn
 	p.callbackMu.Unlock()
 }
 

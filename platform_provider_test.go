@@ -37,6 +37,7 @@ func (m *mockPlatform) InSizeMove() bool                                        
 func (m *mockPlatform) SetPointerCallback(func(gpucontext.PointerEvent))                {}
 func (m *mockPlatform) SetScrollCallback(func(gpucontext.ScrollEvent))                  {}
 func (m *mockPlatform) SetKeyCallback(func(gpucontext.Key, gpucontext.Modifiers, bool)) {}
+func (m *mockPlatform) SetCharCallback(func(rune))                                      {}
 func (m *mockPlatform) SetModalFrameCallback(func())                                    {}
 func (m *mockPlatform) WaitEvents()                                                     {}
 func (m *mockPlatform) WakeUp()                                                         {}

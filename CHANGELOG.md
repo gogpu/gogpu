@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Platform: SetCharCallback for Unicode text input** — New `Platform.SetCharCallback(func(rune))`
+  interface method, wired to `OnTextInput()` callback in app.go. Enables non-Latin text input
+  (Cyrillic, CJK, Arabic, etc.) in UI widgets.
+  - **Windows:** Full implementation with WM_CHAR + WM_SYSCHAR (AltGr) + WM_UNICHAR (IME),
+    UTF-16 surrogate pair decoding for emoji/supplementary characters (GLFW/Ebiten pattern)
+  - **macOS:** Basic implementation via `[NSEvent characters]` UTF-8 extraction
+  - **Linux (X11/Wayland):** Callback infrastructure in place, full implementation
+    requires libxkbcommon integration (planned)
+  - Fixes [#138](https://github.com/gogpu/gogpu/issues/138)
+
 ### Changed
 
 - **Renderer migrated from HAL direct to wgpu public API** — The renderer now uses

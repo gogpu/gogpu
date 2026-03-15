@@ -150,3 +150,33 @@ func GetKeyCode(event ID) uint16 {
 	initSelectors()
 	return uint16(event.GetUint64(selectors.keyCode))
 }
+
+// GetCharacters returns the characters produced by a key event.
+// Returns the NSString object ID from [NSEvent characters], or 0 if unavailable.
+// The caller can use NSStringToRunes to extract the runes.
+func GetCharacters(event ID) ID {
+	if event.IsNil() {
+		return 0
+	}
+	initSelectors()
+	return event.Send(selectors.characters)
+}
+
+// NSStringLength returns the length of an NSString.
+func NSStringLength(nsstr ID) uint64 {
+	if nsstr.IsNil() {
+		return 0
+	}
+	initSelectors()
+	return nsstr.GetUint64(selectors.length)
+}
+
+// NSStringUTF8Ptr returns a pointer to the UTF-8 bytes of an NSString.
+// The pointer is only valid until the NSString is released or the autorelease pool is drained.
+func NSStringUTF8Ptr(nsstr ID) uintptr {
+	if nsstr.IsNil() {
+		return 0
+	}
+	initSelectors()
+	return uintptr(nsstr.Send(selectors.UTF8String))
+}

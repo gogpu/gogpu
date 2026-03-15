@@ -5,6 +5,8 @@ package platform
 import (
 	"sync"
 	"time"
+	"unicode/utf8"
+	"unsafe"
 
 	"github.com/gogpu/gogpu/internal/platform/darwin"
 	"github.com/gogpu/gpucontext"
@@ -27,10 +29,11 @@ type darwinPlatform struct {
 	modifiers     gpucontext.Modifiers
 	mouseInWindow bool
 
-	// Callbacks for pointer, scroll, and keyboard events
+	// Callbacks for pointer, scroll, keyboard, and character input events
 	pointerCallback  func(gpucontext.PointerEvent)
 	scrollCallback   func(gpucontext.ScrollEvent)
 	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
+	charCallback     func(rune)
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -292,6 +295,10 @@ func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventTy
 		key := macKeyCodeToKey(keyCode)
 		p.dispatchKeyEventUnlocked(key, p.modifiers, true)
 
+		// Dispatch character input from [NSEvent characters].
+		// This handles all keyboard layouts, IME, and dead key sequences.
+		p.dispatchCharFromEvent(event)
+
 	case darwin.NSEventTypeKeyUp:
 		keyCode := darwin.GetKeyCode(event)
 		key := macKeyCodeToKey(keyCode)
@@ -342,6 +349,53 @@ func (p *darwinPlatform) dispatchKeyEventUnlocked(key gpucontext.Key, mods gpuco
 		callback(key, mods, pressed)
 		p.mu.Lock()
 	}
+}
+
+// dispatchCharFromEvent extracts characters from an NSEvent and dispatches them.
+// Called from handleEvent under p.mu lock.
+func (p *darwinPlatform) dispatchCharFromEvent(event darwin.ID) {
+	callback := p.charCallback
+	if callback == nil {
+		return
+	}
+
+	// Get [NSEvent characters] → NSString
+	nsstr := darwin.GetCharacters(event)
+	if nsstr.IsNil() {
+		return
+	}
+
+	// Get UTF-8 C string pointer
+	utf8Ptr := darwin.NSStringUTF8Ptr(nsstr)
+	if utf8Ptr == 0 {
+		return
+	}
+
+	// Read C string into Go string
+	length := darwin.NSStringLength(nsstr)
+	if length == 0 {
+		return
+	}
+
+	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // bounded by NSString
+
+	// Release lock before calling user callback to avoid deadlocks
+	p.mu.Unlock()
+
+	// Decode UTF-8 runes and dispatch each non-control character
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size <= 1 {
+			break // end of valid UTF-8
+		}
+		if r >= 32 && r != 127 {
+			callback(r)
+		}
+		i += size
+	}
+
+	p.mu.Lock()
 }
 
 func (p *darwinPlatform) ShouldClose() bool {
@@ -448,6 +502,13 @@ func (p *darwinPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
 func (p *darwinPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
 	p.mu.Lock()
 	p.keyboardCallback = fn
+	p.mu.Unlock()
+}
+
+// SetCharCallback registers a callback for Unicode character input.
+func (p *darwinPlatform) SetCharCallback(fn func(rune)) {
+	p.mu.Lock()
+	p.charCallback = fn
 	p.mu.Unlock()
 }
 
