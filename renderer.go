@@ -3,6 +3,7 @@ package gogpu
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -151,7 +152,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	// driver-level crashes (e.g. DPC_WATCHDOG_VIOLATION BSOD on DX12).
 	var err error
 	r.instance, err = wgpu.CreateInstance(&wgpu.InstanceDescriptor{
-		Backends: gputypes.Backends(backendVariant),
+		Backends: 1 << backendVariant,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
@@ -171,6 +172,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
 	}
+	slog.Info("adapter selected", "name", r.adapter.Info().Name, "type", r.adapter.Info().DeviceType)
 
 	// Request device with default features and limits
 	r.device, err = r.adapter.RequestDevice(nil)
@@ -255,7 +257,6 @@ func (r *Renderer) initRust() error {
 // This is shared between the native and Rust init paths.
 func (r *Renderer) initCommon() error {
 	// Create fence pool for non-blocking submission tracking (wgpu-rs pattern).
-	// Each submission gets its own fence, enabling true non-blocking completion checks.
 	r.fencePool = NewFencePool(r.device)
 
 	// Configure surface with PHYSICAL pixel dimensions.
@@ -368,6 +369,7 @@ func (r *Renderer) BeginFrame() bool {
 	// Acquire the next surface texture via wgpu public API.
 	surfaceTexture, _, err := r.surface.GetCurrentTexture()
 	if err != nil {
+		slog.Error("GET TEXTURE ERROR", "err", err)
 		// Surface needs reconfiguration (outdated or lost).
 		// Only attempt if we have valid dimensions.
 		if r.width > 0 && r.height > 0 {
@@ -402,7 +404,9 @@ func (r *Renderer) EndFrame() {
 
 	// Present the surface texture via wgpu Surface.
 	if r.currentSurfaceTexture != nil {
-		_ = r.surface.Present(r.currentSurfaceTexture)
+		if err := r.surface.Present(r.currentSurfaceTexture); err != nil {
+			slog.Error("PRESENT ERROR", "err", err)
+		}
 		r.blitSoftwareFramebuffer()
 	}
 
