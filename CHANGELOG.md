@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-03-15
+
+### Fixed
+
+- **X11/Wayland: character dispatch for Unicode text input** — Completes #138
+  across all platforms. Previously only Windows and macOS dispatched characters.
+  - **X11:** Character dispatch via `KeysymToString` (respects server keyboard mapping)
+  - **Wayland:** `evdevKeycodeToRune` US QWERTY fallback table
+  - Both skip char dispatch when Ctrl/Alt/Super held (shortcuts, not text input)
+
 ## [0.24.0] - 2026-03-15
 
 ### Added
@@ -17,8 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Windows:** Full implementation with WM_CHAR + WM_SYSCHAR (AltGr) + WM_UNICHAR (IME),
     UTF-16 surrogate pair decoding for emoji/supplementary characters (GLFW/Ebiten pattern)
   - **macOS:** Basic implementation via `[NSEvent characters]` UTF-8 extraction
-  - **Linux (X11/Wayland):** Callback infrastructure in place, full implementation
-    requires libxkbcommon integration (planned)
   - Fixes [#138](https://github.com/gogpu/gogpu/issues/138)
 
 ### Changed

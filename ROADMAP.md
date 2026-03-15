@@ -32,7 +32,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Three-layer wgpu API** — renderer uses `*wgpu.Device`/`*wgpu.Queue` (not HAL direct)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
-- **Unicode text input** — SetCharCallback with UTF-16 surrogate pairs (Windows)
+- **Unicode text input** — SetCharCallback on all platforms (Win32/macOS/X11/Wayland)
 - **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
