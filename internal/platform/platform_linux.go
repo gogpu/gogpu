@@ -1340,7 +1340,7 @@ func evdevToKey(keycode uint32) gpucontext.Key {
 // Assumes US QWERTY layout. Returns 0 for non-printable keys.
 // This is a basic fallback; full Unicode support requires libxkbcommon.
 //
-//nolint:cyclop,maintidx // keycode-to-char mapping is inherently a large switch
+//nolint:gocognit,maintidx // keycode-to-char mapping is inherently a large switch
 func evdevKeycodeToRune(keycode uint32, shift, capsLock bool) rune {
 	// Letters: apply shift XOR capsLock for case
 	upper := shift != capsLock

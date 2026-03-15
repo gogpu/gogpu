@@ -878,12 +878,11 @@ func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
 	// Skip when Ctrl/Alt/Super are held — those are shortcuts, not text input.
 	if pressed && keymap != nil &&
 		mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
-
 		shift := mods&gpucontext.ModShift != 0
 		capsLock := mods&gpucontext.ModCapsLock != 0
 		keysym := keymap.KeycodeToKeysym(keycode, shift, capsLock)
 		str := KeysymToString(keysym)
-		if len(str) > 0 {
+		if str != "" {
 			p.callbackMu.RLock()
 			cb := p.charCallback
 			p.callbackMu.RUnlock()
