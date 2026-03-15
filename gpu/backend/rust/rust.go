@@ -76,10 +76,41 @@ func (i *rustInstance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedA
 		adapterInfo.Vendor = info.Vendor
 	}
 
+	// Get adapter limits for validation layer.
+	// go-webgpu returns wgpu.SupportedLimits, convert to gputypes.Limits.
+	halLimits := gputypes.DefaultLimits()
+	if supported, err := adapter.GetLimits(); err == nil && supported != nil {
+		wl := supported.Limits
+		halLimits.MaxTextureDimension1D = wl.MaxTextureDimension1D
+		halLimits.MaxTextureDimension2D = wl.MaxTextureDimension2D
+		halLimits.MaxTextureDimension3D = wl.MaxTextureDimension3D
+		halLimits.MaxTextureArrayLayers = wl.MaxTextureArrayLayers
+		halLimits.MaxBindGroups = wl.MaxBindGroups
+		halLimits.MaxSampledTexturesPerShaderStage = wl.MaxSampledTexturesPerShaderStage
+		halLimits.MaxSamplersPerShaderStage = wl.MaxSamplersPerShaderStage
+		halLimits.MaxStorageBuffersPerShaderStage = wl.MaxStorageBuffersPerShaderStage
+		halLimits.MaxStorageTexturesPerShaderStage = wl.MaxStorageTexturesPerShaderStage
+		halLimits.MaxUniformBuffersPerShaderStage = wl.MaxUniformBuffersPerShaderStage
+		halLimits.MaxUniformBufferBindingSize = wl.MaxUniformBufferBindingSize
+		halLimits.MaxStorageBufferBindingSize = wl.MaxStorageBufferBindingSize
+		halLimits.MaxVertexBuffers = wl.MaxVertexBuffers
+		halLimits.MaxBufferSize = wl.MaxBufferSize
+		halLimits.MaxVertexAttributes = wl.MaxVertexAttributes
+		halLimits.MaxVertexBufferArrayStride = wl.MaxVertexBufferArrayStride
+		halLimits.MaxComputeWorkgroupSizeX = wl.MaxComputeWorkgroupSizeX
+		halLimits.MaxComputeWorkgroupSizeY = wl.MaxComputeWorkgroupSizeY
+		halLimits.MaxComputeWorkgroupSizeZ = wl.MaxComputeWorkgroupSizeZ
+		halLimits.MaxComputeInvocationsPerWorkgroup = wl.MaxComputeInvocationsPerWorkgroup
+		halLimits.MaxComputeWorkgroupsPerDimension = wl.MaxComputeWorkgroupsPerDimension
+	}
+
 	return []hal.ExposedAdapter{
 		{
 			Adapter: &rustAdapter{adapter: adapter},
 			Info:    adapterInfo,
+			Capabilities: hal.Capabilities{
+				Limits: halLimits,
+			},
 		},
 	}
 }

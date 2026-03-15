@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.24.2] - 2026-03-15
+
+### Fixed
+
+- **Rust backend: adapter limits propagation** — `EnumerateAdapters` now fills
+  `Capabilities.Limits` from `adapter.GetLimits()`. Previously zero limits caused
+  core validation to reject all textures.
+
+### Dependencies
+
+- wgpu v0.21.0 → v0.21.1 (per-stage resource limit validation)
 
 ## [0.24.1] - 2026-03-15
 
