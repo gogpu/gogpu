@@ -235,7 +235,7 @@ gogpu/
 ├── invalidator.go      # Goroutine-safe redraw coalescing
 ├── event_source.go     # gpucontext.EventSource adapter
 ├── resource_tracker.go  # ResourceTracker: automatic GPU resource cleanup (LIFO)
-├── gpucontext_adapter.go # gpucontext.DeviceProvider + HalProvider
+├── gpucontext_adapter.go # gpucontext.DeviceProvider adapter
 ├── gesture.go          # GestureRecognizer (Vello-style)
 ├── gpu/
 │   ├── types/          # Backend type enum (BackendType)
