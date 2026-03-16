@@ -14,18 +14,20 @@ coverage:
 # Ignore paths from coverage calculation
 # GPU-dependent code and platform stubs cannot be unit tested
 ignore:
-  - "examples/**/*"
-  - "internal/platform/**/*"
-  - "gpu/backend/rust/**/*"
-  - "gpu/backend/native/**/*"
-  - "window/**/*"
-  - "input/**/*"
-  - "cmd/**/*"
+  - "examples/"
+  - "internal/platform/"
+  - "internal/thread/"
+  - "internal/"
+  - "gpu/backend/rust/"
+  - "gpu/backend/native/"
+  - "gpu/"
+  - "window/"
+  - "input/"
+  - "cmd/"
+  - "tmp/"
   - "renderer.go"
   - "renderer_rust.go"
   - "renderer_norust.go"
-  - "internal/thread/**/*"
-  - "tmp/**/*"
 
 # Go-specific parser settings
 parsers:
