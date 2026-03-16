@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.4] - 2026-03-16
+
+### Added
+
+- **`GOGPU_GRAPHICS_API` environment variable** — Select backend without code changes:
+  `vulkan`, `dx12`, `metal`, `gles`, `software` (+ short aliases `vk`, `d3d12`, `gl`, `sw`, `cpu`).
+  `WithGraphicsAPI()` in code takes precedence.
+
+- **`Context.PresentTexture(tex)`** — Draws a texture filling the entire surface.
+  Universal path for presenting pre-rendered content on any backend including software.
+
+- **`Context.RenderTarget()`** — Adapter satisfying `ggcanvas.RenderTarget` interface
+  for universal backend-agnostic canvas rendering.
+
+- **Renderer passes `CompatibleSurface` in `RequestAdapter`** — GLES backends
+  enumerate adapters using the surface's GL context (WebGPU spec pattern).
+
+### Dependencies
+
+- wgpu v0.21.2 → v0.21.3 (GLES/DX12/software fixes, naga v0.14.8)
+
 ## [0.24.3] - 2026-03-16
 
 ### Dependencies
