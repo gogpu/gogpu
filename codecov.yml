@@ -28,6 +28,8 @@ ignore:
   - "renderer.go"
   - "renderer_rust.go"
   - "renderer_norust.go"
+  - "texture.go"
+  - "fence_pool.go"
 
 # Go-specific parser settings
 parsers:
