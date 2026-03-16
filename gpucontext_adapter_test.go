@@ -115,3 +115,111 @@ func TestMapTextureFormat(t *testing.T) {
 		})
 	}
 }
+
+// TestGPUContextAdapterWindowProvider tests WindowProvider delegation.
+func TestGPUContextAdapterWindowProvider(t *testing.T) {
+	t.Run("Size with app", func(t *testing.T) {
+		mock := &mockPlatform{width: 1280, height: 720, scaleFactor: 1.0}
+		app := &App{platform: mock}
+		adapter := &gpuContextAdapter{app: app}
+
+		w, h := adapter.Size()
+		if w != 1280 || h != 720 {
+			t.Errorf("Size() = (%d, %d), want (1280, 720)", w, h)
+		}
+	})
+
+	t.Run("Size without app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+
+		w, h := adapter.Size()
+		if w != 0 || h != 0 {
+			t.Errorf("Size() = (%d, %d), want (0, 0)", w, h)
+		}
+	})
+
+	t.Run("ScaleFactor with app", func(t *testing.T) {
+		mock := &mockPlatform{scaleFactor: 2.0}
+		app := &App{platform: mock}
+		adapter := &gpuContextAdapter{app: app}
+
+		sf := adapter.ScaleFactor()
+		if sf != 2.0 {
+			t.Errorf("ScaleFactor() = %f, want 2.0", sf)
+		}
+	})
+
+	t.Run("ScaleFactor without app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+
+		sf := adapter.ScaleFactor()
+		if sf != 1.0 {
+			t.Errorf("ScaleFactor() = %f, want 1.0", sf)
+		}
+	})
+
+	t.Run("RequestRedraw with app", func(t *testing.T) {
+		wokenUp := false
+		app := &App{
+			invalidator: newInvalidator(func() { wokenUp = true }),
+		}
+		adapter := &gpuContextAdapter{app: app}
+
+		adapter.RequestRedraw()
+
+		if !wokenUp {
+			t.Error("RequestRedraw should trigger wakeup")
+		}
+	})
+
+	t.Run("RequestRedraw without app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		// Should not panic
+		adapter.RequestRedraw()
+	})
+}
+
+// TestGPUContextAdapterResourceTracker tests resource tracking via adapter.
+func TestGPUContextAdapterResourceTracker(t *testing.T) {
+	t.Run("TrackResource with tracker", func(t *testing.T) {
+		tracker := &resourceTracker{}
+		adapter := &gpuContextAdapter{tracker: tracker}
+
+		m := newMockCloser("test")
+		adapter.TrackResource(m)
+
+		err := tracker.CloseAll()
+		if err != nil {
+			t.Fatalf("CloseAll error: %v", err)
+		}
+		if !m.closed {
+			t.Error("Resource should have been closed via tracker")
+		}
+	})
+
+	t.Run("TrackResource nil tracker", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		// Should not panic
+		adapter.TrackResource(newMockCloser("test"))
+	})
+
+	t.Run("UntrackResource with tracker", func(t *testing.T) {
+		tracker := &resourceTracker{}
+		adapter := &gpuContextAdapter{tracker: tracker}
+
+		m := newMockCloser("test")
+		adapter.TrackResource(m)
+		adapter.UntrackResource(m)
+
+		_ = tracker.CloseAll()
+		if m.closed {
+			t.Error("Resource should NOT have been closed (was untracked)")
+		}
+	})
+
+	t.Run("UntrackResource nil tracker", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		// Should not panic
+		adapter.UntrackResource(newMockCloser("test"))
+	})
+}

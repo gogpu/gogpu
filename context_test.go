@@ -275,3 +275,142 @@ func TestNewContext(t *testing.T) {
 		t.Error("cleared should be false for new context")
 	}
 }
+
+func TestNewContextZeroScale(t *testing.T) {
+	r := &Renderer{width: 800, height: 600}
+	ctx := newContext(r, 0)
+
+	if ctx.scaleFactor != 1.0 {
+		t.Errorf("scaleFactor = %f, want 1.0 (should default for zero)", ctx.scaleFactor)
+	}
+}
+
+func TestNewContextNegativeScale(t *testing.T) {
+	r := &Renderer{width: 800, height: 600}
+	ctx := newContext(r, -1.0)
+
+	if ctx.scaleFactor != 1.0 {
+		t.Errorf("scaleFactor = %f, want 1.0 (should default for negative)", ctx.scaleFactor)
+	}
+}
+
+func TestContextScaleFactor(t *testing.T) {
+	tests := []struct {
+		name  string
+		scale float64
+		want  float64
+	}{
+		{"standard", 1.0, 1.0},
+		{"retina", 2.0, 2.0},
+		{"150%", 1.5, 1.5},
+		{"zero defaults", 0, 1.0},
+		{"negative defaults", -1, 1.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &Renderer{width: 800, height: 600}
+			ctx := newContext(r, tt.scale)
+			if ctx.ScaleFactor() != tt.want {
+				t.Errorf("ScaleFactor() = %f, want %f", ctx.ScaleFactor(), tt.want)
+			}
+		})
+	}
+}
+
+func TestContextSizeWithScaling(t *testing.T) {
+	// Physical 1600x1200 at 2x scale = logical 800x600
+	r := &Renderer{width: 1600, height: 1200}
+	ctx := newContext(r, 2.0)
+
+	w, h := ctx.Size()
+	if w != 800 || h != 600 {
+		t.Errorf("Size() = (%d, %d), want (800, 600)", w, h)
+	}
+}
+
+func TestContextFramebufferSize(t *testing.T) {
+	r := &Renderer{width: 1600, height: 1200}
+	ctx := newContext(r, 2.0)
+
+	w, h := ctx.FramebufferSize()
+	if w != 1600 || h != 1200 {
+		t.Errorf("FramebufferSize() = (%d, %d), want (1600, 1200)", w, h)
+	}
+}
+
+func TestContextFramebufferWidth(t *testing.T) {
+	r := &Renderer{width: 1920, height: 1080}
+	ctx := newContext(r, 1.0)
+
+	if ctx.FramebufferWidth() != 1920 {
+		t.Errorf("FramebufferWidth() = %d, want 1920", ctx.FramebufferWidth())
+	}
+}
+
+func TestContextFramebufferHeight(t *testing.T) {
+	r := &Renderer{width: 1920, height: 1080}
+	ctx := newContext(r, 1.0)
+
+	if ctx.FramebufferHeight() != 1080 {
+		t.Errorf("FramebufferHeight() = %d, want 1080", ctx.FramebufferHeight())
+	}
+}
+
+func TestContextRenderTarget(t *testing.T) {
+	r := &Renderer{width: 800, height: 600}
+	ctx := newContext(r, 1.0)
+
+	rt := ctx.RenderTarget()
+	if rt == nil {
+		t.Fatal("RenderTarget() returned nil")
+	}
+
+	// SurfaceView wraps any, underlying is nil TextureView
+	sv := rt.SurfaceView()
+	_ = sv // Just verify it doesn't panic
+
+	// SurfaceSize should match renderer
+	w, h := rt.SurfaceSize()
+	if w != 800 || h != 600 {
+		t.Errorf("SurfaceSize() = (%d, %d), want (800, 600)", w, h)
+	}
+
+	// PresentTexture with nil should return nil (no-op)
+	err := rt.PresentTexture(nil)
+	if err != nil {
+		t.Errorf("PresentTexture(nil) = %v, want nil", err)
+	}
+}
+
+func TestContextAsTextureDrawer(t *testing.T) {
+	r := &Renderer{width: 800, height: 600}
+	ctx := newContext(r, 1.0)
+
+	drawer := ctx.AsTextureDrawer()
+	if drawer == nil {
+		t.Fatal("AsTextureDrawer() returned nil")
+	}
+
+	// DrawTexture with invalid type should return error
+	err := drawer.DrawTexture(nil, 0, 0)
+	if err == nil {
+		t.Error("DrawTexture(nil) should return error")
+	}
+
+	// TextureCreator should not be nil
+	if drawer.TextureCreator() == nil {
+		t.Error("TextureCreator() should not be nil")
+	}
+}
+
+func TestContextPresentTextureNonTexture(t *testing.T) {
+	r := &Renderer{width: 800, height: 600}
+	ctx := newContext(r, 1.0)
+
+	// Non-Texture type should return nil (silently ignored)
+	err := ctx.PresentTexture("not a texture")
+	if err != nil {
+		t.Errorf("PresentTexture(string) = %v, want nil", err)
+	}
+}

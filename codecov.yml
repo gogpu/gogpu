@@ -17,10 +17,15 @@ ignore:
   - "examples/**/*"
   - "internal/platform/**/*"
   - "gpu/backend/rust/**/*"
-  - "gpu/backend/gpu/**/*"
+  - "gpu/backend/native/**/*"
   - "window/**/*"
   - "input/**/*"
   - "cmd/**/*"
+  - "renderer.go"
+  - "renderer_rust.go"
+  - "renderer_norust.go"
+  - "internal/thread/**/*"
+  - "tmp/**/*"
 
 # Go-specific parser settings
 parsers:

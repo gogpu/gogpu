@@ -292,7 +292,7 @@ func TestDrawTextureExAlphaClamping(t *testing.T) {
 	}
 }
 
-func TestErrorConstants(t *testing.T) {
+func TestContextTextureErrorConstants(t *testing.T) {
 	// Verify error messages are meaningful
 	tests := []struct {
 		err  error
@@ -302,6 +302,7 @@ func TestErrorConstants(t *testing.T) {
 		{ErrTextureDestroyed, "gogpu: texture has been destroyed"},
 		{ErrInvalidDimensions, "gogpu: invalid texture dimensions"},
 		{ErrNotImplemented, "gogpu: feature not implemented"},
+		{ErrInvalidTextureType, "gogpu: texture must be *Texture"},
 	}
 
 	for _, tt := range tests {
@@ -310,5 +311,38 @@ func TestErrorConstants(t *testing.T) {
 				t.Errorf("Error() = %q, want %q", tt.err.Error(), tt.want)
 			}
 		})
+	}
+}
+
+func TestContextTextureDrawerInvalidType(t *testing.T) {
+	ctx := &Context{renderer: &Renderer{}}
+	drawer := ctx.AsTextureDrawer()
+
+	// Passing a non-*Texture type should return ErrInvalidTextureType
+	err := drawer.DrawTexture(nil, 0, 0)
+	if !errors.Is(err, ErrInvalidTextureType) {
+		t.Errorf("DrawTexture(nil) = %v, want ErrInvalidTextureType", err)
+	}
+}
+
+func TestContextTextureDrawerValidTexture(t *testing.T) {
+	ctx := &Context{renderer: &Renderer{}}
+	drawer := ctx.AsTextureDrawer()
+
+	// Valid texture with nil HAL texture should return ErrTextureDestroyed
+	tex := &Texture{texture: nil, width: 64, height: 64}
+	err := drawer.DrawTexture(tex, 0, 0)
+	if !errors.Is(err, ErrTextureDestroyed) {
+		t.Errorf("DrawTexture(destroyed) = %v, want ErrTextureDestroyed", err)
+	}
+}
+
+func TestContextTextureDrawerTextureCreator(t *testing.T) {
+	ctx := &Context{renderer: &Renderer{}}
+	drawer := ctx.AsTextureDrawer()
+
+	creator := drawer.TextureCreator()
+	if creator == nil {
+		t.Fatal("TextureCreator() returned nil")
 	}
 }

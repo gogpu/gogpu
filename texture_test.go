@@ -323,6 +323,50 @@ func TestBytesPerPixelUnknownFormat(t *testing.T) {
 	}
 }
 
+func TestTexturePremultiplied(t *testing.T) {
+	tex := &Texture{}
+
+	// Default should be false
+	if tex.Premultiplied() {
+		t.Error("Premultiplied() should be false by default")
+	}
+
+	tex.SetPremultiplied(true)
+	if !tex.Premultiplied() {
+		t.Error("Premultiplied() should be true after SetPremultiplied(true)")
+	}
+
+	tex.SetPremultiplied(false)
+	if tex.Premultiplied() {
+		t.Error("Premultiplied() should be false after SetPremultiplied(false)")
+	}
+}
+
+func TestPositionedQuadShader(t *testing.T) {
+	shader := PositionedQuadShader()
+
+	if shader == "" {
+		t.Error("PositionedQuadShader() returned empty string")
+	}
+
+	// Verify it contains expected WGSL elements
+	tests := []string{
+		"@vertex",
+		"@fragment",
+		"textureSample",
+		"sampler",
+		"texture_2d",
+		"QuadUniforms",
+		"premultiplied",
+	}
+
+	for _, expected := range tests {
+		if !containsString(shader, expected) {
+			t.Errorf("PositionedQuadShader() missing %q", expected)
+		}
+	}
+}
+
 func TestUpdateDataDestroyedTexture(t *testing.T) {
 	tests := []struct {
 		name string

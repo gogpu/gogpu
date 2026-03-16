@@ -258,3 +258,36 @@ func TestBackendGoIsNativeAlias(t *testing.T) {
 		t.Errorf("BackendGo (%v) != BackendNative (%v), expected them to be the same", BackendGo, BackendNative)
 	}
 }
+
+func TestGraphicsAPIFromEnv(t *testing.T) {
+	tests := []struct {
+		envVal string
+		want   types.GraphicsAPI
+	}{
+		{"vulkan", types.GraphicsAPIVulkan},
+		{"vk", types.GraphicsAPIVulkan},
+		{"dx12", types.GraphicsAPIDX12},
+		{"d3d12", types.GraphicsAPIDX12},
+		{"directx", types.GraphicsAPIDX12},
+		{"metal", types.GraphicsAPIMetal},
+		{"gles", types.GraphicsAPIGLES},
+		{"gl", types.GraphicsAPIGLES},
+		{"opengl", types.GraphicsAPIGLES},
+		{"software", types.GraphicsAPISoftware},
+		{"sw", types.GraphicsAPISoftware},
+		{"cpu", types.GraphicsAPISoftware},
+		{"VULKAN", types.GraphicsAPIVulkan}, // case insensitive
+		{"", types.GraphicsAPIAuto},
+		{"unknown", types.GraphicsAPIAuto},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.envVal, func(t *testing.T) {
+			t.Setenv("GOGPU_GRAPHICS_API", tt.envVal)
+			got := graphicsAPIFromEnv()
+			if got != tt.want {
+				t.Errorf("graphicsAPIFromEnv() with %q = %v, want %v", tt.envVal, got, tt.want)
+			}
+		})
+	}
+}
