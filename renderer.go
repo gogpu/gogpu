@@ -167,8 +167,12 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 		return fmt.Errorf("gogpu: failed to create surface: %w", err)
 	}
 
-	// Request adapter (first compatible one)
-	r.adapter, err = r.instance.RequestAdapter(nil)
+	// Request adapter compatible with the surface.
+	// Passing CompatibleSurface is required for GLES backends which defer
+	// adapter enumeration until a surface (GL context) is available.
+	r.adapter, err = r.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+		CompatibleSurface: r.surface,
+	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
 	}
