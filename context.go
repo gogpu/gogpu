@@ -135,6 +135,40 @@ func (c *Context) SurfaceView() *wgpu.TextureView {
 	return c.renderer.currentView
 }
 
+// PresentTexture draws a texture filling the entire surface.
+// This is the universal path for presenting pre-rendered content (e.g., from
+// ggcanvas.Flush) on any backend including software.
+// The tex parameter must be a *gogpu.Texture.
+func (c *Context) PresentTexture(tex any) error {
+	t, ok := tex.(*Texture)
+	if !ok || t == nil {
+		return nil
+	}
+	return c.renderer.drawTexturedQuad(t, DrawTextureOptions{
+		Width:  float32(c.renderer.width),
+		Height: float32(c.renderer.height),
+		Alpha:  1.0,
+	})
+}
+
+// RenderTarget returns an adapter that satisfies ggcanvas.RenderTarget interface.
+// Use with canvas.Render(dc.RenderTarget()) for universal backend-agnostic rendering.
+func (c *Context) RenderTarget() *ContextRenderTarget {
+	return &ContextRenderTarget{ctx: c}
+}
+
+// ContextRenderTarget adapts *Context to ggcanvas.RenderTarget interface.
+type ContextRenderTarget struct{ ctx *Context }
+
+// SurfaceView returns the surface texture view as any.
+func (r *ContextRenderTarget) SurfaceView() any { return r.ctx.SurfaceView() }
+
+// SurfaceSize returns the surface dimensions.
+func (r *ContextRenderTarget) SurfaceSize() (uint32, uint32) { return r.ctx.SurfaceSize() }
+
+// PresentTexture draws a texture filling the entire surface.
+func (r *ContextRenderTarget) PresentTexture(tex any) error { return r.ctx.PresentTexture(tex) }
+
 // CheckDeviceHealth returns nil if the GPU device is operational, or an error
 // describing why the device was removed. This is a diagnostic method for
 // debugging DX12 DEVICE_REMOVED issues.
