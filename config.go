@@ -1,6 +1,11 @@
 package gogpu
 
-import "github.com/gogpu/gogpu/gpu/types"
+import (
+	"os"
+	"strings"
+
+	"github.com/gogpu/gogpu/gpu/types"
+)
 
 // Config configures the application.
 type Config struct {
@@ -41,6 +46,18 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 // By default, uses continuous rendering (game loop style).
 // For power-efficient UI apps, use WithContinuousRender(false).
+// DefaultConfig returns a sensible default configuration.
+//
+// The graphics API can be overridden via the GOGPU_GRAPHICS_API environment variable:
+//
+//	GOGPU_GRAPHICS_API=vulkan   — force Vulkan
+//	GOGPU_GRAPHICS_API=dx12     — force DirectX 12
+//	GOGPU_GRAPHICS_API=metal    — force Metal
+//	GOGPU_GRAPHICS_API=gles     — force OpenGL ES
+//	GOGPU_GRAPHICS_API=software — force CPU software rasterizer
+//
+// This is useful for testing different backends without modifying code.
+// WithGraphicsAPI() in code takes precedence over the environment variable.
 func DefaultConfig() Config {
 	return Config{
 		Title:            "GoGPU Application",
@@ -48,7 +65,27 @@ func DefaultConfig() Config {
 		Height:           600,
 		Resizable:        true,
 		VSync:            true,
-		ContinuousRender: true, // Game loop by default for backwards compat
+		ContinuousRender: true,
+		GraphicsAPI:      graphicsAPIFromEnv(),
+	}
+}
+
+// graphicsAPIFromEnv reads GOGPU_GRAPHICS_API environment variable.
+func graphicsAPIFromEnv() types.GraphicsAPI {
+	v := strings.ToLower(os.Getenv("GOGPU_GRAPHICS_API"))
+	switch v {
+	case "vulkan", "vk":
+		return types.GraphicsAPIVulkan
+	case "dx12", "d3d12", "directx":
+		return types.GraphicsAPIDX12
+	case "metal":
+		return types.GraphicsAPIMetal
+	case "gles", "gl", "opengl":
+		return types.GraphicsAPIGLES
+	case "software", "sw", "cpu":
+		return types.GraphicsAPISoftware
+	default:
+		return types.GraphicsAPIAuto
 	}
 }
 
