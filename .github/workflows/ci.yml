@@ -21,6 +21,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  id-token: write  # Required for Codecov OIDC token
+
 jobs:
   # Build verification - Cross-platform
   build:
@@ -101,7 +105,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       uses: codecov/codecov-action@v5
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
+        use_oidc: true
         files: ./coverage.txt
         flags: unittests
         name: codecov-gogpu
