@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.24.5] - 2026-03-18
+
+### Fixed
+
+- **`SetLogger` now propagates to all subsystems** — a single `gogpu.SetLogger()` call
+  enables logging across the entire stack (platform + wgpu). Previously each subsystem
+  had an isolated logger that was only set during `NewApp()`, so calling `SetLogger`
+  before or after `NewApp` had no effect on platform/GPU logging. (#149)
 
 ### Testing
 

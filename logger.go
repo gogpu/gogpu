@@ -4,6 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"sync/atomic"
+
+	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/wgpu"
 )
 
 // nopHandler silently discards all log records.
@@ -50,6 +53,11 @@ func SetLogger(l *slog.Logger) {
 		l = slog.New(nopHandler{})
 	}
 	loggerPtr.Store(l)
+
+	// Propagate to all subsystems so a single SetLogger() call
+	// enables logging across the entire stack.
+	platform.SetLogger(l)
+	wgpu.SetLogger(l)
 }
 
 // Logger returns the current logger used by gogpu.
