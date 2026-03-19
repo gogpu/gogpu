@@ -473,11 +473,16 @@ func (p *windowsPlatform) Init(config Config) error {
 		return fmt.Errorf("utf16 title: %w", err)
 	}
 
-	// Both frameless and normal windows use WS_OVERLAPPEDWINDOW.
-	// For frameless: WM_NCCALCSIZE removes title bar, WM_NCACTIVATE(-1)
-	// prevents border repaint, DwmExtendFrameIntoClientArea adds shadow.
-	// This is the Chrome/Electron/VS Code approach.
-	style := uintptr(wsOverlappedWindow | wsVisible)
+	// Both frameless and normal use WS_OVERLAPPEDWINDOW for native resize + DWM shadow.
+	// For frameless: WM_NCCALCSIZE removes title bar, WM_NCACTIVATE(-1) prevents
+	// border repaint, WM_NCUAHDRAW* blocks UxTheme painting.
+	var style uintptr
+	if config.Frameless {
+		// Create hidden — show after DWM setup + WM_NCCALCSIZE to avoid first-frame artifact.
+		style = uintptr(wsOverlappedWindow)
+	} else {
+		style = uintptr(wsOverlappedWindow | wsVisible)
+	}
 
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
@@ -501,26 +506,22 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.height = config.Height
 	p.frameless = config.Frameless
 
-	// For frameless: extend DWM frame 1px into client area to activate shadow,
-	// then force WM_NCCALCSIZE recalculation to remove title bar before showing.
+	// Enable DWM shadow for frameless windows.
 	if config.Frameless {
 		type margins struct {
 			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
 		}
 		m := margins{0, 0, 0, 1}
 		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
-	}
-
-	// Show window — triggers WM_NCCALCSIZE which removes NC area for frameless.
-	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
-
-	if config.Frameless {
-		// After ShowWindow: WM_NCCALCSIZE has fired, client rect is now full window.
-		// Force frame recalc + update cached size with correct dimensions.
+		// Force WM_NCCALCSIZE to remove NC area, then update cached size
+		// so first frame renders at full window size.
 		procSetWindowPos.Call(uintptr(p.hwnd), 0, 0, 0, 0, 0,
 			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
+		p.updateSize()
 	}
 
+	// Show window (frameless was created hidden to avoid first-frame artifact)
+	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
 	procUpdateWindow.Call(uintptr(p.hwnd))
 
 	// Get actual client size
@@ -1679,8 +1680,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 
 	case wmNCPaint:
-		// For frameless: let DefWindowProc handle WM_NCPAINT so DWM draws shadow.
-		// Previously we returned 0 which killed the shadow.
+		// Suppress NC painting for frameless — prevents white border during resize.
+		// DWM shadow still works because it's drawn by DWM compositor, not WM_NCPAINT.
+		p.callbackMu.RLock()
+		frameless := p.frameless
+		p.callbackMu.RUnlock()
+		if frameless {
+			return 0
+		}
 
 	case wmNCCalcSize:
 		// Chrome/Electron approach: remove title bar but keep DWM shadow.
