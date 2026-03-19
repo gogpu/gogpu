@@ -151,14 +151,17 @@ const (
 	hcfHighContrastOn         = 0x00000001
 
 	// Frameless window constants
-	wsPopup      = 0x80000000 // WS_POPUP
-	wsThickFrame = 0x00040000 // WS_THICKFRAME (for resize in frameless)
-	wsCaption    = 0x00C00000 // WS_CAPTION (title bar)
-	wmNCHitTest  = 0x0084     // WM_NCHITTEST
-	wmNCCalcSize = 0x0083     // WM_NCCALCSIZE
-	wmNCPaint    = 0x0085     // WM_NCPAINT
-	swMinimize   = 6          // SW_MINIMIZE
-	swMaximize   = 3          // SW_MAXIMIZE
+	wsPopup            = 0x80000000 // WS_POPUP
+	wsThickFrame       = 0x00040000 // WS_THICKFRAME (for resize in frameless)
+	wsCaption          = 0x00C00000 // WS_CAPTION (title bar)
+	wmNCHitTest        = 0x0084     // WM_NCHITTEST
+	wmNCCalcSize       = 0x0083     // WM_NCCALCSIZE
+	wmNCPaint          = 0x0085     // WM_NCPAINT
+	wmNCActivate       = 0x0086     // WM_NCACTIVATE
+	wmNCUAHDrawCaption = 0x00AE     // Undocumented: UxTheme caption draw
+	wmNCUAHDrawFrame   = 0x00AF     // Undocumented: UxTheme frame draw
+	swMinimize         = 6          // SW_MINIMIZE
+	swMaximize         = 3          // SW_MAXIMIZE
 
 	// WM_NCHITTEST return values
 	htCaption     = 2
@@ -238,7 +241,7 @@ var (
 	procSetWindowLongPtrW  = user32.NewProc("SetWindowLongPtrW")
 	procSetWindowPos       = user32.NewProc("SetWindowPos")
 	procIsZoomed           = user32.NewProc("IsZoomed")
-	procScreenToClient = user32.NewProc("ScreenToClient")
+	procScreenToClient     = user32.NewProc("ScreenToClient")
 	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
 	procMonitorFromWindow  = user32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
@@ -470,15 +473,11 @@ func (p *windowsPlatform) Init(config Config) error {
 		return fmt.Errorf("utf16 title: %w", err)
 	}
 
-	var style uintptr
-	if config.Frameless {
-		// WS_POPUP: clean frameless, no OS chrome, no border artifacts.
-		// Resize handled via WM_NCHITTEST returning HitTestResize* values.
-		// No DWM shadow (WS_THICKFRAME causes visible border artifacts).
-		style = uintptr(wsPopup | wsVisible)
-	} else {
-		style = uintptr(wsOverlappedWindow | wsVisible)
-	}
+	// Both frameless and normal windows use WS_OVERLAPPEDWINDOW.
+	// For frameless: WM_NCCALCSIZE removes title bar, WM_NCACTIVATE(-1)
+	// prevents border repaint, DwmExtendFrameIntoClientArea adds shadow.
+	// This is the Chrome/Electron/VS Code approach.
+	style := uintptr(wsOverlappedWindow | wsVisible)
 
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
@@ -502,8 +501,26 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.height = config.Height
 	p.frameless = config.Frameless
 
-	// Show window
+	// For frameless: extend DWM frame 1px into client area to activate shadow,
+	// then force WM_NCCALCSIZE recalculation to remove title bar before showing.
+	if config.Frameless {
+		type margins struct {
+			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
+		}
+		m := margins{0, 0, 0, 1}
+		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
+	}
+
+	// Show window — triggers WM_NCCALCSIZE which removes NC area for frameless.
 	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
+
+	if config.Frameless {
+		// After ShowWindow: WM_NCCALCSIZE has fired, client rect is now full window.
+		// Force frame recalc + update cached size with correct dimensions.
+		procSetWindowPos.Call(uintptr(p.hwnd), 0, 0, 0, 0, 0,
+			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
+	}
+
 	procUpdateWindow.Call(uintptr(p.hwnd))
 
 	// Get actual client size
@@ -1636,15 +1653,34 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		p.queueEvent(Event{Type: EventClose})
 		return 0
 
-	case wmNCPaint:
-		// Suppress non-client area painting for frameless windows.
-		// Without this, WS_THICKFRAME causes a white border artifact.
+	case wmNCUAHDrawCaption, wmNCUAHDrawFrame:
+		// Block undocumented UxTheme caption/frame drawing messages.
+		// These cause border artifacts on frameless windows.
+		// Source: rossy/borderless-window, wangwenx190/framelesshelper
 		p.callbackMu.RLock()
 		frameless := p.frameless
 		p.callbackMu.RUnlock()
 		if frameless {
 			return 0
 		}
+
+	case wmNCActivate:
+		// THE KEY FIX: Prevent non-client area repaint on focus change.
+		// DefWindowProc with lParam=-1 processes activation state change
+		// but SKIPS repainting the non-client area. This eliminates the
+		// visible border flash when the window gains/loses focus.
+		// Source: Chromium, Electron, rossy/borderless-window, FramelessHelper
+		p.callbackMu.RLock()
+		frameless := p.frameless
+		p.callbackMu.RUnlock()
+		if frameless {
+			ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, ^uintptr(0))
+			return ret
+		}
+
+	case wmNCPaint:
+		// For frameless: let DefWindowProc handle WM_NCPAINT so DWM draws shadow.
+		// Previously we returned 0 which killed the shadow.
 
 	case wmNCCalcSize:
 		// Chrome/Electron approach: remove title bar but keep DWM shadow.
