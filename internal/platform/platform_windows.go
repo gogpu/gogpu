@@ -153,9 +153,9 @@ const (
 	// Frameless window constants
 	wsPopup      = 0x80000000 // WS_POPUP
 	wsThickFrame = 0x00040000 // WS_THICKFRAME (for resize in frameless)
-	wsCaption    = 0x00C00000 // WS_CAPTION (title bar)
-	wmNCHitTest    = 0x0084   // WM_NCHITTEST
-	wmNCCalcSize   = 0x0083   // WM_NCCALCSIZE
+	wsCaption = 0x00C00000 // WS_CAPTION (title bar)
+	wmNCHitTest  = 0x0084 // WM_NCHITTEST
+	wmNCCalcSize = 0x0083 // WM_NCCALCSIZE
 	swMinimize     = 6        // SW_MINIMIZE
 	swMaximize     = 3        // SW_MAXIMIZE
 
@@ -463,8 +463,8 @@ func (p *windowsPlatform) Init(config Config) error {
 
 	var style uintptr
 	if config.Frameless {
-		// WS_POPUP: no OS title bar from the start (no flash).
-		// DwmExtendFrameIntoClientArea adds a subtle shadow.
+		// WS_POPUP: clean frameless window, no OS chrome, no artifacts.
+		// Resize handled via WM_NCHITTEST returning HitTestResize* values.
 		style = uintptr(wsPopup | wsVisible)
 	} else {
 		style = uintptr(wsOverlappedWindow | wsVisible)
@@ -491,18 +491,6 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.width = config.Width
 	p.height = config.Height
 	p.frameless = config.Frameless
-
-	// For frameless windows, extend DWM frame into client area to get shadow.
-	// MARGINS{0,0,0,1} means 1px bottom margin — enough for DWM to draw shadow
-	// while WM_NCCALCSIZE removes the actual title bar.
-	// This is the Chrome/Electron/VS Code approach.
-	if config.Frameless {
-		type margins struct {
-			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
-		}
-		m := margins{0, 0, 0, 1}
-		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
-	}
 
 	// Show window
 	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
