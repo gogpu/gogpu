@@ -1682,53 +1682,34 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 
 	case wmNCPaint:
-		// Suppress NC painting for frameless — prevents white border during resize.
-		// DWM shadow still works because it's drawn by DWM compositor, not WM_NCPAINT.
-		p.callbackMu.RLock()
-		frameless := p.frameless
-		p.callbackMu.RUnlock()
-		if frameless {
-			return 0
-		}
+		// Let DefWindowProc handle WM_NCPAINT — DWM draws shadow + borders.
+		// Our GPU renderer covers the borders. JBR approach.
 
 	case wmNCCalcSize:
-		// Chrome/Electron approach: remove title bar but keep DWM shadow.
-		// When wParam=TRUE, lParam points to NCCALCSIZE_PARAMS.
-		// Returning 0 makes the entire window area = client area (no title bar).
-		// When maximized, we must adjust rgrc[0] to the monitor work area
-		// to prevent the window from extending behind the taskbar.
+		// JBR approach: remove ONLY the title bar (top NC area).
+		// Keep left/right/bottom NC borders so DWM shadow works.
+		// GPU renderer draws over the thin NC borders.
 		p.callbackMu.RLock()
 		frameless := p.frameless
 		p.callbackMu.RUnlock()
 
-		if frameless {
-			// wParam=0: lParam is a RECT*. Return 0 to accept the proposed client rect.
-			if wParam == 0 {
-				return 0
-			}
-			// wParam=TRUE: lParam is NCCALCSIZE_PARAMS*.
-			// Check if maximized — need to constrain to monitor work area
-			ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd))
-			if ret != 0 {
-				// lParam is *NCCALCSIZE_PARAMS, rgrc[0] is the first RECT
-				type monitorInfo struct {
-					cbSize    uint32
-					rcMonitor rect
-					rcWork    rect
-					dwFlags   uint32
-				}
-				hMon, _, _ := procMonitorFromWindow.Call(
-					uintptr(p.hwnd), monitorDefaultToNearest)
-				var mi monitorInfo
-				mi.cbSize = uint32(unsafe.Sizeof(mi))
-				procGetMonitorInfoW.Call(hMon, uintptr(unsafe.Pointer(&mi)))
+		if frameless && wParam != 0 {
+			// Save original top before DefWindowProc adjusts it
+			rgrc := (*rect)(unsafe.Pointer(lParam)) //nolint:govet // lParam is NCCALCSIZE_PARAMS*
+			frameTop := rgrc.top
 
-				// Set rgrc[0] to monitor work area (excludes taskbar)
-				rgrc := (*rect)(unsafe.Pointer(lParam)) //nolint:govet // lParam is NCCALCSIZE_PARAMS*
-				rgrc.left = mi.rcWork.left
-				rgrc.top = mi.rcWork.top
-				rgrc.right = mi.rcWork.right
-				rgrc.bottom = mi.rcWork.bottom
+			// Let Windows calculate NC area (borders, title bar)
+			procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+
+			// Restore top — removes title bar but keeps side/bottom borders
+			rgrc.top = frameTop
+
+			if ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd)); ret != 0 {
+				// When maximized, add frame border to top to prevent
+				// window from extending above the screen
+				borderY, _, _ := procGetSystemMetrics.Call(smCYSizeFrame)
+				padded, _, _ := procGetSystemMetrics.Call(smCXPaddedBorder)
+				rgrc.top += int32(borderY + padded)
 			}
 			return 0
 		}
