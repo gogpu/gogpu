@@ -66,6 +66,7 @@ func (m *mockPlatform) ReduceMotion() bool               { return m.reduceMotion
 func (m *mockPlatform) HighContrast() bool               { return m.highContrast }
 func (m *mockPlatform) FontScale() float32               { return m.fontScale }
 
+func (m *mockPlatform) SyncFrame()          {}
 func (m *mockPlatform) SetFrameless(v bool) { m.frameless = v }
 func (m *mockPlatform) IsFrameless() bool   { return m.frameless }
 func (m *mockPlatform) SetHitTestCallback(fn func(float64, float64) gpucontext.HitTestResult) {

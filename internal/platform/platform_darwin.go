@@ -1048,6 +1048,8 @@ func (p *darwinPlatform) IsMaximized() bool {
 	return false
 }
 
+func (p *darwinPlatform) SyncFrame() {}
+
 func (p *darwinPlatform) CloseWindow() {
 	if p.window != nil {
 		p.window.Close()

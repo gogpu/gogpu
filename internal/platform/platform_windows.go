@@ -246,6 +246,7 @@ var (
 	// DWM (Desktop Window Manager) for frameless window shadow
 	dwmapi                       = windows.NewLazyDLL("dwmapi.dll")
 	procDwmExtendFrameIntoClient = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	procDwmFlush                 = dwmapi.NewProc("DwmFlush")
 
 	// WaitEvents / WakeUp
 	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
@@ -927,6 +928,18 @@ func (p *windowsPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.Hi
 	p.callbackMu.Lock()
 	defer p.callbackMu.Unlock()
 	p.hitTestCallback = fn
+}
+
+func (p *windowsPlatform) SyncFrame() {
+	// DwmFlush synchronizes with Desktop Window Manager composition.
+	// During resize, this ensures our rendered frame and the DWM window
+	// border update appear in the same composition cycle, reducing lag.
+	p.sizeMu.RLock()
+	resizing := p.inSizeMove
+	p.sizeMu.RUnlock()
+	if resizing {
+		procDwmFlush.Call()
+	}
 }
 
 func (p *windowsPlatform) Minimize() {

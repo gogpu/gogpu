@@ -388,6 +388,11 @@ func (a *App) modalFrameTick() {
 
 	// Render frame on render thread (blocks until complete).
 	a.renderFrameMultiThread()
+
+	// Synchronize with compositor (DwmFlush on Windows).
+	// This ensures our frame and the DWM window border update
+	// appear in the same composition cycle, reducing resize lag.
+	a.platform.SyncFrame()
 }
 
 // Quit requests the application to quit.

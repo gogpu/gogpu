@@ -2001,6 +2001,10 @@ func (p *x11Platform) CloseWindow() {
 	p.inner.CloseWindow()
 }
 
+func (p *x11Platform) SyncFrame() {}
+
+func (p *waylandPlatform) SyncFrame() {}
+
 // Frameless window support — waylandPlatform
 
 func (p *waylandPlatform) SetFrameless(frameless bool) {

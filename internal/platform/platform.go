@@ -173,6 +173,11 @@ type Platform interface {
 	// CloseWindow requests the window to close.
 	CloseWindow()
 
+	// SyncFrame synchronizes the rendered frame with the compositor.
+	// On Windows, calls DwmFlush() during resize to sync with DWM composition.
+	// On other platforms, this is a no-op.
+	SyncFrame()
+
 	// DarkMode returns true if system dark mode is active.
 	DarkMode() bool
 
