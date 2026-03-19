@@ -242,6 +242,7 @@ var (
 	procSetWindowPos       = user32.NewProc("SetWindowPos")
 	procIsZoomed           = user32.NewProc("IsZoomed")
 	procScreenToClient     = user32.NewProc("ScreenToClient")
+	procInvalidateRect     = user32.NewProc("InvalidateRect")
 	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
 	procMonitorFromWindow  = user32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
@@ -1675,8 +1676,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		frameless := p.frameless
 		p.callbackMu.RUnlock()
 		if frameless {
-			ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, ^uintptr(0))
-			return ret
+			// Invalidate client area to force GPU redraw over any NC artifacts.
+			procInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
+			return 1
 		}
 
 	case wmNCPaint:
