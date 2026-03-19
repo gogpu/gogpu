@@ -153,11 +153,12 @@ const (
 	// Frameless window constants
 	wsPopup      = 0x80000000 // WS_POPUP
 	wsThickFrame = 0x00040000 // WS_THICKFRAME (for resize in frameless)
-	wsCaption = 0x00C00000 // WS_CAPTION (title bar)
-	wmNCHitTest  = 0x0084 // WM_NCHITTEST
-	wmNCCalcSize = 0x0083 // WM_NCCALCSIZE
-	swMinimize     = 6        // SW_MINIMIZE
-	swMaximize     = 3        // SW_MAXIMIZE
+	wsCaption    = 0x00C00000 // WS_CAPTION (title bar)
+	wmNCHitTest  = 0x0084     // WM_NCHITTEST
+	wmNCCalcSize = 0x0083     // WM_NCCALCSIZE
+	wmNCPaint    = 0x0085     // WM_NCPAINT
+	swMinimize   = 6          // SW_MINIMIZE
+	swMaximize   = 3          // SW_MAXIMIZE
 
 	// WM_NCHITTEST return values
 	htCaption     = 2
@@ -181,9 +182,9 @@ const (
 	swpFrameChanged = 0x0020
 
 	// GetSystemMetrics / MonitorFromWindow constants
-	smCXSizeFrame          = 32 // SM_CXSIZEFRAME
-	smCYSizeFrame          = 33 // SM_CYSIZEFRAME
-	smCXPaddedBorder       = 92 // SM_CXPADDEDBORDERWIDTH
+	smCXSizeFrame           = 32 // SM_CXSIZEFRAME
+	smCYSizeFrame           = 33 // SM_CYSIZEFRAME
+	smCXPaddedBorder        = 92 // SM_CXPADDEDBORDERWIDTH
 	monitorDefaultToNearest = 2  // MONITOR_DEFAULTTONEAREST
 
 	// WaitEvents / WakeUp constants
@@ -243,8 +244,8 @@ var (
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
 
 	// DWM (Desktop Window Manager) for frameless window shadow
-	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
-	procDwmExtendFrameIntoClient  = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	dwmapi                       = windows.NewLazyDLL("dwmapi.dll")
+	procDwmExtendFrameIntoClient = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
 
 	// WaitEvents / WakeUp
 	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
@@ -463,9 +464,11 @@ func (p *windowsPlatform) Init(config Config) error {
 
 	var style uintptr
 	if config.Frameless {
-		// WS_POPUP: clean frameless window, no OS chrome, no artifacts.
-		// Resize handled via WM_NCHITTEST returning HitTestResize* values.
-		style = uintptr(wsPopup | wsVisible)
+		// WS_POPUP | WS_THICKFRAME: native resize loop for responsive resizing.
+		// WS_THICKFRAME enables DWM shadow and native modal resize.
+		// WM_NCCALCSIZE returns 0 to remove visible frame.
+		// WM_NCPAINT is intercepted to prevent frame painting.
+		style = uintptr(wsPopup | wsThickFrame | wsVisible)
 	} else {
 		style = uintptr(wsOverlappedWindow | wsVisible)
 	}
@@ -491,6 +494,17 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.width = config.Width
 	p.height = config.Height
 	p.frameless = config.Frameless
+
+	// Enable DWM shadow for frameless windows.
+	// WS_THICKFRAME + DwmExtendFrameIntoClientArea + WM_NCCALCSIZE=0 + WM_NCPAINT=0
+	// gives DWM shadow without visible frame.
+	if config.Frameless {
+		type margins struct {
+			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
+		}
+		m := margins{1, 1, 1, 1}
+		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
+	}
 
 	// Show window
 	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
@@ -1614,6 +1628,16 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		p.queueEvent(Event{Type: EventClose})
 		return 0
 
+	case wmNCPaint:
+		// Suppress non-client area painting for frameless windows.
+		// Without this, WS_THICKFRAME causes a white border artifact.
+		p.callbackMu.RLock()
+		frameless := p.frameless
+		p.callbackMu.RUnlock()
+		if frameless {
+			return 0
+		}
+
 	case wmNCCalcSize:
 		// Chrome/Electron approach: remove title bar but keep DWM shadow.
 		// When wParam=TRUE, lParam points to NCCALCSIZE_PARAMS.
@@ -1642,7 +1666,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 				procGetMonitorInfoW.Call(hMon, uintptr(unsafe.Pointer(&mi)))
 
 				// Set rgrc[0] to monitor work area (excludes taskbar)
-				rgrc := (*rect)(unsafe.Pointer(lParam))
+				rgrc := (*rect)(unsafe.Pointer(lParam)) //nolint:govet // lParam is NCCALCSIZE_PARAMS*
 				rgrc.left = mi.rcWork.left
 				rgrc.top = mi.rcWork.top
 				rgrc.right = mi.rcWork.right
