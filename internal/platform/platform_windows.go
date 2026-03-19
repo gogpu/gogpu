@@ -238,7 +238,7 @@ var (
 	procSetWindowLongPtrW  = user32.NewProc("SetWindowLongPtrW")
 	procSetWindowPos       = user32.NewProc("SetWindowPos")
 	procIsZoomed           = user32.NewProc("IsZoomed")
-	procScreenToClient     = user32.NewProc("ScreenToClient")
+	procScreenToClient = user32.NewProc("ScreenToClient")
 	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
 	procMonitorFromWindow  = user32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
@@ -285,6 +285,7 @@ var (
 	procGetDC             = user32.NewProc("GetDC")
 	procReleaseDC         = user32.NewProc("ReleaseDC")
 	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
+	procGetStockObject    = gdi32.NewProc("GetStockObject")
 )
 
 // trackMouseEventStruct is the TRACKMOUSEEVENT structure.
@@ -447,6 +448,12 @@ func (p *windowsPlatform) Init(config Config) error {
 		lpszClassName: className,
 	}
 
+	// Set black background brush to prevent gray flash during resize/focus loss.
+	// Without this, Windows draws the system default background (gray) between
+	// GPU frame renders, causing visible flicker.
+	blackBrush, _, _ := procGetStockObject.Call(4) // BLACK_BRUSH = 4
+	wndClass.hbrBackground = windows.Handle(blackBrush)
+
 	// Load default cursor
 	cursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	wndClass.hCursor = windows.Handle(cursor)
@@ -465,11 +472,10 @@ func (p *windowsPlatform) Init(config Config) error {
 
 	var style uintptr
 	if config.Frameless {
-		// WS_POPUP | WS_THICKFRAME: native resize loop for responsive resizing.
-		// WS_THICKFRAME enables DWM shadow and native modal resize.
-		// WM_NCCALCSIZE returns 0 to remove visible frame.
-		// WM_NCPAINT is intercepted to prevent frame painting.
-		style = uintptr(wsPopup | wsThickFrame | wsVisible)
+		// WS_POPUP: clean frameless, no OS chrome, no border artifacts.
+		// Resize handled via WM_NCHITTEST returning HitTestResize* values.
+		// No DWM shadow (WS_THICKFRAME causes visible border artifacts).
+		style = uintptr(wsPopup | wsVisible)
 	} else {
 		style = uintptr(wsOverlappedWindow | wsVisible)
 	}
@@ -495,17 +501,6 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.width = config.Width
 	p.height = config.Height
 	p.frameless = config.Frameless
-
-	// Enable DWM shadow for frameless windows.
-	// WS_THICKFRAME + DwmExtendFrameIntoClientArea + WM_NCCALCSIZE=0 + WM_NCPAINT=0
-	// gives DWM shadow without visible frame.
-	if config.Frameless {
-		type margins struct {
-			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
-		}
-		m := margins{1, 1, 1, 1}
-		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
-	}
 
 	// Show window
 	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
@@ -1661,7 +1656,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		frameless := p.frameless
 		p.callbackMu.RUnlock()
 
-		if frameless && wParam != 0 {
+		if frameless {
+			// wParam=0: lParam is a RECT*. Return 0 to accept the proposed client rect.
+			if wParam == 0 {
+				return 0
+			}
+			// wParam=TRUE: lParam is NCCALCSIZE_PARAMS*.
 			// Check if maximized — need to constrain to monitor work area
 			ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd))
 			if ret != 0 {
