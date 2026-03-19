@@ -150,6 +150,42 @@ const (
 	spiGetHighContrast        = 0x0042
 	hcfHighContrastOn         = 0x00000001
 
+	// Frameless window constants
+	wsPopup      = 0x80000000 // WS_POPUP
+	wsThickFrame = 0x00040000 // WS_THICKFRAME (for resize in frameless)
+	wsCaption    = 0x00C00000 // WS_CAPTION (title bar)
+	wmNCHitTest    = 0x0084   // WM_NCHITTEST
+	wmNCCalcSize   = 0x0083   // WM_NCCALCSIZE
+	swMinimize     = 6        // SW_MINIMIZE
+	swMaximize     = 3        // SW_MAXIMIZE
+
+	// WM_NCHITTEST return values
+	htCaption     = 2
+	htSysMenu     = 3
+	htMinButton   = 8
+	htMaxButton   = 9
+	htClose       = 20 // HTCLOSE
+	htTop         = 12
+	htBottom      = 15
+	htLeft        = 10
+	htRight       = 11
+	htTopLeft     = 13
+	htTopRight    = 14
+	htBottomLeft  = 16
+	htBottomRight = 17
+
+	// SetWindowPos constants
+	swpNoMove       = 0x0002
+	swpNoSize       = 0x0001
+	swpNoZOrder     = 0x0004
+	swpFrameChanged = 0x0020
+
+	// GetSystemMetrics / MonitorFromWindow constants
+	smCXSizeFrame          = 32 // SM_CXSIZEFRAME
+	smCYSizeFrame          = 33 // SM_CYSIZEFRAME
+	smCXPaddedBorder       = 92 // SM_CXPADDEDBORDERWIDTH
+	monitorDefaultToNearest = 2  // MONITOR_DEFAULTTONEAREST
+
 	// WaitEvents / WakeUp constants
 	wmWakeUp       = 0x0401     // WM_USER + 1 (custom wakeup message)
 	qsAllinput     = 0x04FF     // QS_ALLINPUT
@@ -198,6 +234,17 @@ var (
 	procGetMessageTime     = user32.NewProc("GetMessageTime")
 	procSetTimer           = user32.NewProc("SetTimer")
 	procKillTimer          = user32.NewProc("KillTimer")
+	procSetWindowLongPtrW  = user32.NewProc("SetWindowLongPtrW")
+	procSetWindowPos       = user32.NewProc("SetWindowPos")
+	procIsZoomed           = user32.NewProc("IsZoomed")
+	procScreenToClient     = user32.NewProc("ScreenToClient")
+	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
+	procMonitorFromWindow  = user32.NewProc("MonitorFromWindow")
+	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
+
+	// DWM (Desktop Window Manager) for frameless window shadow
+	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
+	procDwmExtendFrameIntoClient  = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
 
 	// WaitEvents / WakeUp
 	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
@@ -349,6 +396,11 @@ type windowsPlatform struct {
 	mouseInWindow bool
 	mouseMu       sync.RWMutex // Protects mouse state
 
+	// Frameless window state
+	frameless       bool
+	hitTestCallback func(x, y float64) gpucontext.HitTestResult
+	maximized       bool
+
 	// Callbacks for pointer, scroll, keyboard, and character input events
 	pointerCallback    func(gpucontext.PointerEvent)
 	scrollCallback     func(gpucontext.ScrollEvent)
@@ -409,7 +461,14 @@ func (p *windowsPlatform) Init(config Config) error {
 		return fmt.Errorf("utf16 title: %w", err)
 	}
 
-	style := uintptr(wsOverlappedWindow | wsVisible)
+	var style uintptr
+	if config.Frameless {
+		// WS_POPUP: no OS title bar from the start (no flash).
+		// DwmExtendFrameIntoClientArea adds a subtle shadow.
+		style = uintptr(wsPopup | wsVisible)
+	} else {
+		style = uintptr(wsOverlappedWindow | wsVisible)
+	}
 
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
@@ -431,6 +490,19 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.hwnd = windows.HWND(hwnd)
 	p.width = config.Width
 	p.height = config.Height
+	p.frameless = config.Frameless
+
+	// For frameless windows, extend DWM frame into client area to get shadow.
+	// MARGINS{0,0,0,1} means 1px bottom margin — enough for DWM to draw shadow
+	// while WM_NCCALCSIZE removes the actual title bar.
+	// This is the Chrome/Electron/VS Code approach.
+	if config.Frameless {
+		type margins struct {
+			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
+		}
+		m := margins{0, 0, 0, 1}
+		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
+	}
 
 	// Show window
 	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
@@ -819,6 +891,61 @@ func (p *windowsPlatform) HighContrast() bool {
 // On Windows, font scale is derived from the DPI scale factor.
 func (p *windowsPlatform) FontScale() float32 {
 	return float32(p.ScaleFactor())
+}
+
+func (p *windowsPlatform) SetFrameless(frameless bool) {
+	p.callbackMu.Lock()
+	p.frameless = frameless
+	p.callbackMu.Unlock()
+
+	// Style is always WS_OVERLAPPEDWINDOW (Chrome approach).
+	// WM_NCCALCSIZE removes the title bar when frameless=true.
+	// Toggle DWM frame extension for shadow.
+	type margins struct {
+		cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
+	}
+	var m margins
+	if frameless {
+		m = margins{0, 0, 0, 1} // 1px bottom = enable DWM shadow
+	}
+	procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
+
+	// Force WM_NCCALCSIZE recalculation
+	procSetWindowPos.Call(uintptr(p.hwnd), 0, 0, 0, 0, 0,
+		swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
+}
+
+func (p *windowsPlatform) IsFrameless() bool {
+	p.callbackMu.RLock()
+	defer p.callbackMu.RUnlock()
+	return p.frameless
+}
+
+func (p *windowsPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	p.callbackMu.Lock()
+	defer p.callbackMu.Unlock()
+	p.hitTestCallback = fn
+}
+
+func (p *windowsPlatform) Minimize() {
+	procShowWindow.Call(uintptr(p.hwnd), swMinimize)
+}
+
+func (p *windowsPlatform) Maximize() {
+	if p.IsMaximized() {
+		procShowWindow.Call(uintptr(p.hwnd), swRestore)
+	} else {
+		procShowWindow.Call(uintptr(p.hwnd), swMaximize)
+	}
+}
+
+func (p *windowsPlatform) IsMaximized() bool {
+	ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd))
+	return ret != 0
+}
+
+func (p *windowsPlatform) CloseWindow() {
+	procPostMessageW.Call(uintptr(p.hwnd), wmClose, 0, 0)
 }
 
 func (p *windowsPlatform) queueEvent(event Event) {
@@ -1322,6 +1449,38 @@ func getPointerID(wParam uintptr) uint32 {
 	return uint32(wParam & 0xFFFF)
 }
 
+// hitTestResultToWin32 converts gpucontext.HitTestResult to Win32 NCHITTEST values.
+func hitTestResultToWin32(result gpucontext.HitTestResult) uintptr {
+	switch result {
+	case gpucontext.HitTestCaption:
+		return htCaption
+	case gpucontext.HitTestClose:
+		return htClose
+	case gpucontext.HitTestMaximize:
+		return htMaxButton
+	case gpucontext.HitTestMinimize:
+		return htMinButton
+	case gpucontext.HitTestResizeN:
+		return htTop
+	case gpucontext.HitTestResizeS:
+		return htBottom
+	case gpucontext.HitTestResizeW:
+		return htLeft
+	case gpucontext.HitTestResizeE:
+		return htRight
+	case gpucontext.HitTestResizeNW:
+		return htTopLeft
+	case gpucontext.HitTestResizeNE:
+		return htTopRight
+	case gpucontext.HitTestResizeSW:
+		return htBottomLeft
+	case gpucontext.HitTestResizeSE:
+		return htBottomRight
+	default:
+		return htClient
+	}
+}
+
 // mapWin32PointerType maps Win32 PT_* constants to gpucontext.PointerType.
 func mapWin32PointerType(ptType uint32) gpucontext.PointerType {
 	switch ptType {
@@ -1466,6 +1625,72 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		p.shouldClose = true
 		p.queueEvent(Event{Type: EventClose})
 		return 0
+
+	case wmNCCalcSize:
+		// Chrome/Electron approach: remove title bar but keep DWM shadow.
+		// When wParam=TRUE, lParam points to NCCALCSIZE_PARAMS.
+		// Returning 0 makes the entire window area = client area (no title bar).
+		// When maximized, we must adjust rgrc[0] to the monitor work area
+		// to prevent the window from extending behind the taskbar.
+		p.callbackMu.RLock()
+		frameless := p.frameless
+		p.callbackMu.RUnlock()
+
+		if frameless && wParam != 0 {
+			// Check if maximized — need to constrain to monitor work area
+			ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd))
+			if ret != 0 {
+				// lParam is *NCCALCSIZE_PARAMS, rgrc[0] is the first RECT
+				type monitorInfo struct {
+					cbSize    uint32
+					rcMonitor rect
+					rcWork    rect
+					dwFlags   uint32
+				}
+				hMon, _, _ := procMonitorFromWindow.Call(
+					uintptr(p.hwnd), monitorDefaultToNearest)
+				var mi monitorInfo
+				mi.cbSize = uint32(unsafe.Sizeof(mi))
+				procGetMonitorInfoW.Call(hMon, uintptr(unsafe.Pointer(&mi)))
+
+				// Set rgrc[0] to monitor work area (excludes taskbar)
+				rgrc := (*rect)(unsafe.Pointer(lParam))
+				rgrc.left = mi.rcWork.left
+				rgrc.top = mi.rcWork.top
+				rgrc.right = mi.rcWork.right
+				rgrc.bottom = mi.rcWork.bottom
+			}
+			return 0
+		}
+
+	case wmNCHitTest:
+		// Custom hit testing for frameless windows
+		p.callbackMu.RLock()
+		cb := p.hitTestCallback
+		frameless := p.frameless
+		p.callbackMu.RUnlock()
+
+		if frameless && cb != nil {
+			// Get cursor position in screen coordinates from lParam
+			screenX := int16(lParam & 0xFFFF)
+			screenY := int16((lParam >> 16) & 0xFFFF)
+
+			// Convert screen to client coordinates
+			pt := point{x: int32(screenX), y: int32(screenY)}
+			procScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&pt)))
+
+			// Convert to logical (DIP) coordinates
+			scale := p.scaleFactor()
+			logX := float64(pt.x)
+			logY := float64(pt.y)
+			if scale > 1.0 {
+				logX /= scale
+				logY /= scale
+			}
+
+			result := cb(logX, logY)
+			return hitTestResultToWin32(result)
+		}
 
 	case wmWakeUp:
 		// No-op: sole purpose is to unblock MsgWaitForMultipleObjectsEx in WaitEvents.

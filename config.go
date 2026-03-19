@@ -41,6 +41,11 @@ type Config struct {
 	// or when events occur (resize, input, etc.) - more power efficient.
 	// When true, renders every frame at VSync rate - suitable for games/animations.
 	ContinuousRender bool
+
+	// Frameless removes the OS window chrome (title bar, borders).
+	// When true, the application must provide its own title bar via
+	// WindowChrome.SetHitTestCallback for drag, resize, and button regions.
+	Frameless bool
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -126,6 +131,14 @@ func (c Config) WithGraphicsAPI(api types.GraphicsAPI) Config {
 // When false: renders only on RequestRedraw() or events - power efficient for UI.
 func (c Config) WithContinuousRender(continuous bool) Config {
 	c.ContinuousRender = continuous
+	return c
+}
+
+// WithFrameless enables or disables frameless window mode.
+// When true, the OS title bar and borders are removed.
+// Use WindowChrome.SetHitTestCallback to define drag, resize, and button regions.
+func (c Config) WithFrameless(frameless bool) Config {
+	c.Frameless = frameless
 	return c
 }
 

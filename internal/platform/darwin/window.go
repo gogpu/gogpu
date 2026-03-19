@@ -20,6 +20,7 @@ type WindowConfig struct {
 	Height     int
 	Resizable  bool
 	Fullscreen bool
+	Frameless  bool
 }
 
 // Window represents an NSWindow with its content view.
@@ -45,9 +46,17 @@ func NewWindow(config WindowConfig) (*Window, error) {
 	}
 
 	// Calculate style mask
-	styleMask := NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
-	if config.Resizable {
-		styleMask |= NSWindowStyleMaskResizable
+	var styleMask NSWindowStyleMask
+	if config.Frameless {
+		styleMask = NSWindowStyleMaskBorderless
+		if config.Resizable {
+			styleMask |= NSWindowStyleMaskResizable
+		}
+	} else {
+		styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
+		if config.Resizable {
+			styleMask |= NSWindowStyleMaskResizable
+		}
 	}
 
 	// Create content rect
@@ -422,6 +431,18 @@ func (w *Window) Zoom() {
 	}
 
 	w.nsWindow.SendPtr(selectors.zoom, 0)
+}
+
+// SetStyleMask sets the window's style mask.
+func (w *Window) SetStyleMask(mask NSWindowStyleMask) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	w.nsWindow.SendUint(selectors.setStyleMask, uint64(mask))
 }
 
 // IsMiniaturized returns true if the window is minimized.

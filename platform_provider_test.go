@@ -19,6 +19,13 @@ type mockPlatform struct {
 	reduceMotion  bool
 	highContrast  bool
 	fontScale     float32
+
+	// Frameless window state
+	frameless       bool
+	maximized       bool
+	minimized       bool
+	closed          bool
+	hitTestCallback func(float64, float64) gpucontext.HitTestResult
 }
 
 func (m *mockPlatform) Init(platform.Config) error { return nil }
@@ -58,6 +65,16 @@ func (m *mockPlatform) DarkMode() bool                   { return m.darkMode }
 func (m *mockPlatform) ReduceMotion() bool               { return m.reduceMotion }
 func (m *mockPlatform) HighContrast() bool               { return m.highContrast }
 func (m *mockPlatform) FontScale() float32               { return m.fontScale }
+
+func (m *mockPlatform) SetFrameless(v bool) { m.frameless = v }
+func (m *mockPlatform) IsFrameless() bool   { return m.frameless }
+func (m *mockPlatform) SetHitTestCallback(fn func(float64, float64) gpucontext.HitTestResult) {
+	m.hitTestCallback = fn
+}
+func (m *mockPlatform) Minimize()         { m.minimized = true }
+func (m *mockPlatform) Maximize()         { m.maximized = !m.maximized }
+func (m *mockPlatform) IsMaximized() bool { return m.maximized }
+func (m *mockPlatform) CloseWindow()      { m.closed = true }
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {

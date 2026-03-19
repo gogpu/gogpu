@@ -148,6 +148,7 @@ func (a *App) Run() error {
 		Height:     a.config.Height,
 		Resizable:  a.config.Resizable,
 		Fullscreen: a.config.Fullscreen,
+		Frameless:  a.config.Frameless,
 	}); err != nil {
 		return err
 	}
@@ -504,9 +505,73 @@ func (a *App) FontScale() float32 {
 	return 1.0
 }
 
+// SetFrameless enables or disables frameless window mode.
+// Implements gpucontext.WindowChrome.
+func (a *App) SetFrameless(frameless bool) {
+	if a.platform != nil {
+		a.platform.SetFrameless(frameless)
+	}
+}
+
+// IsFrameless returns true if the window is in frameless mode.
+// Implements gpucontext.WindowChrome.
+func (a *App) IsFrameless() bool {
+	if a.platform != nil {
+		return a.platform.IsFrameless()
+	}
+	return false
+}
+
+// SetHitTestCallback sets the callback for custom hit testing in frameless mode.
+// Implements gpucontext.WindowChrome.
+func (a *App) SetHitTestCallback(callback gpucontext.HitTestCallback) {
+	if a.platform != nil {
+		a.platform.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
+			if callback != nil {
+				return callback(x, y)
+			}
+			return gpucontext.HitTestClient
+		})
+	}
+}
+
+// Minimize minimizes the window.
+// Implements gpucontext.WindowChrome.
+func (a *App) Minimize() {
+	if a.platform != nil {
+		a.platform.Minimize()
+	}
+}
+
+// Maximize toggles between maximized and restored window state.
+// Implements gpucontext.WindowChrome.
+func (a *App) Maximize() {
+	if a.platform != nil {
+		a.platform.Maximize()
+	}
+}
+
+// IsMaximized returns true if the window is maximized.
+// Implements gpucontext.WindowChrome.
+func (a *App) IsMaximized() bool {
+	if a.platform != nil {
+		return a.platform.IsMaximized()
+	}
+	return false
+}
+
+// Close requests the window to close.
+// Implements gpucontext.WindowChrome.
+func (a *App) Close() {
+	if a.platform != nil {
+		a.platform.CloseWindow()
+	}
+}
+
 // Compile-time interface checks.
 var _ gpucontext.WindowProvider = (*App)(nil)
 var _ gpucontext.PlatformProvider = (*App)(nil)
+var _ gpucontext.WindowChrome = (*App)(nil)
 
 // Config returns the application configuration.
 func (a *App) Config() Config {

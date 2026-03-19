@@ -12,6 +12,7 @@ type Config struct {
 	Height     int
 	Resizable  bool
 	Fullscreen bool
+	Frameless  bool
 }
 
 // Event represents a platform event.
@@ -148,6 +149,29 @@ type Platform interface {
 	// SetCursor changes the mouse cursor shape.
 	// cursorID maps to gpucontext.CursorShape values (0-11).
 	SetCursor(cursorID int)
+
+	// SetFrameless enables or disables frameless window mode at runtime.
+	SetFrameless(frameless bool)
+
+	// IsFrameless returns true if the window has no OS chrome.
+	IsFrameless() bool
+
+	// SetHitTestCallback sets the callback for custom hit testing in frameless mode.
+	// The callback receives cursor position in logical points (DIP) and returns
+	// a gpucontext.HitTestResult indicating what region the cursor is over.
+	SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult)
+
+	// Minimize minimizes the window.
+	Minimize()
+
+	// Maximize toggles between maximized and restored window state.
+	Maximize()
+
+	// IsMaximized returns true if the window is maximized.
+	IsMaximized() bool
+
+	// CloseWindow requests the window to close.
+	CloseWindow()
 
 	// DarkMode returns true if system dark mode is active.
 	DarkMode() bool

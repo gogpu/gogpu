@@ -29,6 +29,10 @@ type darwinPlatform struct {
 	modifiers     gpucontext.Modifiers
 	mouseInWindow bool
 
+	// Frameless window state
+	frameless       bool
+	hitTestCallback func(x, y float64) gpucontext.HitTestResult
+
 	// Callbacks for pointer, scroll, keyboard, and character input events
 	pointerCallback  func(gpucontext.PointerEvent)
 	scrollCallback   func(gpucontext.ScrollEvent)
@@ -60,6 +64,8 @@ func (p *darwinPlatform) Init(config Config) error {
 		return err
 	}
 
+	p.frameless = config.Frameless
+
 	// Create window
 	windowConfig := darwin.WindowConfig{
 		Title:      config.Title,
@@ -67,6 +73,7 @@ func (p *darwinPlatform) Init(config Config) error {
 		Height:     config.Height,
 		Resizable:  config.Resizable,
 		Fullscreen: config.Fullscreen,
+		Frameless:  config.Frameless,
 	}
 
 	window, err := darwin.NewWindow(windowConfig)
@@ -993,6 +1000,59 @@ func (p *darwinPlatform) HighContrast() bool { return false }
 // FontScale returns font size preference multiplier.
 // TODO: Implement using system font size preferences.
 func (p *darwinPlatform) FontScale() float32 { return 1.0 }
+
+func (p *darwinPlatform) SetFrameless(frameless bool) {
+	p.mu.Lock()
+	p.frameless = frameless
+	p.mu.Unlock()
+
+	if p.window != nil {
+		if frameless {
+			p.window.SetStyleMask(darwin.NSWindowStyleMaskBorderless | darwin.NSWindowStyleMaskResizable)
+		} else {
+			p.window.SetStyleMask(
+				darwin.NSWindowStyleMaskTitled | darwin.NSWindowStyleMaskClosable |
+					darwin.NSWindowStyleMaskMiniaturizable | darwin.NSWindowStyleMaskResizable)
+		}
+	}
+}
+
+func (p *darwinPlatform) IsFrameless() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.frameless
+}
+
+func (p *darwinPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.hitTestCallback = fn
+}
+
+func (p *darwinPlatform) Minimize() {
+	if p.window != nil {
+		p.window.Miniaturize()
+	}
+}
+
+func (p *darwinPlatform) Maximize() {
+	if p.window != nil {
+		p.window.Zoom()
+	}
+}
+
+func (p *darwinPlatform) IsMaximized() bool {
+	if p.window != nil {
+		return p.window.IsZoomed()
+	}
+	return false
+}
+
+func (p *darwinPlatform) CloseWindow() {
+	if p.window != nil {
+		p.window.Close()
+	}
+}
 
 // detectModifierKeyChange detects which modifier key was pressed/released.
 // macOS sends NSEventTypeFlagsChanged for modifier keys instead of keyDown/keyUp.

@@ -22,6 +22,7 @@ type Config struct {
 	Height     int
 	Resizable  bool
 	Fullscreen bool
+	Frameless  bool
 }
 
 // EventType represents the type of platform event.
@@ -97,6 +98,10 @@ type Platform struct {
 	activeTouches map[uint32]bool
 	primaryTouch  uint32
 	hasPrimary    bool
+
+	// Frameless window state
+	frameless       bool
+	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 
 	// Callbacks for pointer, scroll, and keyboard events
 	pointerCallback  func(gpucontext.PointerEvent)
@@ -252,8 +257,14 @@ func (p *Platform) Init(config Config) error {
 	// Set window type (non-fatal, some WMs don't support this)
 	_ = conn.SetNetWMWindowType(window, atoms.NetWMWindowTypeNormal, atoms)
 
+	// Handle frameless windows via Motif hints
+	if config.Frameless {
+		p.frameless = true
+		_ = conn.SetWindowBorderless(window, atoms)
+	}
+
 	// Handle non-resizable windows via Motif hints
-	if !config.Resizable {
+	if !config.Resizable && !config.Frameless {
 		hints := &MotifWMHints{
 			Flags:       MotifHintsDecorations | MotifHintsFunctions,
 			Decorations: MotifDecorBorder | MotifDecorTitle | MotifDecorMenu | MotifDecorMinimize,
@@ -1265,4 +1276,54 @@ func (p *Platform) createPointerEvent(
 		Modifiers:   modifiers,
 		Timestamp:   p.eventTimestamp(),
 	}
+}
+
+// Frameless window support
+
+func (p *Platform) SetFrameless(frameless bool) {
+	p.mu.Lock()
+	p.frameless = frameless
+	p.mu.Unlock()
+
+	if frameless {
+		_ = p.conn.SetWindowBorderless(p.window, p.atoms)
+	} else {
+		// Restore decorations
+		hints := &MotifWMHints{
+			Flags:       MotifHintsDecorations,
+			Decorations: MotifDecorAll,
+		}
+		_ = p.conn.SetMotifWMHints(p.window, hints, p.atoms)
+	}
+}
+
+func (p *Platform) IsFrameless() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.frameless
+}
+
+func (p *Platform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	p.callbackMu.Lock()
+	defer p.callbackMu.Unlock()
+	p.hitTestCallback = fn
+}
+
+func (p *Platform) Minimize() {
+	// TODO: Implement using XIconifyWindow or _NET_WM_STATE
+}
+
+func (p *Platform) Maximize() {
+	// TODO: Implement using _NET_WM_STATE_MAXIMIZED_VERT/_HORZ
+}
+
+func (p *Platform) IsMaximized() bool {
+	// TODO: Query _NET_WM_STATE
+	return false
+}
+
+func (p *Platform) CloseWindow() {
+	p.mu.Lock()
+	p.shouldClose = true
+	p.mu.Unlock()
 }

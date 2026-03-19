@@ -40,6 +40,11 @@ type waylandPlatform struct {
 	decorationManager  *wayland.ZxdgDecorationManager
 	toplevelDecoration *wayland.ZxdgToplevelDecoration
 
+	// Frameless window state
+	frameless       bool
+	maximized       bool
+	hitTestCallback func(x, y float64) gpucontext.HitTestResult
+
 	// Input devices
 	seat     *wayland.WlSeat
 	keyboard *wayland.WlKeyboard
@@ -114,6 +119,7 @@ func (p *x11Platform) Init(config Config) error {
 		Height:     config.Height,
 		Resizable:  config.Resizable,
 		Fullscreen: config.Fullscreen,
+		Frameless:  config.Frameless,
 	}
 	if err := p.inner.Init(x11Config); err != nil {
 		return err
@@ -1964,3 +1970,93 @@ func (p *x11Platform) HighContrast() bool { return false }
 // FontScale returns font size preference multiplier.
 // TODO: Implement using Xft.dpi or GSettings text-scaling-factor.
 func (p *x11Platform) FontScale() float32 { return 1.0 }
+
+// Frameless window support — x11Platform
+
+func (p *x11Platform) SetFrameless(frameless bool) {
+	p.inner.SetFrameless(frameless)
+}
+
+func (p *x11Platform) IsFrameless() bool {
+	return p.inner.IsFrameless()
+}
+
+func (p *x11Platform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	p.inner.SetHitTestCallback(fn)
+}
+
+func (p *x11Platform) Minimize() {
+	p.inner.Minimize()
+}
+
+func (p *x11Platform) Maximize() {
+	p.inner.Maximize()
+}
+
+func (p *x11Platform) IsMaximized() bool {
+	return p.inner.IsMaximized()
+}
+
+func (p *x11Platform) CloseWindow() {
+	p.inner.CloseWindow()
+}
+
+// Frameless window support — waylandPlatform
+
+func (p *waylandPlatform) SetFrameless(frameless bool) {
+	p.mu.Lock()
+	p.frameless = frameless
+	p.mu.Unlock()
+
+	if p.toplevelDecoration != nil {
+		if frameless {
+			p.toplevelDecoration.SetMode(wayland.DecorationModeClientSide)
+		} else {
+			p.toplevelDecoration.SetMode(wayland.DecorationModeServerSide)
+		}
+	}
+}
+
+func (p *waylandPlatform) IsFrameless() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.frameless
+}
+
+func (p *waylandPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.hitTestCallback = fn
+}
+
+func (p *waylandPlatform) Minimize() {
+	if p.toplevel != nil {
+		_ = p.toplevel.SetMinimized()
+	}
+}
+
+func (p *waylandPlatform) Maximize() {
+	p.mu.Lock()
+	maximized := p.maximized
+	p.mu.Unlock()
+
+	if p.toplevel != nil {
+		if maximized {
+			_ = p.toplevel.UnsetMaximized()
+		} else {
+			_ = p.toplevel.SetMaximized()
+		}
+	}
+}
+
+func (p *waylandPlatform) IsMaximized() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.maximized
+}
+
+func (p *waylandPlatform) CloseWindow() {
+	p.mu.Lock()
+	p.shouldClose = true
+	p.mu.Unlock()
+}
