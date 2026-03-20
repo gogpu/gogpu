@@ -185,7 +185,7 @@ func (a *App) Run() error {
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(a.platform, a.config.Backend, a.config.GraphicsAPI)
+		a.renderer, initErr = newRenderer(a.platform, a.config.Backend, a.config.GraphicsAPI, a.config.VSync)
 	})
 	if initErr != nil {
 		return initErr
@@ -244,6 +244,13 @@ func (a *App) Run() error {
 		now := time.Now()
 		deltaTime := now.Sub(a.lastFrame).Seconds()
 		a.lastFrame = now
+
+		// Clamp deltaTime after long idle (WaitEvents can block for seconds/minutes).
+		// Without clamping, physics and animations would jump on the first frame.
+		// 66ms = ~15 FPS minimum, a safe upper bound for a single frame step.
+		if deltaTime > 0.066 {
+			deltaTime = 0.066
+		}
 
 		// Update input state for next frame (Ebiten-style polling)
 		// This must be called before onUpdate so JustPressed/JustReleased work correctly
@@ -367,6 +374,11 @@ func (a *App) modalFrameTick() {
 	now := time.Now()
 	deltaTime := now.Sub(a.lastFrame).Seconds()
 	a.lastFrame = now
+
+	// Clamp deltaTime after long idle (same as main loop).
+	if deltaTime > 0.066 {
+		deltaTime = 0.066
+	}
 
 	// Update input state
 	if a.inputState != nil {

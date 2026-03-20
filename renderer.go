@@ -94,12 +94,16 @@ type Renderer struct {
 
 	// Platform reference
 	platform platform.Platform
+
+	// VSync preference from Config
+	vsync bool
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI) (*Renderer, error) {
+func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool) (*Renderer, error) {
 	r := &Renderer{
 		platform: plat,
+		vsync:    vsync,
 	}
 
 	if err := r.init(backendType, graphicsAPI); err != nil {
@@ -294,13 +298,18 @@ func (r *Renderer) initCommon() error {
 
 // configureSurface configures the wgpu surface with current dimensions and format.
 func (r *Renderer) configureSurface() error {
+	presentMode := gputypes.PresentModeFifo // VSync on
+	if !r.vsync {
+		presentMode = gputypes.PresentModeImmediate // VSync off
+	}
+
 	return r.surface.Configure(r.device, &wgpu.SurfaceConfiguration{
 		Format:      r.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       r.width,
 		Height:      r.height,
 		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
-		PresentMode: gputypes.PresentModeFifo, // VSync
+		PresentMode: presentMode,
 	})
 }
 
