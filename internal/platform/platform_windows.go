@@ -190,6 +190,9 @@ const (
 	smCXPaddedBorder        = 92 // SM_CXPADDEDBORDERWIDTH
 	monitorDefaultToNearest = 2  // MONITOR_DEFAULTTONEAREST
 
+	// DPI change message (Windows 8.1+)
+	wmDpiChanged = 0x02E0 // WM_DPICHANGED
+
 	// WaitEvents / WakeUp constants
 	wmWakeUp       = 0x0401     // WM_USER + 1 (custom wakeup message)
 	qsAllinput     = 0x04FF     // QS_ALLINPUT
@@ -707,7 +710,6 @@ func (p *windowsPlatform) ScaleFactor() float64 {
 }
 
 // PrepareFrame returns current DPI state for the Windows platform.
-// Future: apply pending WM_DPICHANGED here.
 func (p *windowsPlatform) PrepareFrame() PrepareFrameResult {
 	w, h := p.PhysicalSize()
 	return PrepareFrameResult{
@@ -1779,6 +1781,32 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmWakeUp:
 		// No-op: sole purpose is to unblock MsgWaitForMultipleObjectsEx in WaitEvents.
+		return 0
+
+	case wmDpiChanged:
+		// Window moved to a monitor with different DPI.
+		// lParam points to a RECT with the suggested new position/size.
+		suggestedRect := (*rect)(unsafe.Pointer(lParam)) //nolint:govet // lParam is RECT*
+		procSetWindowPos.Call(uintptr(p.hwnd), 0,
+			uintptr(suggestedRect.left),
+			uintptr(suggestedRect.top),
+			uintptr(suggestedRect.right-suggestedRect.left),
+			uintptr(suggestedRect.bottom-suggestedRect.top),
+			swpNoZOrder|swpNoActivate)
+
+		// Update cached client size after DPI-driven resize.
+		p.updateSize()
+
+		// Queue resize event with new DPI-adjusted dimensions.
+		physW, physH := p.PhysicalSize()
+		logW, logH := p.LogicalSize()
+		p.queueEvent(Event{
+			Type:           EventResize,
+			Width:          logW,
+			Height:         logH,
+			PhysicalWidth:  physW,
+			PhysicalHeight: physH,
+		})
 		return 0
 
 	case wmDestroy:
