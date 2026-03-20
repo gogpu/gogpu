@@ -2118,8 +2118,11 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	// Vertical scroll wheel
 	case wmMouseWheel:
 		// For wheel messages, coordinates are screen-relative
-		// We need to convert to client coordinates
-		x, y := extractMousePos(lParam)
+		// Convert to client coordinates using ScreenToClient
+		screenX, screenY := extractMousePos(lParam)
+		pt := point{x: int32(screenX), y: int32(screenY)}
+		procScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&pt)))
+		x, y := float64(pt.x), float64(pt.y)
 		deltaY := extractWheelDelta(wParam)
 
 		ev := gpucontext.ScrollEvent{
@@ -2136,7 +2139,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	// Horizontal scroll wheel
 	case wmMouseHWheel:
-		x, y := extractMousePos(lParam)
+		// For wheel messages, coordinates are screen-relative
+		// Convert to client coordinates using ScreenToClient
+		screenX, screenY := extractMousePos(lParam)
+		pt := point{x: int32(screenX), y: int32(screenY)}
+		procScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&pt)))
+		x, y := float64(pt.x), float64(pt.y)
 		deltaX := extractWheelDelta(wParam)
 
 		ev := gpucontext.ScrollEvent{
