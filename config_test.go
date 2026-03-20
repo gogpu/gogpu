@@ -7,6 +7,9 @@ import (
 )
 
 func TestDefaultConfigValues(t *testing.T) {
+	// Clear env to avoid interference from GOGPU_GRAPHICS_API.
+	t.Setenv("GOGPU_GRAPHICS_API", "")
+
 	cfg := DefaultConfig()
 
 	if cfg.Title != "GoGPU Application" {
@@ -35,6 +38,9 @@ func TestDefaultConfigValues(t *testing.T) {
 	}
 	if !cfg.ContinuousRender {
 		t.Error("ContinuousRender = false, want true")
+	}
+	if cfg.Frameless {
+		t.Error("Frameless = true, want false")
 	}
 }
 
@@ -151,13 +157,35 @@ func TestConfigWithContinuousRender(t *testing.T) {
 	}
 }
 
+func TestConfigWithFramelessBuilder(t *testing.T) {
+	tests := []struct {
+		name      string
+		frameless bool
+	}{
+		{"enabled", true},
+		{"disabled", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig().WithFrameless(tt.frameless)
+			if cfg.Frameless != tt.frameless {
+				t.Errorf("Frameless = %v, want %v", cfg.Frameless, tt.frameless)
+			}
+		})
+	}
+}
+
 func TestConfigBuilderChaining(t *testing.T) {
+	t.Setenv("GOGPU_GRAPHICS_API", "")
+
 	cfg := DefaultConfig().
 		WithTitle("Test App").
 		WithSize(1024, 768).
 		WithBackend(types.BackendNative).
 		WithGraphicsAPI(types.GraphicsAPIVulkan).
-		WithContinuousRender(false)
+		WithContinuousRender(false).
+		WithFrameless(true)
 
 	if cfg.Title != "Test App" {
 		t.Errorf("Title = %q, want %q", cfg.Title, "Test App")
@@ -177,7 +205,10 @@ func TestConfigBuilderChaining(t *testing.T) {
 	if cfg.ContinuousRender {
 		t.Error("ContinuousRender = true, want false")
 	}
-	// Verify defaults not overridden remain intact
+	if !cfg.Frameless {
+		t.Error("Frameless = false, want true")
+	}
+	// Verify defaults not overridden remain intact.
 	if !cfg.Resizable {
 		t.Error("Resizable = false, want true (default)")
 	}
@@ -187,10 +218,11 @@ func TestConfigBuilderChaining(t *testing.T) {
 }
 
 func TestConfigImmutability(t *testing.T) {
-	// Verify that With* methods return copies, not mutating the original
-	original := DefaultConfig()
-	_ = original.WithTitle("Modified")
+	t.Setenv("GOGPU_GRAPHICS_API", "")
 
+	original := DefaultConfig()
+
+	_ = original.WithTitle("Modified")
 	if original.Title != "GoGPU Application" {
 		t.Errorf("Original Title was mutated to %q, want %q", original.Title, "GoGPU Application")
 	}
@@ -214,10 +246,14 @@ func TestConfigImmutability(t *testing.T) {
 	if !original.ContinuousRender {
 		t.Error("Original ContinuousRender was mutated to false, want true")
 	}
+
+	_ = original.WithFrameless(true)
+	if original.Frameless {
+		t.Error("Original Frameless was mutated to true, want false")
+	}
 }
 
-func TestReExportedConstants(t *testing.T) {
-	// Verify re-exported backend constants match the types package
+func TestReExportedBackendConstants(t *testing.T) {
 	if BackendAuto != types.BackendAuto {
 		t.Errorf("BackendAuto = %v, want %v", BackendAuto, types.BackendAuto)
 	}
@@ -230,8 +266,9 @@ func TestReExportedConstants(t *testing.T) {
 	if BackendGo != types.BackendGo {
 		t.Errorf("BackendGo = %v, want %v", BackendGo, types.BackendGo)
 	}
+}
 
-	// Verify re-exported graphics API constants
+func TestReExportedGraphicsAPIConstants(t *testing.T) {
 	if GraphicsAPIAuto != types.GraphicsAPIAuto {
 		t.Errorf("GraphicsAPIAuto = %v, want %v", GraphicsAPIAuto, types.GraphicsAPIAuto)
 	}
@@ -253,7 +290,6 @@ func TestReExportedConstants(t *testing.T) {
 }
 
 func TestBackendGoIsNativeAlias(t *testing.T) {
-	// BackendGo should be identical to BackendNative
 	if BackendGo != BackendNative {
 		t.Errorf("BackendGo (%v) != BackendNative (%v), expected them to be the same", BackendGo, BackendNative)
 	}
@@ -261,33 +297,56 @@ func TestBackendGoIsNativeAlias(t *testing.T) {
 
 func TestGraphicsAPIFromEnv(t *testing.T) {
 	tests := []struct {
+		name   string
 		envVal string
 		want   types.GraphicsAPI
 	}{
-		{"vulkan", types.GraphicsAPIVulkan},
-		{"vk", types.GraphicsAPIVulkan},
-		{"dx12", types.GraphicsAPIDX12},
-		{"d3d12", types.GraphicsAPIDX12},
-		{"directx", types.GraphicsAPIDX12},
-		{"metal", types.GraphicsAPIMetal},
-		{"gles", types.GraphicsAPIGLES},
-		{"gl", types.GraphicsAPIGLES},
-		{"opengl", types.GraphicsAPIGLES},
-		{"software", types.GraphicsAPISoftware},
-		{"sw", types.GraphicsAPISoftware},
-		{"cpu", types.GraphicsAPISoftware},
-		{"VULKAN", types.GraphicsAPIVulkan}, // case insensitive
-		{"", types.GraphicsAPIAuto},
-		{"unknown", types.GraphicsAPIAuto},
+		{"vulkan", "vulkan", types.GraphicsAPIVulkan},
+		{"vk alias", "vk", types.GraphicsAPIVulkan},
+		{"VULKAN uppercase", "VULKAN", types.GraphicsAPIVulkan},
+		{"Vulkan mixed case", "Vulkan", types.GraphicsAPIVulkan},
+		{"dx12", "dx12", types.GraphicsAPIDX12},
+		{"d3d12 alias", "d3d12", types.GraphicsAPIDX12},
+		{"directx alias", "directx", types.GraphicsAPIDX12},
+		{"DX12 uppercase", "DX12", types.GraphicsAPIDX12},
+		{"metal", "metal", types.GraphicsAPIMetal},
+		{"Metal mixed case", "Metal", types.GraphicsAPIMetal},
+		{"gles", "gles", types.GraphicsAPIGLES},
+		{"gl alias", "gl", types.GraphicsAPIGLES},
+		{"opengl alias", "opengl", types.GraphicsAPIGLES},
+		{"software", "software", types.GraphicsAPISoftware},
+		{"sw alias", "sw", types.GraphicsAPISoftware},
+		{"cpu alias", "cpu", types.GraphicsAPISoftware},
+		{"empty string", "", types.GraphicsAPIAuto},
+		{"unknown value", "webgl", types.GraphicsAPIAuto},
+		{"unknown random", "foobar", types.GraphicsAPIAuto},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.envVal, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("GOGPU_GRAPHICS_API", tt.envVal)
 			got := graphicsAPIFromEnv()
 			if got != tt.want {
-				t.Errorf("graphicsAPIFromEnv() with %q = %v, want %v", tt.envVal, got, tt.want)
+				t.Errorf("graphicsAPIFromEnv() with env=%q = %v, want %v", tt.envVal, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDefaultConfigReadsEnv(t *testing.T) {
+	t.Setenv("GOGPU_GRAPHICS_API", "vulkan")
+
+	cfg := DefaultConfig()
+	if cfg.GraphicsAPI != types.GraphicsAPIVulkan {
+		t.Errorf("DefaultConfig().GraphicsAPI = %v, want GraphicsAPIVulkan when env=vulkan", cfg.GraphicsAPI)
+	}
+}
+
+func TestWithGraphicsAPIOverridesEnv(t *testing.T) {
+	t.Setenv("GOGPU_GRAPHICS_API", "vulkan")
+
+	cfg := DefaultConfig().WithGraphicsAPI(types.GraphicsAPIMetal)
+	if cfg.GraphicsAPI != types.GraphicsAPIMetal {
+		t.Errorf("GraphicsAPI = %v, want GraphicsAPIMetal (WithGraphicsAPI should override env)", cfg.GraphicsAPI)
 	}
 }
