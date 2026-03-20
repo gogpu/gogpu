@@ -270,6 +270,10 @@ var (
 	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
 	procGlobalFree       = kernel32.NewProc("GlobalFree")
 
+	// Mouse capture (for drag tracking across window boundaries)
+	procSetCapture     = user32.NewProc("SetCapture")
+	procReleaseCapture = user32.NewProc("ReleaseCapture")
+
 	// Pointer input (WM_POINTER*, Windows 8+)
 	procGetPointerType    = user32.NewProc("GetPointerType")
 	procGetPointerInfo    = user32.NewProc("GetPointerInfo")
@@ -1473,6 +1477,36 @@ func (p *windowsPlatform) createPointerEvent(
 	}
 }
 
+// mouseCapture calls SetCapture on the first button press to track mouse
+// movement outside the window boundary during drag operations (sliders,
+// scrollbars, text selection). Must be called BEFORE dispatching the event
+// so the button state in p.buttons reflects the pre-press state.
+func (p *windowsPlatform) mouseCapture(wParam uintptr) {
+	p.mouseMu.Lock()
+	wasPressedBefore := p.buttons != gpucontext.ButtonsNone
+	p.buttons = extractButtons(wParam)
+	p.mouseMu.Unlock()
+
+	if !wasPressedBefore {
+		procSetCapture.Call(uintptr(p.hwnd))
+	}
+}
+
+// mouseRelease calls ReleaseCapture when the last button is released.
+// Must be called AFTER dispatching the event so the PointerUp event
+// still has correct button state.
+func (p *windowsPlatform) mouseRelease(wParam uintptr) {
+	newButtons := extractButtons(wParam)
+
+	p.mouseMu.Lock()
+	p.buttons = newButtons
+	p.mouseMu.Unlock()
+
+	if newButtons == gpucontext.ButtonsNone {
+		procReleaseCapture.Call()
+	}
+}
+
 // getPointerID extracts pointer ID from wParam (LOWORD).
 func getPointerID(wParam uintptr) uint32 {
 	return uint32(wParam & 0xFFFF)
@@ -2063,6 +2097,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	// Left button
 	case wmLButtonDown:
+		p.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
 		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonLeft, x, y, wParam)
 		p.dispatchPointerEvent(ev)
@@ -2072,10 +2107,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		x, y := extractMousePos(lParam)
 		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonLeft, x, y, wParam)
 		p.dispatchPointerEvent(ev)
+		p.mouseRelease(wParam)
 		return 0
 
 	// Right button
 	case wmRButtonDown:
+		p.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
 		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonRight, x, y, wParam)
 		p.dispatchPointerEvent(ev)
@@ -2085,10 +2122,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		x, y := extractMousePos(lParam)
 		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonRight, x, y, wParam)
 		p.dispatchPointerEvent(ev)
+		p.mouseRelease(wParam)
 		return 0
 
 	// Middle button
 	case wmMButtonDown:
+		p.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
 		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonMiddle, x, y, wParam)
 		p.dispatchPointerEvent(ev)
@@ -2098,10 +2137,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		x, y := extractMousePos(lParam)
 		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonMiddle, x, y, wParam)
 		p.dispatchPointerEvent(ev)
+		p.mouseRelease(wParam)
 		return 0
 
 	// X buttons (back/forward)
 	case wmXButtonDown:
+		p.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
 		button := extractXButton(wParam)
 		ev := p.createPointerEvent(gpucontext.PointerDown, button, x, y, wParam)
@@ -2113,6 +2154,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		button := extractXButton(wParam)
 		ev := p.createPointerEvent(gpucontext.PointerUp, button, x, y, wParam)
 		p.dispatchPointerEvent(ev)
+		p.mouseRelease(wParam)
 		return 1 // Must return TRUE for XBUTTON messages
 
 	// Vertical scroll wheel
