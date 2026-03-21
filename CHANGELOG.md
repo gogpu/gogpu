@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Frameless window support** — `Config.Frameless` + `WithFrameless()` builder.
+  `App` implements `gpucontext.WindowChrome` (SetFrameless, SetHitTestCallback,
+  Minimize, Maximize, IsMaximized, Close). Platform support:
+  - **Windows**: JBR approach — WS_OVERLAPPEDWINDOW + WM_NCCALCSIZE (top only) +
+    WM_NCACTIVATE + DwmExtendFrameIntoClientArea + DwmFlush sync + BLACK_BRUSH
+  - **macOS**: NSWindowStyleMaskBorderless + SetStyleMask
+  - **X11**: _MOTIF_WM_HINTS borderless
+  - **Wayland**: zxdg_decoration_manager client-side mode
+
+- **`SyncFrame()` platform method** — DwmFlush during modal resize for smoother content
+
+- **`WM_DPICHANGED` handler** — Multi-monitor DPI transitions with SetWindowPos
+  to suggested rect
+
+- **`Config.VSync` honored** — PresentModeFifo (VSync on) or PresentModeImmediate
+  (VSync off). Previously hardcoded to Fifo.
+
+### Fixed
+
+- **WM_MOUSEWHEEL screen→client coords** — ScreenToClient conversion for scroll events
+- **Mouse capture for drag tracking** — SetCapture/ReleaseCapture on button press/release
+- **System caption flash on focus loss** — WM_NCACTIVATE + InvalidateRect
+- **Delta time clamped after idle** — Max 66ms to prevent animation jumps
+
+### Testing
+
+- **config.go**: 19 subtests (DefaultConfig, builders, env vars, immutability)
+- **fence_pool.go**: 22 subtests (acquire/release/reuse, error propagation, concurrency)
+- **context.go**: 14 new tests (DPI scales, aspect ratio, surface size, typed-nil safety)
+- **window_chrome**: 37 tests (interface, nil-safety, delegation, hit test regions)
+
 ## [0.24.5] - 2026-03-18
 
 ### Fixed
