@@ -313,6 +313,33 @@ ctx.FramebufferWidth()   // 1600 (physical)
 | **macOS** | NSView bounds (points) | bounds × backingScaleFactor | `backingScaleFactor` |
 | **Windows** | Client rect / DPI scale | Client rect (raw pixels) | `GetDpiForWindow() / 96` |
 | **Linux X11** | Window geometry | Same (scale=1.0 baseline) | 1.0 |
+
+### Frameless Window (Custom Chrome)
+
+`App` implements `gpucontext.WindowChrome` for frameless windows with custom title bars:
+
+```go
+app := gogpu.NewApp(gogpu.DefaultConfig().WithFrameless(true))
+app.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
+    if y < 40 { return gpucontext.HitTestCaption }  // drag area
+    return gpucontext.HitTestClient
+})
+```
+
+| Platform | Approach | Shadow |
+|----------|----------|--------|
+| **Windows** | WS_OVERLAPPEDWINDOW + WM_NCCALCSIZE (JBR pattern: remove only title bar, keep side/bottom NC for DWM shadow) + WM_NCACTIVATE(-1) + DwmExtendFrameIntoClientArea | DWM shadow |
+| **macOS** | NSWindowStyleMaskBorderless + SetStyleMask | Native shadow |
+| **X11** | _MOTIF_WM_HINTS borderless | No shadow |
+| **Wayland** | zxdg_decoration_manager client-side | Compositor shadow |
+
+Research: `docs/dev/research/JBR-FRAMELESS-SHADOW-RESEARCH.md`
+
+### DPI / HiDPI
+
+- `WM_DPICHANGED` handler repositions window to suggested rect on multi-monitor transitions
+- `PrepareFrame()` returns current scale factor per frame for dynamic DPI detection
+- `SyncFrame()` calls `DwmFlush()` during modal resize for compositor synchronization
 | **Linux Wayland** | Window geometry | Same (scale=1.0 baseline) | 1.0 |
 
 ### Thread Safety
