@@ -34,9 +34,11 @@
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering |
-| **Graphics** | Windowing, input handling, texture loading |
+| **Graphics** | Windowing, input handling, texture loading, frameless windows |
 | **Compute** | Full compute shader support |
-| **Integration** | DeviceProvider, HalProvider, WindowProvider, PlatformProvider, SurfaceView |
+| **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
+| **HiDPI** | Per-monitor DPI, WM_DPICHANGED, logical/physical coordinate split |
+| **Integration** | DeviceProvider, WindowProvider, PlatformProvider, WindowChrome, SurfaceView |
 | **Logging** | Structured logging via `log/slog`, silent by default |
 | **Build** | Zero CGO with Pure Go backend |
 
