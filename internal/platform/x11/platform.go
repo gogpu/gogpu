@@ -77,10 +77,11 @@ type Platform struct {
 	keymap *KeyboardMapping
 
 	// Window state
-	width       int
-	height      int
-	shouldClose bool
-	configured  bool
+	width         int
+	height        int
+	shouldClose   bool
+	closeReturned bool // true after EventTypeClose has been returned from PollEvents
+	configured    bool
 
 	// Pending resize
 	pendingWidth  int
@@ -352,13 +353,20 @@ func (p *Platform) PollEvents() PlatformEvent {
 		}
 	}
 
-	// Check for close
-	if p.shouldClose {
+	// Check for close (return EventTypeClose only once to avoid infinite loops
+	// in event drain loops that break on EventTypeNone)
+	if p.shouldClose && !p.closeReturned {
+		p.closeReturned = true
 		p.mu.Unlock()
 		return PlatformEvent{Type: EventTypeClose}
 	}
 
 	p.mu.Unlock()
+
+	// Don't poll for more events after close was requested
+	if p.shouldClose {
+		return PlatformEvent{Type: EventTypeNone}
+	}
 
 	// Process pending events
 	for {
@@ -394,7 +402,8 @@ func (p *Platform) PollEvents() PlatformEvent {
 		}
 	}
 
-	if p.shouldClose {
+	if p.shouldClose && !p.closeReturned {
+		p.closeReturned = true
 		return PlatformEvent{Type: EventTypeClose}
 	}
 

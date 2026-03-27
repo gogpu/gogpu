@@ -52,10 +52,11 @@ type waylandPlatform struct {
 	touch    *wayland.WlTouch
 
 	// Window state
-	width       int
-	height      int
-	shouldClose bool
-	configured  bool
+	width         int
+	height        int
+	shouldClose   bool
+	closeReturned bool // true after EventClose has been returned from PollEvents
+	configured    bool
 
 	// Pending resize from configure event
 	pendingWidth  int
@@ -1651,10 +1652,17 @@ func (p *waylandPlatform) PollEvents() Event {
 		}
 	}
 
-	// Check for close
-	if p.shouldClose {
+	// Check for close (return EventClose only once to avoid infinite loops
+	// in event drain loops that break on EventNone)
+	if p.shouldClose && !p.closeReturned {
+		p.closeReturned = true
 		p.mu.Unlock()
 		return Event{Type: EventClose}
+	}
+
+	if p.shouldClose {
+		p.mu.Unlock()
+		return Event{Type: EventNone}
 	}
 
 	p.mu.Unlock()
@@ -1686,7 +1694,8 @@ func (p *waylandPlatform) PollEvents() Event {
 		}
 	}
 
-	if p.shouldClose {
+	if p.shouldClose && !p.closeReturned {
+		p.closeReturned = true
 		return Event{Type: EventClose}
 	}
 
