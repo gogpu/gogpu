@@ -235,6 +235,65 @@ func (c *Connection) SetNetWMWindowType(window ResourceID, windowType Atom, atom
 	return c.ChangeProperty(window, atoms.NetWMWindowType, AtomAtom, 32, PropModeReplace, data)
 }
 
+// GetProperty reads a window property.
+// It returns the property value as raw bytes, the actual type atom, and the format (8/16/32).
+// If the property does not exist, it returns nil data with no error.
+func (c *Connection) GetProperty(window ResourceID, property, reqType Atom, longOffset, longLength uint32, deleteAfter bool) (data []byte, actualType Atom, format uint8, err error) {
+	var deleteByte uint8
+	if deleteAfter {
+		deleteByte = 1
+	}
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeGetProperty)
+	e.PutUint8(deleteByte)
+	e.PutUint16(6) // length = 6 4-byte units
+	e.PutUint32(uint32(window))
+	e.PutUint32(uint32(property))
+	e.PutUint32(uint32(reqType))
+	e.PutUint32(longOffset)
+	e.PutUint32(longLength)
+
+	reply, err := c.sendRequestWithReply(e.Bytes())
+	if err != nil {
+		return nil, AtomNone, 0, fmt.Errorf("x11: GetProperty failed: %w", err)
+	}
+
+	// Reply format:
+	// [1:reply][1:format][2:seq][4:replyLength][4:type][4:bytesAfter][4:valueLength][12:unused][value...]
+	if len(reply) < 32 {
+		return nil, AtomNone, 0, fmt.Errorf("x11: GetProperty reply too short (%d bytes)", len(reply))
+	}
+
+	format = reply[1]
+	d := NewDecoder(c.byteOrder, reply[8:])
+	typeAtom, _ := d.Uint32()
+	actualType = Atom(typeAtom)
+	_, _ = d.Uint32() // bytesAfter
+	valueLen, _ := d.Uint32()
+
+	if actualType == AtomNone || valueLen == 0 {
+		return nil, actualType, format, nil
+	}
+
+	// Value data starts at byte 32
+	var dataLen uint32
+	switch format {
+	case 8:
+		dataLen = valueLen
+	case 16:
+		dataLen = valueLen * 2
+	case 32:
+		dataLen = valueLen * 4
+	}
+
+	if uint32(len(reply)) < 32+dataLen {
+		return nil, actualType, format, fmt.Errorf("x11: GetProperty reply data truncated")
+	}
+
+	return reply[32 : 32+dataLen], actualType, format, nil
+}
+
 // ConfigureWindow configures window position and size.
 func (c *Connection) ConfigureWindow(window ResourceID, x, y int16, width, height uint16) error {
 	// Value mask bits

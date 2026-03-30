@@ -788,8 +788,10 @@ func (c *Connection) PollEvent() (Event, error) {
 	}
 	c.mu.Unlock()
 
-	// Set a very short read deadline so Read returns immediately if no data.
-	if err := c.conn.SetReadDeadline(time.Now().Add(time.Microsecond)); err != nil {
+	// Set a short read deadline so Read returns quickly if no data.
+	// 1ms is enough for the kernel to deliver buffered X11 events.
+	// Too short (1μs) causes events to be missed under high frame rates.
+	if err := c.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return nil, nil //nolint:nilerr // deadline not supported = no polling
 	}
 

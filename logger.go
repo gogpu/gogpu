@@ -3,6 +3,8 @@ package gogpu
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gogpu/gogpu/internal/platform"
@@ -21,6 +23,29 @@ func (nopHandler) WithGroup(string) slog.Handler             { return nopHandler
 var loggerPtr atomic.Pointer[slog.Logger]
 
 func init() {
+	// Check GOGPU_LOG env var for automatic logger initialization.
+	// Levels: debug, info, warn, error. Default: silent (no output).
+	if envLog := os.Getenv("GOGPU_LOG"); envLog != "" {
+		var level slog.Level
+		switch strings.ToLower(envLog) {
+		case "debug":
+			level = slog.LevelDebug
+		case "info":
+			level = slog.LevelInfo
+		case "warn":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		default:
+			level = slog.LevelInfo
+		}
+		l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+		loggerPtr.Store(l)
+		platform.SetLogger(l)
+		wgpu.SetLogger(l)
+		return
+	}
+
 	l := slog.New(nopHandler{})
 	loggerPtr.Store(l)
 }

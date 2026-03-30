@@ -67,6 +67,9 @@ var selectors struct {
 	setBounds       SEL
 	setNeedsDisplay SEL
 
+	// CALayer - Contents (for software blitting)
+	setContents SEL
+
 	// NSScreen
 	mainScreen   SEL
 	screens      SEL
@@ -135,6 +138,34 @@ var selectors struct {
 	// NSRunLoop
 	currentRunLoop SEL
 	runMode        SEL
+
+	// NSPasteboard
+	generalPasteboard SEL
+	stringForType     SEL
+	clearContents     SEL
+	setStringForType  SEL
+
+	// NSCursor
+	arrowCursor               SEL
+	pointingHandCursor        SEL
+	IBeamCursor               SEL
+	crosshairCursor           SEL
+	openHandCursor            SEL
+	resizeUpDownCursor        SEL
+	resizeLeftRightCursor     SEL
+	operationNotAllowedCursor SEL
+	setCursor                 SEL
+	hideCursor                SEL // NSCursor class method
+	unhideCursor              SEL // NSCursor class method
+
+	// NSAppearance
+	effectiveAppearance SEL
+	name                SEL
+
+	// NSWorkspace
+	sharedWorkspace                            SEL
+	accessibilityDisplayShouldReduceMotion     SEL
+	accessibilityDisplayShouldIncreaseContrast SEL
 }
 
 // classes holds cached class references.
@@ -154,6 +185,9 @@ var classes struct {
 	NSRunLoop            Class
 	CALayer              Class
 	CAMetalLayer         Class
+	NSPasteboard         Class
+	NSCursor             Class
+	NSWorkspace          Class
 }
 
 // initSelectors registers all selectors used by the darwin package.
@@ -218,6 +252,9 @@ func initSelectors() {
 		selectors.bounds = RegisterSelector("bounds")
 		selectors.setBounds = RegisterSelector("setBounds:")
 		selectors.setNeedsDisplay = RegisterSelector("setNeedsDisplay:")
+
+		// CALayer - Contents
+		selectors.setContents = RegisterSelector("setContents:")
 
 		// NSScreen
 		selectors.mainScreen = RegisterSelector("mainScreen")
@@ -289,6 +326,36 @@ func initSelectors() {
 		// NSRunLoop
 		selectors.currentRunLoop = RegisterSelector("currentRunLoop")
 		selectors.runMode = RegisterSelector("runMode:beforeDate:")
+
+		// NSPasteboard
+		selectors.generalPasteboard = RegisterSelector("generalPasteboard")
+		selectors.stringForType = RegisterSelector("stringForType:")
+		selectors.clearContents = RegisterSelector("clearContents")
+		selectors.setStringForType = RegisterSelector("setString:forType:")
+
+		// NSCursor
+		selectors.arrowCursor = RegisterSelector("arrowCursor")
+		selectors.pointingHandCursor = RegisterSelector("pointingHandCursor")
+		selectors.IBeamCursor = RegisterSelector("IBeamCursor")
+		selectors.crosshairCursor = RegisterSelector("crosshairCursor")
+		selectors.openHandCursor = RegisterSelector("openHandCursor")
+		selectors.resizeUpDownCursor = RegisterSelector("resizeUpDownCursor")
+		selectors.resizeLeftRightCursor = RegisterSelector("resizeLeftRightCursor")
+		selectors.operationNotAllowedCursor = RegisterSelector("operationNotAllowedCursor")
+		selectors.setCursor = RegisterSelector("set")
+		selectors.hideCursor = RegisterSelector("hide")
+		selectors.unhideCursor = RegisterSelector("unhide")
+
+		// NSAppearance
+		selectors.effectiveAppearance = RegisterSelector("effectiveAppearance")
+		selectors.name = RegisterSelector("name")
+
+		// NSWorkspace
+		selectors.sharedWorkspace = RegisterSelector("sharedWorkspace")
+		selectors.accessibilityDisplayShouldReduceMotion = RegisterSelector(
+			"accessibilityDisplayShouldReduceMotion")
+		selectors.accessibilityDisplayShouldIncreaseContrast = RegisterSelector(
+			"accessibilityDisplayShouldIncreaseContrast")
 	})
 }
 
@@ -308,6 +375,9 @@ func initClasses() {
 		classes.NSRunLoop = GetClass("NSRunLoop")
 		classes.CALayer = GetClass("CALayer")
 		classes.CAMetalLayer = GetClass("CAMetalLayer")
+		classes.NSPasteboard = GetClass("NSPasteboard")
+		classes.NSCursor = GetClass("NSCursor")
+		classes.NSWorkspace = GetClass("NSWorkspace")
 	})
 }
 

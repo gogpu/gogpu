@@ -4,7 +4,10 @@ package x11
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -82,10 +85,9 @@ type Platform struct {
 	shouldClose bool
 	configured  bool
 
-	// Pending resize
-	pendingWidth  int
-	pendingHeight int
-	hasResize     bool
+	// Event queue (matches Windows pattern — finite queue, no infinite loops)
+	events  []PlatformEvent
+	eventMu sync.Mutex
 
 	// Mouse state tracking
 	mouseX        float64
@@ -99,6 +101,10 @@ type Platform struct {
 	primaryTouch  uint32
 	hasPrimary    bool
 
+	// Cursor state
+	cursorFontID ResourceID         // "cursor" font ID (0 = not opened yet)
+	cursorCache  map[int]ResourceID // cursor shape → X11 cursor resource ID
+
 	// Frameless window state
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -109,6 +115,13 @@ type Platform struct {
 	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
 	charCallback     func(rune)
 	callbackMu       sync.RWMutex
+
+	// DPI scale factor (from Xft.dpi or screen physical size)
+	scaleFactor float64
+
+	// Graphics context for BlitPixels (software backend presentation).
+	// Lazily created on first BlitPixels call.
+	blitGC ResourceID
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -325,6 +338,12 @@ func (p *Platform) Init(config Config) error {
 	}
 	p.xlib = xlib
 
+	// Query DPI scale factor from X resources (Xft.dpi) or screen physical size.
+	p.scaleFactor = p.queryScaleFactor()
+	if p.scaleFactor != 1.0 {
+		logger().Info("x11 DPI scale", "factor", p.scaleFactor)
+	}
+
 	if xlib != nil {
 		logger().Info("x11 init complete", "window", fmt.Sprintf("%#x", p.window), "display", fmt.Sprintf("%#x", xlib.display))
 	} else {
@@ -334,71 +353,124 @@ func (p *Platform) Init(config Config) error {
 	return nil
 }
 
-// PollEvents processes pending X11 events.
-func (p *Platform) PollEvents() PlatformEvent {
-	p.mu.Lock()
+// ScaleFactor returns the DPI scale factor detected during Init.
+// Returns 1.0 if DPI information is unavailable.
+func (p *Platform) ScaleFactor() float64 {
+	if p.scaleFactor <= 0 {
+		return 1.0
+	}
+	return p.scaleFactor
+}
 
-	// Check for pending resize
-	if p.hasResize {
-		p.width = p.pendingWidth
-		p.height = p.pendingHeight
-		p.hasResize = false
-		p.mu.Unlock()
+// queryScaleFactor determines the DPI scale factor using two methods:
+//  1. Xft.dpi from RESOURCE_MANAGER property on root window (most reliable, matches GLFW/Qt/GTK)
+//  2. Screen physical dimensions as fallback (pixels / mm * 25.4 / 96)
+//
+// Returns 1.0 if neither method yields a usable result.
+func (p *Platform) queryScaleFactor() float64 {
+	if p.conn == nil {
+		return 1.0
+	}
 
-		return PlatformEvent{
-			Type:   EventTypeResize,
-			Width:  p.pendingWidth,
-			Height: p.pendingHeight,
+	// Method 1: Read Xft.dpi from RESOURCE_MANAGER property on root window.
+	// This is the standard way desktop environments communicate DPI settings.
+	// KDE, GNOME, Xfce all set this. GLFW uses the same approach.
+	rootWindow := p.conn.RootWindow()
+	if rootWindow != 0 {
+		// RESOURCE_MANAGER is a predefined atom (23). Request type AnyPropertyType (0).
+		data, _, _, err := p.conn.GetProperty(rootWindow, AtomResourceManager, Atom(0), 0, 8192, false)
+		if err == nil && len(data) > 0 {
+			if dpi := parseXftDPI(string(data)); dpi > 0 {
+				scale := dpi / 96.0
+				// Clamp to reasonable range [0.5, 8.0]
+				if scale >= 0.5 && scale <= 8.0 {
+					return scale
+				}
+			}
 		}
 	}
 
-	// Check for close
-	if p.shouldClose {
-		p.mu.Unlock()
-		return PlatformEvent{Type: EventTypeClose}
+	// Method 2: Compute DPI from screen physical dimensions.
+	screen := p.conn.DefaultScreen()
+	if screen != nil && screen.WidthInMillimeters > 0 {
+		dpi := float64(screen.WidthInPixels) * 25.4 / float64(screen.WidthInMillimeters)
+		scale := dpi / 96.0
+		// Only use if significantly different from 1.0 and within reasonable range.
+		// Screen physical sizes reported by X are often inaccurate (especially on VMs),
+		// so we use a wider dead zone than for Xft.dpi.
+		if scale >= 0.5 && scale <= 8.0 && math.Abs(scale-1.0) > 0.1 {
+			return math.Round(scale*4) / 4 // Round to nearest 0.25
+		}
 	}
 
-	p.mu.Unlock()
+	return 1.0
+}
 
-	// Process pending events
+// parseXftDPI parses the Xft.dpi value from an X RESOURCE_MANAGER string.
+// The string contains lines like "Xft.dpi:\t96" or "Xft.dpi: 144".
+// Returns 0 if Xft.dpi is not found or cannot be parsed.
+func parseXftDPI(resources string) float64 {
+	for _, line := range strings.Split(resources, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Xft.dpi:") {
+			continue
+		}
+		value := strings.TrimSpace(line[len("Xft.dpi:"):])
+		if dpi, err := strconv.ParseFloat(value, 64); err == nil && dpi > 0 {
+			return dpi
+		}
+	}
+	return 0
+}
+
+// PollEvents processes pending X11 events.
+func (p *Platform) PollEvents() PlatformEvent {
+	// First, drain queued events (from previous X11 reads).
+	p.eventMu.Lock()
+	if len(p.events) > 0 {
+		event := p.events[0]
+		p.events = p.events[1:]
+		p.eventMu.Unlock()
+		return event
+	}
+	p.eventMu.Unlock()
+
+	// Read and process all available X11 events into the queue.
 	for {
 		event, err := p.conn.PollEvent()
 		if err != nil {
 			p.mu.Lock()
 			p.shouldClose = true
 			p.mu.Unlock()
-			return PlatformEvent{Type: EventTypeClose}
-		}
-
-		if event == nil {
+			p.queueEvent(PlatformEvent{Type: EventTypeClose})
 			break
 		}
 
+		if event == nil {
+			break // No more X11 data available
+		}
+
 		if platformEvent := p.handleEvent(event); platformEvent.Type != EventTypeNone {
-			return platformEvent
+			p.queueEvent(platformEvent)
 		}
 	}
 
-	// Check again after processing
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.hasResize {
-		p.width = p.pendingWidth
-		p.height = p.pendingHeight
-		p.hasResize = false
-		return PlatformEvent{
-			Type:   EventTypeResize,
-			Width:  p.pendingWidth,
-			Height: p.pendingHeight,
-		}
+	// Return first queued event, or EventNone if empty.
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	if len(p.events) > 0 {
+		event := p.events[0]
+		p.events = p.events[1:]
+		return event
 	}
-
-	if p.shouldClose {
-		return PlatformEvent{Type: EventTypeClose}
-	}
-
 	return PlatformEvent{Type: EventTypeNone}
+}
+
+// queueEvent appends a platform event to the event queue.
+func (p *Platform) queueEvent(event PlatformEvent) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	p.events = append(p.events, event)
 }
 
 // handleEvent processes a single X11 event.
@@ -406,17 +478,16 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 	switch e := event.(type) {
 	case *ConfigureNotifyEvent:
 		if e.Window == p.window {
-			p.mu.Lock()
 			newWidth := int(e.Width)
 			newHeight := int(e.Height)
-			if newWidth != p.width || newHeight != p.height {
-				p.pendingWidth = newWidth
-				p.pendingHeight = newHeight
-				p.hasResize = true
+			p.mu.Lock()
+			changed := newWidth != p.width || newHeight != p.height
+			if changed {
+				p.width = newWidth
+				p.height = newHeight
 			}
 			p.mu.Unlock()
-
-			if p.hasResize {
+			if changed {
 				return PlatformEvent{
 					Type:   EventTypeResize,
 					Width:  newWidth,
@@ -793,6 +864,22 @@ func (p *Platform) Destroy() {
 	}
 
 	if p.conn != nil {
+		// Free blit GC before destroying window/connection
+		if p.blitGC != 0 {
+			_ = p.conn.FreeGC(p.blitGC)
+			p.blitGC = 0
+		}
+
+		// Free cached cursors and cursor font before destroying window/connection
+		for _, cursor := range p.cursorCache {
+			_ = p.conn.FreeCursor(cursor)
+		}
+		p.cursorCache = nil
+		if p.cursorFontID != 0 {
+			_ = p.conn.CloseFont(p.cursorFontID)
+			p.cursorFontID = 0
+		}
+
 		if p.window != 0 {
 			_ = p.conn.DestroyWindow(p.window)
 			p.window = 0
@@ -1326,4 +1413,170 @@ func (p *Platform) CloseWindow() {
 	p.mu.Lock()
 	p.shouldClose = true
 	p.mu.Unlock()
+}
+
+// SetCursor changes the mouse cursor shape using the standard X11 cursor font.
+// cursorID maps to gpucontext.CursorShape values (0-11).
+func (p *Platform) SetCursor(cursorID int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn == nil || p.window == 0 {
+		return
+	}
+
+	// CursorNone (11): hide cursor by setting a blank 1x1 cursor
+	if cursorID == 11 {
+		p.setBlankCursor()
+		return
+	}
+
+	// Map gpucontext.CursorShape to X11 cursor font glyph index
+	glyphIndex := cursorShapeToGlyph(cursorID)
+
+	// Check cursor cache
+	if p.cursorCache == nil {
+		p.cursorCache = make(map[int]ResourceID)
+	}
+	if cached, ok := p.cursorCache[cursorID]; ok {
+		_ = p.conn.ChangeWindowCursor(p.window, cached)
+		return
+	}
+
+	// Ensure cursor font is opened
+	if p.cursorFontID == 0 {
+		fontID, err := p.conn.OpenFont("cursor")
+		if err != nil {
+			return
+		}
+		p.cursorFontID = fontID
+	}
+
+	// Create glyph cursor: black foreground on white background
+	cursor, err := p.conn.CreateGlyphCursor(
+		p.cursorFontID, p.cursorFontID,
+		glyphIndex, glyphIndex+1,
+		0, 0, 0, // foreground: black
+		0xFFFF, 0xFFFF, 0xFFFF, // background: white
+	)
+	if err != nil {
+		return
+	}
+
+	p.cursorCache[cursorID] = cursor
+	_ = p.conn.ChangeWindowCursor(p.window, cursor)
+}
+
+// setBlankCursor creates and sets a 1x1 transparent cursor to hide the pointer.
+func (p *Platform) setBlankCursor() {
+	if cached, ok := p.cursorCache[11]; ok {
+		_ = p.conn.ChangeWindowCursor(p.window, cached)
+		return
+	}
+
+	// Revert to parent cursor (0 = None in X11 means inherit from parent).
+	// For true cursor hiding we would need CreateCursor with empty pixmaps,
+	// which requires CreatePixmap + CreateGC. For now, revert to default.
+	_ = p.conn.ChangeWindowCursor(p.window, 0)
+}
+
+// FreeCursors releases all cached cursor resources and closes the cursor font.
+// Should be called during platform cleanup.
+func (p *Platform) FreeCursors() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn == nil {
+		return
+	}
+
+	for _, cursor := range p.cursorCache {
+		_ = p.conn.FreeCursor(cursor)
+	}
+	p.cursorCache = nil
+
+	if p.cursorFontID != 0 {
+		_ = p.conn.CloseFont(p.cursorFontID)
+		p.cursorFontID = 0
+	}
+}
+
+// cursorShapeToGlyph maps gpucontext.CursorShape int values to X11 cursor font glyph indices.
+func cursorShapeToGlyph(cursorID int) uint16 {
+	switch cursorID {
+	case 0: // CursorDefault
+		return XCursorLeftPtr
+	case 1: // CursorPointer
+		return XCursorHand2
+	case 2: // CursorText
+		return XCursorXterm
+	case 3: // CursorCrosshair
+		return XCursorCrosshair
+	case 4: // CursorMove
+		return XCursorFleur
+	case 5: // CursorResizeNS
+		return XCursorSBVDoubleArrow
+	case 6: // CursorResizeEW
+		return XCursorSBHDoubleArrow
+	case 7: // CursorResizeNWSE
+		return XCursorTopLeftCorner
+	case 8: // CursorResizeNESW
+		return XCursorBottomLeftCorner
+	case 9: // CursorNotAllowed
+		return XCursorCircle
+	case 10: // CursorWait
+		return XCursorWatch
+	default:
+		return XCursorLeftPtr
+	}
+}
+
+// BlitPixels copies RGBA pixel data to the window using X11 PutImage.
+// Implements software backend presentation for X11.
+// Converts RGBA to BGRA (X11 ZPixmap format on little-endian) and sends
+// pixel data via the pure Go wire protocol.
+func (p *Platform) BlitPixels(pixels []byte, width, height int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn == nil || p.window == 0 {
+		return fmt.Errorf("x11: BlitPixels: no connection or window")
+	}
+
+	screen := p.conn.DefaultScreen()
+	if screen == nil {
+		return fmt.Errorf("x11: BlitPixels: no default screen")
+	}
+
+	// Lazily create a GC for blitting
+	if p.blitGC == 0 {
+		gc, err := p.conn.CreateGC(p.window)
+		if err != nil {
+			return fmt.Errorf("x11: BlitPixels: failed to create GC: %w", err)
+		}
+		p.blitGC = gc
+	}
+
+	// Convert RGBA to BGRA (X11 ZPixmap on little-endian expects BGRA)
+	bgra := make([]byte, len(pixels))
+	for i := 0; i < len(pixels)-3; i += 4 {
+		bgra[i+0] = pixels[i+2] // B
+		bgra[i+1] = pixels[i+1] // G
+		bgra[i+2] = pixels[i+0] // R
+		bgra[i+3] = pixels[i+3] // A
+	}
+
+	err := p.conn.PutImage(
+		p.window, p.blitGC,
+		uint16(width), uint16(height),
+		0, 0, // dst x, y
+		screen.RootDepth,
+		ImageFormatZPixmap,
+		bgra,
+	)
+	if err != nil {
+		return fmt.Errorf("x11: BlitPixels: %w", err)
+	}
+
+	return nil
 }

@@ -3,6 +3,8 @@
 package platform
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -111,18 +113,25 @@ func (p *darwinPlatform) PollEvents() Event {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Process OS events with our handler
+	// Return queued event first (from previous processing).
+	if len(p.events) > 0 {
+		event := p.events[0]
+		p.events = p.events[1:]
+		return event
+	}
+
+	// Process OS events with our handler — queues pointer/key/scroll events.
 	if p.app != nil {
 		p.app.PollEventsWithHandler(p.handleEvent)
 	}
 
-	// Check if window should close
-	if p.window != nil && p.window.ShouldClose() {
+	// Check if window should close — queue once, not every call.
+	if !p.shouldClose && p.window != nil && p.window.ShouldClose() {
 		p.shouldClose = true
-		return Event{Type: EventClose}
+		p.events = append(p.events, Event{Type: EventClose})
 	}
 
-	// Update window size and check for resize.
+	// Check for resize — queue if size changed.
 	// RETINA-002: Do NOT call p.surface.Resize() here. PollEvents runs on the
 	// main thread while the render thread operates on wgpu surface. Surface
 	// reconfiguration is handled by the render thread via RequestResize.
@@ -134,21 +143,18 @@ func (p *darwinPlatform) PollEvents() Event {
 		if newWidth != oldWidth || newHeight != oldHeight {
 			p.config.Width = newWidth
 			p.config.Height = newHeight
-
-			// Get physical pixel size for GPU surface reconfiguration
 			physW, physH := p.window.FramebufferSize()
-
-			return Event{
+			p.events = append(p.events, Event{
 				Type:           EventResize,
 				Width:          newWidth,
 				Height:         newHeight,
 				PhysicalWidth:  physW,
 				PhysicalHeight: physH,
-			}
+			})
 		}
 	}
 
-	// Return queued event if any
+	// Return first queued event, or EventNone.
 	if len(p.events) > 0 {
 		event := p.events[0]
 		p.events = p.events[1:]
@@ -385,7 +391,7 @@ func (p *darwinPlatform) dispatchCharFromEvent(event darwin.ID) {
 	}
 
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // bounded by NSString
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // ObjC UTF8String pointer, bounded by NSString length
 
 	// Release lock before calling user callback to avoid deadlocks
 	p.mu.Unlock()
@@ -973,32 +979,192 @@ func (p *darwinPlatform) PrepareFrame() PrepareFrameResult {
 	}
 }
 
-// ClipboardRead reads text from the system clipboard.
-// TODO: Implement using NSPasteboard.
-func (p *darwinPlatform) ClipboardRead() (string, error) { return "", nil }
+// ClipboardRead reads text from the system clipboard using NSPasteboard.
+func (p *darwinPlatform) ClipboardRead() (string, error) {
+	pb := darwin.GetClass("NSPasteboard").Send(darwin.RegisterSelector("generalPasteboard"))
+	if pb.IsNil() {
+		return "", nil
+	}
 
-// ClipboardWrite writes text to the system clipboard.
-// TODO: Implement using NSPasteboard.
-func (p *darwinPlatform) ClipboardWrite(string) error { return nil }
+	// Request public.utf8-plain-text type
+	typeStr := darwin.NewNSString("public.utf8-plain-text")
+	if typeStr == nil {
+		return "", nil
+	}
+	defer typeStr.Release()
 
-// SetCursor changes the mouse cursor shape.
-// TODO: Implement using NSCursor.
-func (p *darwinPlatform) SetCursor(int) {}
+	nsstr := pb.SendPtr(darwin.RegisterSelector("stringForType:"), uintptr(typeStr.ID()))
+	if nsstr.IsNil() {
+		return "", nil
+	}
+
+	// Convert NSString to Go string
+	utf8Ptr := darwin.NSStringUTF8Ptr(nsstr)
+	if utf8Ptr == 0 {
+		return "", nil
+	}
+
+	length := darwin.NSStringLength(nsstr)
+	if length == 0 {
+		return "", nil
+	}
+
+	// Read UTF-8 bytes (length is character count; UTF-8 may use up to 4 bytes per char)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // ObjC UTF8String pointer, bounded by NSString length
+
+	// Find actual end of the C string
+	end := 0
+	for end < len(data) && data[end] != 0 {
+		end++
+	}
+
+	return string(data[:end]), nil
+}
+
+// ClipboardWrite writes text to the system clipboard using NSPasteboard.
+func (p *darwinPlatform) ClipboardWrite(text string) error {
+	pb := darwin.GetClass("NSPasteboard").Send(darwin.RegisterSelector("generalPasteboard"))
+	if pb.IsNil() {
+		return nil
+	}
+
+	// Clear existing contents
+	pb.Send(darwin.RegisterSelector("clearContents"))
+
+	// Create NSString with the text
+	nsStr := darwin.NewNSString(text)
+	if nsStr == nil {
+		return nil
+	}
+	defer nsStr.Release()
+
+	// Create type string
+	typeStr := darwin.NewNSString("public.utf8-plain-text")
+	if typeStr == nil {
+		return nil
+	}
+	defer typeStr.Release()
+
+	// setString:forType: takes two pointer arguments
+	pb.SendUintUint(
+		darwin.RegisterSelector("setString:forType:"),
+		uint64(nsStr.ID()),
+		uint64(typeStr.ID()),
+	)
+
+	return nil
+}
+
+// SetCursor changes the mouse cursor shape using NSCursor.
+// cursorID maps to gpucontext.CursorShape values (0-11).
+func (p *darwinPlatform) SetCursor(cursorID int) {
+	cursorClass := darwin.GetClass("NSCursor")
+	if cursorClass == 0 {
+		return
+	}
+
+	var cursor darwin.ID
+	switch cursorID {
+	case 0: // CursorDefault — arrow
+		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	case 1: // CursorPointer — pointing hand
+		cursor = cursorClass.Send(darwin.RegisterSelector("pointingHandCursor"))
+	case 2: // CursorText — I-beam
+		cursor = cursorClass.Send(darwin.RegisterSelector("IBeamCursor"))
+	case 3: // CursorCrosshair
+		cursor = cursorClass.Send(darwin.RegisterSelector("crosshairCursor"))
+	case 4: // CursorMove — open hand (closest macOS equivalent)
+		cursor = cursorClass.Send(darwin.RegisterSelector("openHandCursor"))
+	case 5: // CursorResizeNS
+		cursor = cursorClass.Send(darwin.RegisterSelector("resizeUpDownCursor"))
+	case 6: // CursorResizeEW
+		cursor = cursorClass.Send(darwin.RegisterSelector("resizeLeftRightCursor"))
+	case 7: // CursorResizeNWSE — no direct macOS equivalent, use arrow
+		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	case 8: // CursorResizeNESW — no direct macOS equivalent, use arrow
+		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	case 9: // CursorNotAllowed
+		cursor = cursorClass.Send(darwin.RegisterSelector("operationNotAllowedCursor"))
+	case 10: // CursorWait — macOS has no wait cursor, use arrow
+		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	case 11: // CursorNone — hide cursor
+		cursorClass.Send(darwin.RegisterSelector("hide"))
+		return
+	default:
+		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	}
+
+	if !cursor.IsNil() {
+		// Call [cursor set] to activate it
+		cursor.Send(darwin.RegisterSelector("set"))
+	}
+}
 
 // DarkMode returns true if the system dark mode is active.
-// TODO: Implement using NSAppearance.
-func (p *darwinPlatform) DarkMode() bool { return false }
+// Checks NSApplication.effectiveAppearance.name for "Dark" substring.
+func (p *darwinPlatform) DarkMode() bool {
+	app := darwin.GetClass("NSApplication").Send(darwin.RegisterSelector("sharedApplication"))
+	if app.IsNil() {
+		return false
+	}
+
+	appearance := app.Send(darwin.RegisterSelector("effectiveAppearance"))
+	if appearance.IsNil() {
+		return false
+	}
+
+	nameID := appearance.Send(darwin.RegisterSelector("name"))
+	if nameID.IsNil() {
+		return false
+	}
+
+	// Get the UTF-8 string from the appearance name
+	utf8Ptr := darwin.NSStringUTF8Ptr(nameID)
+	if utf8Ptr == 0 {
+		return false
+	}
+
+	length := darwin.NSStringLength(nameID)
+	if length == 0 {
+		return false
+	}
+
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // ObjC UTF8String pointer, bounded by NSString length
+
+	// Find actual string end
+	end := 0
+	for end < len(data) && data[end] != 0 {
+		end++
+	}
+
+	name := string(data[:end])
+	// macOS dark appearance names contain "Dark" (e.g., "NSAppearanceNameDarkAqua")
+	return strings.Contains(name, "Dark")
+}
 
 // ReduceMotion returns true if the user prefers reduced animation.
-// TODO: Implement using NSWorkspace accessibilityDisplayShouldReduceMotion.
-func (p *darwinPlatform) ReduceMotion() bool { return false }
+// Uses NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion.
+func (p *darwinPlatform) ReduceMotion() bool {
+	ws := darwin.GetClass("NSWorkspace").Send(darwin.RegisterSelector("sharedWorkspace"))
+	if ws.IsNil() {
+		return false
+	}
+	return ws.GetBool(darwin.RegisterSelector("accessibilityDisplayShouldReduceMotion"))
+}
 
 // HighContrast returns true if high contrast mode is active.
-// TODO: Implement using NSWorkspace accessibilityDisplayShouldIncreaseContrast.
-func (p *darwinPlatform) HighContrast() bool { return false }
+// Uses NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast.
+func (p *darwinPlatform) HighContrast() bool {
+	ws := darwin.GetClass("NSWorkspace").Send(darwin.RegisterSelector("sharedWorkspace"))
+	if ws.IsNil() {
+		return false
+	}
+	return ws.GetBool(darwin.RegisterSelector("accessibilityDisplayShouldIncreaseContrast"))
+}
 
-// FontScale returns font size preference multiplier.
-// TODO: Implement using system font size preferences.
+// FontScale returns the font size preference multiplier.
+// macOS does not have a system-wide font scale setting like Windows or Android.
+// Individual apps control their own text sizing. Returns 1.0 (no scaling).
 func (p *darwinPlatform) FontScale() float32 { return 1.0 }
 
 func (p *darwinPlatform) SetFrameless(frameless bool) {
@@ -1049,6 +1215,43 @@ func (p *darwinPlatform) IsMaximized() bool {
 }
 
 func (p *darwinPlatform) SyncFrame() {}
+
+// BlitPixels copies RGBA pixel data to the window using CoreGraphics.
+// Implements the PixelBlitter interface for software backend presentation.
+// Creates a CGImage from the pixel data and sets it as the NSView's layer contents.
+func (p *darwinPlatform) BlitPixels(pixels []byte, width, height int) error {
+	if p.window == nil {
+		return fmt.Errorf("gogpu: darwin BlitPixels: no window")
+	}
+
+	// Create CGImage from RGBA pixel data
+	cgImage, err := darwin.CreateCGImageFromRGBA(pixels, width, height)
+	if err != nil {
+		return fmt.Errorf("gogpu: darwin BlitPixels: %w", err)
+	}
+	defer darwin.ReleaseCGImage(cgImage)
+
+	// Get the view's layer and set the image as its contents.
+	// setContents: accepts a CGImageRef (toll-free bridged with id).
+	contentView := p.window.ContentView()
+	if contentView.IsNil() {
+		return fmt.Errorf("gogpu: darwin BlitPixels: no content view")
+	}
+
+	// Ensure the view is layer-backed
+	contentView.SendBool(darwin.RegisterSelector("setWantsLayer:"), true)
+
+	// Get the layer
+	layerID := contentView.Send(darwin.RegisterSelector("layer"))
+	if layerID.IsNil() {
+		return fmt.Errorf("gogpu: darwin BlitPixels: no layer")
+	}
+
+	// Set CGImage as layer contents (toll-free bridged with id)
+	layerID.SendPtr(darwin.RegisterSelector("setContents:"), cgImage)
+
+	return nil
+}
 
 func (p *darwinPlatform) CloseWindow() {
 	if p.window != nil {
