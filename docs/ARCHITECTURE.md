@@ -230,7 +230,7 @@ gogpu/
 ├── context.go          # Drawing context
 ├── renderer.go         # Uses *wgpu.Device/*wgpu.Queue (wgpu public API)
 ├── texture.go          # Texture management (*wgpu.Texture/View/Sampler)
-├── fence_pool.go       # GPU fence pool (*wgpu.Fence)
+├── submission_tracker.go # Deferred GPU resource release (by SubmissionIndex)
 ├── animation.go        # AnimationController + AnimationToken
 ├── invalidator.go      # Goroutine-safe redraw coalescing
 ├── event_source.go     # gpucontext.EventSource adapter
@@ -331,16 +331,25 @@ app.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
 | **Windows** | WS_OVERLAPPEDWINDOW + WM_NCCALCSIZE (JBR pattern: remove only title bar, keep side/bottom NC for DWM shadow) + WM_NCACTIVATE(-1) + DwmExtendFrameIntoClientArea | DWM shadow |
 | **macOS** | NSWindowStyleMaskBorderless + SetStyleMask | Native shadow |
 | **X11** | _MOTIF_WM_HINTS borderless | No shadow |
-| **Wayland** | zxdg_decoration_manager client-side | Compositor shadow |
+| **Wayland** | zxdg_decoration_manager SSD, CSD subsurfaces when SSD unavailable | Compositor shadow (SSD) / none (CSD) |
 
 Research: `docs/dev/research/JBR-FRAMELESS-SHADOW-RESEARCH.md`
 
 ### DPI / HiDPI
 
-- `WM_DPICHANGED` handler repositions window to suggested rect on multi-monitor transitions
-- `PrepareFrame()` returns current scale factor per frame for dynamic DPI detection
-- `SyncFrame()` calls `DwmFlush()` during modal resize for compositor synchronization
-| **Linux Wayland** | Window geometry | Same (scale=1.0 baseline) | 1.0 |
+- **Windows**: `WM_DPICHANGED` repositions window to suggested rect
+- **macOS**: `backingScaleFactor` from CAMetalLayer
+- **X11**: `Xft.dpi` from RESOURCE_MANAGER, fallback screen physical dimensions
+- **Wayland**: `wl_output.scale` event + env fallback (GDK_SCALE, QT_SCALE_FACTOR)
+- `PrepareFrame()` returns current scale factor per frame
+- `SyncFrame()` calls `DwmFlush()` during modal resize
+
+### Platform Features
+
+Clipboard, cursor (12 shapes), dark mode, accessibility (reduce motion,
+high contrast, font scale), BlitPixels — implemented on Windows, macOS, Linux X11.
+Linux clipboard and Wayland cursor/BlitPixels remain TODO.
+See `docs/dev/research/PLATFORM-IMPLEMENTATION-MATRIX.md` for full matrix.
 
 ### Thread Safety
 
@@ -485,7 +494,7 @@ Platform Layer          InputState               Game Loop
 | Platform | Pointer Events | Keyboard | Text Input | Scroll |
 |----------|---------------|----------|------------|--------|
 | Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates) | WM_MOUSEWHEEL |
-| Linux (Wayland) | wl_pointer | wl_keyboard | evdevKeycodeToRune (US QWERTY) | wl_pointer.axis |
+| Linux (Wayland) | wl_pointer (libwayland goffi) | wl_keyboard (libwayland goffi) | evdevKeycodeToRune (US QWERTY) | wl_pointer.axis |
 | Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | KeysymToString (server mapping) | Button 4-7 |
 | macOS    | NSEvent mouse | NSEvent key | NSEvent characters (UTF-8) | NSEvent scroll |
 

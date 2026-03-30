@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-03-31
+
+### Added
+
+- **GPU particles example** — Compute + render in one window. 4096 particles
+  simulated on GPU, rendered directly from compute buffer (zero CPU readback).
+- **GOGPU_LOG env var** — Auto-initialize slog logger from environment variable.
+  `GOGPU_LOG=debug|info|warn|error` — no code changes needed.
+- **Wayland CSD (client-side decorations)** — Title bar with bitmap font title text,
+  close/minimize/maximize/restore buttons with hover highlights. Activates
+  automatically when `zxdg_decoration_manager_v1` unavailable. SHM subsurfaces
+  via libwayland-client, resize on `xdg_toplevel.configure`. (FEAT-GOGPU-001)
+- **Wayland single connection architecture** — Eliminated dual connection
+  (Pure Go wire + C libwayland). All Wayland operations through single
+  libwayland-client connection via goffi. Input (pointer, keyboard, touch)
+  via goffi callbacks. Fixes zero-input on ALL Wayland compositors.
+  (BUG-GOGPU-002, fixes gogpu#157, ui#64)
+- **TextureCreator on ContextRenderTarget** — Enables universal rendering path
+  (CPU pixmap → GPU texture → present) for CPU-only adapters.
+- **`Config.WithVSync()`** — Builder method for VSync configuration.
+- **Present mode fallback chain** — Capability-based selection:
+  VSync on → FifoRelaxed → Fifo, VSync off → Immediate → Mailbox → Fifo.
+  Queries driver via `Adapter.GetSurfaceCapabilities()`.
+  Follows Rust wgpu `AutoVsync`/`AutoNoVsync` pattern.
+- **BlitPixels on macOS and Linux X11** — Software backend pixel blitting.
+- **Platform stubs** — macOS + Linux: ScaleFactor, PrepareFrame, PhysicalSize.
+- **X11 DPI + Wayland scale factor** — Xft.dpi, wl_output.scale, env fallback.
+
+### Fixed
+
+- **PresentTexture error handling** — Returns error on nil/wrong type instead of
+  silent nil. Fixes black screen on CPU adapters (llvmpipe, SwiftShader).
+- **X11/macOS window close** — Rewritten PollEvents to queue pattern, fixes
+  infinite EventClose loop (#129).
+- **X11 poll timing** — Increased deadline from 1μs to 1ms to prevent missed events.
+- **Wayland close** — PollEvents no longer returns EventClose infinitely
+  (closeEmitted flag). Flush + roundtrip on disconnect for clean compositor cleanup.
+
+### Changed
+
+- **Enterprise fence architecture** — Replaced `FencePool` (per-submission VkFence)
+  with `SubmissionTracker` (tracks by submission index from wgpu HAL). No more
+  application-level fence management — HAL owns all fences internally. Eliminates
+  double `vkQueueSubmit` on binary fence path. (BUG-GOGPU-004, fixes ui#66)
+- **deps: wgpu v0.22.2 → v0.23.0** — Enterprise fence architecture, naga v0.15.0,
+  GetSurfaceCapabilities
+- **deps: naga v0.14.8 → v0.15.0** — Full Rust parity: IR 144/144, SPIR-V 87/87,
+  MSL 91/91, HLSL 58/58, GLSL 68/68
+- **deps: goffi v0.5.0** — Windows ARM64 / Snapdragon X support
+- **deps: webgpu v0.4.3** — Rust FFI backend update
+- **deps: gpucontext v0.11.0** — WindowChrome interface
+
+### Known Issues
+
+- Wayland CSD: border subsurface artifacts visible after maximize on WSLg
+  (compositor doesn't remove old pixels on subsurface destroy)
+
+## [0.25.1] - 2026-03-25
+
+### Added
+
+- **X11 DPI reading** — `ScaleFactor()` reads `Xft.dpi` from RESOURCE_MANAGER,
+  fallback to screen physical dimensions. No longer hardcoded 1.0.
+- **Wayland scale factor** — binds `wl_output`, handles scale event, tracks
+  per-output scale via surface enter/leave. Env var fallback (GDK_SCALE, QT_SCALE_FACTOR).
+- **macOS platform stubs implemented** — ClipboardRead/Write (NSPasteboard),
+  SetCursor (12 shapes via NSCursor), DarkMode (NSAppearance),
+  ReduceMotion/HighContrast (NSWorkspace accessibility).
+- **Linux platform stubs implemented** — DarkMode/HighContrast (GTK_THEME),
+  FontScale (GDK_DPI_SCALE), ReduceMotion (GTK_ENABLE_ANIMATIONS),
+  X11 SetCursor (CreateGlyphCursor with cursor caching).
+- **BlitPixels on macOS** — CoreGraphics CGBitmapContext → CALayer.setContents.
+- **BlitPixels on Linux X11** — PutImage with RGBA→BGRA conversion and
+  automatic row-strip chunking for >64KB images.
+
 ## [0.25.0] - 2026-03-21
 
 ### Added

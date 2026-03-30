@@ -145,13 +145,12 @@ func (h *LibwaylandHandle) SetupCSD(subcompName, subcompVersion, shmName, shmVer
 		}
 
 		// Attach buffer, damage, commit
-		h.marshalVoid(surf, 1, uintptr(buffer), 0, 0)                                  // attach(buffer, 0, 0)
-		h.marshalVoid(surf, 9, 0, 0, uintptr(uint32(spec.w)), uintptr(uint32(spec.h))) // damage
+		h.marshalVoid(surf, 1, buffer, 0, 0)                                           // attach(buffer, 0, 0)
+		h.marshalVoid(surf, 2, 0, 0, uintptr(uint32(spec.w)), uintptr(uint32(spec.h))) // damage
 		h.marshalVoid(surf, 6)                                                         // commit
 	}
 
 	// Set window geometry so compositor knows content area (excludes CSD borders).
-	// xdg_surface.set_window_geometry = opcode 3, args: x, y, width, height
 	h.marshalVoid(h.xdgSurface, 3, 0, 0, uintptr(uint32(contentW)), uintptr(uint32(contentH)))
 
 	// Commit parent surface (subsurfaces apply atomically in sync mode)
@@ -471,7 +470,7 @@ func (h *LibwaylandHandle) repaintCSDTitleBar() {
 	buf := h.csdBuffers[csdTop]
 	w, ht := h.csdSizes[csdTop][0], h.csdSizes[csdTop][1]
 	h.marshalVoid(surf, 1, buf, 0, 0)                                     // attach
-	h.marshalVoid(surf, 9, 0, 0, uintptr(uint32(w)), uintptr(uint32(ht))) // damage
+	h.marshalVoid(surf, 2, 0, 0, uintptr(uint32(w)), uintptr(uint32(ht))) // damage
 	h.marshalVoid(surf, 6)                                                // commit
 	_ = h.flush()
 }
@@ -479,7 +478,7 @@ func (h *LibwaylandHandle) repaintCSDTitleBar() {
 // ResizeCSD recreates SHM buffers for all 4 CSD subsurfaces when the content
 // area dimensions change (e.g. maximize, compositor-driven resize).
 // Must be called from the event loop, not from inside a goffi callback.
-func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) {
+func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit // CSD resize is inherently complex
 	if !h.csdActive || h.csdPainter == nil {
 		return
 	}
@@ -504,17 +503,29 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) {
 		w, h int
 		x, y int32
 	}{
-		{totalW, tbH, -int32(bW), -int32(tbH)}, // top (normal)
-		{bW, contentH, -int32(bW), 0},           // left
-		{bW, contentH, int32(contentW), 0},      // right
+		{totalW, tbH, -int32(bW), -int32(tbH)},    // top (normal)
+		{bW, contentH, -int32(bW), 0},             // left
+		{bW, contentH, int32(contentW), 0},        // right
 		{totalW, bW, -int32(bW), int32(contentH)}, // bottom
 	}
 	if maximized {
 		// Title bar inside window, full configure width, no borders
-		specs[0] = struct{ w, h int; x, y int32 }{contentW, tbH, 0, 0}
-		specs[1] = struct{ w, h int; x, y int32 }{0, 0, 0, 0} // hidden
-		specs[2] = struct{ w, h int; x, y int32 }{0, 0, 0, 0} // hidden
-		specs[3] = struct{ w, h int; x, y int32 }{0, 0, 0, 0} // hidden
+		specs[0] = struct {
+			w, h int
+			x, y int32
+		}{contentW, tbH, 0, 0}
+		specs[1] = struct {
+			w, h int
+			x, y int32
+		}{0, 0, 0, 0} // hidden
+		specs[2] = struct {
+			w, h int
+			x, y int32
+		}{0, 0, 0, 0} // hidden
+		specs[3] = struct {
+			w, h int
+			x, y int32
+		}{0, 0, 0, 0} // hidden
 	}
 
 	state := h.csdState
@@ -523,16 +534,28 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) {
 		if h.csdSurfaces[i] == 0 {
 			continue
 		}
-		// Hide subsurface: attach NULL buffer + commit
+		// Hide subsurface: destroy wl_subsurface (immediate per spec).
+		// GLFW pattern: destroy on maximize, recreate on restore.
 		if spec.w <= 0 || spec.h <= 0 {
-			surf := h.csdSurfaces[i]
-			h.marshalVoid(surf, 1, 0, 0, 0) // attach(NULL, 0, 0)
-			h.marshalVoid(surf, 6)           // commit
+			if h.csdSubsurf[i] != 0 {
+				h.marshalVoid(h.csdSubsurf[i], 0) // wl_subsurface.destroy = opcode 0
+				h.csdSubsurf[i] = 0
+			}
 			continue
 		}
 		if h.csdSurfaces[i] == 0 {
-			slog.Warn("CSD resize: skip nil surface", "edge", i)
 			continue
+		}
+
+		// Recreate wl_subsurface if it was destroyed (maximize → restore)
+		if h.csdSubsurf[i] == 0 {
+			subsrf, err := h.marshalConstructor2Obj(h.subcompositor, 1, h.subsurfaceInterface, h.csdSurfaces[i], h.surface)
+			if err != nil {
+				slog.Warn("CSD resize: recreate subsurface failed", "edge", i, "err", err)
+				continue
+			}
+			h.csdSubsurf[i] = subsrf
+			// Sync mode is default for new subsurfaces
 		}
 
 		// Save old resources for cleanup AFTER new buffer is attached
@@ -609,7 +632,7 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) {
 		// Attach new buffer + damage + commit
 		surf := h.csdSurfaces[i]
 		h.marshalVoid(surf, 1, buffer, 0, 0)                                           // attach(buffer, 0, 0)
-		h.marshalVoid(surf, 9, 0, 0, uintptr(uint32(spec.w)), uintptr(uint32(spec.h))) // damage
+		h.marshalVoid(surf, 2, 0, 0, uintptr(uint32(spec.w)), uintptr(uint32(spec.h))) // damage
 		h.marshalVoid(surf, 6)                                                         // commit
 		slog.Warn("CSD-RESIZE: subsurface committed", "edge", i, "surf", surf)
 
@@ -627,8 +650,8 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) {
 
 	// Force parent surface to have pending damage so commit triggers subsurface apply.
 	// WSLg (Weston) may optimize away empty parent commits.
-	h.marshalVoid(h.surface, 9, 0, 0, 1, 1) // damage_buffer 1x1
-	h.marshalVoid(h.surface, 6)              // commit parent
+	h.marshalVoid(h.surface, 2, 0, 0, 1, 1) // damage 1x1 on parent
+	h.marshalVoid(h.surface, 6)             // commit parent
 	slog.Warn("CSD-RESIZE: parent committed", "surface", h.surface)
 
 	if err := h.flush(); err != nil {

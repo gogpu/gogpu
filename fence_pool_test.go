@@ -18,42 +18,42 @@ type mockFenceDevice struct {
 	freedCmdBufs []hal.CommandBuffer
 }
 
-func (d *mockFenceDevice) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error) { return nil, nil }
+func (d *mockFenceDevice) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error) { return nil, nil } //nolint:nilnil // mock
 func (d *mockFenceDevice) DestroyBuffer(_ hal.Buffer)                               {}
 func (d *mockFenceDevice) CreateTexture(_ *hal.TextureDescriptor) (hal.Texture, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyTexture(_ hal.Texture) {}
 func (d *mockFenceDevice) CreateTextureView(_ hal.Texture, _ *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyTextureView(_ hal.TextureView) {}
 func (d *mockFenceDevice) CreateSampler(_ *hal.SamplerDescriptor) (hal.Sampler, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroySampler(_ hal.Sampler) {}
 func (d *mockFenceDevice) CreateBindGroupLayout(_ *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyBindGroupLayout(_ hal.BindGroupLayout) {}
 func (d *mockFenceDevice) CreateBindGroup(_ *hal.BindGroupDescriptor) (hal.BindGroup, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyBindGroup(_ hal.BindGroup) {}
 func (d *mockFenceDevice) CreatePipelineLayout(_ *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyPipelineLayout(_ hal.PipelineLayout) {}
 func (d *mockFenceDevice) CreateShaderModule(_ *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyShaderModule(_ hal.ShaderModule) {}
 func (d *mockFenceDevice) CreateRenderPipeline(_ *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyRenderPipeline(_ hal.RenderPipeline) {}
 func (d *mockFenceDevice) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
 func (d *mockFenceDevice) DestroyComputePipeline(_ hal.ComputePipeline) {}
 func (d *mockFenceDevice) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
@@ -61,9 +61,9 @@ func (d *mockFenceDevice) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySe
 }
 func (d *mockFenceDevice) DestroyQuerySet(_ hal.QuerySet) {}
 func (d *mockFenceDevice) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // mock
 }
-func (d *mockFenceDevice) CreateFence() (hal.Fence, error) { return nil, nil }
+func (d *mockFenceDevice) CreateFence() (hal.Fence, error) { return nil, nil } //nolint:nilnil // mock
 func (d *mockFenceDevice) DestroyFence(_ hal.Fence)        {}
 func (d *mockFenceDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, error) {
 	return true, nil

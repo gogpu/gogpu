@@ -238,23 +238,17 @@ events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
 
 This enables enterprise-grade dependency injection between packages without circular imports.
 
-### HalProvider (Direct GPU Access)
+### DeviceProvider (GPU Access)
 
-For GPU accelerators that need low-level HAL access (compute shaders, buffer readback):
+For GPU compute and custom rendering, access the wgpu device directly:
 
 ```go
-import "github.com/gogpu/gpucontext"
-
-provider := app.GPUContextProvider()
-
-// Type-assert to HalProvider for direct HAL access
-if hp, ok := provider.(gpucontext.HalProvider); ok {
-    halDevice := hp.HalDevice() // hal.Device for compute pipelines
-    halQueue := hp.HalQueue()   // hal.Queue for command submission
-}
+provider := app.DeviceProvider()
+device := provider.Device()   // *wgpu.Device — full WebGPU API
+queue := device.Queue()       // *wgpu.Queue — command submission
 ```
 
-Used by [gogpu/gg](https://github.com/gogpu/gg) GPU SDF accelerator for compute shader dispatch on shared device.
+Used for compute shaders, custom render pipelines, and by [gogpu/gg](https://github.com/gogpu/gg) GPU accelerator.
 
 ### SurfaceView (Zero-Copy Rendering)
 
@@ -371,33 +365,54 @@ if err := app.Run(); err != nil {
 
 ## Compute Shaders
 
-Full compute shader support via HAL interfaces:
+Full compute shader support via wgpu public API:
 
 ```go
-// Create compute pipeline via HAL device
-pipeline, _ := device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-    Layout:     pipelineLayout,
-    Module:     shaderModule,
-    EntryPoint: "main",
+device := app.DeviceProvider().Device()
+
+// WGSL compute shader
+shader, _ := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+    WGSL: `
+        @group(0) @binding(0) var<storage, read> input: array<f32>;
+        @group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+        @compute @workgroup_size(64)
+        fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+            output[id.x] = input[id.x] * 2.0;
+        }
+    `,
 })
 
 // Create storage buffers
-inputBuffer, _ := device.CreateBuffer(&hal.BufferDescriptor{
+inputBuf, _ := device.CreateBuffer(&wgpu.BufferDescriptor{
     Size:  dataSize,
-    Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
+    Usage: wgpu.BufferUsageStorage | wgpu.BufferUsageCopyDst,
 })
 
-// Dispatch compute work via command encoder
-encoder, _ := device.CreateCommandEncoder()
-encoder.BeginEncoding("compute")
-pass := encoder.BeginComputePass(&hal.ComputePassDescriptor{})
+// Create pipeline and dispatch
+pipeline, _ := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+    Layout: pipelineLayout, Module: shader, EntryPoint: "main",
+})
+
+encoder, _ := device.CreateCommandEncoder(nil)
+pass, _ := encoder.BeginComputePass(nil)
 pass.SetPipeline(pipeline)
 pass.SetBindGroup(0, bindGroup, nil)
-pass.Dispatch(workgroupsX, 1, 1)
+pass.Dispatch(workgroups, 1, 1)
 pass.End()
-cmdBuf := encoder.EndEncoding()
-queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0)
+cmds, _ := encoder.Finish()
+_, _ = device.Queue().Submit(cmds)
+device.WaitIdle()  // wait for GPU before readback
+
+// Read results back to CPU
+result := make([]byte, dataSize)
+device.Queue().ReadBuffer(stagingBuf, 0, result)
 ```
+
+See [`examples/particles`](examples/particles) for a full GPU particle simulation
+(compute + render in one window) and
+[`wgpu/examples/compute-particles`](https://github.com/gogpu/wgpu/tree/main/examples/compute-particles)
+for a headless compute example.
 
 ---
 
@@ -488,7 +503,7 @@ Native Win32 windowing with Vulkan, DirectX 12, GLES, and Software backends.
 X11 and Wayland support with Vulkan, GLES, and Software (headless) backends.
 
 - **X11** — pure Go X11 protocol with libX11 loaded via goffi for Vulkan surface creation. Multi-touch input via XInput2 wire protocol.
-- **Wayland** — pure Go Wayland protocol (object dispatch) with libwayland-client via goffi for Vulkan surfaces. Server-side decorations via `zxdg_decoration_manager_v1`. Tested on WSLg, GNOME, KDE, sway.
+- **Wayland** — single libwayland-client connection via goffi for all Wayland operations (surface, input, xdg-shell, CSD). Server-side decorations via `zxdg_decoration_manager_v1`, client-side decorations (CSD) with subsurface title bar when SSD unavailable. Tested on WSLg, GNOME, KDE, sway, niri, COSMIC.
 
 ### macOS
 

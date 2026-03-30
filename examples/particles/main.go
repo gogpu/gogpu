@@ -143,7 +143,6 @@ type sim struct {
 	compBG1  *wgpu.BindGroup // B→A
 	rendPipe *wgpu.RenderPipeline
 	rendPL   *wgpu.PipelineLayout
-	flip     int
 	frameNum int
 }
 

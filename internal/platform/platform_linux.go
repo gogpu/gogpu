@@ -733,22 +733,25 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				p.savedHeight = 0
 			}
 
-			// Width/height of 0 means client can choose — restore to saved size
+			// Width/height of 0 means client can choose — restore to saved size.
+			// Saved size is content size (no CSD borders), so skip subtraction.
+			restoredFromSaved := false
 			if width == 0 && height == 0 && p.savedWidth > 0 {
 				width = int32(p.savedWidth)
 				height = int32(p.savedHeight)
 				p.savedWidth = 0
 				p.savedHeight = 0
+				restoredFromSaved = true
 			}
 			if width > 0 && height > 0 {
 				newWidth := int(width)
 				newHeight := int(height)
 
-				// Vulkan surface = full configure size (compositor expects exact match).
-				// CSD content = configure minus borders (decorations are outside content).
+				// CSD content = configure minus borders (compositor sends full window size).
+				// But restored size is already content — don't subtract again.
 				csdContentW := newWidth
 				csdContentH := newHeight
-				if p.libwl != nil && p.libwl.CSDActive() {
+				if !restoredFromSaved && p.libwl != nil && p.libwl.CSDActive() {
 					tbH, bW := p.libwl.CSDBorders()
 					csdContentW = newWidth - bW*2
 					csdContentH = newHeight - tbH - bW
@@ -1557,22 +1560,24 @@ func (p *waylandPlatform) PollEvents() Event {
 
 	p.mu.Unlock()
 
-	// Dispatch all pending events on the C display (single connection)
+	// Dispatch all pending events on the C display (single connection).
+	// Order: DispatchDefaultQueue reads from socket (all queues),
+	// then DispatchCSDEvents dispatches CSD queue events that were just read.
 	if p.libwl != nil {
-		// Dispatch CSD events on separate queue
-		if p.libwl.CSDActive() {
-			if err := p.libwl.DispatchCSDEvents(); err != nil {
-				logger().Error("CSD dispatch error", "error", err)
-			}
-		}
-
-		// Dispatch default queue (xdg, pointer, keyboard, touch)
+		// Read from socket + dispatch default queue (xdg, pointer, keyboard, touch)
 		if err := p.libwl.DispatchDefaultQueue(); err != nil {
 			logger().Error("wayland dispatch error — closing window", "error", err)
 			p.mu.Lock()
 			p.shouldClose = true
 			p.mu.Unlock()
 			return Event{Type: EventClose}
+		}
+
+		// Dispatch CSD events (separate queue, read by DispatchDefaultQueue above)
+		if p.libwl.CSDActive() {
+			if err := p.libwl.DispatchCSDEvents(); err != nil {
+				logger().Error("CSD dispatch error", "error", err)
+			}
 		}
 	}
 

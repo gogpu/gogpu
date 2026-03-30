@@ -537,10 +537,3 @@ func inputToplevelCloseCb(data, toplevel uintptr) {
 
 func inputToplevelConfigureBoundsCb(data, toplevel, width, height uintptr) {}
 func inputToplevelWmCapabilitiesCb(data, toplevel, capabilities uintptr)   {}
-
-// wlArrayContainsUint32 checks if a C wl_array contains a specific uint32 value.
-// The arrayPtr is a C wl_array pointer from a goffi callback.
-// wl_array layout on 64-bit: { size_t size; size_t alloc; void *data; }
-func wlArrayContainsUint32(arrayPtr uintptr, target uint32) bool {
-	return wlArrayContainsUint32Impl(arrayPtr, target)
-}
