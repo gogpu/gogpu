@@ -133,6 +133,15 @@ func (r *Registry) BindShm(version uint32) (ObjectID, error) {
 	return r.Bind(name, InterfaceWlShm, version)
 }
 
+// BindSubcompositor binds to the wl_subcompositor global.
+func (r *Registry) BindSubcompositor(version uint32) (ObjectID, error) {
+	name, err := r.FindGlobal(InterfaceWlSubcompositor)
+	if err != nil {
+		return 0, err
+	}
+	return r.Bind(name, InterfaceWlSubcompositor, version)
+}
+
 // BindSeat binds to the wl_seat global.
 func (r *Registry) BindSeat(version uint32) (ObjectID, error) {
 	name, err := r.FindGlobal(InterfaceWlSeat)
@@ -158,6 +167,26 @@ func (r *Registry) BindZxdgDecorationManager(version uint32) (ObjectID, error) {
 		return 0, err
 	}
 	return r.Bind(name, InterfaceZxdgDecorationManagerV1, version)
+}
+
+// BindOutput binds to a wl_output global by its name.
+func (r *Registry) BindOutput(name uint32, version uint32) (ObjectID, error) {
+	return r.Bind(name, InterfaceWlOutput, version)
+}
+
+// FindAllGlobals finds all globals with the given interface name.
+// Returns their names (for use with Bind).
+func (r *Registry) FindAllGlobals(iface string) []uint32 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var names []uint32
+	for _, g := range r.globals {
+		if g.Interface == iface {
+			names = append(names, g.Name)
+		}
+	}
+	return names
 }
 
 // FindGlobal finds a global by interface name and returns its name.

@@ -296,6 +296,93 @@ func (s *WlSurface) handleLeave(msg *Message) error {
 	return nil
 }
 
+// wl_output event opcodes
+const (
+	outputEventGeometry Opcode = 0 // geometry(x, y, physical_width, physical_height, subpixel, make, model, transform)
+	outputEventMode     Opcode = 1 // mode(flags, width, height, refresh)
+	outputEventDone     Opcode = 2 // done()
+	outputEventScale    Opcode = 3 // scale(factor: int) [v2]
+)
+
+// WlOutput represents the wl_output interface.
+// It provides information about an output (monitor), including its scale factor.
+type WlOutput struct {
+	display *Display
+	id      ObjectID
+
+	mu    sync.Mutex
+	scale int32
+
+	// Event handlers
+	onScale func(scale int32)
+}
+
+// NewWlOutput creates a WlOutput from a bound object ID.
+// It auto-registers with Display for event dispatch.
+func NewWlOutput(display *Display, objectID ObjectID) *WlOutput {
+	o := &WlOutput{
+		display: display,
+		id:      objectID,
+		scale:   1, // default scale
+	}
+	if display != nil {
+		display.RegisterObject(objectID, o)
+	}
+	return o
+}
+
+// ID returns the object ID of the output.
+func (o *WlOutput) ID() ObjectID {
+	return o.id
+}
+
+// Scale returns the current scale factor for this output.
+// Returns 1 if no scale event has been received yet.
+func (o *WlOutput) Scale() int32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.scale
+}
+
+// SetScaleHandler sets a callback for the scale event.
+// The handler is called when the compositor sends a new scale factor.
+func (o *WlOutput) SetScaleHandler(handler func(scale int32)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.onScale = handler
+}
+
+// dispatch handles wl_output events.
+func (o *WlOutput) dispatch(msg *Message) error {
+	switch msg.Opcode {
+	case outputEventScale:
+		return o.handleScale(msg)
+	case outputEventGeometry, outputEventMode, outputEventDone:
+		// Ignore other events for now
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (o *WlOutput) handleScale(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+	scale, err := decoder.Int32()
+	if err != nil {
+		return err
+	}
+
+	o.mu.Lock()
+	o.scale = scale
+	handler := o.onScale
+	o.mu.Unlock()
+
+	if handler != nil {
+		handler(scale)
+	}
+	return nil
+}
+
 // WlCallback represents the wl_callback interface.
 // Callbacks are used for one-shot notifications, typically for frame synchronization.
 type WlCallback struct {

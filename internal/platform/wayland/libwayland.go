@@ -52,11 +52,70 @@ type LibwaylandHandle struct {
 	fnProxyDestroy   unsafe.Pointer
 	fnAddListener    unsafe.Pointer // wl_proxy_add_listener
 	fnRoundtrip      unsafe.Pointer // wl_display_roundtrip
+	fnDispatchPend   unsafe.Pointer // wl_display_dispatch_pending
+	fnPrepareRead    unsafe.Pointer // wl_display_prepare_read
+	fnReadEvents     unsafe.Pointer // wl_display_read_events
+	fnCancelRead     unsafe.Pointer // wl_display_cancel_read
+	fnGetFD          unsafe.Pointer // wl_display_get_fd
+	fnCreateQueue    unsafe.Pointer // wl_display_create_queue
+	fnDispatchQueueP unsafe.Pointer // wl_display_dispatch_queue_pending
+	fnProxySetQueue  unsafe.Pointer // wl_proxy_set_queue
+	fnMarshalArray   unsafe.Pointer // wl_proxy_marshal_array (no new_id)
+
+	// CSD objects (subsurfaces for client-side decorations)
+	subcompositor uintptr    // wl_subcompositor* proxy
+	shm           uintptr    // wl_shm* proxy
+	csdSurfaces   [4]uintptr // wl_surface* for top/left/right/bottom
+	csdSubsurf    [4]uintptr // wl_subsurface* for top/left/right/bottom
+	csdPools      [4]uintptr // wl_shm_pool* for each decoration
+	csdBuffers    [4]uintptr // wl_buffer* for each decoration
+	csdFDs        [4]int     // shm file descriptors
+	csdData       [4][]byte  // mmap'd pixel data
+	csdSizes      [4][2]int  // [width, height] for each decoration
+	csdContentW   int        // content area width (for resize delta detection)
+	csdContentH   int        // content area height (for resize delta detection)
+	configuredW   int        // last configure width (for set_window_geometry in ack_configure)
+	configuredH   int        // last configure height
+	csdActive     bool
+
+	// CSD input (pointer events on C display for decoration subsurfaces)
+	csdQueue          uintptr      // separate event queue for CSD pointer events
+	csdSeat           uintptr      // wl_seat* on CSD queue (for pointer events)
+	csdSeatDefault    uintptr      // wl_seat* on default queue (for move/resize)
+	csdPointer        uintptr      // wl_pointer* on C display
+	csdHitResult      CSDHitResult // current hit-test result under pointer
+	csdPointerX       float64      // pointer x in current subsurface
+	csdPointerY       float64      // pointer y in current subsurface
+	csdPointerSurface uintptr      // which C surface pointer is over (0 = none)
+	csdSerial         uint32       // last button press serial (for move/resize)
+	csdPainter        CSDPainter   // painter for repaint on hover
+	csdState          CSDState     // current decoration state
+	onCSDClose        func()       // callback when close button clicked
+	csdPendingAction  CSDHitResult // action to perform outside callback
+	csdPendingSerial  uint32       // serial for pending move/resize
+	csdPendingRepaint bool         // title bar needs repaint (deferred from callback)
+
+	// Main surface input (pointer, keyboard, touch on default queue)
+	inputSeat      uintptr         // wl_seat* for main input
+	inputSeatCaps  uint32          // seat capabilities bitmask
+	inputPointer   uintptr         // wl_pointer* for main surface
+	inputKeyboard  uintptr         // wl_keyboard* for main surface
+	inputTouch     uintptr         // wl_touch* for main surface
+	inputCallbacks *InputCallbacks // Go callbacks for input events
 
 	// Data symbols (interface descriptors — pointers to static C structs)
-	registryInterface   unsafe.Pointer // &wl_registry_interface
-	compositorInterface unsafe.Pointer // &wl_compositor_interface
-	surfaceInterface    unsafe.Pointer // &wl_surface_interface
+	registryInterface      unsafe.Pointer // &wl_registry_interface
+	compositorInterface    unsafe.Pointer // &wl_compositor_interface
+	surfaceInterface       unsafe.Pointer // &wl_surface_interface
+	subcompositorInterface unsafe.Pointer // &wl_subcompositor_interface
+	subsurfaceInterface    unsafe.Pointer // &wl_subsurface_interface
+	shmInterface           unsafe.Pointer // &wl_shm_interface
+	shmPoolInterface       unsafe.Pointer // &wl_shm_pool_interface
+	bufferInterface        unsafe.Pointer // &wl_buffer_interface
+	seatInterface          unsafe.Pointer // &wl_seat_interface
+	pointerInterface       unsafe.Pointer // &wl_pointer_interface
+	keyboardInterface      unsafe.Pointer // &wl_keyboard_interface
+	touchInterface         unsafe.Pointer // &wl_touch_interface
 
 	// Call interfaces (goffi call descriptors, prepared once)
 	cifConnect     types.CallInterface
@@ -67,6 +126,13 @@ type LibwaylandHandle struct {
 	cifDestroy     types.CallInterface
 	cifAddListener types.CallInterface
 	cifRoundtrip   types.CallInterface
+	cifDispatchP   types.CallInterface // wl_display_dispatch_pending(display) -> int
+	cifPrepareRead types.CallInterface // wl_display_prepare_read(display) -> int
+	cifReadEvents  types.CallInterface // wl_display_read_events(display) -> int
+	cifCreateQueue types.CallInterface // wl_display_create_queue(display) -> queue*
+	cifDispatchQP  types.CallInterface // wl_display_dispatch_queue_pending(display, queue) -> int
+	cifSetQueue    types.CallInterface // wl_proxy_set_queue(proxy, queue) -> void
+	cifMarshalArr  types.CallInterface // wl_proxy_marshal_array(proxy, opcode, args) -> void
 }
 
 // Display returns the wl_display* C pointer for Vulkan surface creation.
@@ -165,6 +231,24 @@ func (h *LibwaylandHandle) Close() {
 		return
 	}
 
+	// Destroy input objects
+	if h.inputTouch != 0 {
+		h.proxyDestroy(h.inputTouch)
+		h.inputTouch = 0
+	}
+	if h.inputKeyboard != 0 {
+		h.proxyDestroy(h.inputKeyboard)
+		h.inputKeyboard = 0
+	}
+	if h.inputPointer != 0 {
+		h.proxyDestroy(h.inputPointer)
+		h.inputPointer = 0
+	}
+	if h.inputSeat != 0 {
+		h.proxyDestroy(h.inputSeat)
+		h.inputSeat = 0
+	}
+
 	// Destroy decoration objects (reverse order: decoration → manager)
 	if h.toplevelDecor != 0 {
 		h.proxyDestroy(h.toplevelDecor)
@@ -207,6 +291,11 @@ func (h *LibwaylandHandle) Close() {
 		h.registry = 0
 	}
 
+	// Flush all destroy requests and roundtrip to ensure compositor processes them.
+	// Without this, WSLg leaves a ghost window on screen.
+	_ = h.flush()
+	h.Roundtrip()
+
 	h.disconnectDisplay()
 }
 
@@ -224,6 +313,15 @@ func (h *LibwaylandHandle) resolveSymbols() error {
 		{"wl_proxy_destroy", &h.fnProxyDestroy},
 		{"wl_proxy_add_listener", &h.fnAddListener},
 		{"wl_display_roundtrip", &h.fnRoundtrip},
+		{"wl_display_dispatch_pending", &h.fnDispatchPend},
+		{"wl_display_prepare_read", &h.fnPrepareRead},
+		{"wl_display_read_events", &h.fnReadEvents},
+		{"wl_display_cancel_read", &h.fnCancelRead},
+		{"wl_display_get_fd", &h.fnGetFD},
+		{"wl_display_create_queue", &h.fnCreateQueue},
+		{"wl_display_dispatch_queue_pending", &h.fnDispatchQueueP},
+		{"wl_proxy_set_queue", &h.fnProxySetQueue},
+		{"wl_proxy_marshal_array", &h.fnMarshalArray},
 	}
 
 	for _, s := range syms {
@@ -245,6 +343,15 @@ func (h *LibwaylandHandle) resolveSymbols() error {
 		{"wl_registry_interface", &h.registryInterface},
 		{"wl_compositor_interface", &h.compositorInterface},
 		{"wl_surface_interface", &h.surfaceInterface},
+		{"wl_subcompositor_interface", &h.subcompositorInterface},
+		{"wl_subsurface_interface", &h.subsurfaceInterface},
+		{"wl_shm_interface", &h.shmInterface},
+		{"wl_shm_pool_interface", &h.shmPoolInterface},
+		{"wl_buffer_interface", &h.bufferInterface},
+		{"wl_seat_interface", &h.seatInterface},
+		{"wl_pointer_interface", &h.pointerInterface},
+		{"wl_keyboard_interface", &h.keyboardInterface},
+		{"wl_touch_interface", &h.touchInterface},
 	}
 
 	for _, s := range datasyms {
@@ -288,6 +395,20 @@ func (h *LibwaylandHandle) prepareCIFs() error {
 		{"add_listener", &h.cifAddListener, i32, []*types.TypeDescriptor{ptr, ptr, ptr}},
 		// int wl_display_roundtrip(wl_display*)
 		{"roundtrip", &h.cifRoundtrip, i32, []*types.TypeDescriptor{ptr}},
+		// int wl_display_dispatch_pending(wl_display*)
+		{"dispatch_pending", &h.cifDispatchP, i32, []*types.TypeDescriptor{ptr}},
+		// int wl_display_prepare_read(wl_display*)
+		{"prepare_read", &h.cifPrepareRead, i32, []*types.TypeDescriptor{ptr}},
+		// int wl_display_read_events(wl_display*)
+		{"read_events", &h.cifReadEvents, i32, []*types.TypeDescriptor{ptr}},
+		// wl_event_queue* wl_display_create_queue(wl_display*)
+		{"create_queue", &h.cifCreateQueue, ptr, []*types.TypeDescriptor{ptr}},
+		// int wl_display_dispatch_queue_pending(wl_display*, wl_event_queue*)
+		{"dispatch_queue_pending", &h.cifDispatchQP, i32, []*types.TypeDescriptor{ptr, ptr}},
+		// void wl_proxy_set_queue(wl_proxy*, wl_event_queue*)
+		{"set_queue", &h.cifSetQueue, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr, ptr}},
+		// void wl_proxy_marshal_array(wl_proxy*, uint32_t opcode, union wl_argument*)
+		{"marshal_array", &h.cifMarshalArr, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr, types.UInt32TypeDescriptor, ptr}},
 	}
 
 	for _, d := range cifDefs {

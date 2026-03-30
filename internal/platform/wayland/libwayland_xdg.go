@@ -18,6 +18,7 @@ package wayland
 
 import (
 	"fmt"
+	"log/slog"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -65,9 +66,9 @@ var xdg struct {
 	toplevelDecor cWlInterface
 
 	// Method arrays (indexed by opcode)
-	wmBaseMethods   [4]cWlMessage // destroy, create_positioner, get_xdg_surface, pong
-	surfaceMethods  [5]cWlMessage // destroy, get_toplevel, get_popup, set_window_geometry, ack_configure
-	toplevelMethods [4]cWlMessage // destroy, set_parent, set_title, set_app_id
+	wmBaseMethods   [4]cWlMessage  // destroy, create_positioner, get_xdg_surface, pong
+	surfaceMethods  [5]cWlMessage  // destroy, get_toplevel, get_popup, set_window_geometry, ack_configure
+	toplevelMethods [14]cWlMessage // all 14 xdg_toplevel requests
 
 	// Decoration method arrays
 	decorManagerMethods  [2]cWlMessage // destroy, get_toplevel_decoration
@@ -130,11 +131,21 @@ func initXdgInterfaces() {
 			Events:      uintptr(unsafe.Pointer(&xdg.surfaceEvents[0])),
 		}
 
-		// === xdg_toplevel methods ===
+		// === xdg_toplevel methods (all 14 per xdg-shell spec) ===
 		xdg.toplevelMethods[0] = cWlMessage{cstr("destroy\x00"), cstr("\x00"), nt}
 		xdg.toplevelMethods[1] = cWlMessage{cstr("set_parent\x00"), cstr("?o\x00"), nt}
 		xdg.toplevelMethods[2] = cWlMessage{cstr("set_title\x00"), cstr("s\x00"), nt}
 		xdg.toplevelMethods[3] = cWlMessage{cstr("set_app_id\x00"), cstr("s\x00"), nt}
+		xdg.toplevelMethods[4] = cWlMessage{cstr("show_window_menu\x00"), cstr("ouii\x00"), nt}
+		xdg.toplevelMethods[5] = cWlMessage{cstr("move\x00"), cstr("ou\x00"), nt}
+		xdg.toplevelMethods[6] = cWlMessage{cstr("resize\x00"), cstr("ouu\x00"), nt}
+		xdg.toplevelMethods[7] = cWlMessage{cstr("set_max_size\x00"), cstr("ii\x00"), nt}
+		xdg.toplevelMethods[8] = cWlMessage{cstr("set_min_size\x00"), cstr("ii\x00"), nt}
+		xdg.toplevelMethods[9] = cWlMessage{cstr("set_maximized\x00"), cstr("\x00"), nt}
+		xdg.toplevelMethods[10] = cWlMessage{cstr("unset_maximized\x00"), cstr("\x00"), nt}
+		xdg.toplevelMethods[11] = cWlMessage{cstr("set_fullscreen\x00"), cstr("?o\x00"), nt}
+		xdg.toplevelMethods[12] = cWlMessage{cstr("unset_fullscreen\x00"), cstr("\x00"), nt}
+		xdg.toplevelMethods[13] = cWlMessage{cstr("set_minimized\x00"), cstr("\x00"), nt}
 
 		// xdg_toplevel events (all 4 events per xdg-shell v6 protocol spec)
 		xdg.toplevelEvents[0] = cWlMessage{cstr("configure\x00"), cstr("iia\x00"), nt}
@@ -146,7 +157,7 @@ func initXdgInterfaces() {
 		xdg.toplevel = cWlInterface{
 			Name:        cstr("xdg_toplevel\x00"),
 			Version:     6,
-			MethodCount: 4,
+			MethodCount: 14,
 			Methods:     uintptr(unsafe.Pointer(&xdg.toplevelMethods[0])),
 			EventCount:  4,
 			Events:      uintptr(unsafe.Pointer(&xdg.toplevelEvents[0])),
@@ -191,15 +202,28 @@ func initXdgInterfaces() {
 var xdgCallbackHandle *LibwaylandHandle
 
 // xdgSurfaceConfigureCb handles xdg_surface.configure(data, xdg_surface, serial).
-// Called from C via goffi trampoline during wl_display_roundtrip.
+// Called from C via goffi trampoline during wl_display_dispatch.
 // Acks the configure event so the compositor maps the surface.
 func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 	h := xdgCallbackHandle
 	if h == nil {
 		return
 	}
+	slog.Warn("CSD-DEBUG: surface.configure", "serial", uint32(serial))
+
 	// ack_configure = xdg_surface opcode 4, arg: serial (uint32)
 	h.marshalVoid(h.xdgSurface, 4, serial)
+	slog.Debug("CSD-DEBUG: ack_configure sent", "serial", uint32(serial))
+
+	// Set window geometry = configure size (must match what compositor expects).
+	// Compositor validates: geometry must equal configure size for maximized state.
+	if h.configuredW > 0 && h.configuredH > 0 {
+		h.marshalVoid(h.xdgSurface, 3, 0, 0, uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
+	}
+
+	// Commit the main surface — atomic: ack + geometry + subsurface changes all at once.
+	h.marshalVoid(h.surface, 6)
+	slog.Debug("CSD-DEBUG: parent surface committed")
 }
 
 // xdgWmBasePingCb handles xdg_wm_base.ping(data, xdg_wm_base, serial).
@@ -299,11 +323,11 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 	// Roundtrip: processes initial configure event.
 	// The configure callback acks it, making the surface ready for buffers.
 	if err := h.roundtrip(); err != nil {
-		xdgCallbackHandle = nil
 		return fmt.Errorf("wayland: roundtrip for xdg configure failed: %w", err)
 	}
 
-	xdgCallbackHandle = nil
+	// Keep xdgCallbackHandle set for the window lifetime.
+	// Needed for runtime xdg_surface.configure (maximize, resize) and xdg_wm_base.ping.
 
 	// Second commit after configure ack (surface is now fully configured)
 	h.marshalVoid(h.surface, 6) // wl_surface::commit
@@ -340,8 +364,8 @@ func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, i
 }
 
 // marshalVoid sends a request without creating a new proxy.
-// Uses wl_proxy_marshal_array_constructor with NULL interface (no new proxy created,
-// but the message is still marshaled and sent).
+// Uses wl_proxy_marshal_array_constructor with NULL interface.
+// This works for all void requests (set_title, commit, attach, move, resize).
 func (h *LibwaylandHandle) marshalVoid(proxy uintptr, opcode uint32, args ...uintptr) {
 	var argBuf [8]uintptr
 	copy(argBuf[:], args)
@@ -355,7 +379,7 @@ func (h *LibwaylandHandle) marshalVoid(proxy uintptr, opcode uint32, args ...uin
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&nullIface),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&dummyResult), ffiArgs[:])
+	ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&dummyResult), ffiArgs[:])
 }
 
 // addListener calls wl_proxy_add_listener(proxy, listener, NULL).
@@ -434,4 +458,63 @@ func (h *LibwaylandHandle) SetAppID(appID string) {
 	copy(buf, appID)
 	h.marshalVoid(h.xdgToplevel, 3, uintptr(unsafe.Pointer(&buf[0])))
 	runtime.KeepAlive(buf)
+}
+
+// SetMinSize sets the minimum window size on the C xdg_toplevel.
+// Uses xdg_toplevel.set_min_size (opcode 8, signature "ii").
+func (h *LibwaylandHandle) SetMinSize(width, height int32) {
+	if h.xdgToplevel == 0 {
+		return
+	}
+	h.marshalVoid(h.xdgToplevel, 8, uintptr(uint32(width)), uintptr(uint32(height)))
+}
+
+// SetMaxSize sets the maximum window size on the C xdg_toplevel.
+// Uses xdg_toplevel.set_max_size (opcode 7, signature "ii").
+func (h *LibwaylandHandle) SetMaxSize(width, height int32) {
+	if h.xdgToplevel == 0 {
+		return
+	}
+	h.marshalVoid(h.xdgToplevel, 7, uintptr(uint32(width)), uintptr(uint32(height)))
+}
+
+// SetFullscreen requests fullscreen mode on the C xdg_toplevel.
+// Uses xdg_toplevel.set_fullscreen (opcode 11, signature "?o").
+func (h *LibwaylandHandle) SetFullscreen() {
+	if h.xdgToplevel == 0 {
+		return
+	}
+	h.marshalVoid(h.xdgToplevel, 11, 0) // NULL output = default
+}
+
+// Toplevel returns the xdg_toplevel proxy pointer.
+// Used by CSD for move/resize operations.
+func (h *LibwaylandHandle) Toplevel() uintptr {
+	return h.xdgToplevel
+}
+
+// MarshalVoidOnToplevel sends a void request to the xdg_toplevel.
+// Used for minimize, maximize, unset_maximized, fullscreen, etc.
+func (h *LibwaylandHandle) MarshalVoidOnToplevel(opcode uint32, args ...uintptr) {
+	if h.xdgToplevel == 0 {
+		return
+	}
+	h.marshalVoid(h.xdgToplevel, opcode, args...)
+	_ = h.flush()
+}
+
+// InputSeat returns the main input seat proxy pointer.
+// Used by platform for serial-based operations.
+func (h *LibwaylandHandle) InputSeat() uintptr {
+	return h.inputSeat
+}
+
+// Flush sends all buffered requests to the compositor.
+func (h *LibwaylandHandle) Flush() error {
+	return h.flush()
+}
+
+// Roundtrip performs a blocking roundtrip to the compositor.
+func (h *LibwaylandHandle) Roundtrip() error {
+	return h.roundtrip()
 }

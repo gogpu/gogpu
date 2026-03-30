@@ -5,6 +5,7 @@ package platform
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 )
 
 // waylandPlatform implements the Platform interface using Wayland.
+// Uses a single libwayland-client C connection for everything:
+// display, registry, compositor, surface, xdg-shell, input, CSD.
 type waylandPlatform struct {
 	mu sync.Mutex
 
@@ -23,44 +26,37 @@ type waylandPlatform struct {
 	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
 	wakePipe [2]int
 
-	// Wayland core objects (pure Go protocol)
-	display    *wayland.Display
-	registry   *wayland.Registry
-	compositor *wayland.WlCompositor
-	surface    *wayland.WlSurface
-	xdgWmBase  *wayland.XdgWmBase
-	xdgSurface *wayland.XdgSurface
-	toplevel   *wayland.XdgToplevel
-
-	// C pointers from libwayland-client for Vulkan surface creation.
-	// nil if libwayland-client.so.0 is unavailable (software backend fallback).
+	// Single C libwayland connection — owns everything.
 	libwl *wayland.LibwaylandHandle
 
-	// Decorations (optional, zxdg_decoration_manager_v1)
-	decorationManager  *wayland.ZxdgDecorationManager
-	toplevelDecoration *wayland.ZxdgToplevelDecoration
+	// Pure Go protocol objects — kept for registry global discovery only.
+	// The Pure Go display is used during init to discover global names,
+	// then those names are used to bind on the C connection.
+	// After init, only libwl is used for event dispatch.
+	display  *wayland.Display
+	registry *wayland.Registry
 
 	// Frameless window state
 	frameless       bool
 	maximized       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 
-	// Input devices
-	seat     *wayland.WlSeat
-	keyboard *wayland.WlKeyboard
-	pointer  *wayland.WlPointer
-	touch    *wayland.WlTouch
+	// Scale factor from environment variables (fallback)
+	envScaleFactor float64
 
 	// Window state
-	width       int
-	height      int
-	shouldClose bool
-	configured  bool
+	width        int
+	height       int
+	shouldClose  bool
+	closeEmitted bool // EventClose returned once, prevents infinite loop in PollEvents
+	configured   bool
 
 	// Pending resize from configure event
 	pendingWidth  int
 	pendingHeight int
 	hasResize     bool
+	savedWidth    int // pre-maximize size for restore
+	savedHeight   int
 
 	// Pointer state tracking
 	pointerX  float64
@@ -70,6 +66,9 @@ type waylandPlatform struct {
 	pointerMu sync.RWMutex
 	pointerIn bool // True when pointer is inside our surface
 	startTime time.Time
+
+	// Keyboard focus tracking
+	keyboardFocused bool
 
 	// Callbacks for pointer, scroll, and keyboard events
 	pointerCallback  func(gpucontext.PointerEvent)
@@ -244,29 +243,30 @@ func (p *x11Platform) WakeUp() {
 	_, _ = unix.Write(p.wakePipe[1], []byte{0})
 }
 
-// Init creates the Wayland window.
+// Init creates the Wayland window using a single C libwayland connection.
+// All Wayland objects (display, registry, compositor, surface, xdg-shell, seat,
+// pointer, keyboard, touch) are created on this one connection via goffi.
 func (p *waylandPlatform) Init(config Config) error {
 	// Check if Wayland is available
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
 		return fmt.Errorf("wayland: WAYLAND_DISPLAY not set")
 	}
 
-	return p.initPureGoDisplay(config)
+	return p.initSingleConnection(config)
 }
 
-// initPureGoDisplay initializes using pure Go Wayland protocol.
-// After creating the window, tries to load libwayland-client.so.0 via goffi
-// to get real C pointers (wl_display*, wl_surface*) for Vulkan surface creation.
-// If unavailable, software backend is used instead.
-func (p *waylandPlatform) initPureGoDisplay(config Config) error {
-	// Connect to Wayland display
+// initSingleConnection initializes using a single C libwayland connection.
+// Uses Pure Go wire protocol ONLY for registry global discovery, then
+// creates all objects on the C connection via goffi.
+func (p *waylandPlatform) initSingleConnection(config Config) error {
+	// Step 1: Use Pure Go protocol to discover registry globals.
+	// This is lightweight (just reads global names/versions), then we disconnect.
 	display, err := wayland.Connect()
 	if err != nil {
-		return fmt.Errorf("wayland: failed to connect: %w", err)
+		return fmt.Errorf("wayland: failed to connect (Go): %w", err)
 	}
 	p.display = display
 
-	// Get registry
 	registry, err := display.GetRegistry()
 	if err != nil {
 		_ = display.Close()
@@ -274,7 +274,6 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 	}
 	p.registry = registry
 
-	// Wait for globals to be advertised
 	required := []string{
 		wayland.InterfaceWlCompositor,
 		wayland.InterfaceXdgWmBase,
@@ -284,559 +283,502 @@ func (p *waylandPlatform) initPureGoDisplay(config Config) error {
 		return fmt.Errorf("wayland: %w", err)
 	}
 
-	// Bind to wl_compositor
-	compositorID, err := registry.BindCompositor(4)
-	if err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to bind compositor: %w", err)
-	}
-	p.compositor = wayland.NewWlCompositor(display, compositorID)
-
-	// Bind to xdg_wm_base (use available version, max 2)
-	xdgVersion := registry.GlobalVersion(wayland.InterfaceXdgWmBase)
-	if xdgVersion > 2 {
-		xdgVersion = 2
-	}
-	if xdgVersion == 0 {
-		xdgVersion = 1
-	}
-	xdgWmBaseID, err := registry.BindXdgWmBase(xdgVersion)
-	if err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to bind xdg_wm_base: %w", err)
-	}
-	p.xdgWmBase = wayland.NewXdgWmBase(display, xdgWmBaseID)
-
-	// Create wl_surface
-	surface, err := p.compositor.CreateSurface()
-	if err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to create surface: %w", err)
-	}
-	p.surface = surface
-
-	// Create xdg_surface
-	xdgSurface, err := p.xdgWmBase.GetXdgSurface(surface)
-	if err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to create xdg_surface: %w", err)
-	}
-	p.xdgSurface = xdgSurface
-
-	// Create xdg_toplevel
-	toplevel, err := xdgSurface.GetToplevel()
-	if err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to create toplevel: %w", err)
-	}
-	p.toplevel = toplevel
-
-	// Set window properties
-	if err := toplevel.SetTitle(config.Title); err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to set title: %w", err)
-	}
-	if err := toplevel.SetAppID("gogpu"); err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to set app_id: %w", err)
-	}
-
-	// Set initial size
-	p.width = config.Width
-	p.height = config.Height
-
-	// Set size constraints if not resizable
-	if !config.Resizable {
-		if err := toplevel.SetMinSize(int32(config.Width), int32(config.Height)); err != nil {
-			_ = display.Close()
-			return fmt.Errorf("wayland: failed to set min size: %w", err)
-		}
-		if err := toplevel.SetMaxSize(int32(config.Width), int32(config.Height)); err != nil {
-			_ = display.Close()
-			return fmt.Errorf("wayland: failed to set max size: %w", err)
-		}
-	}
-
-	// Request server-side decorations if compositor supports it
-	if registry.HasGlobal(wayland.InterfaceZxdgDecorationManagerV1) {
-		logger().Info("zxdg_decoration_manager_v1 found in pure Go registry")
-		decorMgrID, err := registry.BindZxdgDecorationManager(1)
-		if err == nil {
-			p.decorationManager = wayland.NewZxdgDecorationManager(display, decorMgrID)
-			decoration, err := p.decorationManager.GetToplevelDecoration(toplevel)
-			if err == nil {
-				p.toplevelDecoration = decoration
-				_ = decoration.SetMode(wayland.DecorationModeServerSide)
-				logger().Info("pure Go: server-side decorations requested")
-			}
-		}
-	} else {
-		logger().Info("zxdg_decoration_manager_v1 NOT found in registry")
-	}
-
-	// Set up event handlers
-	p.setupEventHandlers()
-
-	// Commit to signal we're ready for configure
-	if err := surface.Commit(); err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to commit surface: %w", err)
-	}
-
-	// Wait for initial configure event
-	if err := p.waitForConfigure(); err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: failed to wait for configure: %w", err)
-	}
-
-	// Create wakeup pipe for WakeUp → WaitEvents unblocking
-	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
-		_ = display.Close()
-		return fmt.Errorf("wayland: wakeup pipe: %w", err)
-	}
-
-	// Optionally bind to seat for input devices
-	if registry.HasGlobal(wayland.InterfaceWlSeat) {
-		_ = p.bindSeat() // Non-fatal: we can run without input devices
-	}
-
-	// Set fullscreen if requested
-	if config.Fullscreen {
-		_ = toplevel.SetFullscreen(0) // Non-fatal, continue
-	}
-
-	// Try loading libwayland-client for Vulkan surface support.
-	p.tryLoadLibwayland(config)
-
-	return nil
-}
-
-// tryLoadLibwayland attempts to load libwayland-client.so.0 via goffi for Vulkan surface support.
-// Non-fatal: if unavailable, software backend is used (same pattern as X11/libX11).
-func (p *waylandPlatform) tryLoadLibwayland(config Config) {
-	compGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceWlCompositor)
-	xdgGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceXdgWmBase)
+	// Collect global names/versions for C-side binding
+	compGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlCompositor)
+	xdgGlobal := registry.GetGlobalByInterface(wayland.InterfaceXdgWmBase)
 	if compGlobal == nil || xdgGlobal == nil {
-		logger().Warn("wl_compositor or xdg_wm_base not found in registry, Vulkan surface unavailable")
-		return
+		_ = display.Close()
+		return fmt.Errorf("wayland: wl_compositor or xdg_wm_base not found")
 	}
 
-	// Get decoration manager global (optional — 0 means not available)
 	var decorName, decorVersion uint32
-	decorGlobal := p.registry.GetGlobalByInterface(wayland.InterfaceZxdgDecorationManagerV1)
+	decorGlobal := registry.GetGlobalByInterface(wayland.InterfaceZxdgDecorationManagerV1)
 	if decorGlobal != nil {
 		decorName = decorGlobal.Name
 		decorVersion = decorGlobal.Version
-		logger().Info("libwayland: decoration manager global found",
-			"name", decorName, "version", decorVersion)
-	} else {
-		logger().Info("libwayland: decoration manager global NOT found")
 	}
 
+	// Step 2: Open C libwayland connection — this is the SINGLE connection
+	// that owns everything: surface, xdg-shell, input, Vulkan.
 	libwl, err := wayland.OpenLibwayland(
 		compGlobal.Name, compGlobal.Version,
 		xdgGlobal.Name, xdgGlobal.Version,
 		decorName, decorVersion,
 	)
 	if err != nil {
-		logger().Warn("libwayland-client not available, using software backend", "error", err)
-		return
+		_ = display.Close()
+		return fmt.Errorf("wayland: failed to open libwayland: %w", err)
 	}
 	p.libwl = libwl
 
-	// Set title and app_id on the C xdg_toplevel (shown in decoration bar)
+	// Set initial size
+	p.width = config.Width
+	p.height = config.Height
+
+	// Set window properties on C xdg_toplevel
 	libwl.SetTitle(config.Title)
 	libwl.SetAppID("gogpu")
 
-	logger().Info("Vulkan surface ready via libwayland-client",
+	// Set size constraints if not resizable
+	if !config.Resizable {
+		libwl.SetMinSize(int32(config.Width), int32(config.Height))
+		libwl.SetMaxSize(int32(config.Width), int32(config.Height))
+	}
+
+	// Set fullscreen if requested
+	if config.Fullscreen {
+		libwl.SetFullscreen()
+	}
+
+	// Register input callbacks BEFORE setting up input
+	p.setupInputCallbacks()
+	libwl.SetAsInputHandler()
+
+	// Set up xdg_toplevel listeners (configure, close)
+	if err := libwl.SetupToplevelListeners(); err != nil {
+		logger().Warn("xdg_toplevel listener setup failed", "err", err)
+	}
+
+	// Flush + roundtrip to process initial events
+	if err := libwl.Flush(); err != nil {
+		libwl.Close()
+		_ = display.Close()
+		return fmt.Errorf("wayland: flush failed: %w", err)
+	}
+	if err := libwl.Roundtrip(); err != nil {
+		libwl.Close()
+		_ = display.Close()
+		return fmt.Errorf("wayland: roundtrip failed: %w", err)
+	}
+
+	p.configured = true
+
+	// Create wakeup pipe for WakeUp → WaitEvents unblocking
+	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
+		libwl.Close()
+		_ = display.Close()
+		return fmt.Errorf("wayland: wakeup pipe: %w", err)
+	}
+
+	// Detect env-based scale factor as fallback
+	p.envScaleFactor = detectEnvScaleFactor()
+
+	// Set up input devices (pointer, keyboard, touch) on C display
+	seatGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSeat)
+	if seatGlobal != nil {
+		if err := libwl.SetupInput(seatGlobal.Name, seatGlobal.Version); err != nil {
+			logger().Warn("input setup failed", "err", err)
+		}
+	}
+
+	// Activate CSD if SSD was not available and window is not frameless
+	if decorGlobal == nil && !config.Frameless {
+		if err := p.initCSD(config); err != nil {
+			logger().Warn("CSD initialization failed, running without decorations", "err", err)
+		}
+	}
+
+	logger().Info("Wayland initialized (single C connection)",
 		"display", fmt.Sprintf("%#x", libwl.Display()),
 		"surface", fmt.Sprintf("%#x", libwl.Surface()))
-}
-
-// setupEventHandlers sets up Wayland event handlers.
-func (p *waylandPlatform) setupEventHandlers() {
-	// Handle xdg_surface configure
-	p.xdgSurface.SetConfigureHandler(func(serial uint32) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-
-		// ACK the configure event
-		if err := p.xdgSurface.AckConfigure(serial); err != nil {
-			// Log error but continue
-			return
-		}
-
-		// Commit the surface
-		if err := p.surface.Commit(); err != nil {
-			// Log error but continue
-			return
-		}
-
-		p.configured = true
-	})
-
-	// Handle toplevel configure (resize)
-	p.toplevel.SetConfigureHandler(func(config *wayland.XdgToplevelConfig) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-
-		// Width/height of 0 means client can choose
-		if config.Width > 0 && config.Height > 0 {
-			newWidth := int(config.Width)
-			newHeight := int(config.Height)
-
-			if newWidth != p.width || newHeight != p.height {
-				p.pendingWidth = newWidth
-				p.pendingHeight = newHeight
-				p.hasResize = true
-			}
-		}
-	})
-
-	// Handle toplevel close
-	p.toplevel.SetCloseHandler(func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.shouldClose = true
-	})
-}
-
-// waitForConfigure waits for the initial configure event.
-func (p *waylandPlatform) waitForConfigure() error {
-	// Perform roundtrips until we receive a configure event
-	for i := 0; i < 10; i++ {
-		if err := p.display.Roundtrip(); err != nil {
-			return fmt.Errorf("roundtrip failed: %w", err)
-		}
-
-		p.mu.Lock()
-		configured := p.configured
-		p.mu.Unlock()
-
-		if configured {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("timeout waiting for configure")
-}
-
-// bindSeat binds to the wl_seat for input devices.
-func (p *waylandPlatform) bindSeat() error {
-	seatVersion := p.registry.GlobalVersion(wayland.InterfaceWlSeat)
-	if seatVersion == 0 {
-		return fmt.Errorf("wl_seat not available")
-	}
-
-	// Limit to version we support
-	if seatVersion > 7 {
-		seatVersion = 7
-	}
-
-	seatID, err := p.registry.BindSeat(seatVersion)
-	if err != nil {
-		return fmt.Errorf("failed to bind seat: %w", err)
-	}
-	p.seat = wayland.NewWlSeat(p.display, seatID, seatVersion)
-
-	// Wait for capabilities
-	if err := p.display.Roundtrip(); err != nil {
-		return fmt.Errorf("roundtrip failed: %w", err)
-	}
-
-	// Get keyboard if available
-	if p.seat.HasKeyboard() {
-		keyboard, err := p.seat.GetKeyboard()
-		if err == nil {
-			p.keyboard = keyboard
-			p.setupKeyboardHandlers()
-		}
-	}
-
-	// Get pointer if available
-	if p.seat.HasPointer() {
-		pointer, err := p.seat.GetPointer()
-		if err == nil {
-			p.pointer = pointer
-			p.setupPointerHandlers()
-		}
-	}
-
-	// Get touch if available
-	if p.seat.HasTouch() {
-		touch, err := p.seat.GetTouch()
-		if err == nil {
-			p.touch = touch
-			p.setupTouchHandlers()
-		}
-	}
 
 	return nil
 }
 
-// setupPointerHandlers configures Wayland pointer event handlers.
-func (p *waylandPlatform) setupPointerHandlers() {
-	if p.pointer == nil {
-		return
+// initCSD initializes Client-Side Decorations when SSD is unavailable.
+// Creates subsurfaces on the C display (same connection as main surface).
+func (p *waylandPlatform) initCSD(config Config) error {
+	if p.libwl == nil {
+		return fmt.Errorf("libwayland-client not available for CSD")
 	}
 
-	// Handle pointer enter (mouse enters our surface)
-	p.pointer.SetEnterHandler(func(event *wayland.PointerEnterEvent) {
-		// Check if this is our surface
-		if p.surface == nil || event.Surface != p.surface.ID() {
-			return
-		}
+	registry := p.registry
 
-		p.pointerMu.Lock()
-		p.pointerX = event.SurfaceX
-		p.pointerY = event.SurfaceY
-		p.pointerIn = true
-		p.pointerMu.Unlock()
+	// Check required globals
+	subcompGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSubcompositor)
+	shmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlShm)
+	if subcompGlobal == nil || shmGlobal == nil {
+		return fmt.Errorf("required CSD globals not found (subcompositor or shm)")
+	}
 
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerEnter,
-			PointerID:   1, // Mouse always has ID 1
-			X:           event.SurfaceX,
-			Y:           event.SurfaceY,
-			Pressure:    0,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeMouse,
-			IsPrimary:   true,
-			Button:      gpucontext.ButtonNone,
-			Buttons:     p.getButtons(),
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
+	var seatName, seatVersion uint32
+	seatGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSeat)
+	if seatGlobal != nil {
+		seatName = seatGlobal.Name
+		seatVersion = seatGlobal.Version
+	}
 
-	// Handle pointer leave (mouse leaves our surface)
-	p.pointer.SetLeaveHandler(func(event *wayland.PointerLeaveEvent) {
-		// Check if this is our surface
-		if p.surface == nil || event.Surface != p.surface.ID() {
-			return
-		}
+	if err := p.libwl.SetupCSD(
+		subcompGlobal.Name, subcompGlobal.Version,
+		shmGlobal.Name, shmGlobal.Version,
+		seatName, seatVersion,
+		config.Width, config.Height,
+		config.Title,
+		nil, // DefaultCSDPainter
+		func() {
+			logger().Info("CSD close button pressed")
+			p.mu.Lock()
+			p.shouldClose = true
+			p.mu.Unlock()
+			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
+		},
+	); err != nil {
+		return fmt.Errorf("CSD setup: %w", err)
+	}
 
-		p.pointerMu.Lock()
-		x := p.pointerX
-		y := p.pointerY
-		p.pointerIn = false
-		p.pointerMu.Unlock()
+	logger().Info("CSD: client-side decorations activated",
+		"titleBarHeight", wayland.DefaultCSDPainter{}.TitleBarHeight(),
+		"borderWidth", wayland.DefaultCSDPainter{}.BorderWidth())
 
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerLeave,
-			PointerID:   1,
-			X:           x,
-			Y:           y,
-			Pressure:    0,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeMouse,
-			IsPrimary:   true,
-			Button:      gpucontext.ButtonNone,
-			Buttons:     p.getButtons(),
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
-
-	// Handle pointer motion
-	p.pointer.SetMotionHandler(func(event *wayland.PointerMotionEvent) {
-		p.pointerMu.Lock()
-		if !p.pointerIn {
-			p.pointerMu.Unlock()
-			return
-		}
-		p.pointerX = event.SurfaceX
-		p.pointerY = event.SurfaceY
-		buttons := p.buttons
-		p.pointerMu.Unlock()
-
-		// Pressure is 0.5 if any button is pressed, 0 otherwise
-		var pressure float32
-		if buttons != gpucontext.ButtonsNone {
-			pressure = 0.5
-		}
-
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerMove,
-			PointerID:   1,
-			X:           event.SurfaceX,
-			Y:           event.SurfaceY,
-			Pressure:    pressure,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeMouse,
-			IsPrimary:   true,
-			Button:      gpucontext.ButtonNone,
-			Buttons:     buttons,
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
-
-	// Handle pointer button events
-	p.pointer.SetButtonHandler(func(event *wayland.PointerButtonEvent) {
-		p.pointerMu.Lock()
-		if !p.pointerIn {
-			p.pointerMu.Unlock()
-			return
-		}
-
-		// Map Linux evdev button code to gpucontext button
-		button := mapWaylandButton(event.Button)
-		buttonMask := buttonToMask(button)
-
-		// Update button state
-		if event.State == wayland.PointerButtonStatePressed {
-			p.buttons |= buttonMask
-		} else {
-			p.buttons &^= buttonMask
-		}
-
-		buttons := p.buttons
-		x := p.pointerX
-		y := p.pointerY
-		p.pointerMu.Unlock()
-
-		// Determine event type
-		var eventType gpucontext.PointerEventType
-		if event.State == wayland.PointerButtonStatePressed {
-			eventType = gpucontext.PointerDown
-		} else {
-			eventType = gpucontext.PointerUp
-		}
-
-		// Pressure is 0.5 for button down, based on button state for up
-		var pressure float32
-		if eventType == gpucontext.PointerDown || buttons != gpucontext.ButtonsNone {
-			pressure = 0.5
-		}
-
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        eventType,
-			PointerID:   1,
-			X:           x,
-			Y:           y,
-			Pressure:    pressure,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeMouse,
-			IsPrimary:   true,
-			Button:      button,
-			Buttons:     buttons,
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
-
-	// Handle scroll (axis) events
-	p.pointer.SetAxisHandler(func(event *wayland.PointerAxisEvent) {
-		p.pointerMu.Lock()
-		if !p.pointerIn {
-			p.pointerMu.Unlock()
-			return
-		}
-		x := p.pointerX
-		y := p.pointerY
-		p.pointerMu.Unlock()
-
-		var deltaX, deltaY float64
-
-		// Map Wayland axis to scroll delta
-		// Axis 0 = vertical scroll, Axis 1 = horizontal scroll
-		// Wayland: positive = down/right
-		// gpucontext ScrollEvent: positive = down/right (same convention)
-		switch event.Axis {
-		case wayland.PointerAxisVerticalScroll:
-			deltaY = event.Value
-		case wayland.PointerAxisHorizontalScroll:
-			deltaX = event.Value
-		}
-
-		p.dispatchScrollEvent(gpucontext.ScrollEvent{
-			X:         x,
-			Y:         y,
-			DeltaX:    deltaX,
-			DeltaY:    deltaY,
-			DeltaMode: gpucontext.ScrollDeltaPixel, // Wayland provides pixel values
-			Modifiers: p.getModifiers(),
-			Timestamp: p.eventTimestamp(),
-		})
-	})
+	return nil
 }
 
-// setupTouchHandlers configures Wayland touch event handlers.
-func (p *waylandPlatform) setupTouchHandlers() {
-	if p.touch == nil {
-		return
+// setupInputCallbacks creates Go-side input callbacks and wires them to
+// the LibwaylandHandle. These callbacks are invoked by goffi from C context.
+//
+//nolint:gocognit,maintidx // callback setup is inherently complex but well-structured per event type
+func (p *waylandPlatform) setupInputCallbacks() {
+	cb := &wayland.InputCallbacks{
+		// Pointer events
+		OnPointerEnter: func(serial uint32, x, y float64) {
+			p.pointerMu.Lock()
+			p.pointerX = x
+			p.pointerY = y
+			p.pointerIn = true
+			p.pointerMu.Unlock()
+
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerEnter,
+				PointerID:   1,
+				X:           x,
+				Y:           y,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeMouse,
+				IsPrimary:   true,
+				Button:      gpucontext.ButtonNone,
+				Buttons:     p.getButtons(),
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnPointerLeave: func(serial uint32) {
+			p.pointerMu.Lock()
+			x := p.pointerX
+			y := p.pointerY
+			p.pointerIn = false
+			p.pointerMu.Unlock()
+
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerLeave,
+				PointerID:   1,
+				X:           x,
+				Y:           y,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeMouse,
+				IsPrimary:   true,
+				Button:      gpucontext.ButtonNone,
+				Buttons:     p.getButtons(),
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnPointerMotion: func(timeMs uint32, x, y float64) {
+			p.pointerMu.Lock()
+			if !p.pointerIn {
+				p.pointerMu.Unlock()
+				return
+			}
+			p.pointerX = x
+			p.pointerY = y
+			buttons := p.buttons
+			p.pointerMu.Unlock()
+
+			var pressure float32
+			if buttons != gpucontext.ButtonsNone {
+				pressure = 0.5
+			}
+
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerMove,
+				PointerID:   1,
+				X:           x,
+				Y:           y,
+				Pressure:    pressure,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeMouse,
+				IsPrimary:   true,
+				Button:      gpucontext.ButtonNone,
+				Buttons:     buttons,
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnPointerButton: func(serial, timeMs, button, state uint32) {
+			p.pointerMu.Lock()
+			if !p.pointerIn {
+				p.pointerMu.Unlock()
+				return
+			}
+
+			btn := mapWaylandButton(button)
+			mask := buttonToMask(btn)
+
+			if state == wayland.PointerButtonStatePressed {
+				p.buttons |= mask
+			} else {
+				p.buttons &^= mask
+			}
+
+			buttons := p.buttons
+			x := p.pointerX
+			y := p.pointerY
+			p.pointerMu.Unlock()
+
+			var eventType gpucontext.PointerEventType
+			if state == wayland.PointerButtonStatePressed {
+				eventType = gpucontext.PointerDown
+			} else {
+				eventType = gpucontext.PointerUp
+			}
+
+			var pressure float32
+			if eventType == gpucontext.PointerDown || buttons != gpucontext.ButtonsNone {
+				pressure = 0.5
+			}
+
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        eventType,
+				PointerID:   1,
+				X:           x,
+				Y:           y,
+				Pressure:    pressure,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeMouse,
+				IsPrimary:   true,
+				Button:      btn,
+				Buttons:     buttons,
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnPointerAxis: func(timeMs, axis uint32, value float64) {
+			p.pointerMu.Lock()
+			if !p.pointerIn {
+				p.pointerMu.Unlock()
+				return
+			}
+			x := p.pointerX
+			y := p.pointerY
+			p.pointerMu.Unlock()
+
+			var deltaX, deltaY float64
+			switch axis {
+			case wayland.PointerAxisVerticalScroll:
+				deltaY = value
+			case wayland.PointerAxisHorizontalScroll:
+				deltaX = value
+			}
+
+			p.dispatchScrollEvent(gpucontext.ScrollEvent{
+				X:         x,
+				Y:         y,
+				DeltaX:    deltaX,
+				DeltaY:    deltaY,
+				DeltaMode: gpucontext.ScrollDeltaPixel,
+				Modifiers: p.getModifiers(),
+				Timestamp: p.eventTimestamp(),
+			})
+		},
+
+		// Keyboard events
+		OnKeyboardKeymap: func(format uint32, fd int, size uint32) {
+			// For now, ignore keymap (basic evdev keycode mapping used).
+			// Full libxkbcommon integration is a future task.
+		},
+		OnKeyboardEnter: func(serial uint32, keys []uint32) {
+			p.mu.Lock()
+			p.keyboardFocused = true
+			p.mu.Unlock()
+		},
+		OnKeyboardLeave: func(serial uint32) {
+			p.mu.Lock()
+			p.keyboardFocused = false
+			p.mu.Unlock()
+		},
+		OnKeyboardKey: func(serial, timeMs, key, state uint32) {
+			p.mu.Lock()
+			focused := p.keyboardFocused
+			p.mu.Unlock()
+			if !focused {
+				return
+			}
+
+			gpuKey := evdevToKey(key)
+			mods := p.getModifiers()
+			pressed := state == wayland.KeyStatePressed
+
+			p.dispatchKeyEvent(gpuKey, mods, pressed)
+
+			// Dispatch character input on key press only.
+			if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
+				shift := mods&gpucontext.ModShift != 0
+				capsLock := mods&gpucontext.ModCapsLock != 0
+				if r := evdevKeycodeToRune(key, shift, capsLock); r != 0 {
+					p.callbackMu.RLock()
+					cb := p.charCallback
+					p.callbackMu.RUnlock()
+					if cb != nil {
+						cb(r)
+					}
+				}
+			}
+		},
+		OnKeyboardModifiers: func(serial, modsDepressed, modsLatched, modsLocked, group uint32) {
+			p.pointerMu.Lock()
+			p.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
+			p.pointerMu.Unlock()
+		},
+		OnKeyboardRepeat: func(rate, delay int32) {
+			// Stored for future key repeat implementation
+		},
+
+		// Touch events
+		OnTouchDown: func(serial, timeMs uint32, id int32, x, y float64) {
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerDown,
+				PointerID:   int(id) + 2,
+				X:           x,
+				Y:           y,
+				Pressure:    0.5,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeTouch,
+				IsPrimary:   id == 0,
+				Button:      gpucontext.ButtonLeft,
+				Buttons:     gpucontext.ButtonsLeft,
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnTouchUp: func(serial, timeMs uint32, id int32) {
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerUp,
+				PointerID:   int(id) + 2,
+				Pressure:    0,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeTouch,
+				IsPrimary:   id == 0,
+				Button:      gpucontext.ButtonLeft,
+				Buttons:     gpucontext.ButtonsNone,
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnTouchMotion: func(timeMs uint32, id int32, x, y float64) {
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerMove,
+				PointerID:   int(id) + 2,
+				X:           x,
+				Y:           y,
+				Pressure:    0.5,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeTouch,
+				IsPrimary:   id == 0,
+				Button:      gpucontext.ButtonNone,
+				Buttons:     gpucontext.ButtonsLeft,
+				Modifiers:   p.getModifiers(),
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+		OnTouchCancel: func() {
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerLeave,
+				PointerID:   2,
+				PointerType: gpucontext.PointerTypeTouch,
+				IsPrimary:   true,
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+
+		// xdg_toplevel events
+		OnClose: func() {
+			logger().Info("xdg_toplevel close event from compositor")
+			p.mu.Lock()
+			p.shouldClose = true
+			p.mu.Unlock()
+			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
+		},
+		OnConfigure: func(width, height int32) {
+			logger().Debug("CSD-DEBUG: OnConfigure", "rawW", width, "rawH", height)
+			p.mu.Lock()
+			defer p.mu.Unlock()
+
+			isMaximized := p.libwl != nil && p.libwl.CSDActive() && p.libwl.IsMaximized()
+
+			// Save pre-maximize size ONLY when transitioning TO maximized.
+			// Don't overwrite on every configure — restore needs the original size.
+			if isMaximized && p.savedWidth == 0 && p.width > 0 {
+				p.savedWidth = p.width
+				p.savedHeight = p.height
+			}
+			// Clear saved size when restored (so next maximize saves fresh)
+			if !isMaximized && p.savedWidth > 0 && width > 0 {
+				p.savedWidth = 0
+				p.savedHeight = 0
+			}
+
+			// Width/height of 0 means client can choose — restore to saved size
+			if width == 0 && height == 0 && p.savedWidth > 0 {
+				width = int32(p.savedWidth)
+				height = int32(p.savedHeight)
+				p.savedWidth = 0
+				p.savedHeight = 0
+			}
+			if width > 0 && height > 0 {
+				newWidth := int(width)
+				newHeight := int(height)
+
+				// Vulkan surface = full configure size (compositor expects exact match).
+				// CSD content = configure minus borders (decorations are outside content).
+				csdContentW := newWidth
+				csdContentH := newHeight
+				if p.libwl != nil && p.libwl.CSDActive() {
+					tbH, bW := p.libwl.CSDBorders()
+					csdContentW = newWidth - bW*2
+					csdContentH = newHeight - tbH - bW
+					if csdContentW < 1 {
+						csdContentW = 1
+					}
+					if csdContentH < 1 {
+						csdContentH = 1
+					}
+				}
+
+				logger().Debug("CSD-DEBUG: OnConfigure adjusted", "vulkanW", newWidth, "vulkanH", newHeight, "csdContentW", csdContentW, "csdContentH", csdContentH)
+				if newWidth != p.width || newHeight != p.height {
+					logger().Warn("CSD-DEBUG: RESIZE TRIGGERED", "newW", newWidth, "newH", newHeight, "oldW", p.width, "oldH", p.height, "maximized", isMaximized)
+					p.pendingWidth = newWidth
+					p.pendingHeight = newHeight
+					p.hasResize = true
+					// Resize CSD decorations to match CSD content area
+					if p.libwl != nil && p.libwl.CSDActive() {
+						p.libwl.ResizeCSD(csdContentW, csdContentH)
+					}
+					// Note: xdg_surface.configure will arrive on next PollEvents dispatch,
+					// AFTER Vulkan surface has been resized by the render loop.
+					// ack_configure + set_window_geometry + commit happen in that callback.
+				}
+			}
+		},
 	}
 
-	p.touch.SetDownHandler(func(event *wayland.TouchDownEvent) {
-		if p.surface == nil || event.Surface != p.surface.ID() {
-			return
-		}
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerDown,
-			PointerID:   int(event.ID) + 2, // Touch IDs start at 2 (mouse=1)
-			X:           event.X,
-			Y:           event.Y,
-			Pressure:    0.5,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeTouch,
-			IsPrimary:   event.ID == 0,
-			Button:      gpucontext.ButtonLeft,
-			Buttons:     gpucontext.ButtonsLeft,
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
-
-	p.touch.SetUpHandler(func(event *wayland.TouchUpEvent) {
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerUp,
-			PointerID:   int(event.ID) + 2,
-			Pressure:    0,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeTouch,
-			IsPrimary:   event.ID == 0,
-			Button:      gpucontext.ButtonLeft,
-			Buttons:     gpucontext.ButtonsNone,
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
-
-	p.touch.SetMotionHandler(func(event *wayland.TouchMotionEvent) {
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerMove,
-			PointerID:   int(event.ID) + 2,
-			X:           event.X,
-			Y:           event.Y,
-			Pressure:    0.5,
-			Width:       1,
-			Height:      1,
-			PointerType: gpucontext.PointerTypeTouch,
-			IsPrimary:   event.ID == 0,
-			Button:      gpucontext.ButtonNone,
-			Buttons:     gpucontext.ButtonsLeft,
-			Modifiers:   p.getModifiers(),
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
-
-	p.touch.SetCancelHandler(func() {
-		// Touch cancel: dispatch PointerLeave to signal compositor took over
-		p.dispatchPointerEvent(gpucontext.PointerEvent{
-			Type:        gpucontext.PointerLeave,
-			PointerID:   2,
-			PointerType: gpucontext.PointerTypeTouch,
-			IsPrimary:   true,
-			Timestamp:   p.eventTimestamp(),
-		})
-	})
+	p.libwl.SetInputCallbacks(cb)
 }
 
 // mapWaylandButton maps a Linux evdev button code to gpucontext.Button.
@@ -925,51 +867,6 @@ func (p *waylandPlatform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.M
 	if callback != nil {
 		callback(key, mods, pressed)
 	}
-}
-
-// setupKeyboardHandlers configures Wayland keyboard event handlers.
-func (p *waylandPlatform) setupKeyboardHandlers() {
-	if p.keyboard == nil {
-		return
-	}
-
-	// Handle key events
-	p.keyboard.SetKeyHandler(func(event *wayland.KeyboardKeyEvent) {
-		// Check if we have keyboard focus on our surface
-		if p.keyboard.FocusedSurface() != p.surface.ID() {
-			return
-		}
-
-		// Convert evdev keycode to gpucontext.Key
-		// Note: Wayland uses evdev keycodes, which need +8 offset from X11 keycodes
-		key := evdevToKey(event.Key)
-		mods := p.getModifiers()
-		pressed := event.State == wayland.KeyStatePressed
-
-		p.dispatchKeyEvent(key, mods, pressed)
-
-		// Dispatch character input on key press only.
-		// Skip when Ctrl/Alt/Super are held — those are shortcuts, not text input.
-		if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
-			shift := mods&gpucontext.ModShift != 0
-			capsLock := mods&gpucontext.ModCapsLock != 0
-			if r := evdevKeycodeToRune(event.Key, shift, capsLock); r != 0 {
-				p.callbackMu.RLock()
-				cb := p.charCallback
-				p.callbackMu.RUnlock()
-				if cb != nil {
-					cb(r)
-				}
-			}
-		}
-	})
-
-	// Handle modifier events to update modifier state
-	p.keyboard.SetModifiersHandler(func(event *wayland.KeyboardModifiersEvent) {
-		p.pointerMu.Lock()
-		p.modifiers = evdevModsToModifiers(event.ModsDepressed, event.ModsLocked)
-		p.pointerMu.Unlock()
-	})
 }
 
 // evdevModsToModifiers converts evdev modifier bitmasks to gpucontext.Modifiers.
@@ -1651,22 +1548,32 @@ func (p *waylandPlatform) PollEvents() Event {
 		}
 	}
 
-	// Check for close
-	if p.shouldClose {
+	// Check for close (emit once to prevent infinite loop in processEventsMultiThread)
+	if p.shouldClose && !p.closeEmitted {
+		p.closeEmitted = true
 		p.mu.Unlock()
 		return Event{Type: EventClose}
 	}
 
 	p.mu.Unlock()
 
-	// Dispatch pending Wayland events (non-blocking)
-	if err := p.display.Dispatch(); err != nil {
-		// Connection error - treat as close
-		logger().Error("wayland dispatch error", "error", err)
-		p.mu.Lock()
-		p.shouldClose = true
-		p.mu.Unlock()
-		return Event{Type: EventClose}
+	// Dispatch all pending events on the C display (single connection)
+	if p.libwl != nil {
+		// Dispatch CSD events on separate queue
+		if p.libwl.CSDActive() {
+			if err := p.libwl.DispatchCSDEvents(); err != nil {
+				logger().Error("CSD dispatch error", "error", err)
+			}
+		}
+
+		// Dispatch default queue (xdg, pointer, keyboard, touch)
+		if err := p.libwl.DispatchDefaultQueue(); err != nil {
+			logger().Error("wayland dispatch error — closing window", "error", err)
+			p.mu.Lock()
+			p.shouldClose = true
+			p.mu.Unlock()
+			return Event{Type: EventClose}
+		}
 	}
 
 	// Check again after dispatch
@@ -1686,7 +1593,8 @@ func (p *waylandPlatform) PollEvents() Event {
 		}
 	}
 
-	if p.shouldClose {
+	if p.shouldClose && !p.closeEmitted {
+		p.closeEmitted = true
 		return Event{Type: EventClose}
 	}
 
@@ -1738,66 +1646,13 @@ func (p *waylandPlatform) Destroy() {
 		p.wakePipe = [2]int{}
 	}
 
-	// Close libwayland-client C connection (Vulkan surface handle)
+	// Close C libwayland connection (owns all Wayland objects)
 	if p.libwl != nil {
 		p.libwl.Close()
 		p.libwl = nil
 	}
 
-	// Destroy pure Go objects in reverse order of creation
-
-	if p.touch != nil {
-		_ = p.touch.Release()
-		p.touch = nil
-	}
-
-	if p.pointer != nil {
-		_ = p.pointer.Release()
-		p.pointer = nil
-	}
-
-	if p.keyboard != nil {
-		_ = p.keyboard.Release()
-		p.keyboard = nil
-	}
-
-	if p.seat != nil {
-		// Don't call Release() unless we have version 5+
-		p.seat = nil
-	}
-
-	if p.toplevelDecoration != nil {
-		_ = p.toplevelDecoration.Destroy()
-		p.toplevelDecoration = nil
-	}
-
-	if p.decorationManager != nil {
-		_ = p.decorationManager.Destroy()
-		p.decorationManager = nil
-	}
-
-	if p.toplevel != nil {
-		_ = p.toplevel.Destroy()
-		p.toplevel = nil
-	}
-
-	if p.xdgSurface != nil {
-		_ = p.xdgSurface.Destroy()
-		p.xdgSurface = nil
-	}
-
-	if p.surface != nil {
-		_ = p.surface.Destroy()
-		p.surface = nil
-	}
-
-	if p.xdgWmBase != nil {
-		_ = p.xdgWmBase.Destroy()
-		p.xdgWmBase = nil
-	}
-
-	// Note: compositor doesn't have a destroy method
-
+	// Close Pure Go display (used only for registry discovery during init)
 	if p.display != nil {
 		_ = p.display.Close()
 		p.display = nil
@@ -1844,9 +1699,12 @@ func (p *waylandPlatform) SetCharCallback(fn func(rune)) {
 func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}
 
 // WaitEvents blocks until at least one OS event is available.
-// Uses unix.Poll on the Wayland display fd and a wakeup pipe to block with 0% CPU.
+// Uses unix.Poll on the C display fd and a wakeup pipe to block with 0% CPU.
 func (p *waylandPlatform) WaitEvents() {
-	dispFd := p.display.Fd()
+	if p.libwl == nil {
+		return
+	}
+	dispFd := p.libwl.GetDisplayFD()
 	if dispFd < 0 {
 		return
 	}
@@ -1881,14 +1739,41 @@ func drainPipe(fd int) {
 	}
 }
 
-// waylandPlatform provider stubs
+// detectEnvScaleFactor reads scale factor from environment variables.
+// Checks GDK_SCALE (GNOME/GTK) and QT_SCALE_FACTOR (KDE/Qt).
+// Returns 0 if no env var is set.
+func detectEnvScaleFactor() float64 {
+	// GDK_SCALE is integer-only (GNOME/GTK)
+	if s := os.Getenv("GDK_SCALE"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			return float64(v)
+		}
+	}
+
+	// QT_SCALE_FACTOR supports fractional values (KDE/Qt)
+	if s := os.Getenv("QT_SCALE_FACTOR"); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && v > 0 {
+			return v
+		}
+	}
+
+	return 0
+}
 
 // ScaleFactor returns the DPI scale factor.
-// TODO: Implement using wl_output scale and fractional_scale_v1.
-func (p *waylandPlatform) ScaleFactor() float64 { return 1.0 }
+// Falls back to environment variables (GDK_SCALE, QT_SCALE_FACTOR) or 1.0.
+// TODO: Add wl_output scale tracking on C display for proper HiDPI support.
+func (p *waylandPlatform) ScaleFactor() float64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.envScaleFactor > 0 {
+		return p.envScaleFactor
+	}
+	return 1.0
+}
 
 // PrepareFrame returns current scale/size state for the Wayland platform.
-// Future: apply pending wl_output.scale here.
 func (p *waylandPlatform) PrepareFrame() PrepareFrameResult {
 	w, h := p.PhysicalSize()
 	return PrepareFrameResult{
@@ -1899,38 +1784,50 @@ func (p *waylandPlatform) PrepareFrame() PrepareFrameResult {
 }
 
 // ClipboardRead reads text from the system clipboard.
-// TODO: Implement using wl_data_device and wl_data_offer.
+// TODO(PLAT-008): Implement using wl_data_device and wl_data_offer.
+// Wayland clipboard requires wl_data_device_manager binding, wl_data_offer
+// event handling (offer -> receive via pipe fd), and MIME type negotiation.
+// Effort: ~3 (async protocol, pipe-based data transfer).
 func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
 
 // ClipboardWrite writes text to the system clipboard.
-// TODO: Implement using wl_data_device and wl_data_source.
+// TODO(PLAT-008): Implement using wl_data_device and wl_data_source.
+// Requires creating wl_data_source, setting MIME types, handling send events
+// by writing to the provided fd. The source must remain valid while owned.
+// Effort: ~3 (async protocol, fd-based data transfer).
 func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
 
 // SetCursor changes the mouse cursor shape.
-// TODO: Implement using wp_cursor_shape_manager_v1 or cursor theme.
+// TODO(PLAT-008): Implement using wp_cursor_shape_manager_v1 or xcursor theme loading.
+// wp_cursor_shape_manager_v1 is the modern approach (Wayland protocol extension).
+// Fallback: load xcursor theme files from $XCURSOR_PATH, render to wl_buffer,
+// attach via wl_pointer.set_cursor. Both approaches are significant effort.
 func (p *waylandPlatform) SetCursor(int) {}
 
 // DarkMode returns true if the system dark mode is active.
-// TODO: Implement using org.freedesktop.portal.Settings.
-func (p *waylandPlatform) DarkMode() bool { return false }
+// Checks GTK_THEME environment variable and KDE kdeglobals config.
+// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
+func (p *waylandPlatform) DarkMode() bool { return detectDarkMode() }
 
 // ReduceMotion returns true if the user prefers reduced animation.
-// TODO: Implement using org.freedesktop.portal.Settings.
-func (p *waylandPlatform) ReduceMotion() bool { return false }
+// Checks GTK_ENABLE_ANIMATIONS environment variable.
+// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
+func (p *waylandPlatform) ReduceMotion() bool { return detectReduceMotion() }
 
 // HighContrast returns true if high contrast mode is active.
-// TODO: Implement using org.freedesktop.portal.Settings.
-func (p *waylandPlatform) HighContrast() bool { return false }
+// Checks GTK_THEME environment variable for HighContrast theme names.
+func (p *waylandPlatform) HighContrast() bool { return detectHighContrast() }
 
 // FontScale returns font size preference multiplier.
-// TODO: Implement using GSettings text-scaling-factor.
-func (p *waylandPlatform) FontScale() float32 { return 1.0 }
+// Checks GDK_DPI_SCALE environment variable.
+// For full support, GSettings text-scaling-factor via D-Bus is needed.
+func (p *waylandPlatform) FontScale() float32 { return detectFontScale() }
 
 // x11Platform provider stubs
 
 // ScaleFactor returns the DPI scale factor.
-// TODO: Implement using Xft.dpi or XRandR.
-func (p *x11Platform) ScaleFactor() float64 { return 1.0 }
+// Reads Xft.dpi from X RESOURCE_MANAGER property, with screen physical size fallback.
+func (p *x11Platform) ScaleFactor() float64 { return p.inner.ScaleFactor() }
 
 // PrepareFrame returns current scale/size state for the X11 platform.
 // X11 has static DPI — no per-frame updates needed.
@@ -1944,32 +1841,41 @@ func (p *x11Platform) PrepareFrame() PrepareFrameResult {
 }
 
 // ClipboardRead reads text from the system clipboard.
-// TODO: Implement using X11 selections (XA_CLIPBOARD).
+// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
+// X11 clipboard uses the selections protocol: SetSelectionOwner, ConvertSelection,
+// SelectionNotify events, and incremental transfer (INCR) for large data.
+// Effort: ~5 (complex async event-driven protocol with multiple round trips).
 func (p *x11Platform) ClipboardRead() (string, error) { return "", nil }
 
 // ClipboardWrite writes text to the system clipboard.
-// TODO: Implement using X11 selections (XA_CLIPBOARD).
+// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
+// Requires becoming selection owner (SetSelectionOwner), then responding to
+// SelectionRequest events from other clients. Must handle TARGETS, UTF8_STRING,
+// and INCR protocol for large transfers.
+// Effort: ~5 (must handle ongoing SelectionRequest events while owning clipboard).
 func (p *x11Platform) ClipboardWrite(string) error { return nil }
 
-// SetCursor changes the mouse cursor shape.
-// TODO: Implement using XCreateFontCursor or Xcursor.
-func (p *x11Platform) SetCursor(int) {}
+// SetCursor changes the mouse cursor shape using the standard X11 cursor font.
+// cursorID maps to gpucontext.CursorShape values (0-11).
+func (p *x11Platform) SetCursor(cursorID int) { p.inner.SetCursor(cursorID) }
 
 // DarkMode returns true if the system dark mode is active.
-// TODO: Implement using org.freedesktop.portal.Settings.
-func (p *x11Platform) DarkMode() bool { return false }
+// Checks GTK_THEME environment variable and KDE kdeglobals config.
+// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
+func (p *x11Platform) DarkMode() bool { return detectDarkMode() }
 
 // ReduceMotion returns true if the user prefers reduced animation.
-// TODO: Implement using org.freedesktop.portal.Settings.
-func (p *x11Platform) ReduceMotion() bool { return false }
+// Checks GTK_ENABLE_ANIMATIONS environment variable.
+// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
+func (p *x11Platform) ReduceMotion() bool { return detectReduceMotion() }
 
 // HighContrast returns true if high contrast mode is active.
-// TODO: Implement using org.freedesktop.portal.Settings.
-func (p *x11Platform) HighContrast() bool { return false }
+// Checks GTK_THEME environment variable for HighContrast theme names.
+func (p *x11Platform) HighContrast() bool { return detectHighContrast() }
 
 // FontScale returns font size preference multiplier.
-// TODO: Implement using Xft.dpi or GSettings text-scaling-factor.
-func (p *x11Platform) FontScale() float32 { return 1.0 }
+// Checks GDK_DPI_SCALE environment variable, with Xft.dpi as context via ScaleFactor.
+func (p *x11Platform) FontScale() float32 { return detectFontScale() }
 
 // Frameless window support — x11Platform
 
@@ -2003,6 +1909,12 @@ func (p *x11Platform) CloseWindow() {
 
 func (p *x11Platform) SyncFrame() {}
 
+// BlitPixels copies RGBA pixel data to the window using X11 PutImage.
+// Implements the PixelBlitter interface for software backend presentation.
+func (p *x11Platform) BlitPixels(pixels []byte, width, height int) error {
+	return p.inner.BlitPixels(pixels, width, height)
+}
+
 func (p *waylandPlatform) SyncFrame() {}
 
 // Frameless window support — waylandPlatform
@@ -2011,14 +1923,8 @@ func (p *waylandPlatform) SetFrameless(frameless bool) {
 	p.mu.Lock()
 	p.frameless = frameless
 	p.mu.Unlock()
-
-	if p.toplevelDecoration != nil {
-		if frameless {
-			p.toplevelDecoration.SetMode(wayland.DecorationModeClientSide)
-		} else {
-			p.toplevelDecoration.SetMode(wayland.DecorationModeServerSide)
-		}
-	}
+	// SSD/CSD mode switching on C display is not yet implemented.
+	// The decoration mode is set during Init based on config.Frameless.
 }
 
 func (p *waylandPlatform) IsFrameless() bool {
@@ -2034,8 +1940,8 @@ func (p *waylandPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.Hi
 }
 
 func (p *waylandPlatform) Minimize() {
-	if p.toplevel != nil {
-		_ = p.toplevel.SetMinimized()
+	if p.libwl != nil && p.libwl.Toplevel() != 0 {
+		p.libwl.MarshalVoidOnToplevel(13) // xdg_toplevel.set_minimized = opcode 13
 	}
 }
 
@@ -2044,11 +1950,11 @@ func (p *waylandPlatform) Maximize() {
 	maximized := p.maximized
 	p.mu.Unlock()
 
-	if p.toplevel != nil {
+	if p.libwl != nil && p.libwl.Toplevel() != 0 {
 		if maximized {
-			_ = p.toplevel.UnsetMaximized()
+			p.libwl.MarshalVoidOnToplevel(10) // unset_maximized = opcode 10
 		} else {
-			_ = p.toplevel.SetMaximized()
+			p.libwl.MarshalVoidOnToplevel(9) // set_maximized = opcode 9
 		}
 	}
 }
