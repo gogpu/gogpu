@@ -1,7 +1,10 @@
 package gogpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gogpu/gmath"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -138,11 +141,18 @@ func (c *Context) SurfaceView() *wgpu.TextureView {
 // PresentTexture draws a texture filling the entire surface.
 // This is the universal path for presenting pre-rendered content (e.g., from
 // ggcanvas.Flush) on any backend including software.
-// The tex parameter must be a *gogpu.Texture.
+// The tex parameter must be a *gogpu.Texture. Returns an error if tex is nil
+// or not the expected type.
 func (c *Context) PresentTexture(tex any) error {
+	if tex == nil {
+		return fmt.Errorf("gogpu: PresentTexture called with nil texture")
+	}
 	t, ok := tex.(*Texture)
-	if !ok || t == nil {
-		return nil
+	if !ok {
+		return fmt.Errorf("gogpu: PresentTexture expects *gogpu.Texture, got %T", tex)
+	}
+	if t == nil {
+		return fmt.Errorf("gogpu: PresentTexture called with nil *Texture")
 	}
 	return c.renderer.drawTexturedQuad(t, DrawTextureOptions{
 		Width:  float32(c.renderer.width),
@@ -168,6 +178,13 @@ func (r *ContextRenderTarget) SurfaceSize() (uint32, uint32) { return r.ctx.Surf
 
 // PresentTexture draws a texture filling the entire surface.
 func (r *ContextRenderTarget) PresentTexture(tex any) error { return r.ctx.PresentTexture(tex) }
+
+// TextureCreator returns the texture creator for promoting pending textures.
+// This enables the universal rendering path (CPU pixmap -> GPU texture -> present)
+// to create real GPU textures from raw pixel data.
+func (r *ContextRenderTarget) TextureCreator() gpucontext.TextureCreator {
+	return &rendererTextureCreator{renderer: r.ctx.renderer}
+}
 
 // CheckDeviceHealth returns nil if the GPU device is operational, or an error
 // describing why the device was removed. This is a diagnostic method for

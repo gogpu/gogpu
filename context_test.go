@@ -377,10 +377,10 @@ func TestContextRenderTarget(t *testing.T) {
 		t.Errorf("SurfaceSize() = (%d, %d), want (800, 600)", w, h)
 	}
 
-	// PresentTexture with nil should return nil (no-op)
+	// PresentTexture with nil must return an error
 	err := rt.PresentTexture(nil)
-	if err != nil {
-		t.Errorf("PresentTexture(nil) = %v, want nil", err)
+	if err == nil {
+		t.Error("PresentTexture(nil) = nil, want error")
 	}
 }
 
@@ -409,10 +409,10 @@ func TestContextPresentTextureNonTexture(t *testing.T) {
 	r := &Renderer{width: 800, height: 600}
 	ctx := newContext(r, 1.0)
 
-	// Non-Texture type should return nil (silently ignored)
+	// Non-Texture type must return an error (not silently ignored)
 	err := ctx.PresentTexture("not a texture")
-	if err != nil {
-		t.Errorf("PresentTexture(string) = %v, want nil", err)
+	if err == nil {
+		t.Error("PresentTexture(string) = nil, want error")
 	}
 }
 
@@ -420,10 +420,10 @@ func TestContextPresentTextureNil(t *testing.T) {
 	r := &Renderer{width: 800, height: 600}
 	ctx := newContext(r, 1.0)
 
-	// nil should return nil (no-op)
+	// nil must return an error
 	err := ctx.PresentTexture(nil)
-	if err != nil {
-		t.Errorf("PresentTexture(nil) = %v, want nil", err)
+	if err == nil {
+		t.Error("PresentTexture(nil) = nil, want error")
 	}
 }
 
@@ -431,11 +431,11 @@ func TestContextPresentTextureNilTyped(t *testing.T) {
 	r := &Renderer{width: 800, height: 600}
 	ctx := newContext(r, 1.0)
 
-	// (*Texture)(nil) passes the type assertion but is nil-checked inside
+	// (*Texture)(nil) passes the type assertion but must be caught as nil
 	var tex *Texture
 	err := ctx.PresentTexture(tex)
-	if err != nil {
-		t.Errorf("PresentTexture((*Texture)(nil)) = %v, want nil", err)
+	if err == nil {
+		t.Error("PresentTexture((*Texture)(nil)) = nil, want error")
 	}
 }
 
@@ -608,10 +608,10 @@ func TestContextRenderTargetPresentTextureNonTexture(t *testing.T) {
 	ctx := newTestContext(800, 600, gputypes.TextureFormatBGRA8Unorm, "test")
 	rt := ctx.RenderTarget()
 
-	// Wrong type should be silently ignored
+	// Wrong type must return an error
 	err := rt.PresentTexture("not a texture")
-	if err != nil {
-		t.Errorf("RenderTarget().PresentTexture(string) = %v, want nil", err)
+	if err == nil {
+		t.Error("RenderTarget().PresentTexture(string) = nil, want error")
 	}
 }
 
