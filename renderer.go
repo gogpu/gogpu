@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"math"
 	"sync"
-	"time"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
@@ -60,11 +59,10 @@ type Renderer struct {
 	pendingClearColor gputypes.Color
 	hasPendingClear   bool
 
-	// FencePool for non-blocking submission tracking (wgpu-rs pattern).
-	// Each submission gets its own fence from the pool.
-	// Non-blocking: poll fence status to determine completed submissions.
-	fencePool         *FencePool
-	nextSubmissionIdx uint64
+	// Submission tracker for non-blocking resource recycling.
+	// Each Submit returns a submission index; Poll returns the last completed.
+	// Command buffers are freed when their submission completes.
+	tracker submissionTracker
 
 	// Built-in pipelines
 	trianglePipeline       *wgpu.RenderPipeline
@@ -264,8 +262,7 @@ func (r *Renderer) initRust() error {
 // initCommon performs common initialization after device and surface are ready.
 // This is shared between the native and Rust init paths.
 func (r *Renderer) initCommon() error {
-	// Create fence pool for non-blocking submission tracking (wgpu-rs pattern).
-	r.fencePool = NewFencePool(r.device)
+	// Submission tracker is zero-value ready — no initialization needed.
 
 	// Configure surface with PHYSICAL pixel dimensions.
 	// GPU surfaces operate in device pixels, not logical points.
@@ -298,10 +295,7 @@ func (r *Renderer) initCommon() error {
 
 // configureSurface configures the wgpu surface with current dimensions and format.
 func (r *Renderer) configureSurface() error {
-	presentMode := gputypes.PresentModeFifo // VSync on
-	if !r.vsync {
-		presentMode = gputypes.PresentModeImmediate // VSync off
-	}
+	presentMode := r.resolvePresentMode()
 
 	return r.surface.Configure(r.device, &wgpu.SurfaceConfiguration{
 		Format:      r.format,
@@ -311,6 +305,62 @@ func (r *Renderer) configureSurface() error {
 		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
 		PresentMode: presentMode,
 	})
+}
+
+// resolvePresentMode selects the best available present mode following the
+// Rust wgpu fallback pattern. For VSync on (AutoVsync): FifoRelaxed -> Fifo.
+// For VSync off (AutoNoVsync): Immediate -> Mailbox -> Fifo.
+// Falls back to Fifo which is guaranteed by the Vulkan spec.
+func (r *Renderer) resolvePresentMode() gputypes.PresentMode {
+	caps := r.adapter.GetSurfaceCapabilities(r.surface)
+	if caps == nil {
+		// No capabilities available — use safe default.
+		mode := gputypes.PresentModeFifo
+		if !r.vsync {
+			mode = gputypes.PresentModeImmediate
+		}
+		slog.Debug("gogpu: no surface capabilities, using default present mode",
+			"mode", mode, "vsync", r.vsync)
+		return mode
+	}
+
+	supported := caps.PresentModes
+	var mode gputypes.PresentMode
+
+	if r.vsync {
+		// VSync on: FifoRelaxed -> Fifo (like Rust AutoVsync).
+		mode = pickPresentMode(supported,
+			gputypes.PresentModeFifoRelaxed,
+			gputypes.PresentModeFifo,
+		)
+	} else {
+		// VSync off: Immediate -> Mailbox -> Fifo (like Rust AutoNoVsync).
+		mode = pickPresentMode(supported,
+			gputypes.PresentModeImmediate,
+			gputypes.PresentModeMailbox,
+			gputypes.PresentModeFifo,
+		)
+	}
+
+	slog.Debug("gogpu: resolved present mode",
+		"mode", mode, "vsync", r.vsync, "supported", supported)
+	return mode
+}
+
+// pickPresentMode returns the first mode from preferred that is in supported.
+// Falls back to Fifo if none match (guaranteed by Vulkan spec).
+func pickPresentMode(supported []gputypes.PresentMode, preferred ...gputypes.PresentMode) gputypes.PresentMode {
+	for _, pref := range preferred {
+		for _, sup := range supported {
+			if pref == sup {
+				return pref
+			}
+		}
+	}
+
+	slog.Warn("gogpu: no preferred present mode available, falling back to Fifo",
+		"supported", supported, "preferred", preferred)
+	return gputypes.PresentModeFifo
 }
 
 // Resize handles window resize.
@@ -423,10 +473,9 @@ func (r *Renderer) EndFrame() {
 		r.blitSoftwareFramebuffer()
 	}
 
-	// Non-blocking submission tracking: poll completed submissions.
-	if r.fencePool != nil {
-		r.fencePool.PollCompleted()
-	}
+	// Non-blocking submission tracking: free resources for completed submissions.
+	completedIdx := r.device.Queue().Poll()
+	r.tracker.triage(completedIdx, r.device)
 
 	// Release resources after presentation
 	if r.currentView != nil {
@@ -510,39 +559,21 @@ func (r *Renderer) flushClear() {
 		return
 	}
 
-	r.submitWithFence(commands)
+	r.submitTracked(commands)
 	r.hasPendingClear = false
 	r.frameCleared = true
 }
 
-// submitWithFence submits commands with a fence for non-blocking tracking.
+// submitTracked submits commands with non-blocking tracking.
 // The command buffer is stored and released only when GPU finishes using it.
-// This follows wgpu-rs pattern: resources must remain alive until GPU completes.
-func (r *Renderer) submitWithFence(commands *wgpu.CommandBuffer) {
-	if r.fencePool == nil {
-		// No fence pool - submit synchronously (legacy behavior)
-		_ = r.device.Queue().Submit(commands)
-		return
-	}
-
-	// Acquire fence from pool
-	fence, err := r.fencePool.AcquireFence()
+// BUG-GOGPU-004: HAL manages fences internally — single vkQueueSubmit per frame.
+func (r *Renderer) submitTracked(commands *wgpu.CommandBuffer) {
+	subIdx, err := r.device.Queue().Submit(commands)
 	if err != nil {
-		// Fence acquisition failed - submit synchronously
-		_ = r.device.Queue().Submit(commands)
+		slog.Error("submit failed", "err", err)
 		return
 	}
-
-	// Increment submission index
-	r.nextSubmissionIdx++
-	subIdx := r.nextSubmissionIdx
-
-	// Submit with fence signaling
-	_ = r.device.Queue().SubmitWithFence([]*wgpu.CommandBuffer{commands}, fence, subIdx)
-
-	// Track submission WITH command buffer for deferred release.
-	// Command buffer will be released when fence signals (GPU done).
-	r.fencePool.TrackSubmission(subIdx, fence, commands)
+	r.tracker.track(subIdx, commands)
 }
 
 // Size returns the current render target size.
@@ -658,7 +689,7 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	}
 
 	// Submit with fence tracking (command buffer released when GPU done)
-	r.submitWithFence(commands)
+	r.submitTracked(commands)
 
 	return nil
 }
@@ -938,7 +969,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	}
 
 	// Submit with fence tracking (command buffer released when GPU done)
-	r.submitWithFence(commands)
+	r.submitTracked(commands)
 
 	// Mark frame as having content (for subsequent LoadOp)
 	r.frameCleared = true
@@ -950,9 +981,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 // Call this before destroying user-created GPU resources to prevent
 // Vulkan validation errors about resources still in use by command buffers.
 func (r *Renderer) WaitForGPU() {
-	if r.fencePool != nil {
-		r.fencePool.WaitAll(time.Second)
-	}
+	r.tracker.waitAll(r.device)
 }
 
 // EnqueueDeferredDestroy adds a destruction function to the deferred queue.
@@ -990,11 +1019,8 @@ func (r *Renderer) Destroy() {
 		_ = r.device.WaitIdle()
 	}
 
-	// FencePool.Destroy() waits for all active user fence submissions to complete.
-	if r.fencePool != nil {
-		r.fencePool.Destroy()
-		r.fencePool = nil
-	}
+	// Wait for all tracked submissions and free their command buffers.
+	r.tracker.waitAll(r.device)
 
 	if r.currentView != nil {
 		r.currentView.Release()

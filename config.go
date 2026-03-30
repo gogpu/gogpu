@@ -126,6 +126,14 @@ func (c Config) WithGraphicsAPI(api types.GraphicsAPI) Config {
 	return c
 }
 
+// WithVSync enables or disables vertical synchronization.
+// When true (default): presentation synchronized with display refresh rate.
+// When false: frames presented immediately without waiting for vblank.
+func (c Config) WithVSync(vsync bool) Config {
+	c.VSync = vsync
+	return c
+}
+
 // WithContinuousRender sets the rendering mode.
 // When true (default): renders every frame at VSync rate - for games/animations.
 // When false: renders only on RequestRedraw() or events - power efficient for UI.

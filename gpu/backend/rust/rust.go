@@ -763,7 +763,8 @@ type rustQueue struct {
 }
 
 // Submit submits command buffers to the GPU.
-func (q *rustQueue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, fenceValue uint64) error {
+// Returns a monotonically increasing submission index for tracking completion.
+func (q *rustQueue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	cmds := make([]*wgpu.CommandBuffer, 0, len(commandBuffers))
 	for _, cb := range commandBuffers {
 		if rcb, ok := cb.(*rustCommandBuffer); ok && rcb.buf != nil {
@@ -771,9 +772,19 @@ func (q *rustQueue) Submit(commandBuffers []hal.CommandBuffer, fence hal.Fence, 
 		}
 	}
 	if len(cmds) > 0 {
-		q.q.Submit(cmds...)
+		subIdx, err := q.q.Submit(cmds...)
+		if err != nil {
+			return 0, err
+		}
+		return subIdx, nil
 	}
-	return nil
+	return 0, nil
+}
+
+// PollCompleted returns the highest submission index known to be completed.
+// Rust wgpu-native manages fences internally.
+func (q *rustQueue) PollCompleted() uint64 {
+	return q.q.Poll()
 }
 
 // WriteBuffer writes data to a buffer immediately.
