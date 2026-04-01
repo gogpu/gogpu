@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"sync"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
@@ -149,12 +150,17 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	r.backendName, backendVariant = native.BackendInfo(graphicsAPI)
 
 	// Create WebGPU instance via the wgpu public API.
-	// Enable debug/validation flags so that GPU-side errors (invalid shaders,
-	// bad PSO, etc.) are caught on the CPU before submission, preventing
-	// driver-level crashes (e.g. DPC_WATCHDOG_VIOLATION BSOD on DX12).
+	// Enable debug/validation layer when GOGPU_DEBUG=1 is set. This catches
+	// GPU-side errors (invalid shaders, bad PSO, etc.) before submission,
+	// preventing driver-level crashes (e.g. DPC_WATCHDOG_VIOLATION BSOD on DX12).
+	var instanceFlags gputypes.InstanceFlags
+	if os.Getenv("GOGPU_DEBUG") == "1" {
+		instanceFlags = gputypes.InstanceFlagsDebug | gputypes.InstanceFlagsValidation
+	}
 	var err error
 	r.instance, err = wgpu.CreateInstance(&wgpu.InstanceDescriptor{
 		Backends: 1 << backendVariant,
+		Flags:    instanceFlags,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
