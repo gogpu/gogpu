@@ -209,11 +209,20 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 	if h == nil {
 		return
 	}
-	slog.Warn("CSD-DEBUG: surface.configure", "serial", uint32(serial))
+	slog.Debug("xdg_surface.configure", "serial", uint32(serial))
 
 	// ack_configure = xdg_surface opcode 4, arg: serial (uint32)
 	h.marshalVoid(h.xdgSurface, 4, serial)
-	slog.Debug("CSD-DEBUG: ack_configure sent", "serial", uint32(serial))
+	slog.Debug("ack_configure sent", "serial", uint32(serial))
+
+	// Resize CSD subsurfaces AFTER ack_configure, BEFORE parent commit.
+	// Subsurfaces in sync mode have their state applied atomically with the parent commit.
+	// This is the GLFW pattern: ack_configure -> resizeWindow -> commit.
+	if h.csdPendingResize {
+		h.csdPendingResize = false
+		h.csdPendingRepaint = false // resize already repaints all surfaces
+		h.ResizeCSD(h.csdPendingResizeW, h.csdPendingResizeH)
+	}
 
 	// Set window geometry = configure size (must match what compositor expects).
 	// Compositor validates: geometry must equal configure size for maximized state.
@@ -223,7 +232,7 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 
 	// Commit the main surface — atomic: ack + geometry + subsurface changes all at once.
 	h.marshalVoid(h.surface, 6)
-	slog.Debug("CSD-DEBUG: parent surface committed")
+	slog.Debug("parent surface committed")
 }
 
 // xdgWmBasePingCb handles xdg_wm_base.ping(data, xdg_wm_base, serial).

@@ -94,6 +94,9 @@ type LibwaylandHandle struct {
 	csdPendingAction  CSDHitResult // action to perform outside callback
 	csdPendingSerial  uint32       // serial for pending move/resize
 	csdPendingRepaint bool         // title bar needs repaint (deferred from callback)
+	csdPendingResize  bool         // CSD needs resize on next xdg_surface.configure
+	csdPendingResizeW int          // pending CSD content width for resize
+	csdPendingResizeH int          // pending CSD content height for resize
 
 	// Main surface input (pointer, keyboard, touch on default queue)
 	inputSeat      uintptr         // wl_seat* for main input

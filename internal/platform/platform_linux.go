@@ -715,7 +715,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
 		},
 		OnConfigure: func(width, height int32) {
-			logger().Debug("CSD-DEBUG: OnConfigure", "rawW", width, "rawH", height)
+			logger().Debug("wayland toplevel.configure", "rawW", width, "rawH", height)
 			p.mu.Lock()
 			defer p.mu.Unlock()
 
@@ -763,19 +763,17 @@ func (p *waylandPlatform) setupInputCallbacks() {
 					}
 				}
 
-				logger().Debug("CSD-DEBUG: OnConfigure adjusted", "vulkanW", newWidth, "vulkanH", newHeight, "csdContentW", csdContentW, "csdContentH", csdContentH)
+				logger().Debug("wayland configure", "vulkanW", newWidth, "vulkanH", newHeight, "csdContentW", csdContentW, "csdContentH", csdContentH)
 				if newWidth != p.width || newHeight != p.height {
-					logger().Warn("CSD-DEBUG: RESIZE TRIGGERED", "newW", newWidth, "newH", newHeight, "oldW", p.width, "oldH", p.height, "maximized", isMaximized)
 					p.pendingWidth = newWidth
 					p.pendingHeight = newHeight
 					p.hasResize = true
-					// Resize CSD decorations to match CSD content area
+					// Schedule CSD resize for xdgSurfaceConfigureCb (after ack_configure).
+					// Subsurface state must be applied atomically with the parent commit
+					// that follows ack_configure (GLFW pattern).
 					if p.libwl != nil && p.libwl.CSDActive() {
-						p.libwl.ResizeCSD(csdContentW, csdContentH)
+						p.libwl.SetPendingCSDResize(csdContentW, csdContentH)
 					}
-					// Note: xdg_surface.configure will arrive on next PollEvents dispatch,
-					// AFTER Vulkan surface has been resized by the render loop.
-					// ack_configure + set_window_geometry + commit happen in that callback.
 				}
 			}
 		},

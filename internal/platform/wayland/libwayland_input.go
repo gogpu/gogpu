@@ -496,7 +496,7 @@ func initInputToplevelListeners() {
 // The states argument is a pointer to wl_array { size_t size; size_t alloc; void *data }.
 // Each element is a uint32 xdg_toplevel_state enum value.
 func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
-	slog.Debug("CSD-DEBUG: toplevel.configure", "width", int32(width), "height", int32(height))
+	slog.Debug("xdg_toplevel.configure", "width", int32(width), "height", int32(height))
 	h := inputCallbackHandle
 	if h == nil || h.inputCallbacks == nil {
 		return
@@ -519,6 +519,10 @@ func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 		h.configuredH = int(int32(height))
 	}
 
+	// Call platform OnConfigure — it calculates CSD content dimensions
+	// (handling restore-from-saved, border subtraction) and calls
+	// SetPendingCSDResize. The actual CSD resize happens in
+	// xdgSurfaceConfigureCb after ack_configure.
 	if h.inputCallbacks.OnConfigure != nil {
 		h.inputCallbacks.OnConfigure(int32(width), int32(height))
 	}
