@@ -260,7 +260,9 @@ var (
 	procPostMessageW                = user32.NewProc("PostMessageW")
 
 	// DPI
-	procGetDpiForWindow = user32.NewProc("GetDpiForWindow")
+	procGetDpiForWindow               = user32.NewProc("GetDpiForWindow")
+	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
+	procSetProcessDPIAware            = user32.NewProc("SetProcessDPIAware")
 
 	// Clipboard
 	procOpenClipboard    = user32.NewProc("OpenClipboard")
@@ -438,6 +440,17 @@ func newPlatform() Platform {
 }
 
 func (p *windowsPlatform) Init(config Config) error {
+	// Enable per-monitor DPI awareness programmatically.
+	// Without this, Windows bitmap-upscales the app on high-DPI displays (200%+),
+	// causing blurry text and incorrect mouse coordinates.
+	// Try PerMonitorV2 (Win10 1703+), fallback to basic DPI aware (Vista+).
+	// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+	if err := procSetProcessDpiAwarenessContext.Find(); err == nil {
+		procSetProcessDpiAwarenessContext.Call(^uintptr(3)) // -4 as uintptr
+	} else if err := procSetProcessDPIAware.Find(); err == nil {
+		procSetProcessDPIAware.Call()
+	}
+
 	// Store global reference for callback
 	globalPlatform = p
 

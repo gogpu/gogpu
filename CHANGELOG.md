@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Wayland CSD defer resize** — Defer CSD resize to after `ack_configure` for
   atomic subsurface state application (GLFW pattern).
 
+### Added
+
+- **Programmatic DPI awareness** — Windows apps are now automatically DPI-aware
+  without requiring a manifest file. Uses `SetProcessDpiAwarenessContext`
+  (PerMonitorV2, Win10 1703+) with fallback to `SetProcessDPIAware` (Vista+).
+  Fixes blurry text on high-DPI displays (200%+). (TASK-GOGPU-DPI-001)
+
 ### Changed (Dependencies)
 
 - **wgpu** v0.23.0 → **v0.23.7** (GLES ADJUST_COORDINATE_SPACE, DX12 deferred resource destruction, DRED diagnostics, shader cache, naga v0.16.4)
