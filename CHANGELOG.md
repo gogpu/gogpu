@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.26.1] - 2026-04-04
 
+### Fixed
+
+- **Wayland CSD resize** — Fixed ghost borders remaining on screen after maximize
+  using GLFW destroy/recreate pattern (destroy both wl_surface and wl_subsurface,
+  recreate on restore). Fixed `set_window_geometry` with CSD offset so compositor
+  knows actual window bounds for interactive resize. Fixed Vulkan surface using
+  full configure size instead of content size (minus CSD borders). (BUG-CSD-001)
+- **Wayland CSD defer resize** — Defer CSD resize to after `ack_configure` for
+  atomic subsurface state application (GLFW pattern).
+
 ### Changed (Dependencies)
 
 - **wgpu** v0.23.0 → **v0.23.7** (GLES ADJUST_COORDINATE_SPACE, DX12 deferred resource destruction, DRED diagnostics, shader cache, naga v0.16.4)

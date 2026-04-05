@@ -763,10 +763,14 @@ func (p *waylandPlatform) setupInputCallbacks() {
 					}
 				}
 
-				logger().Debug("wayland configure", "vulkanW", newWidth, "vulkanH", newHeight, "csdContentW", csdContentW, "csdContentH", csdContentH)
-				if newWidth != p.width || newHeight != p.height {
-					p.pendingWidth = newWidth
-					p.pendingHeight = newHeight
+				// Vulkan surface uses CONTENT size (without CSD borders).
+				// CSD subsurfaces are separate — they don't overlap the main surface.
+				vulkanW := csdContentW
+				vulkanH := csdContentH
+				logger().Debug("wayland configure", "vulkanW", vulkanW, "vulkanH", vulkanH, "csdContentW", csdContentW, "csdContentH", csdContentH)
+				if vulkanW != p.width || vulkanH != p.height {
+					p.pendingWidth = vulkanW
+					p.pendingHeight = vulkanH
 					p.hasResize = true
 					// Schedule CSD resize for xdgSurfaceConfigureCb (after ack_configure).
 					// Subsurface state must be applied atomically with the parent commit

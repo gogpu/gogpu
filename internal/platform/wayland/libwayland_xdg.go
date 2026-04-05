@@ -224,10 +224,24 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 		h.ResizeCSD(h.csdPendingResizeW, h.csdPendingResizeH)
 	}
 
-	// Set window geometry = configure size (must match what compositor expects).
-	// Compositor validates: geometry must equal configure size for maximized state.
+	// Set window geometry for the compositor.
+	// For CSD, the geometry covers the full decorated area (title bar + borders + content).
+	// Origin is at (-borderW, -titleBarH) because decorations are subsurfaces at
+	// negative offsets from the main content surface.
+	// For maximized, borders are hidden — geometry is (0, 0, configuredW, configuredH).
 	if h.configuredW > 0 && h.configuredH > 0 {
-		h.marshalVoid(h.xdgSurface, 3, 0, 0, uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
+		if h.csdActive && !h.csdState.Maximized {
+			bW := h.csdPainter.BorderWidth()
+			tbH := h.csdPainter.TitleBarHeight()
+			// Geometry covers: title bar + content + borders
+			// Origin offset accounts for subsurface positions
+			h.marshalVoid(h.xdgSurface, 3,
+				uintptr(uint32(int32(-bW))), uintptr(uint32(int32(-tbH))),
+				uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
+		} else {
+			h.marshalVoid(h.xdgSurface, 3, 0, 0,
+				uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
+		}
 	}
 
 	// Commit the main surface — atomic: ack + geometry + subsurface changes all at once.
