@@ -31,8 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (Dependencies)
 
-- **wgpu** v0.23.0 → **v0.23.8** (GLES ADJUST_COORDINATE_SPACE, DX12 deferred resource destruction, DRED diagnostics, shader cache, naga v0.16.4, Vulkan validation fixes)
-- **naga** v0.15.0 → **v0.16.4** (HLSL 72/72, SPIR-V 164/164, ForceLoopBounding, zero-init loop 330× faster FXC, GLSL zero-init loop)
+- **wgpu** v0.23.0 → **v0.23.9** (GLES ADJUST_COORDINATE_SPACE, DX12 deferred resource destruction, DRED diagnostics, shader cache, Vulkan validation fixes)
+- **naga** v0.15.0 → **v0.16.6** (HLSL 72/72, SPIR-V 164/164, ForceLoopBounding, zero-init loop 330× faster FXC, GLSL zero-init loop)
 - **gputypes** v0.3.0 → **v0.4.0** (new vertex format constants, blend constant type)
 
 ## [0.26.0] - 2026-03-31
