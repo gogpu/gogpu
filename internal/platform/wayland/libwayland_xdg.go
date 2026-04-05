@@ -209,7 +209,7 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 	if h == nil {
 		return
 	}
-	slog.Debug("xdg_surface.configure", "serial", uint32(serial))
+	slog.Debug("xdg_surface.configure", "serial", uint32(serial), "configuredW", h.configuredW, "configuredH", h.configuredH)
 
 	// ack_configure = xdg_surface opcode 4, arg: serial (uint32)
 	h.marshalVoid(h.xdgSurface, 4, serial)
@@ -224,24 +224,26 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 		h.ResizeCSD(h.csdPendingResizeW, h.csdPendingResizeH)
 	}
 
-	// Set window geometry for the compositor.
-	// For CSD, the geometry covers the full decorated area (title bar + borders + content).
-	// Origin is at (-borderW, -titleBarH) because decorations are subsurfaces at
-	// negative offsets from the main content surface.
-	// For maximized, borders are hidden — geometry is (0, 0, configuredW, configuredH).
-	if h.configuredW > 0 && h.configuredH > 0 {
-		if h.csdActive && !h.csdState.Maximized {
-			bW := h.csdPainter.BorderWidth()
+	// Set window geometry = content area (0, 0, contentW, contentH).
+	// CSD subsurfaces are OUTSIDE geometry (title bar at negative offset, borders at edges).
+	// Configure events match geometry → content size directly, NO border subtraction.
+	// Negative origin (-bW, -tbH) causes resize jump on WSLg — avoid it.
+	if h.csdActive && h.csdContentW > 0 {
+		geoY := int32(0)
+		geoH := h.csdContentH
+		if h.csdState.Maximized {
+			// On maximize: title bar at (0,0) inside window. Geometry must include
+			// title bar area so compositor positions window with title bar visible.
 			tbH := h.csdPainter.TitleBarHeight()
-			// Geometry covers: title bar + content + borders
-			// Origin offset accounts for subsurface positions
-			h.marshalVoid(h.xdgSurface, 3,
-				uintptr(uint32(int32(-bW))), uintptr(uint32(int32(-tbH))),
-				uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
-		} else {
-			h.marshalVoid(h.xdgSurface, 3, 0, 0,
-				uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
+			geoH = h.csdContentH + tbH
 		}
+		slog.Debug("set_window_geometry CSD", "x", 0, "y", geoY, "w", h.csdContentW, "h", geoH)
+		h.marshalVoid(h.xdgSurface, 3, 0, uintptr(uint32(geoY)),
+			uintptr(uint32(h.csdContentW)), uintptr(uint32(geoH)))
+	} else if h.configuredW > 0 && h.configuredH > 0 {
+		slog.Debug("set_window_geometry non-CSD", "w", h.configuredW, "h", h.configuredH)
+		h.marshalVoid(h.xdgSurface, 3, 0, 0,
+			uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
 	}
 
 	// Commit the main surface — atomic: ack + geometry + subsurface changes all at once.

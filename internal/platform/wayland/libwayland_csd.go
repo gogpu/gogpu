@@ -352,7 +352,6 @@ func csdPointerEnterCb(data, pointer, serial, surface, sxFixed, syFixed uintptr)
 	}
 	h.csdPointerSurface = surface
 	h.csdSerial = uint32(serial)
-	// Convert fixed-point 24.8 to float
 	h.csdPointerX = float64(int32(sxFixed)) / 256.0
 	h.csdPointerY = float64(int32(syFixed)) / 256.0
 	h.updateCSDHitTest()
@@ -485,23 +484,23 @@ func (h *LibwaylandHandle) repaintCSDTitleBar() {
 	_ = h.flush()
 }
 
-// ResizeCSD recreates SHM buffers for all 4 CSD subsurfaces when the content
-// area dimensions change (e.g. maximize, compositor-driven resize).
+// ResizeCSD updates all 4 CSD subsurface buffers and positions when the
+// content area dimensions change (maximize, restore, interactive resize).
+//
+// GLFW pattern: surfaces and subsurfaces are NEVER destroyed (only on window
+// close). This preserves pointer state and avoids stale coordinates after
+// maximize→restore transitions. All 4 decorations remain visible at all times,
+// including when maximized (title bar + borders at screen edges).
 //
 // Called from xdgSurfaceConfigureCb after ack_configure and before the parent
-// surface commit. This ensures subsurface state is applied atomically with the
-// configure acknowledgment (GLFW pattern: ack_configure -> resize -> commit).
-//
-// Subsurfaces in sync mode cache their commits until the parent surface commits.
-// The caller is responsible for committing the parent surface after this call.
-func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit,maintidx // CSD resize is inherently complex
+// surface commit. Subsurfaces in sync mode cache their commits until parent commit.
+func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit // CSD resize with maximize/restore transitions
 	if !h.csdActive || h.csdPainter == nil {
 		return
 	}
 	if contentW == h.csdContentW && contentH == h.csdContentH {
 		return
 	}
-	slog.Debug("CSD resize", "newW", contentW, "newH", contentH, "oldW", h.csdContentW, "oldH", h.csdContentH, "maximized", h.csdState.Maximized)
 
 	h.csdContentW = contentW
 	h.csdContentH = contentH
@@ -510,67 +509,42 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 	bW := h.csdPainter.BorderWidth()
 	totalW := contentW + bW*2
 
-	// New dimensions and positions for each subsurface.
-	// When maximized, title bar goes inside window (0,0) — borders hidden.
-	// When normal, title bar at (-borderW, -titleBarH) with borders around content.
+	// Dimensions and positions for each subsurface.
+	// On maximize: title bar at (0,0) inside window, borders resize to screen edges.
+	// Content starts below title bar. All decorations visible (GLFW pattern).
+	// On normal: title bar above content at (-bW, -tbH), borders around content.
 	maximized := h.csdState.Maximized
 	specs := [4]struct {
 		w, h int
 		x, y int32
 	}{
-		{totalW, tbH, -int32(bW), -int32(tbH)},    // top (normal)
-		{bW, contentH, -int32(bW), 0},             // left
-		{bW, contentH, int32(contentW), 0},        // right
-		{totalW, bW, -int32(bW), int32(contentH)}, // bottom
+		{totalW, tbH, -int32(bW), -int32(tbH)},    // top: title bar
+		{bW, contentH, -int32(bW), 0},              // left border
+		{bW, contentH, int32(contentW), 0},          // right border
+		{totalW, bW, -int32(bW), int32(contentH)},  // bottom border
 	}
 	if maximized {
-		// Title bar inside window, full configure width, no side/bottom borders.
-		specs[0] = struct {
-			w, h int
-			x, y int32
-		}{contentW, tbH, 0, 0}
-		specs[1] = struct {
-			w, h int
-			x, y int32
-		}{0, 0, 0, 0} // hidden
-		specs[2] = struct {
-			w, h int
-			x, y int32
-		}{0, 0, 0, 0} // hidden
-		specs[3] = struct {
-			w, h int
-			x, y int32
-		}{0, 0, 0, 0} // hidden
+		// Title bar at (0,0) inside window, full content width.
+		// Borders at screen edges around content area.
+		specs[0] = struct{ w, h int; x, y int32 }{contentW, tbH, 0, 0}
+		specs[1] = struct{ w, h int; x, y int32 }{bW, contentH, -int32(bW), int32(tbH)}
+		specs[2] = struct{ w, h int; x, y int32 }{bW, contentH, int32(contentW), int32(tbH)}
+		specs[3] = struct{ w, h int; x, y int32 }{contentW, bW, 0, int32(tbH + contentH)}
 	}
 
 	state := h.csdState
 
 	for i, spec := range specs {
-		// Skip edges that have no surface AND don't need one.
-		if h.csdSurfaces[i] == 0 && (spec.w <= 0 || spec.h <= 0) {
-			continue
-		}
-
-		// Hide subsurface: destroy BOTH wl_subsurface AND wl_surface (GLFW pattern).
-		// Just destroying wl_subsurface or attaching NULL buffer is not enough —
-		// the wl_surface retains its last buffer and compositors (WSLg) keep
-		// rendering it. GLFW destroys both and recreates on restore.
-		if spec.w <= 0 || spec.h <= 0 {
-			if h.csdSubsurf[i] != 0 {
-				h.marshalVoid(h.csdSubsurf[i], 0) // wl_subsurface.destroy
-				h.csdSubsurf[i] = 0
-			}
-			if h.csdSurfaces[i] != 0 {
-				h.marshalVoid(h.csdSurfaces[i], 0) // wl_surface.destroy
-				h.csdSurfaces[i] = 0
-			}
-			// Clean up SHM resources for this edge
+		// For borders (not title bar) on maximize: destroy surface+subsurface
+		// to clear ghost pixels on WSLg. Recreate on restore.
+		// Title bar (i==csdTop) is NEVER destroyed — pointer state preserved for buttons.
+		if maximized && i != csdTop && h.csdSurfaces[i] != 0 {
 			if h.csdBuffers[i] != 0 {
-				h.marshalVoid(h.csdBuffers[i], 0) // wl_buffer.destroy
+				h.marshalVoid(h.csdBuffers[i], 0)
 				h.csdBuffers[i] = 0
 			}
 			if h.csdPools[i] != 0 {
-				h.marshalVoid(h.csdPools[i], 1) // wl_shm_pool.destroy
+				h.marshalVoid(h.csdPools[i], 1)
 				h.csdPools[i] = 0
 			}
 			if h.csdData[i] != nil {
@@ -581,122 +555,127 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 				unix.Close(h.csdFDs[i])
 				h.csdFDs[i] = -1
 			}
+			h.csdSizes[i] = [2]int{0, 0}
+			h.marshalVoid(h.csdSubsurf[i], 0)
+			h.csdSubsurf[i] = 0
+			h.marshalVoid(h.csdSurfaces[i], 0)
+			h.csdSurfaces[i] = 0
 			continue
 		}
 
-		// Recreate wl_surface + wl_subsurface if they were destroyed (maximize → restore).
-		if h.csdSurfaces[i] == 0 {
+		// Recreate border surface+subsurface after maximize→restore.
+		if !maximized && i != csdTop && h.csdSurfaces[i] == 0 {
 			surf, err := h.marshalConstructor(h.compositor, 0, h.surfaceInterface)
 			if err != nil {
-				slog.Warn("CSD resize: recreate surface failed", "edge", i, "err", err)
+				slog.Warn("CSD restore: create surface failed", "edge", i, "err", err)
 				continue
 			}
 			h.csdSurfaces[i] = surf
-
-			// Assign surface to CSD queue for pointer events
 			if h.csdQueue != 0 {
 				surfQueueArgs := [2]unsafe.Pointer{unsafe.Pointer(&surf), unsafe.Pointer(&h.csdQueue)}
 				ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, surfQueueArgs[:])
 			}
-
 			subsrf, err := h.marshalConstructor2Obj(h.subcompositor, 1, h.subsurfaceInterface, surf, h.surface)
 			if err != nil {
-				slog.Warn("CSD resize: recreate subsurface failed", "edge", i, "err", err)
+				slog.Warn("CSD restore: create subsurface failed", "edge", i, "err", err)
 				continue
 			}
 			h.csdSubsurf[i] = subsrf
 			h.marshalVoid(subsrf, 4) // set_sync
+			slog.Debug("CSD restore: recreated border", "edge", i)
 		}
 
-		// Check if buffer size changed — skip expensive SHM recreate if not.
+		if h.csdSurfaces[i] == 0 || h.csdSubsurf[i] == 0 {
+			continue
+		}
+
+		// Update SHM buffer only if dimensions changed.
 		oldW, oldH := h.csdSizes[i][0], h.csdSizes[i][1]
-		needNewBuffer := h.csdBuffers[i] == 0 || oldW != spec.w || oldH != spec.h
-
-		if needNewBuffer {
-			// Save old resources for cleanup AFTER new buffer is attached.
-			oldBuffer := h.csdBuffers[i]
-			oldPool := h.csdPools[i]
-			oldData := h.csdData[i]
-			h.csdBuffers[i] = 0
-			h.csdPools[i] = 0
-			h.csdData[i] = nil
-
-			stride := spec.w * 4
-			size := stride * spec.h
-
-			if h.csdFDs[i] >= 0 {
-				unix.Close(h.csdFDs[i])
-				h.csdFDs[i] = -1
-			}
-
-			newFD, err := createShmFD(size)
-			if err != nil {
-				slog.Warn("CSD resize: createShmFD failed", "edge", i, "err", err)
-				continue
-			}
-			h.csdFDs[i] = newFD
-
-			data, err := unix.Mmap(newFD, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-			if err != nil {
-				slog.Warn("CSD resize: mmap failed", "edge", i, "err", err)
-				continue
-			}
-			h.csdData[i] = data
-			h.csdSizes[i] = [2]int{spec.w, spec.h}
-
-			pool, err := h.marshalConstructorFD(h.shm, 0, h.shmPoolInterface, h.csdFDs[i], int32(size))
-			if err != nil {
-				slog.Warn("CSD resize: create_pool failed", "edge", i, "err", err)
-				continue
-			}
-			h.csdPools[i] = pool
-
-			buffer, err := h.marshalConstructorArgs(pool, 0, h.bufferInterface,
-				0,               // offset
-				uintptr(spec.w), // width
-				uintptr(spec.h), // height
-				uintptr(stride), // stride
-				0,               // format: ARGB8888 = 0
-			)
-			if err != nil {
-				slog.Warn("CSD resize: create_buffer failed", "edge", i, "err", err)
-				continue
-			}
-			h.csdBuffers[i] = buffer
-
-			// Paint content into the new SHM buffer.
-			switch i {
-			case csdTop:
-				h.csdPainter.PaintTitleBar(data, spec.w, spec.h, state)
-			default:
-				h.csdPainter.PaintBorder(data, spec.w, spec.h, CSDEdge(i))
-			}
-
-			// Attach new buffer + damage + commit.
-			surf := h.csdSurfaces[i]
-			h.marshalVoid(surf, 1, buffer, 0, 0)                                           // wl_surface.attach
-			h.marshalVoid(surf, 2, 0, 0, uintptr(uint32(spec.w)), uintptr(uint32(spec.h))) // wl_surface.damage
-			h.marshalVoid(surf, 6)                                                         // wl_surface.commit
-
-			// Destroy old resources AFTER new buffer is attached.
-			if oldBuffer != 0 {
-				h.marshalVoid(oldBuffer, 0) // wl_buffer.destroy
-			}
-			if oldPool != 0 {
-				h.marshalVoid(oldPool, 1) // wl_shm_pool.destroy
-			}
-			if oldData != nil {
-				unix.Munmap(oldData)
-			}
+		if h.csdBuffers[i] == 0 || oldW != spec.w || oldH != spec.h {
+			h.resizeCSDEdge(i, spec.w, spec.h, state)
 		}
 
-		// Always update subsurface position (cheap, double-buffered).
+		// Always update subsurface position (double-buffered, applied on parent commit).
 		h.marshalVoid(h.csdSubsurf[i], 1, uintptr(uint32(spec.x)), uintptr(uint32(spec.y)))
 	}
 
 	// Do NOT commit the parent surface here.
 	// The caller (xdgSurfaceConfigureCb) commits the parent after set_window_geometry.
 	// All sync-mode subsurface state is applied atomically with that parent commit.
+}
+
+// resizeCSDEdge recreates the SHM buffer for a single CSD edge.
+func (h *LibwaylandHandle) resizeCSDEdge(i, w, ht int, state CSDState) {
+	// Release old resources.
+	oldBuffer := h.csdBuffers[i]
+	oldPool := h.csdPools[i]
+	oldData := h.csdData[i]
+	h.csdBuffers[i] = 0
+	h.csdPools[i] = 0
+	h.csdData[i] = nil
+
+	stride := w * 4
+	size := stride * ht
+
+	if h.csdFDs[i] >= 0 {
+		unix.Close(h.csdFDs[i])
+		h.csdFDs[i] = -1
+	}
+
+	newFD, err := createShmFD(size)
+	if err != nil {
+		slog.Warn("CSD resize edge: createShmFD failed", "edge", i, "err", err)
+		return
+	}
+	h.csdFDs[i] = newFD
+
+	data, err := unix.Mmap(newFD, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		slog.Warn("CSD resize edge: mmap failed", "edge", i, "err", err)
+		return
+	}
+	h.csdData[i] = data
+	h.csdSizes[i] = [2]int{w, ht}
+
+	pool, err := h.marshalConstructorFD(h.shm, 0, h.shmPoolInterface, h.csdFDs[i], int32(size))
+	if err != nil {
+		slog.Warn("CSD resize edge: create_pool failed", "edge", i, "err", err)
+		return
+	}
+	h.csdPools[i] = pool
+
+	buffer, err := h.marshalConstructorArgs(pool, 0, h.bufferInterface,
+		0, uintptr(w), uintptr(ht), uintptr(stride), 0)
+	if err != nil {
+		slog.Warn("CSD resize edge: create_buffer failed", "edge", i, "err", err)
+		return
+	}
+	h.csdBuffers[i] = buffer
+
+	// Paint.
+	switch i {
+	case csdTop:
+		h.csdPainter.PaintTitleBar(data, w, ht, state)
+	default:
+		h.csdPainter.PaintBorder(data, w, ht, CSDEdge(i))
+	}
+
+	// Attach + damage + commit (cached in sync mode until parent commit).
+	surf := h.csdSurfaces[i]
+	h.marshalVoid(surf, 1, buffer, 0, 0)
+	h.marshalVoid(surf, 2, 0, 0, uintptr(uint32(w)), uintptr(uint32(ht)))
+	h.marshalVoid(surf, 6) // commit
+
+	// Destroy old resources AFTER new buffer attached.
+	if oldBuffer != 0 {
+		h.marshalVoid(oldBuffer, 0)
+	}
+	if oldPool != 0 {
+		h.marshalVoid(oldPool, 1)
+	}
+	if oldData != nil {
+		unix.Munmap(oldData)
+	}
 }
 
 // csdHitToResizeEdge maps CSDHitResult to xdg_toplevel resize edge enum.
@@ -803,7 +782,6 @@ func (h *LibwaylandHandle) processCSDAction(action CSDHitResult, serial uint32) 
 	slog.Info("CSD action", "action", action, "serial", serial, "seat", h.csdSeat, "toplevel", h.xdgToplevel)
 	switch action {
 	case CSDHitCaption:
-		// Use csdSeat (same seat that generated the serial) for move
 		if h.xdgToplevel != 0 && h.csdSeat != 0 && serial != 0 {
 			slog.Info("CSD: sending xdg_toplevel.move", "toplevel", h.xdgToplevel, "seat", h.csdSeat, "serial", serial)
 			h.marshalVoid(h.xdgToplevel, 5, h.csdSeat, uintptr(serial))

@@ -9,13 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Wayland CSD resize** — Fixed ghost borders remaining on screen after maximize
-  using GLFW destroy/recreate pattern (destroy both wl_surface and wl_subsurface,
-  recreate on restore). Fixed `set_window_geometry` with CSD offset so compositor
-  knows actual window bounds for interactive resize. Fixed Vulkan surface using
-  full configure size instead of content size (minus CSD borders). (BUG-CSD-001)
-- **Wayland CSD defer resize** — Defer CSD resize to after `ack_configure` for
-  atomic subsurface state application (GLFW pattern).
+- **Wayland CSD resize** — Complete CSD resize overhaul:
+  - Interactive edge resize works correctly (no jump on first click)
+  - Maximize: title bar at (0,0) inside window, borders destroyed to clear
+    WSLg ghost pixels. Content fills screen below title bar.
+  - Restore: borders recreated, title bar returns to normal position.
+  - `set_window_geometry` = content area (0,0), no negative origin (WSLg compat).
+  - (BUG-CSD-001, BUG-WAYLAND-001)
+- **Wayland PollEvents queue pattern** — Replaced `closeEmitted`/`hasResize` flags
+  with event queue (same architecture as X11 and Windows platforms).
+  Events from Wayland callbacks are queued, PollEvents dequeues one at a time.
 
 ### Added
 
