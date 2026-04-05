@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Programmatic DPI awareness** — Windows apps are now automatically DPI-aware
   without requiring a manifest file. Uses `SetProcessDpiAwarenessContext`
   (PerMonitorV2, Win10 1703+) with fallback to `SetProcessDPIAware` (Vista+).
-  Fixes blurry text on high-DPI displays (200%+). (TASK-GOGPU-DPI-001)
+  Fixes blurry text on high-DPI displays (200%+). Mouse coordinates converted
+  from physical to logical pixels for correct hit-testing on high-DPI.
+  (TASK-GOGPU-DPI-001, BUG-GOGPU-DPI-001)
 
 ### Changed (Dependencies)
 

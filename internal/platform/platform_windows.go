@@ -1466,6 +1466,15 @@ func (p *windowsPlatform) createPointerEvent(
 	buttons := extractButtons(wParam)
 	modifiers := extractModifiers(wParam)
 
+	// Convert physical pixels → logical (DIP) coordinates.
+	// With DPI awareness, WM_MOUSEMOVE reports physical pixels, but UI layout
+	// uses logical coordinates (App.Size() returns LogicalSize).
+	scale := p.scaleFactor()
+	if scale > 1.0 {
+		x /= scale
+		y /= scale
+	}
+
 	// For button down/up, set pressure based on button state
 	var pressure float32
 	if eventType == gpucontext.PointerDown || buttons != gpucontext.ButtonsNone {
@@ -1630,13 +1639,16 @@ func (p *windowsPlatform) createPointerEventFromWMPointer(
 		}
 	}
 
-	// Convert screen coordinates to client coordinates.
-	// ClientToScreen(0,0) gives us the client area origin in screen coords;
-	// subtract it from the pointer's screen position.
+	// Convert screen coordinates to client coordinates (physical pixels),
+	// then to logical (DIP) coordinates for UI layout.
 	var origin point
 	procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
 	x := float64(info.ptPixelLocation.x - origin.x)
 	y := float64(info.ptPixelLocation.y - origin.y)
+	if scale := p.scaleFactor(); scale > 1.0 {
+		x /= scale
+		y /= scale
+	}
 
 	pointerType := mapWin32PointerType(info.pointerType)
 	isPrimary := info.pointerFlags&pointerFlagPrimary != 0
