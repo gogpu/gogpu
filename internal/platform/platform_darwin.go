@@ -168,7 +168,6 @@ func (p *darwinPlatform) PollEvents() Event {
 // It processes pointer and scroll events and dispatches them to callbacks.
 // Returns true to let the event be dispatched to the application.
 //
-//nolint:gocyclo // event type switch inherently has many cases
 func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventType) bool {
 	// Get event info
 	info := darwin.GetEventInfo(event)
@@ -391,7 +390,7 @@ func (p *darwinPlatform) dispatchCharFromEvent(event darwin.ID) {
 	}
 
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Release lock before calling user callback to avoid deadlocks
 	p.mu.Unlock()
@@ -688,11 +687,9 @@ func (p *darwinPlatform) createPointerEvent(
 		tiltX = float32(info.TiltX * 90.0)
 		tiltY = float32(info.TiltY * 90.0)
 		twist = float32(info.Rotation)
-	} else {
+	} else if eventType == gpucontext.PointerDown || p.buttons != gpucontext.ButtonsNone {
 		// Regular mouse: default pressure when buttons are active
-		if eventType == gpucontext.PointerDown || p.buttons != gpucontext.ButtonsNone {
-			pressure = 0.5
-		}
+		pressure = 0.5
 	}
 
 	return gpucontext.PointerEvent{
@@ -716,9 +713,7 @@ func (p *darwinPlatform) createPointerEvent(
 }
 
 // macKeyCodeToKey converts macOS virtual key codes to gpucontext.Key.
-//
-//nolint:gocyclo,cyclop,funlen // key mapping tables are inherently large
-func macKeyCodeToKey(keyCode uint16) gpucontext.Key {
+func macKeyCodeToKey(keyCode uint16) gpucontext.Key { //nolint:maintidx // key mapping tables are inherently large
 	switch keyCode {
 	// Letters (QWERTY layout)
 	case 0x00:
@@ -960,10 +955,7 @@ func (p *darwinPlatform) PrepareFrame() PrepareFrameResult {
 	physW, physH := p.window.FramebufferSize()
 
 	// Detect scale change (skip first frame where lastScale is zero).
-	scaleChanged := false
-	if p.lastScale != 0 && p.lastScale != scale {
-		scaleChanged = true
-	}
+	scaleChanged := p.lastScale != 0 && p.lastScale != scale
 	p.lastScale = scale
 
 	// Re-set contentsScale every frame (defense-in-depth for Retina drift).
@@ -1010,7 +1002,7 @@ func (p *darwinPlatform) ClipboardRead() (string, error) {
 	}
 
 	// Read UTF-8 bytes (length is character count; UTF-8 may use up to 4 bytes per char)
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual end of the C string
 	end := 0
@@ -1129,7 +1121,7 @@ func (p *darwinPlatform) DarkMode() bool {
 		return false
 	}
 
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:gosec // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual string end
 	end := 0

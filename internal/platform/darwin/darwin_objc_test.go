@@ -70,7 +70,7 @@ type objcRuntime struct {
 
 var (
 	objcOnce     sync.Once
-	objcInitErr  error
+	errObjcInit  error
 	objcRuntimeV *objcRuntime
 )
 
@@ -109,43 +109,43 @@ func loadObjcRuntime(t *testing.T) *objcRuntime {
 
 		rt.libobjc, err = ffi.LoadLibrary("/usr/lib/libobjc.A.dylib")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 		rt.foundation, err = ffi.LoadLibrary("/System/Library/Frameworks/Foundation.framework/Foundation")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 		rt.appKit, err = ffi.LoadLibrary("/System/Library/Frameworks/AppKit.framework/AppKit")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 		rt.quartzCore, err = ffi.LoadLibrary("/System/Library/Frameworks/QuartzCore.framework/QuartzCore")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 		rt.coreFoundation, err = ffi.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 
 		rt.objcGetClass, err = ffi.GetSymbol(rt.libobjc, "objc_getClass")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 		rt.selRegisterName, err = ffi.GetSymbol(rt.libobjc, "sel_registerName")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 		rt.objcMsgSend, err = ffi.GetSymbol(rt.libobjc, "objc_msgSend")
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 
@@ -156,15 +156,15 @@ func loadObjcRuntime(t *testing.T) *objcRuntime {
 			[]*types.TypeDescriptor{types.PointerTypeDescriptor},
 		)
 		if err != nil {
-			objcInitErr = err
+			errObjcInit = err
 			return
 		}
 
 		objcRuntimeV = rt
 	})
 
-	if objcInitErr != nil {
-		t.Fatalf("objc runtime init failed: %v", objcInitErr)
+	if errObjcInit != nil {
+		t.Fatalf("objc runtime init failed: %v", errObjcInit)
 	}
 
 	return objcRuntimeV
@@ -397,14 +397,12 @@ func cString(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
+	p := unsafe.Pointer(ptr) //nolint:govet // ObjC C string pointer, safe FFI usage
 	var length int
-	for {
-		if *(*byte)(unsafe.Add(unsafe.Pointer(ptr), length)) == 0 {
-			break
-		}
+	for *(*byte)(unsafe.Add(p, length)) != 0 {
 		length++
 	}
-	return string(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), length))
+	return string(unsafe.Slice((*byte)(p), length))
 }
 
 func TestDarwinSelectorsRegistered(t *testing.T) {
@@ -772,7 +770,6 @@ func TestDarwinCAMetalLayerProperties(t *testing.T) {
 	}
 
 	withAutoreleasePool(t, rt, func() {
-
 		layerClass := rt.getClass(t, "CAMetalLayer")
 		selNew := rt.sel(t, "new")
 		selRelease := rt.sel(t, "release")

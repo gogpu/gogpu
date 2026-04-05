@@ -109,14 +109,14 @@ func GetEventInfo(event ID) EventInfo {
 		NSEventTypeOtherMouseDown, NSEventTypeOtherMouseUp, NSEventTypeOtherMouseDragged,
 		NSEventTypeMouseMoved,
 		NSEventTypeTabletPoint:
-		info.Subtype = NSUInteger(event.GetUint64(selectors.subtype))
+		info.Subtype = event.GetUint64(selectors.subtype)
 		if info.Subtype == NSEventSubtypeTabletPoint || info.Type == NSEventTypeTabletPoint {
 			info.Pressure = event.GetDouble(selectors.pressure)
 			tilt := event.GetPoint(selectors.tilt)
 			info.TiltX = tilt.X
 			info.TiltY = tilt.Y
 			info.Rotation = event.GetDouble(selectors.rotation)
-			info.PointingDeviceType = NSUInteger(event.GetUint64(selectors.pointingDeviceType))
+			info.PointingDeviceType = event.GetUint64(selectors.pointingDeviceType)
 		}
 	}
 
