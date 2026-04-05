@@ -167,7 +167,6 @@ func (p *darwinPlatform) PollEvents() Event {
 // handleEvent is called for each NSEvent during polling.
 // It processes pointer and scroll events and dispatches them to callbacks.
 // Returns true to let the event be dispatched to the application.
-//
 func (p *darwinPlatform) handleEvent(event darwin.ID, eventType darwin.NSEventType) bool {
 	// Get event info
 	info := darwin.GetEventInfo(event)

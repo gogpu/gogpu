@@ -519,17 +519,29 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 		x, y int32
 	}{
 		{totalW, tbH, -int32(bW), -int32(tbH)},    // top: title bar
-		{bW, contentH, -int32(bW), 0},              // left border
-		{bW, contentH, int32(contentW), 0},          // right border
-		{totalW, bW, -int32(bW), int32(contentH)},  // bottom border
+		{bW, contentH, -int32(bW), 0},             // left border
+		{bW, contentH, int32(contentW), 0},        // right border
+		{totalW, bW, -int32(bW), int32(contentH)}, // bottom border
 	}
 	if maximized {
 		// Title bar at (0,0) inside window, full content width.
 		// Borders at screen edges around content area.
-		specs[0] = struct{ w, h int; x, y int32 }{contentW, tbH, 0, 0}
-		specs[1] = struct{ w, h int; x, y int32 }{bW, contentH, -int32(bW), int32(tbH)}
-		specs[2] = struct{ w, h int; x, y int32 }{bW, contentH, int32(contentW), int32(tbH)}
-		specs[3] = struct{ w, h int; x, y int32 }{contentW, bW, 0, int32(tbH + contentH)}
+		specs[0] = struct {
+			w, h int
+			x, y int32
+		}{contentW, tbH, 0, 0}
+		specs[1] = struct {
+			w, h int
+			x, y int32
+		}{bW, contentH, -int32(bW), int32(tbH)}
+		specs[2] = struct {
+			w, h int
+			x, y int32
+		}{bW, contentH, int32(contentW), int32(tbH)}
+		specs[3] = struct {
+			w, h int
+			x, y int32
+		}{contentW, bW, 0, int32(tbH + contentH)}
 	}
 
 	state := h.csdState
