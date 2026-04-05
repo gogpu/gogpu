@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.26.1] - 2026-04-04
+## [0.26.1] - 2026-04-05
 
 ### Fixed
 
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (Dependencies)
 
-- **wgpu** v0.23.0 → **v0.23.7** (GLES ADJUST_COORDINATE_SPACE, DX12 deferred resource destruction, DRED diagnostics, shader cache, naga v0.16.4)
+- **wgpu** v0.23.0 → **v0.23.8** (GLES ADJUST_COORDINATE_SPACE, DX12 deferred resource destruction, DRED diagnostics, shader cache, naga v0.16.4, Vulkan validation fixes)
 - **naga** v0.15.0 → **v0.16.4** (HLSL 72/72, SPIR-V 164/164, ForceLoopBounding, zero-init loop 330× faster FXC, GLSL zero-init loop)
 - **gputypes** v0.3.0 → **v0.4.0** (new vertex format constants, blend constant type)
 
