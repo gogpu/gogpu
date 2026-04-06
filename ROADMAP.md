@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.23.3+
+## Current State: v0.26.1
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
@@ -37,105 +37,47 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
 - Cross-platform: Windows (Vulkan/DX12), Linux (Vulkan/Wayland), macOS (Metal)
-- **Software backend** — always available, Windows screen presentation via GDI
-- Structured logging via log/slog
-- **PrepareFrame** platform hook for HiDPI/DPI handling
+- **Software backend** — always available, Windows/macOS/X11 screen presentation
+- Structured logging via log/slog with `GOGPU_LOG` env var
+- **HiDPI/Retina** — logical/physical pixel split, per-monitor DPI, programmatic DPI awareness
 - **X11 multi-touch** via XInput2 pure Go wire protocol
+- **Frameless windows** — `Config.Frameless` + WindowChrome interface (JBR pattern on Win32)
+- **Wayland CSD** — client-side decorations with title bar, buttons, edge resize
+- **GPU compute** — compute shaders with GPU particles example
+- **Deferred resource destruction** — Rust LifetimeTracker parity in wgpu
 
-**New in v0.24.0 (pending):**
-- Renderer migrated from HAL direct to wgpu public API
-- SetCharCallback for Unicode text input (#138)
-- PrepareFrame platform architecture for macOS Retina
-- wgpu v0.21.0, gpucontext v0.10.0, naga v0.14.7
+### Recent Highlights
 
-**New in v0.22.0:**
-- X11 multi-touch input via XInput2 — pure Go wire protocol (XIQueryVersion 2.2, touch events → PointerEvent)
-- X11 extension query infrastructure — `QueryExtension(name)` with caching
-- GenericEvent (type 35) variable-length event support
-- wgpu v0.18.0 (public API root package)
-
-**New in v0.21.0:**
-- Wayland Vulkan surface via libwayland-client (goffi dynamic loading)
-- Wayland server-side decorations (zxdg_decoration_manager_v1)
-- Wayland non-blocking socket and fd propagation fix
-
-**New in v0.20.9:**
-- wgpu v0.16.17 — load platform Vulkan surface creation functions (the real fix for #106)
-
-**New in v0.20.8:**
-- X11 Vulkan surface pointer fix — root cause of #106 was `unsafe.Pointer(&display)` in wgpu CreateSurface
-- Platform diagnostic logging via slog (silent by default)
-- wgpu v0.16.16
-
-**New in v0.20.6:**
-- Software backend selection fix — `WithGraphicsAPI(GraphicsAPISoftware)` works correctly (#106)
-- Software backend Windows presentation — GDI pixel blitting via `SetDIBitsToDevice`
-- PixelBlitter platform interface for software framebuffer display
-- wgpu v0.16.15 (software backend always compiled, no build tags)
-
-**New in v0.20.5:**
-- wgpu v0.16.14 (Vulkan null surface handle guard, naga v0.14.3)
-
-**New in v0.20.4:**
-- wgpu v0.16.13 (Vulkan debug_utils via GetInstanceProcAddr, #98)
-
-**New in v0.20.3:**
-- wgpu v0.16.12 (Vulkan debug object naming — eliminates false-positive validation errors, #98)
-
-**New in v0.20.2:**
-- Renderer: unconfigure surface on minimize (VK-VAL-001) — prevents stale swapchain (#98)
-- wgpu v0.16.11 (Vulkan zero-extent swapchain fix, unconditional viewport/scissor)
-
-**New in v0.20.1:**
-- Touch/pen input for Win32, macOS, Wayland
-- wgpu v0.16.10, naga v0.14.2
-
-**New in v0.20.0:**
-- `App.TrackResource(io.Closer)` — automatic GPU resource cleanup on shutdown (LIFO order)
-- `ResourceTracker` interface — ggcanvas auto-registers, no manual OnClose needed
-- `runtime.AddCleanup` safety net on Texture — GC catches forgotten Destroy()
-- Deferred destruction queue on Renderer — thread-safe GPU cleanup from any goroutine
-
-**New in v0.19.6:**
-- Rust backend: implement CreateQuerySet, DestroyQuerySet, ResolveQuerySet, WaitIdle (fixes `-tags rust`)
-
-**New in v0.19.5:**
-- go-webgpu/webgpu v0.3.1 (Rust backend: ARM64 callback trampoline fix)
-
-**New in v0.19.4:**
-- wgpu v0.16.6 (Metal debug logging, goffi v0.3.9)
-
-**New in v0.19.3:**
-- wgpu v0.16.5 (per-encoder command pools, fixes VkCommandBuffer crash)
-
-**New in v0.19.2:**
-- 52 enterprise hot-path benchmarks (zero-allocation math confirmed)
-- wgpu v0.16.4 (timeline semaphore, FencePool, −32% naga allocations)
-
-**New in v0.19.1:**
-- `WaitIdle()` call before GPU resource destruction — fixes DX12 crash on exit
-
-### v0.18.x Features
-- ✅ **Event-driven three-state model** — IDLE (0% CPU) / ANIMATING (VSync) / CONTINUOUS
-- ✅ **AnimationToken** — Token-based animation lifecycle with atomic counter
-- ✅ **Native WaitEvents/WakeUp** — macOS (Cocoa), Linux (X11 poll), Windows (MsgWait)
-- ✅ **SurfaceView** — Zero-copy rendering for gg/ggcanvas integration
-- ✅ **GraphicsAPI selection** — Runtime Vulkan/DX12/Metal/GLES/Software choice
-- ✅ **HAL-direct architecture** — hal.Device/Queue interfaces, no handle maps
-- ✅ **Structured logging** — log/slog, silent by default
-- ✅ **DX12 deferred clear** — Fixes content loss on FLIP_DISCARD swapchains
+| Version | Date | Key Changes |
+|---------|------|-------------|
+| **v0.26.1** | 2026-04-05 | CSD resize overhaul, event queue pattern, programmatic DPI awareness |
+| **v0.26.0** | 2026-03-31 | Enterprise fence architecture, Wayland CSD, single connection, GPU particles, present mode fallback |
+| **v0.25.0** | 2026-03-21 | Frameless windows (Win32/macOS/X11/Wayland), WM_DPICHANGED, VSync config |
+| **v0.24.0** | 2026-03-15 | Renderer migrated to wgpu public API, Unicode text input (#138) |
+| **v0.23.0** | 2026-03-11 | Logical/physical pixel split, macOS Retina, PhysicalSize API |
 
 ---
 
 ## Upcoming
 
-### v0.23.0 — Input & Platform Polish
+### v0.27.0 — Platform Polish
+
+- [ ] CSD resize cursor shapes (FEAT-CSD-CURSOR-001)
+- [ ] CSD resize click jump fix (BUG-CSD-002)
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
-- [ ] macOS/Linux PlatformProvider native implementations
-- [ ] Performance optimizations
+
+### v0.28.0+ — Multi-Window (Research Phase)
+
+- [ ] Multi-window architecture (ADR pending — research in progress)
+- [ ] Window manager abstraction (App manages N windows)
+- [ ] Per-window Surface/Swapchain
+- [ ] Shared GPU Device across windows
+- [ ] Event routing by window ID
+- [ ] Window types: main, dialog, tool, popup
 
 ### v1.0.0 — Production Release
+
 - [ ] API stability guarantee
 - [ ] Semantic versioning commitment
 - [ ] Long-term support plan
@@ -146,13 +88,20 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Future Ideas
 
-| Theme | Description | Research |
-|-------|-------------|----------|
-| **Independent Render Thread** | Decouple render loop from message pump via command-buffer pattern | [Research](docs/dev/research/INDEPENDENT_RENDER_THREAD.md) |
-| **gogpu/ui** | GUI toolkit based on gg | — |
-| **WebAssembly** | WASM target for browser | — |
-| **Mobile** | Android/iOS support | — |
-| **Ray Tracing** | RT extensions when available | — |
+| Theme | Description | Status |
+|-------|-------------|--------|
+| **Multi-Window** | Multiple windows per App (IDE/tool pattern) | Research in progress |
+| **WebAssembly** | WASM target for browser via WebGPU | Backlog (WASM-001) |
+| **Android** | Android platform support | Backlog (ANDROID-001) |
+| **iOS** | iOS platform support | Planned |
+| **Ecosystem Logging** | Unified slog-based logging across all repos | Backlog (TASK-LOG-001) |
+| **System Tray** | OS-level tray icon (Win32 Notification Area, macOS Menu Bar Extra, Linux AppIndicator/SNI) | Planned — [Research](docs/dev/research/UI_FRAMEWORK_CONCERNS.md), low retrofit cost |
+| **Native Dialogs** | File open/save, color picker, message box | Planned |
+| **Drag & Drop** | OS-level and inter-window drag and drop | Planned |
+| **Clipboard** | Rich clipboard (images, HTML, custom types) | Planned |
+| **Notifications** | OS-level desktop notifications | Planned |
+| **Independent Render Thread** | Decouple render loop from message pump | [Research](docs/dev/research/INDEPENDENT_RENDER_THREAD.md) |
+| **Ray Tracing** | RT extensions when available | Future |
 
 ---
 
@@ -179,7 +128,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
                           │
     ┌─────────┬─────────┬─────────┬─────────┬─────────┐
     │ Vulkan  │  DX12   │  Metal  │  GLES   │ Software│
-    │ Win+Lin │ Windows │  macOS  │ Win+Lin │ Headless│
+    │ Win+Lin │ Windows │  macOS  │ Win+Lin │ All     │
     └─────────┴─────────┴─────────┴─────────┴─────────┘
 ```
 
@@ -187,14 +136,19 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Ecosystem
 
-| Component | Description |
-|-----------|-------------|
-| **gogpu/gogpu** | GPU abstraction, windowing, input |
-| **gogpu/gpucontext** | Shared interfaces (DeviceProvider, EventSource) |
-| **gogpu/gputypes** | Shared WebGPU types (TextureFormat, BufferUsage) |
-| **gogpu/wgpu** | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
-| **gogpu/naga** | WGSL shader compiler (SPIR-V, MSL, GLSL, HLSL) |
-| **gogpu/gg** | 2D graphics library with GPU acceleration |
+| Component | Version | Description |
+|-----------|---------|-------------|
+| **gogpu/gogpu** | v0.26.1 | GPU application framework, windowing, input |
+| **gogpu/wgpu** | v0.23.9 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | v0.16.4 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL), all backends 100% |
+| **gogpu/gg** | v0.38.2 | 2D graphics library with GPU acceleration |
+| **gogpu/ui** | v0.1.6 | GUI toolkit: 22+ widgets, 4 themes |
+| **gogpu/gpucontext** | v0.11.0 | Shared interfaces (DeviceProvider, WindowChrome) |
+| **gogpu/gputypes** | v0.4.0 | WebGPU type definitions |
+| **gogpu/gg-pdf** | v0.1.0 | PDF export |
+| **gogpu/gg-svg** | v0.1.0 | SVG export |
+
+**Total: ~632K lines of Pure Go, zero CGO.**
 
 ---
 
@@ -202,39 +156,29 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.20.8** | 2026-02 | X11 Vulkan surface pointer fix (root cause #106), platform logging |
-| v0.20.7 | 2026-02 | X11 GetHandle returns Display* via goffi (#106) |
-| v0.20.6 | 2026-02 | Software backend fix + Windows presentation (GDI blit, #106) |
-| v0.20.5 | 2026-02 | wgpu v0.16.14 (Vulkan null surface guard, naga v0.14.3) |
-| v0.20.4 | 2026-02 | wgpu v0.16.13 (Vulkan debug_utils, #98) |
-| v0.20.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming, #98) |
-| v0.20.2 | 2026-02 | Surface unconfigure on minimize, wgpu v0.16.11 |
-| v0.20.1 | 2026-02 | Touch/pen input (Win32, macOS, Wayland), wgpu v0.16.10 |
-| v0.20.0 | 2026-02 | TrackResource, ResourceTracker, deferred destruction queue |
-| v0.19.6 | 2026-02 | Rust backend: QuerySet, WaitIdle |
-| v0.19.5 | 2026-02 | webgpu v0.3.1 (Rust backend: ARM64 callback fix) |
-| v0.19.4 | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
-| v0.19.3 | 2026-02 | wgpu v0.16.5 (per-encoder command pools) |
-| v0.19.2 | 2026-02 | Hot-path benchmarks, wgpu v0.16.4 (timeline semaphore, FencePool) |
-| v0.19.1 | 2026-02 | WaitIdle cleanup, wgpu v0.16.3 |
-| v0.19.0 | 2026-02 | Cross-platform Rust backend, wgpu v0.16.2 |
-| v0.18.2 | 2026-02 | Update wgpu v0.16.1 (Vulkan framebuffer cache fix) |
-| v0.18.1 | 2026-02 | Event-driven three-state model, native WaitEvents, AnimationToken |
-| v0.18.0 | 2026-02 | HAL-direct, GraphicsAPI selection, SurfaceView, slog |
-| v0.17.0 | 2026-02 | HalProvider, compute support, unified native backend |
-| v0.16.0 | 2026-02 | WindowProvider, PlatformProvider (clipboard, cursor, dark mode) |
-| v0.15.7 | 2026-02 | NVIDIA crash fix, single pipeline alpha, naga v0.11.0 |
-| v0.15.6 | 2026-02 | Modal loop rendering (WM_TIMER), smooth drag/resize on Windows |
-| v0.15.x | 2026-02 | Render-on-demand, Event System, Fence sync, Texture.BytesPerPixel |
+| **v0.26.1** | 2026-04-05 | CSD resize overhaul, event queue pattern, DPI awareness |
+| **v0.26.0** | 2026-03-31 | Enterprise fence, Wayland CSD + single connection, GPU particles, present mode fallback |
+| **v0.25.1** | 2026-03-25 | X11/Wayland DPI, macOS platform stubs, BlitPixels cross-platform |
+| **v0.25.0** | 2026-03-21 | Frameless windows, WM_DPICHANGED, VSync config, WindowChrome |
+| v0.24.5 | 2026-03-18 | SetLogger propagation to all subsystems (#150) |
+| v0.24.4 | 2026-03-16 | GOGPU_GRAPHICS_API env var, PresentTexture, RenderTarget |
+| v0.24.3 | 2026-03-16 | wgpu v0.21.2 (core validation layer) |
+| v0.24.2 | 2026-03-15 | Rust backend adapter limits fix |
+| v0.24.1 | 2026-03-15 | X11/Wayland Unicode text input (#138) |
+| **v0.24.0** | 2026-03-15 | Renderer → wgpu public API, Unicode text input, FencePool migration |
+| **v0.23.0** | 2026-03-11 | Logical/physical pixel split, macOS Retina, PhysicalSize API |
+| **v0.22.0** | 2026-02-27 | X11 multi-touch (XInput2), extension query infrastructure |
+| v0.21.0 | 2026-02 | Wayland Vulkan surface, server-side decorations |
+| **v0.20.0** | 2026-02 | TrackResource, ResourceTracker, deferred destruction queue |
+| v0.19.0 | 2026-02 | Cross-platform Rust backend |
+| **v0.18.0** | 2026-02 | HAL-direct, GraphicsAPI selection, SurfaceView, slog, event-driven model |
+| v0.17.0 | 2026-02 | HalProvider, compute support |
+| v0.16.0 | 2026-02 | WindowProvider, PlatformProvider |
+| v0.15.x | 2026-02 | Render-on-demand, Event System, modal loop rendering |
 | v0.14.x | 2026-01 | gpucontext.TextureDrawer, gg/ggcanvas integration |
 | v0.13.x | 2026-01 | Multi-thread architecture, gputypes integration |
 | v0.12.x | 2026-01 | gpucontext integration (DeviceProvider, EventSource) |
-| v0.11.x | 2026-01 | Pure Go default, non-blocking GPU acquire |
-| v0.10.x | 2026-01 | DeviceProvider interface, compute shaders |
-| v0.9.x | 2026-01 | Intel Vulkan compatibility, CI fixes |
-| v0.8.x | 2025-12 | macOS ARM64 fixes, Metal backend |
-| v0.7.x | 2025-12 | Cross-platform Pure Go backend |
-| v0.1-6 | 2025-12 | Core features, Wayland, X11, Cocoa |
+| v0.1–0.11 | 2025-12 – 2026-01 | Core features, Wayland, X11, Cocoa, Metal, Vulkan |
 
 > **See [CHANGELOG.md](CHANGELOG.md) for detailed release notes**
 
@@ -242,12 +186,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Platform Support
 
-| Platform | Windowing | Pure Go Backend | Rust Backend | Status |
-|----------|-----------|-----------------|--------------|--------|
-| **Windows** | Win32 | Vulkan ✅ | Vulkan ✅ | Production |
-| **Linux X11** | X11 | Vulkan ✅ | Vulkan ✅ | Community Testing |
-| **Linux Wayland** | Wayland | Vulkan ✅ | Vulkan ✅ | Community Testing |
-| **macOS** | Cocoa | Metal ✅ | Metal ✅ | Community Testing |
+| Platform | Windowing | GPU Backends | Status |
+|----------|-----------|--------------|--------|
+| **Windows** | Win32 | Vulkan, DX12, GLES, Software | Production |
+| **Linux X11** | X11 | Vulkan, GLES, Software | Community Testing |
+| **Linux Wayland** | Wayland (xdg-shell v6, CSD) | Vulkan, GLES, Software | Community Testing |
+| **macOS** | Cocoa (AppKit) | Metal, Software | Community Testing |
 
 All platforms use Pure Go FFI (no CGO required).
 
@@ -271,7 +215,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 - **2D graphics library** — See gogpu/gg
 - **Shader language design** — Follow WGSL spec
-- **Browser embedding** — WebGPU for native only
 
 ---
 
