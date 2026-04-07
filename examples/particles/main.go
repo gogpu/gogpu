@@ -11,6 +11,7 @@ import (
 	"log"
 	"math"
 	"math/rand/v2"
+	"time"
 
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gputypes"
@@ -35,26 +36,31 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if (i >= params.count) { return; }
     var p = pin[i];
 
-    // Attract toward center
-    p.vel += -p.pos * 0.3 * params.dt;
+    // Orbital gravity: attract to center with angular momentum preservation.
+    // This creates stable orbits that never collapse to a point.
+    let r = length(p.pos);
+    let rSafe = max(r, 0.05);
+    let gravity = -p.pos / (rSafe * rSafe * rSafe) * 0.15 * params.dt;
+    p.vel += gravity;
 
-    // Repel from sampled neighbors
+    // Repel from sampled neighbors (keeps particles spread out)
     let step = max(params.count / 16u, 1u);
     for (var j = 0u; j < params.count; j += step) {
         if (j == i) { continue; }
         let d = p.pos - pin[j].pos;
         let dist = max(length(d), 0.01);
-        p.vel += normalize(d) / (dist * dist) * 0.0001 * params.dt;
+        p.vel += normalize(d) / (dist * dist) * 0.0002 * params.dt;
     }
 
-    p.vel *= 0.995;
+    // Very light damping — orbits persist indefinitely
+    p.vel *= 0.9995;
     p.pos += p.vel * params.dt;
 
-    // Wrap
-    if (p.pos.x > 1.0) { p.pos.x -= 2.0; }
-    if (p.pos.x < -1.0) { p.pos.x += 2.0; }
-    if (p.pos.y > 1.0) { p.pos.y -= 2.0; }
-    if (p.pos.y < -1.0) { p.pos.y += 2.0; }
+    // Soft boundary: reflect with energy loss at edges
+    if (p.pos.x > 1.0) { p.pos.x = 1.0; p.vel.x *= -0.8; }
+    if (p.pos.x < -1.0) { p.pos.x = -1.0; p.vel.x *= -0.8; }
+    if (p.pos.y > 1.0) { p.pos.y = 1.0; p.vel.y *= -0.8; }
+    if (p.pos.y < -1.0) { p.pos.y = -1.0; p.vel.y *= -0.8; }
 
     pout[i] = p;
 }
@@ -95,6 +101,7 @@ func main() {
 		WithContinuousRender(true))
 
 	var s *sim
+	startTime := time.Now()
 	app.OnDraw(func(dc *gogpu.Context) {
 		p := app.DeviceProvider()
 		if p == nil {
@@ -111,13 +118,17 @@ func main() {
 				log.Fatal(err)
 			}
 			log.Printf("GPU: %s | Particles: %d", dc.Backend(), numParticles)
+			startTime = time.Now()
 		}
 		s.frameNum++
-		log.Printf("Frame %d: about to dispatch", s.frameNum)
 		if err := s.frame(sv); err != nil {
 			log.Printf("frame %d error: %v", s.frameNum, err)
 		}
-		log.Printf("Frame %d: done", s.frameNum)
+		if s.frameNum%300 == 0 {
+			elapsed := time.Since(startTime).Seconds()
+			log.Printf("Frame %d | %.1fs | %.0f FPS | %d particles",
+				s.frameNum, elapsed, float64(s.frameNum)/max(elapsed, 0.001), numParticles)
+		}
 	})
 
 	app.OnClose(func() {
@@ -164,14 +175,22 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 		return nil, err
 	}
 
-	// Init random positions
+	// Init particles in orbital ring with tangential velocity
 	d := make([]byte, bufSize)
 	for i := 0; i < numParticles; i++ {
 		o := i * particleBytes
-		binary.LittleEndian.PutUint32(d[o:], math.Float32bits(rand.Float32()*2-1))
-		binary.LittleEndian.PutUint32(d[o+4:], math.Float32bits(rand.Float32()*2-1))
-		binary.LittleEndian.PutUint32(d[o+8:], math.Float32bits((rand.Float32()-0.5)*0.02))
-		binary.LittleEndian.PutUint32(d[o+12:], math.Float32bits((rand.Float32()-0.5)*0.02))
+		angle := float64(i) / float64(numParticles) * 2 * math.Pi
+		radius := 0.3 + rand.Float64()*0.5 // ring from 0.3 to 0.8
+		px := float32(math.Cos(angle) * radius)
+		py := float32(math.Sin(angle) * radius)
+		// Tangential velocity (perpendicular to radius) for stable orbits
+		speed := float32(0.15 + rand.Float64()*0.1)
+		vx := float32(-math.Sin(angle)) * speed
+		vy := float32(math.Cos(angle)) * speed
+		binary.LittleEndian.PutUint32(d[o:], math.Float32bits(px))
+		binary.LittleEndian.PutUint32(d[o+4:], math.Float32bits(py))
+		binary.LittleEndian.PutUint32(d[o+8:], math.Float32bits(vx))
+		binary.LittleEndian.PutUint32(d[o+12:], math.Float32bits(vy))
 	}
 	dev.Queue().WriteBuffer(s.bufA, 0, d)
 	dev.Queue().WriteBuffer(s.bufB, 0, d) // both start same
