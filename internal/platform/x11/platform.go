@@ -127,13 +127,13 @@ type Platform struct {
 	startTime time.Time
 
 	// Cursor mode state (0=normal, 1=locked, 2=confined)
-	cursorMode      int
-	blankCursorID   ResourceID // 1x1 transparent cursor for locked mode
-	savedMouseX     float64    // saved position before locking
-	savedMouseY     float64
-	cursorCenterX   int16 // window center for warp-back in locked mode
-	cursorCenterY   int16
-	cursorGrabbed   bool // whether XGrabPointer is active
+	cursorMode    int
+	blankCursorID ResourceID // 1x1 transparent cursor for locked mode
+	savedMouseX   float64    // saved position before locking
+	savedMouseY   float64
+	cursorCenterX int16 // window center for warp-back in locked mode
+	cursorCenterY int16
+	cursorGrabbed bool // whether XGrabPointer is active
 }
 
 // NewPlatform creates a new X11 platform instance.
