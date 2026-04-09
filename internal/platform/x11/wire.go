@@ -350,6 +350,12 @@ const (
 	CWCursor           = 1 << 14
 )
 
+// Grab modes for GrabPointer/GrabKeyboard.
+const (
+	GrabModeSync  = 0
+	GrabModeAsync = 1
+)
+
 // Property mode values.
 const (
 	PropModeReplace = 0

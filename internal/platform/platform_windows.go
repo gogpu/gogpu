@@ -193,6 +193,12 @@ const (
 	// DPI change message (Windows 8.1+)
 	wmDpiChanged = 0x02E0 // WM_DPICHANGED
 
+	// Focus messages
+	wmActivate    = 0x0006 // WM_ACTIVATE
+	waInactive    = 0      // WA_INACTIVE
+	waActive      = 1      // WA_ACTIVE
+	waClickActive = 2      // WA_CLICKACTIVE
+
 	// WaitEvents / WakeUp constants
 	wmWakeUp       = 0x0401     // WM_USER + 1 (custom wakeup message)
 	qsAllinput     = 0x04FF     // QS_ALLINPUT
@@ -278,6 +284,12 @@ var (
 	// Mouse capture (for drag tracking across window boundaries)
 	procSetCapture     = user32.NewProc("SetCapture")
 	procReleaseCapture = user32.NewProc("ReleaseCapture")
+
+	// Cursor confinement and positioning (for CursorMode locked/confined)
+	procClipCursor   = user32.NewProc("ClipCursor")
+	procShowCursorW  = user32.NewProc("ShowCursor")
+	procSetCursorPos = user32.NewProc("SetCursorPos")
+	procGetCursorPos = user32.NewProc("GetCursorPos")
 
 	// Pointer input (WM_POINTER*, Windows 8+)
 	procGetPointerType    = user32.NewProc("GetPointerType")
@@ -428,6 +440,14 @@ type windowsPlatform struct {
 
 	// Timestamp reference for event timing
 	startTime time.Time
+
+	// Cursor mode state (0=normal, 1=locked, 2=confined)
+	cursorMode    int
+	savedCursorX  int32 // saved cursor position before locking
+	savedCursorY  int32
+	cursorCenterX int32 // window center in screen coords (for warp-back)
+	cursorCenterY int32
+	cursorHidden  bool // tracks ShowCursor balance
 }
 
 // Global instance for window procedure callback
@@ -927,6 +947,107 @@ func (p *windowsPlatform) HighContrast() bool {
 // On Windows, font scale is derived from the DPI scale factor.
 func (p *windowsPlatform) FontScale() float32 {
 	return float32(p.ScaleFactor())
+}
+
+// SetCursorMode sets cursor confinement/lock mode.
+// 0=normal, 1=locked (hidden + confined + relative deltas), 2=confined (visible + confined).
+func (p *windowsPlatform) SetCursorMode(mode int) {
+	if mode == p.cursorMode {
+		return
+	}
+
+	oldMode := p.cursorMode
+	p.cursorMode = mode
+
+	switch mode {
+	case 1: // Locked
+		// Save current cursor position for restoration
+		var pt point
+		procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+		p.savedCursorX = pt.x
+		p.savedCursorY = pt.y
+
+		// Compute window center in screen coordinates
+		p.updateCursorClipRect()
+
+		// Clip cursor to window
+		var r rect
+		procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+		var origin point
+		procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+		clipRect := rect{
+			left:   origin.x + r.left,
+			top:    origin.y + r.top,
+			right:  origin.x + r.right,
+			bottom: origin.y + r.bottom,
+		}
+		procClipCursor.Call(uintptr(unsafe.Pointer(&clipRect)))
+
+		// Hide cursor
+		if !p.cursorHidden {
+			procShowCursorW.Call(0) // FALSE = hide
+			p.cursorHidden = true
+		}
+
+		// Warp to center
+		procSetCursorPos.Call(uintptr(p.cursorCenterX), uintptr(p.cursorCenterY))
+
+	case 2: // Confined
+		// Clip cursor to window
+		var r rect
+		procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+		var origin point
+		procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+		clipRect := rect{
+			left:   origin.x + r.left,
+			top:    origin.y + r.top,
+			right:  origin.x + r.right,
+			bottom: origin.y + r.bottom,
+		}
+		procClipCursor.Call(uintptr(unsafe.Pointer(&clipRect)))
+
+		// Show cursor if it was hidden
+		if p.cursorHidden {
+			procShowCursorW.Call(1) // TRUE = show
+			p.cursorHidden = false
+		}
+
+		// Restore cursor position if coming from locked mode
+		if oldMode == 1 {
+			procSetCursorPos.Call(uintptr(p.savedCursorX), uintptr(p.savedCursorY))
+		}
+
+	default: // Normal (0)
+		// Release clip
+		procClipCursor.Call(0)
+
+		// Show cursor if hidden
+		if p.cursorHidden {
+			procShowCursorW.Call(1) // TRUE = show
+			p.cursorHidden = false
+		}
+
+		// Restore cursor position if coming from locked mode
+		if oldMode == 1 {
+			procSetCursorPos.Call(uintptr(p.savedCursorX), uintptr(p.savedCursorY))
+		}
+	}
+}
+
+// CursorMode returns the current cursor mode.
+func (p *windowsPlatform) CursorMode() int {
+	return p.cursorMode
+}
+
+// updateCursorClipRect computes the window center in screen coordinates.
+// Called when entering locked mode or when the window moves/resizes while locked.
+func (p *windowsPlatform) updateCursorClipRect() {
+	var r rect
+	procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+	var origin point
+	procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+	p.cursorCenterX = origin.x + (r.right-r.left)/2
+	p.cursorCenterY = origin.y + (r.bottom-r.top)/2
 }
 
 func (p *windowsPlatform) SetFrameless(frameless bool) {
@@ -1804,6 +1925,25 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			return hitTestResultToWin32(result)
 		}
 
+	case wmActivate:
+		// Release cursor grab on focus loss, re-grab on focus gain.
+		activationState := wParam & 0xFFFF
+		if activationState == waInactive {
+			// Window lost focus — temporarily release cursor constraints
+			if p.cursorMode != 0 {
+				procClipCursor.Call(0)
+				if p.cursorHidden {
+					procShowCursorW.Call(1)
+					p.cursorHidden = false
+				}
+			}
+		} else {
+			// Window gained focus — re-apply cursor mode
+			if p.cursorMode != 0 {
+				p.SetCursorMode(p.cursorMode)
+			}
+		}
+
 	case wmWakeUp:
 		// No-op: sole purpose is to unblock MsgWaitForMultipleObjectsEx in WaitEvents.
 		return 0
@@ -1889,6 +2029,11 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 				PhysicalWidth:  newWidth,
 				PhysicalHeight: newHeight,
 			})
+
+			// Update cursor clip rect if locked or confined
+			if p.cursorMode != 0 {
+				p.SetCursorMode(p.cursorMode)
+			}
 		}
 		return 0
 
@@ -2099,6 +2244,40 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	// Mouse movement
 	case wmMouseMove:
 		x, y := extractMousePos(lParam)
+
+		// In locked mode, compute delta from center and warp back
+		if p.cursorMode == 1 {
+			// Convert client coords to screen coords to compare with center
+			var screenPt point
+			screenPt.x = int32(x)
+			screenPt.y = int32(y)
+			procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&screenPt)))
+
+			deltaX := float64(screenPt.x - p.cursorCenterX)
+			deltaY := float64(screenPt.y - p.cursorCenterY)
+
+			// Skip the warp-back event (delta=0 means cursor is at center)
+			if deltaX == 0 && deltaY == 0 {
+				return 0
+			}
+
+			// Warp cursor back to center
+			procSetCursorPos.Call(uintptr(p.cursorCenterX), uintptr(p.cursorCenterY))
+
+			// Update mouse state
+			p.mouseMu.Lock()
+			p.buttons = extractButtons(wParam)
+			p.modifiers = extractModifiers(wParam)
+			p.mouseInWindow = true
+			p.mouseMu.Unlock()
+
+			// Emit move event with relative deltas
+			ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, wParam)
+			ev.DeltaX = deltaX
+			ev.DeltaY = deltaY
+			p.dispatchPointerEvent(ev)
+			return 0
+		}
 
 		// Track mouse enter/leave
 		p.mouseMu.Lock()

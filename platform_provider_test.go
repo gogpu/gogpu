@@ -61,6 +61,8 @@ func (m *mockPlatform) PrepareFrame() platform.PrepareFrameResult {
 func (m *mockPlatform) ClipboardRead() (string, error)   { return m.clipboardText, nil }
 func (m *mockPlatform) ClipboardWrite(text string) error { m.clipboardText = text; return nil }
 func (m *mockPlatform) SetCursor(cursorID int)           { m.cursorID = cursorID }
+func (m *mockPlatform) SetCursorMode(int)                {}
+func (m *mockPlatform) CursorMode() int                  { return 0 }
 func (m *mockPlatform) DarkMode() bool                   { return m.darkMode }
 func (m *mockPlatform) ReduceMotion() bool               { return m.reduceMotion }
 func (m *mockPlatform) HighContrast() bool               { return m.highContrast }

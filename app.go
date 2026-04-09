@@ -486,6 +486,38 @@ func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 	}
 }
 
+// SetCursorMode sets the cursor confinement and visibility mode.
+//
+// Three modes are available:
+//   - CursorModeNormal (0): Default — cursor is visible and moves freely.
+//   - CursorModeLocked (1): Cursor is hidden and confined to the window.
+//     Mouse movement is reported as relative deltas (DeltaX/DeltaY on PointerEvent).
+//     Equivalent to SDL_SetRelativeMouseMode(SDL_TRUE).
+//   - CursorModeConfined (2): Cursor is visible but confined to the window bounds.
+//     Equivalent to SDL_SetWindowMouseGrab(SDL_TRUE).
+//
+// On focus loss, the cursor grab is temporarily released and re-applied on focus gain.
+// On window resize while locked/confined, the clip rect is updated automatically.
+//
+// Platform support:
+//   - Windows: Full support (ClipCursor + ShowCursor + SetCursorPos).
+//   - Linux/X11: Full support (XGrabPointer + XWarpPointer + invisible cursor).
+//   - Linux/Wayland: Stub (not yet implemented, requires pointer constraints protocol).
+//   - macOS: Stub (not yet implemented, requires CGAssociateMouseAndMouseCursorPosition).
+func (a *App) SetCursorMode(mode gpucontext.CursorMode) {
+	if a.platform != nil {
+		a.platform.SetCursorMode(int(mode))
+	}
+}
+
+// CursorMode returns the current cursor confinement mode.
+func (a *App) CursorMode() gpucontext.CursorMode {
+	if a.platform != nil {
+		return gpucontext.CursorMode(a.platform.CursorMode())
+	}
+	return gpucontext.CursorModeNormal
+}
+
 // DarkMode returns true if the system dark mode is active.
 // Implements gpucontext.PlatformProvider.
 func (a *App) DarkMode() bool {

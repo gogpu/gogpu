@@ -107,6 +107,152 @@ func (c *Connection) FreeCursor(cursorID ResourceID) error {
 	return nil
 }
 
+// CreatePixmap creates a pixmap with the given depth and dimensions.
+// X11 opcode 53: CreatePixmap(depth, pid, drawable, width, height).
+func (c *Connection) CreatePixmap(depth uint8, drawable ResourceID, width, height uint16) (ResourceID, error) {
+	pixmapID := c.GenerateID()
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeCreatePixmap)
+	e.PutUint8(depth)
+	e.PutUint16(4) // length = 4 4-byte units
+	e.PutUint32(uint32(pixmapID))
+	e.PutUint32(uint32(drawable))
+	e.PutUint16(width)
+	e.PutUint16(height)
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return 0, fmt.Errorf("x11: CreatePixmap failed: %w", err)
+	}
+	return pixmapID, nil
+}
+
+// FreePixmap frees a pixmap resource.
+// X11 opcode 54: FreePixmap(pixmap).
+func (c *Connection) FreePixmap(pixmapID ResourceID) error {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeFreePixmap)
+	e.PutUint8(0)  // unused
+	e.PutUint16(2) // length
+	e.PutUint32(uint32(pixmapID))
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: FreePixmap failed: %w", err)
+	}
+	return nil
+}
+
+// CreateCursor creates a cursor from source and mask pixmaps.
+// X11 opcode 93: CreateCursor(cid, source, mask, fore_r, fore_g, fore_b,
+//
+//	back_r, back_g, back_b, x, y).
+//
+// Pass mask=0 for no mask (all pixels are displayed).
+func (c *Connection) CreateCursor(source, mask ResourceID,
+	foreR, foreG, foreB, backR, backG, backB uint16, x, y uint16) (ResourceID, error) {
+	cursorID := c.GenerateID()
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeCreateCursor)
+	e.PutUint8(0)  // unused
+	e.PutUint16(8) // length = 8 4-byte units
+	e.PutUint32(uint32(cursorID))
+	e.PutUint32(uint32(source))
+	e.PutUint32(uint32(mask))
+	e.PutUint16(foreR)
+	e.PutUint16(foreG)
+	e.PutUint16(foreB)
+	e.PutUint16(backR)
+	e.PutUint16(backG)
+	e.PutUint16(backB)
+	e.PutUint16(x)
+	e.PutUint16(y)
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return 0, fmt.Errorf("x11: CreateCursor failed: %w", err)
+	}
+	return cursorID, nil
+}
+
+// GrabPointer grabs the pointer device.
+// X11 opcode 26: GrabPointer(owner_events, grab_window, event_mask,
+//
+//	pointer_mode, keyboard_mode, confine_to, cursor, time).
+//
+// Returns 0 (GrabSuccess) on success, or an error status.
+func (c *Connection) GrabPointer(ownerEvents bool, grabWindow ResourceID,
+	eventMask uint16, pointerMode, keyboardMode uint8,
+	confineTo, cursor ResourceID, timestamp Timestamp) (uint8, error) {
+	var oe uint8
+	if ownerEvents {
+		oe = 1
+	}
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeGrabPointer)
+	e.PutUint8(oe)
+	e.PutUint16(6) // length = 6 4-byte units
+	e.PutUint32(uint32(grabWindow))
+	e.PutUint16(eventMask)
+	e.PutUint8(pointerMode)
+	e.PutUint8(keyboardMode)
+	e.PutUint32(uint32(confineTo))
+	e.PutUint32(uint32(cursor))
+	e.PutUint32(uint32(timestamp))
+
+	reply, err := c.sendRequestWithReply(e.Bytes())
+	if err != nil {
+		return 0, fmt.Errorf("x11: GrabPointer failed: %w", err)
+	}
+	if len(reply) < 2 {
+		return 0, fmt.Errorf("x11: GrabPointer reply too short")
+	}
+	// Reply byte 1 is the status: 0=Success, 1=AlreadyGrabbed, etc.
+	return reply[1], nil
+}
+
+// UngrabPointer releases a pointer grab.
+// X11 opcode 27: UngrabPointer(time).
+func (c *Connection) UngrabPointer(timestamp Timestamp) error {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeUngrabPointer)
+	e.PutUint8(0)  // unused
+	e.PutUint16(2) // length = 2 4-byte units
+	e.PutUint32(uint32(timestamp))
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: UngrabPointer failed: %w", err)
+	}
+	return nil
+}
+
+// WarpPointer warps the pointer to a position relative to a destination window.
+// X11 opcode 41: WarpPointer(src_window, dst_window, src_x, src_y,
+//
+//	src_width, src_height, dst_x, dst_y).
+//
+// Pass srcWindow=0 to warp regardless of current position.
+func (c *Connection) WarpPointer(srcWindow, dstWindow ResourceID,
+	srcX, srcY int16, srcWidth, srcHeight uint16, dstX, dstY int16) error {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeWarpPointer)
+	e.PutUint8(0)  // unused
+	e.PutUint16(6) // length = 6 4-byte units
+	e.PutUint32(uint32(srcWindow))
+	e.PutUint32(uint32(dstWindow))
+	e.PutInt16(srcX)
+	e.PutInt16(srcY)
+	e.PutUint16(srcWidth)
+	e.PutUint16(srcHeight)
+	e.PutInt16(dstX)
+	e.PutInt16(dstY)
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: WarpPointer failed: %w", err)
+	}
+	return nil
+}
+
 // ChangeWindowCursor changes the cursor attribute of a window.
 // X11 opcode 2: ChangeWindowAttributes with CWCursor value mask.
 // Pass cursorID=0 to revert to parent window's cursor.

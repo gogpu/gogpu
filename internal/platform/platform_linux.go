@@ -1783,6 +1783,13 @@ func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
 // attach via wl_pointer.set_cursor. Both approaches are significant effort.
 func (p *waylandPlatform) SetCursor(int) {}
 
+// SetCursorMode is a stub on Wayland. Full implementation requires
+// zwp_pointer_constraints_v1 and zwp_relative_pointer_v1 protocols.
+func (p *waylandPlatform) SetCursorMode(int) {}
+
+// CursorMode returns 0 (normal) — cursor mode not yet implemented on Wayland.
+func (p *waylandPlatform) CursorMode() int { return 0 }
+
 // DarkMode returns true if the system dark mode is active.
 // Checks GTK_THEME environment variable and KDE kdeglobals config.
 // For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
@@ -1837,6 +1844,12 @@ func (p *x11Platform) ClipboardWrite(string) error { return nil }
 // SetCursor changes the mouse cursor shape using the standard X11 cursor font.
 // cursorID maps to gpucontext.CursorShape values (0-11).
 func (p *x11Platform) SetCursor(cursorID int) { p.inner.SetCursor(cursorID) }
+
+// SetCursorMode sets cursor confinement/lock mode.
+func (p *x11Platform) SetCursorMode(mode int) { p.inner.SetCursorMode(mode) }
+
+// CursorMode returns the current cursor mode.
+func (p *x11Platform) CursorMode() int { return p.inner.GetCursorMode() }
 
 // DarkMode returns true if the system dark mode is active.
 // Checks GTK_THEME environment variable and KDE kdeglobals config.

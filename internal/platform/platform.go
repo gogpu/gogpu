@@ -178,6 +178,15 @@ type Platform interface {
 	// On other platforms, this is a no-op.
 	SyncFrame()
 
+	// SetCursorMode sets the cursor confinement/lock mode.
+	// mode: 0=normal (free movement), 1=locked (hidden, confined, relative deltas),
+	// 2=confined (visible, confined to window).
+	SetCursorMode(mode int)
+
+	// CursorMode returns the current cursor mode.
+	// 0=normal, 1=locked, 2=confined.
+	CursorMode() int
+
 	// DarkMode returns true if system dark mode is active.
 	DarkMode() bool
 

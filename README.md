@@ -34,7 +34,7 @@
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering |
-| **Graphics** | Windowing, input handling, texture loading, frameless windows |
+| **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (SDL parity) |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
 | **HiDPI** | Per-monitor DPI, WM_DPICHANGED, logical/physical coordinate split |
@@ -280,6 +280,11 @@ app.ClipboardWrite("copied text")
 // Cursor management
 app.SetCursor(gpucontext.CursorPointer)  // hand cursor
 app.SetCursor(gpucontext.CursorText)     // I-beam for text input
+
+// Mouse grab / pointer lock (FPS games, 3D editors)
+app.SetCursorMode(gpucontext.CursorModeLocked)   // hide + capture relative deltas (SDL parity)
+app.SetCursorMode(gpucontext.CursorModeConfined)  // visible, confined to window
+app.SetCursorMode(gpucontext.CursorModeNormal)    // release
 
 // System preferences
 if app.DarkMode() { /* switch to dark theme */ }

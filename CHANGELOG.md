@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-04-09
+
+### Added
+
+- **Mouse grab / pointer lock** — `App.SetCursorMode()` with three modes matching SDL:
+  - `CursorModeLocked` — hidden cursor, confined to window, relative deltas in PointerEvent.DeltaX/DeltaY
+    (SDL `SDL_SetRelativeMouseMode` parity). Uses warp-to-center pattern on Win32 and X11.
+  - `CursorModeConfined` — visible cursor, confined to window bounds
+    (SDL `SDL_SetWindowMouseGrab` parity). Win32 `ClipCursor`, X11 `XGrabPointer` confine_to.
+  - `CursorModeNormal` — default behavior
+  - Focus loss auto-releases grab, focus gain re-applies
+  - Window resize updates clip rect
+  - macOS and Wayland: stubs (implementation after deep research)
+  (#173, requested by @darkliquid for ironwail-go Quake engine)
+
 ## [0.26.4] - 2026-04-08
 
 ### Changed

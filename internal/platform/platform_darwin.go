@@ -1091,6 +1091,13 @@ func (p *darwinPlatform) SetCursor(cursorID int) {
 	}
 }
 
+// SetCursorMode is a stub on macOS. Full implementation requires
+// CGAssociateMouseAndMouseCursorPosition and CGWarpMouseCursorPosition.
+func (p *darwinPlatform) SetCursorMode(int) {}
+
+// CursorMode returns 0 (normal) — cursor mode not yet implemented on macOS.
+func (p *darwinPlatform) CursorMode() int { return 0 }
+
 // DarkMode returns true if the system dark mode is active.
 // Checks NSApplication.effectiveAppearance.name for "Dark" substring.
 func (p *darwinPlatform) DarkMode() bool {

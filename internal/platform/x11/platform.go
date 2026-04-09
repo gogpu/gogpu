@@ -125,6 +125,15 @@ type Platform struct {
 
 	// Timestamp reference for event timing
 	startTime time.Time
+
+	// Cursor mode state (0=normal, 1=locked, 2=confined)
+	cursorMode      int
+	blankCursorID   ResourceID // 1x1 transparent cursor for locked mode
+	savedMouseX     float64    // saved position before locking
+	savedMouseY     float64
+	cursorCenterX   int16 // window center for warp-back in locked mode
+	cursorCenterY   int16
+	cursorGrabbed   bool // whether XGrabPointer is active
 }
 
 // NewPlatform creates a new X11 platform instance.
@@ -542,6 +551,14 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 	case *LeaveNotifyEvent:
 		p.handleLeaveNotify(e)
 
+	case *FocusInEvent:
+		// Re-grab pointer if cursor mode requires it
+		p.handleFocusIn()
+
+	case *FocusOutEvent:
+		// Release pointer grab on focus loss
+		p.handleFocusOut()
+
 	case *GenericEvent:
 		p.handleGenericEvent(e)
 	}
@@ -555,11 +572,36 @@ func (p *Platform) handleMotionNotify(e *MotionNotifyEvent) {
 	y := float64(e.EventY)
 
 	p.mu.Lock()
+	cursorMode := p.cursorMode
+	centerX := float64(p.cursorCenterX)
+	centerY := float64(p.cursorCenterY)
 	p.mouseX = x
 	p.mouseY = y
 	p.buttons = extractButtons(e.State)
 	p.modifiers = extractModifiers(e.State)
 	p.mu.Unlock()
+
+	// In locked mode, compute delta from center and warp back
+	if cursorMode == 1 {
+		deltaX := x - centerX
+		deltaY := y - centerY
+
+		// Skip the warp-back event (delta=0)
+		if deltaX == 0 && deltaY == 0 {
+			return
+		}
+
+		// Warp cursor back to center
+		_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0,
+			int16(centerX), int16(centerY))
+
+		// Emit event with relative deltas
+		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
+		ev.DeltaX = deltaX
+		ev.DeltaY = deltaY
+		p.dispatchPointerEvent(ev)
+		return
+	}
 
 	ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
 	p.dispatchPointerEvent(ev)
@@ -1529,6 +1571,142 @@ func cursorShapeToGlyph(cursorID int) uint16 {
 	default:
 		return XCursorLeftPtr
 	}
+}
+
+// SetCursorMode sets cursor confinement/lock mode.
+// 0=normal, 1=locked (hidden, confined, relative deltas), 2=confined (visible, confined).
+func (p *Platform) SetCursorMode(mode int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn == nil || p.window == 0 {
+		return
+	}
+
+	if mode == p.cursorMode {
+		return
+	}
+
+	oldMode := p.cursorMode
+	p.cursorMode = mode
+
+	switch mode {
+	case 1: // Locked
+		// Save current mouse position
+		if oldMode == 0 {
+			p.savedMouseX = p.mouseX
+			p.savedMouseY = p.mouseY
+		}
+
+		// Compute window center
+		p.cursorCenterX = int16(p.width / 2)
+		p.cursorCenterY = int16(p.height / 2)
+
+		// Create invisible cursor if not already created
+		if p.blankCursorID == 0 {
+			p.createBlankCursor()
+		}
+
+		// Grab pointer with invisible cursor, confined to our window
+		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
+		_, _ = p.conn.GrabPointer(true, p.window, grabMask,
+			GrabModeAsync, GrabModeAsync, p.window, p.blankCursorID, 0)
+		p.cursorGrabbed = true
+
+		// Warp to center
+		_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0, p.cursorCenterX, p.cursorCenterY)
+
+	case 2: // Confined
+		// Grab pointer with normal cursor, confined to window
+		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
+		_, _ = p.conn.GrabPointer(true, p.window, grabMask,
+			GrabModeAsync, GrabModeAsync, p.window, 0, 0)
+		p.cursorGrabbed = true
+
+		// Restore cursor position if coming from locked mode
+		if oldMode == 1 {
+			_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0,
+				int16(p.savedMouseX), int16(p.savedMouseY))
+		}
+
+	default: // Normal (0)
+		// Release pointer grab
+		if p.cursorGrabbed {
+			_ = p.conn.UngrabPointer(0)
+			p.cursorGrabbed = false
+		}
+
+		// Restore cursor (revert to normal)
+		_ = p.conn.ChangeWindowCursor(p.window, 0)
+
+		// Restore mouse position if coming from locked mode
+		if oldMode == 1 {
+			_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0,
+				int16(p.savedMouseX), int16(p.savedMouseY))
+		}
+	}
+}
+
+// GetCursorMode returns the current cursor mode.
+func (p *Platform) GetCursorMode() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cursorMode
+}
+
+// handleFocusIn re-applies cursor grab when window regains focus.
+func (p *Platform) handleFocusIn() {
+	p.mu.Lock()
+	mode := p.cursorMode
+	// Reset cursorMode temporarily so SetCursorMode doesn't early-return
+	if mode != 0 {
+		p.cursorMode = 0
+	}
+	p.mu.Unlock()
+
+	if mode != 0 {
+		p.SetCursorMode(mode)
+	}
+}
+
+// handleFocusOut releases cursor grab when window loses focus.
+func (p *Platform) handleFocusOut() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.cursorGrabbed && p.conn != nil {
+		_ = p.conn.UngrabPointer(0)
+		p.cursorGrabbed = false
+	}
+}
+
+// createBlankCursor creates a 1x1 transparent cursor for hiding the pointer.
+// Must be called with p.mu held.
+func (p *Platform) createBlankCursor() {
+	if p.conn == nil || p.window == 0 {
+		return
+	}
+
+	// Create 1x1 pixmap (depth 1 for cursor source/mask)
+	pixmap, err := p.conn.CreatePixmap(1, p.window, 1, 1)
+	if err != nil {
+		return
+	}
+
+	// Create cursor from the pixmap (both source and mask = same 1x1 pixmap)
+	// With a 1-bit depth source of all zeros and mask of all zeros,
+	// the cursor is fully transparent.
+	cursor, err := p.conn.CreateCursor(pixmap, pixmap,
+		0, 0, 0, // foreground RGB
+		0, 0, 0, // background RGB
+		0, 0) // hotspot
+	if err != nil {
+		_ = p.conn.FreePixmap(pixmap)
+		return
+	}
+
+	_ = p.conn.FreePixmap(pixmap)
+	p.blankCursorID = cursor
 }
 
 // BlitPixels copies RGBA pixel data to the window using X11 PutImage.
