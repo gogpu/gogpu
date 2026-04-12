@@ -472,11 +472,14 @@ func (r *Renderer) EndFrame() {
 	r.flushClear()
 
 	// Present the surface texture via wgpu Surface.
+	// For software backend, Present() handles the GDI blit directly
+	// using the SurfaceTexture buffer (correct data, no race).
+	// blitSoftwareFramebuffer() is NOT called — it was a double-blit
+	// that caused flicker and wasted ~12% CPU at fullscreen.
 	if r.currentSurfaceTexture != nil {
 		if err := r.surface.Present(r.currentSurfaceTexture); err != nil {
 			slog.Error("PRESENT ERROR", "err", err)
 		}
-		r.blitSoftwareFramebuffer()
 	}
 
 	// Non-blocking submission tracking: free resources for completed submissions.
