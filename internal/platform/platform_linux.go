@@ -81,9 +81,10 @@ type waylandPlatform struct {
 type x11Platform struct {
 	inner *x11.Platform
 
-	// Wakeup pipe for cross-goroutine WakeUp → WaitEvents unblocking.
-	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
-	wakePipe [2]int
+	// Channel-based wakeup for cross-goroutine WakeUp → WaitEvents unblocking.
+	// Replaces the wakePipe+unix.Poll pattern to avoid dual-poller race with
+	// net.Conn (Go runtime netpoller vs kernel poll on dup'd fd).
+	wakeCh chan struct{}
 }
 
 // newPlatform creates the platform-specific implementation.
@@ -123,11 +124,7 @@ func (p *x11Platform) Init(config Config) error {
 		return err
 	}
 
-	// Create wakeup pipe for WakeUp → WaitEvents unblocking
-	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
-		p.inner.Destroy()
-		return fmt.Errorf("x11: wakeup pipe: %w", err)
-	}
+	p.wakeCh = make(chan struct{}, 1)
 
 	return nil
 }
@@ -176,11 +173,6 @@ func (p *x11Platform) GetHandle() (instance, window uintptr) {
 
 // Destroy closes the window and releases resources.
 func (p *x11Platform) Destroy() {
-	if p.wakePipe[0] != 0 {
-		_ = unix.Close(p.wakePipe[0])
-		_ = unix.Close(p.wakePipe[1])
-		p.wakePipe = [2]int{}
-	}
 	p.inner.Destroy()
 }
 
@@ -215,31 +207,38 @@ func (p *x11Platform) SetCharCallback(fn func(rune)) {
 // X11 doesn't have modal resize loops.
 func (p *x11Platform) SetModalFrameCallback(_ func()) {}
 
-// WaitEvents blocks until at least one OS event is available.
-// Uses unix.Poll on the X11 socket fd and a wakeup pipe to block with 0% CPU.
+// WaitEvents blocks until at least one OS event is available or WakeUp is called.
+// Uses PollEventTimeout on the X11 net.Conn (Go runtime netpoller) with periodic
+// wake channel checks. This avoids the dual-poller race between unix.Poll on a
+// dup'd fd and Go's runtime netpoller on the original net.Conn.
 func (p *x11Platform) WaitEvents() {
-	connFd := p.inner.Fd()
-	if connFd < 0 {
-		return
-	}
+	for {
+		select {
+		case <-p.wakeCh:
+			return
+		default:
+		}
 
-	fds := []unix.PollFd{
-		{Fd: int32(connFd), Events: unix.POLLIN | unix.POLLERR},
-		{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN},
+		event, err := p.inner.PollEventTimeout(100 * time.Millisecond)
+		if err != nil {
+			return
+		}
+		if event != nil {
+			if pe := p.inner.HandleEvent(event); pe.Type != x11.EventTypeNone {
+				p.inner.QueueEvent(pe)
+			}
+			return
+		}
 	}
-	// Block indefinitely until an event arrives or WakeUp is called.
-	// EINTR from signal delivery is harmless — returns as spurious wakeup.
-	_, _ = unix.Poll(fds, -1)
-
-	// Drain the wakeup pipe so it is ready for the next WakeUp call.
-	drainPipe(p.wakePipe[0])
 }
 
 // WakeUp unblocks WaitEvents from any goroutine.
-// Writing a single byte to the pipe wakes up unix.Poll immediately.
-// Safe from any goroutine — pipe writes <= PIPE_BUF (4096 on Linux) are atomic.
+// Non-blocking channel send ensures at most one pending signal.
 func (p *x11Platform) WakeUp() {
-	_, _ = unix.Write(p.wakePipe[1], []byte{0})
+	select {
+	case p.wakeCh <- struct{}{}:
+	default:
+	}
 }
 
 // Init creates the Wayland window using a single C libwayland connection.

@@ -778,9 +778,16 @@ func (c *Connection) WaitForEvent() (Event, error) {
 // PollEvent checks for a pending event without blocking.
 // Returns nil, nil if no event is available - this is the expected case
 // when there are no pending events to process.
+func (c *Connection) PollEvent() (Event, error) {
+	return c.PollEventTimeout(time.Millisecond)
+}
+
+// PollEventTimeout checks for a pending event with a configurable timeout.
+// Returns nil, nil if no event is available within the timeout - this is
+// the expected case when there are no pending events to process.
 //
 //nolint:nilnil // nil,nil is intentional to indicate "no event available"
-func (c *Connection) PollEvent() (Event, error) {
+func (c *Connection) PollEventTimeout(timeout time.Duration) (Event, error) {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -788,10 +795,8 @@ func (c *Connection) PollEvent() (Event, error) {
 	}
 	c.mu.Unlock()
 
-	// Set a short read deadline so Read returns quickly if no data.
-	// 1ms is enough for the kernel to deliver buffered X11 events.
-	// Too short (1μs) causes events to be missed under high frame rates.
-	if err := c.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+	// Set a read deadline so Read returns after the timeout if no data.
+	if err := c.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, nil //nolint:nilerr // deadline not supported = no polling
 	}
 

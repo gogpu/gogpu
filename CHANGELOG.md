@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **X11 event loop:** fixed dual-poller race that blocked resize/close events with `ContinuousRender(false)`. Root cause: `unix.Poll()` on dup'd fd competed with Go runtime netpoller on original `net.Conn` fd. Replaced with channel-based wait using `PollEventTimeout` through Go's single runtime poller. (#178)
 - **Software backend:** removed redundant `blitSoftwareFramebuffer()` call in `EndFrame()` — was causing flicker and ~12% CPU overhead at fullscreen. `surface.Present()` already handles GDI blit via SurfaceTexture buffer.
 
 ### Changed

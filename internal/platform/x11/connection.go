@@ -24,8 +24,7 @@ var (
 
 // Connection represents a connection to an X11 server.
 type Connection struct {
-	conn     net.Conn
-	connFile *os.File
+	conn net.Conn
 
 	// Protocol settings
 	byteOrder ByteOrder
@@ -110,14 +109,6 @@ func ConnectTo(display string) (*Connection, error) {
 		screenNum:      screenNum,
 		pendingReplies: make(map[uint16]chan []byte),
 		extensions:     make(map[string]*ExtensionInfo),
-	}
-
-	// Get file descriptor for raw socket operations
-	switch tc := conn.(type) {
-	case *net.UnixConn:
-		c.connFile, _ = tc.File()
-	case *net.TCPConn:
-		c.connFile, _ = tc.File()
 	}
 
 	// Perform connection setup
@@ -263,9 +254,6 @@ func (c *Connection) Close() error {
 	c.pendingReplies = nil
 	c.pendingRepliesLock.Unlock()
 
-	if c.connFile != nil {
-		_ = c.connFile.Close()
-	}
 	if c.conn != nil {
 		return c.conn.Close()
 	}
@@ -286,14 +274,6 @@ func (c *Connection) GenerateID() ResourceID {
 // getNextSeq returns the next sequence number and increments it.
 func (c *Connection) getNextSeq() uint16 {
 	return uint16(c.nextSeq.Add(1))
-}
-
-// Fd returns the connection file descriptor.
-func (c *Connection) Fd() int {
-	if c.connFile != nil {
-		return int(c.connFile.Fd())
-	}
-	return -1
 }
 
 // Setup returns the setup information from the X server.

@@ -482,6 +482,18 @@ func (p *Platform) queueEvent(event PlatformEvent) {
 	p.events = append(p.events, event)
 }
 
+// QueueEvent is an exported wrapper for queueEvent, used by the platform
+// layer's WaitEvents to enqueue events read during idle wait.
+func (p *Platform) QueueEvent(event PlatformEvent) {
+	p.queueEvent(event)
+}
+
+// HandleEvent is an exported wrapper for handleEvent, used by the platform
+// layer's WaitEvents to process raw X11 events read during idle wait.
+func (p *Platform) HandleEvent(event Event) PlatformEvent {
+	return p.handleEvent(event)
+}
+
 // handleEvent processes a single X11 event.
 func (p *Platform) handleEvent(event Event) PlatformEvent {
 	switch e := event.(type) {
@@ -882,16 +894,13 @@ func (p *Platform) GetHandle() (display, window uintptr) {
 	return p.xlib.display, uintptr(p.window)
 }
 
-// Fd returns the X11 connection file descriptor.
-// This can be used with poll/epoll for event loop integration.
-func (p *Platform) Fd() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
+// PollEventTimeout checks for a pending X11 event with a configurable timeout.
+// Returns nil event if no event is available within the timeout.
+func (p *Platform) PollEventTimeout(timeout time.Duration) (Event, error) {
 	if p.conn == nil {
-		return -1
+		return nil, ErrNotConnected
 	}
-	return p.conn.Fd()
+	return p.conn.PollEventTimeout(timeout)
 }
 
 // Destroy closes the window and releases resources.
