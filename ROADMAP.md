@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.26.1
+## Current State: v0.27.0
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
@@ -45,36 +45,43 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Wayland CSD** — client-side decorations with title bar, buttons, edge resize
 - **GPU compute** — compute shaders with GPU particles example
 - **Deferred resource destruction** — Rust LifetimeTracker parity in wgpu
+- **Mouse grab / pointer lock** — locked, confined, normal modes (SDL parity, Win32 + X11)
 
 ### Recent Highlights
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock — Win32 + X11 (SDL parity) |
+| **v0.26.4** | 2026-04-08 | Orbital particles example, wgpu v0.24.4 (software backend enterprise Present) |
+| **v0.26.3** | 2026-04-07 | wgpu v0.24.2 (Metal SetBindGroup cross-group slot fix) |
+| **v0.26.2** | 2026-04-07 | wgpu v0.24.1, naga v0.17.0 (DXIL backend) |
 | **v0.26.1** | 2026-04-05 | CSD resize overhaul, event queue pattern, programmatic DPI awareness |
-| **v0.26.0** | 2026-03-31 | Enterprise fence architecture, Wayland CSD, single connection, GPU particles, present mode fallback |
+| **v0.26.0** | 2026-03-31 | Enterprise fence architecture, Wayland CSD, GPU particles, present mode fallback |
 | **v0.25.0** | 2026-03-21 | Frameless windows (Win32/macOS/X11/Wayland), WM_DPICHANGED, VSync config |
-| **v0.24.0** | 2026-03-15 | Renderer migrated to wgpu public API, Unicode text input (#138) |
-| **v0.23.0** | 2026-03-11 | Logical/physical pixel split, macOS Retina, PhysicalSize API |
 
 ---
 
 ## Upcoming
 
-### v0.27.0 — Platform Polish
+### v0.27.x — Platform Polish (current)
 
+- [x] Mouse grab / pointer lock — Win32 + X11 (v0.27.0)
+- [x] Software backend double-blit fix
 - [ ] CSD resize cursor shapes (FEAT-CSD-CURSOR-001)
 - [ ] CSD resize click jump fix (BUG-CSD-002)
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
 
-### v0.28.0+ — Multi-Window (Research Phase)
+### v0.28.0+ — Multi-Window ([RFC #167](https://github.com/orgs/gogpu/discussions/167))
 
-- [ ] Multi-window architecture (ADR pending — research in progress)
-- [ ] Window manager abstraction (App manages N windows)
-- [ ] Per-window Surface/Swapchain
-- [ ] Shared GPU Device across windows
-- [ ] Event routing by window ID
-- [ ] Window types: main, dialog, tool, popup
+- [ ] Multi-window architecture (ADR-010 proposed, research complete — 7 framework studies)
+- [ ] PlatformManager + PlatformWindow split (23 per-window methods)
+- [ ] GPUContext (shared) + WindowSurface (per-window) renderer split
+- [ ] Monotonic WindowID, WindowManager with Go map registry
+- [ ] Per-window callbacks struct, close-as-request (Qt6 pattern)
+- [ ] VSync: primary window Fifo, secondary Immediate
+- [ ] Window types: Normal, Dialog, Tool, Popup with parent-child
+- [ ] Backward compatible: existing single-window `App.Run()` unchanged
 
 ### v1.0.0 — Production Release
 

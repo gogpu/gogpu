@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Software backend:** removed redundant `blitSoftwareFramebuffer()` call in `EndFrame()` — was causing flicker and ~12% CPU overhead at fullscreen. `surface.Present()` already handles GDI blit via SurfaceTexture buffer.
+
+### Changed
+
+- **Dependencies:** wgpu v0.24.4 → v0.25.0, naga v0.17.4 (indirect), golang.org/x/sys v0.43.0
+- **Cleanup:** removed dead test files in `tmp/` that caused `go build ./...` failure (multiple `main` declarations) and incorrectly pulled `naga` as a direct dependency
+
 ## [0.27.0] - 2026-04-09
 
 ### Added
