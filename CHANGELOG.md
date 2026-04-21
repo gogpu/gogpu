@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Dependencies:** wgpu v0.24.4 → v0.25.1, naga v0.17.4 (indirect), golang.org/x/sys v0.43.0
+- **Dependencies:** wgpu v0.24.4 → v0.25.1, naga v0.17.4 (indirect), gpucontext v0.12.0 (CursorMode), golang.org/x/sys v0.43.0
 - **Cleanup:** removed dead test files in `tmp/` that caused `go build ./...` failure (multiple `main` declarations) and incorrectly pulled `naga` as a direct dependency
 
 ## [0.27.0] - 2026-04-09

@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.27.0
+## Current State: v0.27.1
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
@@ -45,12 +45,14 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Wayland CSD** — client-side decorations with title bar, buttons, edge resize
 - **GPU compute** — compute shaders with GPU particles example
 - **Deferred resource destruction** — Rust LifetimeTracker parity in wgpu
-- **Mouse grab / pointer lock** — locked, confined, normal modes (SDL parity, Win32 + X11)
+- **Mouse grab / pointer lock** — locked, confined, normal modes (SDL parity, Win32 + X11 + Wayland)
+- **Adapter power preference** — `GOGPU_POWER_PREFERENCE` env var for dual-GPU laptops
 
 ### Recent Highlights
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix, wgpu v0.25.1 |
 | **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock — Win32 + X11 (SDL parity) |
 | **v0.26.4** | 2026-04-08 | Orbital particles example, wgpu v0.24.4 (software backend enterprise Present) |
 | **v0.26.3** | 2026-04-07 | wgpu v0.24.2 (Metal SetBindGroup cross-group slot fix) |
@@ -66,7 +68,11 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 ### v0.27.x — Platform Polish (current)
 
 - [x] Mouse grab / pointer lock — Win32 + X11 (v0.27.0)
-- [x] Software backend double-blit fix
+- [x] Wayland pointer lock — `zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1` (v0.27.1, #175)
+- [x] Adapter power preference — `Config.PowerPreference` + `GOGPU_POWER_PREFERENCE` env var (v0.27.1, #176)
+- [x] X11 event loop fix — dual-poller race with `ContinuousRender(false)` (v0.27.1, #178)
+- [x] macOS software backend blit fix — `setNeedsDisplay:` after `setContents:` (v0.27.1, #172)
+- [x] Software backend double-blit fix (v0.27.1)
 - [ ] CSD resize cursor shapes (FEAT-CSD-CURSOR-001)
 - [ ] CSD resize click jump fix (BUG-CSD-002)
 - [ ] Adapter.GetInfo() API

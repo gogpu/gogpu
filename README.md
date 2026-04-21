@@ -34,7 +34,7 @@
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering |
-| **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (SDL parity) |
+| **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
 | **HiDPI** | Per-monitor DPI, WM_DPICHANGED, logical/physical coordinate split |
@@ -508,7 +508,7 @@ Native Win32 windowing with Vulkan, DirectX 12, GLES, and Software backends.
 X11 and Wayland support with Vulkan, GLES, and Software (headless) backends.
 
 - **X11** — pure Go X11 protocol with libX11 loaded via goffi for Vulkan surface creation. Multi-touch input via XInput2 wire protocol.
-- **Wayland** — single libwayland-client connection via goffi for all Wayland operations (surface, input, xdg-shell, CSD). Server-side decorations via `zxdg_decoration_manager_v1`, client-side decorations (CSD) with subsurface title bar when SSD unavailable. Tested on WSLg, GNOME, KDE, sway, niri, COSMIC.
+- **Wayland** — single libwayland-client connection via goffi for all Wayland operations (surface, input, xdg-shell, CSD, pointer constraints). Server-side decorations via `zxdg_decoration_manager_v1`, client-side decorations (CSD) with subsurface title bar when SSD unavailable. Pointer lock via `zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1`. Tested on WSLg, GNOME, KDE, sway, niri, COSMIC.
 
 ### macOS
 
