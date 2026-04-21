@@ -1248,6 +1248,14 @@ func (p *darwinPlatform) BlitPixels(pixels []byte, width, height int) error {
 	// Set CGImage as layer contents (toll-free bridged with id)
 	layerID.SendPtr(darwin.RegisterSelector("setContents:"), cgImage)
 
+	// BUG-PLATFORM-002: After changing CALayer.contents, Core Animation does
+	// NOT automatically composite the new image. Per Apple docs:
+	// "you must explicitly trigger display by calling setNeedsDisplay."
+	// Without this, the window stays blank until an external recomposite
+	// event (e.g., dragging window to another screen).
+	layerID.SendBool(darwin.RegisterSelector("setNeedsDisplay:"), true)
+	contentView.SendBool(darwin.RegisterSelector("setNeedsDisplay:"), true)
+
 	return nil
 }
 
