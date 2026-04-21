@@ -43,6 +43,15 @@ type InputCallbacks struct {
 	OnTouchMotion func(timeMs uint32, id int32, x, y float64)
 	OnTouchCancel func()
 
+	// Pointer constraint events (zwp_locked_pointer_v1)
+	OnLockedPointerLocked   func()
+	OnLockedPointerUnlocked func()
+
+	// Relative pointer motion (zwp_relative_pointer_v1)
+	// timeUs is a 64-bit microsecond timestamp. dx/dy are accelerated deltas.
+	// dxUnaccel/dyUnaccel are raw (unaccelerated) deltas from the device.
+	OnRelativePointerMotion func(timeUs uint64, dx, dy, dxUnaccel, dyUnaccel float64)
+
 	// Close event from xdg_toplevel
 	OnClose func()
 
@@ -252,6 +261,8 @@ func inputPointerEnterCb(data, pointer, serial, surface, sxFixed, syFixed uintpt
 	if surface != h.surface {
 		return
 	}
+	// Track enter serial — needed for wl_pointer.set_cursor (cursor hide/show)
+	h.pointerEnterSerial = uint32(serial)
 	x := float64(int32(sxFixed)) / 256.0
 	y := float64(int32(syFixed)) / 256.0
 	if h.inputCallbacks.OnPointerEnter != nil {

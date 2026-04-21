@@ -66,6 +66,9 @@ type waylandPlatform struct {
 	pointerIn bool // True when pointer is inside our surface
 	startTime time.Time
 
+	// Cursor mode (0=normal, 1=locked, 2=confined)
+	cursorMode int
+
 	// Keyboard focus tracking
 	keyboardFocused bool
 
@@ -366,6 +369,24 @@ func (p *waylandPlatform) initSingleConnection(config Config) error {
 	if seatGlobal != nil {
 		if err := libwl.SetupInput(seatGlobal.Name, seatGlobal.Version); err != nil {
 			logger().Warn("input setup failed", "err", err)
+		}
+	}
+
+	// Bind pointer constraints and relative pointer protocols (optional, for mouse grab)
+	ptrConstraintsGlobal := registry.GetGlobalByInterface(wayland.InterfaceZwpPointerConstraintsV1)
+	if ptrConstraintsGlobal != nil {
+		if err := libwl.SetupPointerConstraints(ptrConstraintsGlobal.Name, ptrConstraintsGlobal.Version); err != nil {
+			logger().Warn("pointer constraints setup failed (mouse grab unavailable)", "err", err)
+		} else {
+			logger().Debug("pointer constraints protocol bound")
+		}
+	}
+	relPointerGlobal := registry.GetGlobalByInterface(wayland.InterfaceZwpRelativePointerManagerV1)
+	if relPointerGlobal != nil {
+		if err := libwl.SetupRelativePointerManager(relPointerGlobal.Name, relPointerGlobal.Version); err != nil {
+			logger().Warn("relative pointer setup failed", "err", err)
+		} else {
+			logger().Debug("relative pointer manager bound")
 		}
 	}
 
@@ -701,6 +722,52 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				PointerID:   2,
 				PointerType: gpucontext.PointerTypeTouch,
 				IsPrimary:   true,
+				Timestamp:   p.eventTimestamp(),
+			})
+		},
+
+		// Pointer constraint events
+		OnLockedPointerLocked: func() {
+			logger().Debug("wayland: pointer lock activated by compositor")
+		},
+		OnLockedPointerUnlocked: func() {
+			logger().Debug("wayland: pointer lock deactivated by compositor")
+		},
+		OnRelativePointerMotion: func(timeUs uint64, dx, dy, dxUnaccel, dyUnaccel float64) {
+			// Read cursor mode under p.mu (SetCursorMode writes under p.mu).
+			p.mu.Lock()
+			mode := p.cursorMode
+			p.mu.Unlock()
+
+			// Only dispatch relative motion when in locked mode.
+			// In normal/confined mode, absolute motion events are used.
+			if mode != 1 {
+				return
+			}
+
+			p.pointerMu.RLock()
+			buttons := p.buttons
+			p.pointerMu.RUnlock()
+
+			var pressure float32
+			if buttons != gpucontext.ButtonsNone {
+				pressure = 0.5
+			}
+
+			// In locked mode, X/Y stay at the lock position; only DeltaX/DeltaY matter.
+			p.dispatchPointerEvent(gpucontext.PointerEvent{
+				Type:        gpucontext.PointerMove,
+				PointerID:   1,
+				DeltaX:      dx,
+				DeltaY:      dy,
+				Pressure:    pressure,
+				Width:       1,
+				Height:      1,
+				PointerType: gpucontext.PointerTypeMouse,
+				IsPrimary:   true,
+				Button:      gpucontext.ButtonNone,
+				Buttons:     buttons,
+				Modifiers:   p.getModifiers(),
 				Timestamp:   p.eventTimestamp(),
 			})
 		},
@@ -1782,12 +1849,100 @@ func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
 // attach via wl_pointer.set_cursor. Both approaches are significant effort.
 func (p *waylandPlatform) SetCursor(int) {}
 
-// SetCursorMode is a stub on Wayland. Full implementation requires
-// zwp_pointer_constraints_v1 and zwp_relative_pointer_v1 protocols.
-func (p *waylandPlatform) SetCursorMode(int) {}
+// SetCursorMode sets cursor confinement/lock mode on Wayland.
+// 0=normal, 1=locked (hidden + pointer lock + relative deltas), 2=confined (visible + confined to surface).
+// Uses zwp_pointer_constraints_v1 for lock/confine and zwp_relative_pointer_v1 for relative motion.
+func (p *waylandPlatform) SetCursorMode(mode int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-// CursorMode returns 0 (normal) — cursor mode not yet implemented on Wayland.
-func (p *waylandPlatform) CursorMode() int { return 0 }
+	if mode == p.cursorMode {
+		return
+	}
+
+	if p.libwl == nil {
+		return
+	}
+
+	surface := p.libwl.Surface()
+	pointer := p.libwl.InputPointer()
+	if surface == 0 || pointer == 0 {
+		logger().Warn("wayland: SetCursorMode requires surface and pointer", "mode", mode)
+		return
+	}
+
+	// Release any existing constraints before applying new mode
+	p.releasePointerConstraints()
+
+	switch mode {
+	case 1: // Locked — hide cursor, lock pointer, receive relative deltas
+		if !p.libwl.HasPointerConstraints() {
+			logger().Warn("wayland: pointer constraints not supported by compositor, cannot lock")
+			return
+		}
+
+		// Lock pointer to surface (persistent lifetime=1 for auto re-lock on focus)
+		if err := p.libwl.LockPointer(surface, pointer, 1); err != nil {
+			logger().Warn("wayland: lock_pointer failed", "err", err)
+			return
+		}
+
+		// Set up relative pointer for motion deltas (used instead of absolute coords)
+		if p.libwl.HasRelativePointerManager() {
+			if err := p.libwl.GetRelativePointer(pointer); err != nil {
+				logger().Warn("wayland: get_relative_pointer failed", "err", err)
+			}
+		}
+
+		// Hide cursor: set_cursor with NULL surface
+		p.libwl.HideCursor(p.libwl.PointerEnterSerial())
+
+		p.cursorMode = 1
+
+	case 2: // Confined — cursor visible but confined to surface bounds
+		if !p.libwl.HasPointerConstraints() {
+			logger().Warn("wayland: pointer constraints not supported by compositor, cannot confine")
+			return
+		}
+
+		// Confine pointer to surface (persistent lifetime=1)
+		if err := p.libwl.ConfinePointer(surface, pointer, 1); err != nil {
+			logger().Warn("wayland: confine_pointer failed", "err", err)
+			return
+		}
+
+		p.cursorMode = 2
+
+	default: // Normal (0) — release all constraints, show cursor
+		// Constraints already released by releasePointerConstraints above.
+		// Cursor restoration happens automatically when the compositor processes
+		// the constraint destroy and the pointer re-enters the surface.
+		p.cursorMode = 0
+	}
+
+	// Flush to send all protocol requests immediately
+	if err := p.libwl.Flush(); err != nil {
+		logger().Warn("wayland: flush failed after SetCursorMode", "err", err)
+	}
+}
+
+// releasePointerConstraints destroys all active pointer constraints and relative pointer.
+// Must be called with p.mu held.
+func (p *waylandPlatform) releasePointerConstraints() {
+	if p.libwl == nil {
+		return
+	}
+	p.libwl.DestroyLockedPointer()
+	p.libwl.DestroyConfinedPointer()
+	p.libwl.DestroyRelativePointer()
+}
+
+// CursorMode returns the current cursor mode.
+func (p *waylandPlatform) CursorMode() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cursorMode
+}
 
 // DarkMode returns true if the system dark mode is active.
 // Checks GTK_THEME environment variable and KDE kdeglobals config.

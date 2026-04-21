@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Adapter power preference** — `Config.PowerPreference` controls GPU selection on dual-GPU systems (laptops with integrated + discrete). `WithPowerPreference()` builder + `GOGPU_POWER_PREFERENCE` env var (`low`/`high`). Default `None` preserves existing behavior. (#176)
+- **Wayland pointer lock** — `SetCursorMode()` now works on Wayland via `zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1` protocols. Locked mode hides cursor and delivers relative deltas (`PointerEvent.DeltaX/DeltaY`). Confined mode restricts cursor to surface. Persistent lifetime (auto-relock on focus regain). Graceful degradation if compositor doesn't support the protocols. Completes v0.27.0 platform parity for pointer lock (Win32 + X11 + Wayland). (#175)
 
 ### Fixed
 

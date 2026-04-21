@@ -106,6 +106,14 @@ type LibwaylandHandle struct {
 	inputTouch     uintptr         // wl_touch* for main surface
 	inputCallbacks *InputCallbacks // Go callbacks for input events
 
+	// Pointer constraints (zwp_pointer_constraints_v1 + zwp_relative_pointer_v1)
+	pointerConstraintsMgr uintptr // zwp_pointer_constraints_v1* manager proxy
+	relativePointerMgr    uintptr // zwp_relative_pointer_manager_v1* proxy
+	lockedPointer         uintptr // current zwp_locked_pointer_v1* (or 0)
+	confinedPointer       uintptr // current zwp_confined_pointer_v1* (or 0)
+	relativePointer       uintptr // current zwp_relative_pointer_v1* (or 0)
+	pointerEnterSerial    uint32  // last wl_pointer.enter serial (needed for set_cursor)
+
 	// Data symbols (interface descriptors — pointers to static C structs)
 	registryInterface      unsafe.Pointer // &wl_registry_interface
 	compositorInterface    unsafe.Pointer // &wl_compositor_interface
@@ -232,6 +240,19 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 func (h *LibwaylandHandle) Close() {
 	if h == nil {
 		return
+	}
+
+	// Destroy pointer constraint objects (before input, in reverse creation order)
+	h.DestroyRelativePointer()
+	h.DestroyLockedPointer()
+	h.DestroyConfinedPointer()
+	if h.relativePointerMgr != 0 {
+		h.proxyDestroy(h.relativePointerMgr)
+		h.relativePointerMgr = 0
+	}
+	if h.pointerConstraintsMgr != 0 {
+		h.proxyDestroy(h.pointerConstraintsMgr)
+		h.pointerConstraintsMgr = 0
 	}
 
 	// Destroy input objects

@@ -29,6 +29,11 @@ const (
 	InterfaceWlDataDeviceManager     = "wl_data_device_manager"
 	InterfaceZwpLinuxDmabuf          = "zwp_linux_dmabuf_v1"
 	InterfaceZxdgDecorationManagerV1 = "zxdg_decoration_manager_v1"
+
+	// Pointer constraints and relative pointer protocols.
+	// Used for mouse grab / pointer lock (CursorModeLocked, CursorModeConfined).
+	InterfaceZwpPointerConstraintsV1    = "zwp_pointer_constraints_v1"
+	InterfaceZwpRelativePointerManagerV1 = "zwp_relative_pointer_manager_v1"
 )
 
 // Global represents a Wayland global interface advertised by the compositor.
