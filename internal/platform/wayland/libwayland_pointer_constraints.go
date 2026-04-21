@@ -28,23 +28,23 @@ var ptrConstraints struct {
 	once sync.Once
 
 	// Interface descriptors
-	constraintsMgr cWlInterface // zwp_pointer_constraints_v1
-	lockedPointer  cWlInterface // zwp_locked_pointer_v1
+	constraintsMgr  cWlInterface // zwp_pointer_constraints_v1
+	lockedPointer   cWlInterface // zwp_locked_pointer_v1
 	confinedPointer cWlInterface // zwp_confined_pointer_v1
-	relPointerMgr  cWlInterface // zwp_relative_pointer_manager_v1
-	relPointer     cWlInterface // zwp_relative_pointer_v1
+	relPointerMgr   cWlInterface // zwp_relative_pointer_manager_v1
+	relPointer      cWlInterface // zwp_relative_pointer_v1
 
 	// Method arrays (indexed by opcode)
-	constraintsMgrMethods [3]cWlMessage // destroy, lock_pointer, confine_pointer
-	lockedPointerMethods  [3]cWlMessage // destroy, set_cursor_position_hint, set_region
+	constraintsMgrMethods  [3]cWlMessage // destroy, lock_pointer, confine_pointer
+	lockedPointerMethods   [3]cWlMessage // destroy, set_cursor_position_hint, set_region
 	confinedPointerMethods [2]cWlMessage // destroy, set_region
-	relPointerMgrMethods  [2]cWlMessage // destroy, get_relative_pointer
-	relPointerMethods     [1]cWlMessage // destroy
+	relPointerMgrMethods   [2]cWlMessage // destroy, get_relative_pointer
+	relPointerMethods      [1]cWlMessage // destroy
 
 	// Event arrays
-	lockedPointerEvents  [2]cWlMessage // locked, unlocked
+	lockedPointerEvents   [2]cWlMessage // locked, unlocked
 	confinedPointerEvents [2]cWlMessage // confined, unconfined
-	relPointerEvents     [1]cWlMessage // relative_motion
+	relPointerEvents      [1]cWlMessage // relative_motion
 
 	// NULL types array (shared by all messages)
 	nullTypes [8]uintptr
@@ -163,9 +163,9 @@ func initPointerConstraintInterfaces() {
 // --- Listener arrays and callbacks ---
 
 var (
-	lockedPointerListener  [2]uintptr // locked, unlocked
-	confinedPointerListener [2]uintptr // confined, unconfined
-	relPointerListener     [1]uintptr // relative_motion
+	lockedPointerListener      [2]uintptr // locked, unlocked
+	confinedPointerListener    [2]uintptr // confined, unconfined
+	relPointerListener         [1]uintptr // relative_motion
 	ptrConstraintListenersOnce sync.Once
 )
 
@@ -303,10 +303,10 @@ func (h *LibwaylandHandle) LockPointer(surface, pointer uintptr, lifetime uint32
 	// lock_pointer: opcode 1 on zwp_pointer_constraints_v1
 	// signature "noo?ou": new_id, surface, pointer, region(null), lifetime
 	var argBuf [5]uintptr
-	argBuf[0] = 0         // new_id placeholder
-	argBuf[1] = surface   // wl_surface
-	argBuf[2] = pointer   // wl_pointer
-	argBuf[3] = 0         // region = NULL (lock entire surface)
+	argBuf[0] = 0       // new_id placeholder
+	argBuf[1] = surface // wl_surface
+	argBuf[2] = pointer // wl_pointer
+	argBuf[3] = 0       // region = NULL (lock entire surface)
 	argBuf[4] = uintptr(lifetime)
 
 	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
@@ -350,10 +350,10 @@ func (h *LibwaylandHandle) ConfinePointer(surface, pointer uintptr, lifetime uin
 	// confine_pointer: opcode 2 on zwp_pointer_constraints_v1
 	// signature "noo?ou": new_id, surface, pointer, region(null), lifetime
 	var argBuf [5]uintptr
-	argBuf[0] = 0         // new_id placeholder
-	argBuf[1] = surface   // wl_surface
-	argBuf[2] = pointer   // wl_pointer
-	argBuf[3] = 0         // region = NULL (confine to entire surface)
+	argBuf[0] = 0       // new_id placeholder
+	argBuf[1] = surface // wl_surface
+	argBuf[2] = pointer // wl_pointer
+	argBuf[3] = 0       // region = NULL (confine to entire surface)
 	argBuf[4] = uintptr(lifetime)
 
 	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))

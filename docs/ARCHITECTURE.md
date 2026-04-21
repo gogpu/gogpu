@@ -61,6 +61,10 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
 | **gg**        | 2D graphics library (Canvas API)     | [gogpu/gg](https://github.com/gogpu/gg)              |
 | **wgpu**      | Pure Go WebGPU implementation        | [gogpu/wgpu](https://github.com/gogpu/wgpu)          |
 | **naga**      | WGSL shader compiler                 | [gogpu/naga](https://github.com/gogpu/naga)          |
+| **ui**        | GUI toolkit (22+ widgets, 4 themes)  | [gogpu/ui](https://github.com/gogpu/ui)              |
+| **g3d**       | 3D rendering (scene graph, PBR, GLTF)| [gogpu/g3d](https://github.com/gogpu/g3d)            |
+| **compose**   | Multi-process composition (design phase) | [gogpu/compose](https://github.com/gogpu/compose) |
+| **systray**   | System tray (Win32/macOS/Linux)      | [gogpu/systray](https://github.com/gogpu/systray)    |
 
 ### Shared Infrastructure: gputypes + gpucontext
 
@@ -126,7 +130,7 @@ There are **two different** software rendering options:
 | `wgpu/hal/software`  | HAL       | Full WebGPU emulation on CPU         | Yes             |
 | `gg/internal/raster` | Core      | CPU 2D rasterizer (always available) | Yes             |
 
-- **wgpu/hal/software** — Full WebGPU HAL implementation on CPU. Always compiled (no build tags). Used for headless rendering, CI/CD, servers without GPU, and as last-resort fallback. On Windows, software-rendered frames are displayed via GDI `SetDIBitsToDevice` (PixelBlitter interface).
+- **wgpu/hal/software** — Full WebGPU HAL implementation on CPU. Always compiled (no build tags). Used for headless rendering, CI/CD, servers without GPU, and as last-resort fallback. On Windows, software-rendered frames are displayed via `CreateDIBSection` + `BitBlt` (DWM-safe, SDL3/Qt6 pattern). Linux X11 and macOS display paths are in progress (BUG-SW-001).
 - **gg/internal/raster** — CPU rasterization core with analytic AA, always works without GPU
 
 ## Backend Selection
@@ -647,12 +651,13 @@ inherit the logger configuration when registered.
 
 ## Platform Support
 
-| Platform | Status       | GPU Backends                   |
-|----------|--------------|--------------------------------|
-| Windows  | Full support | Vulkan, DX12, GLES, Software   |
-| macOS    | Full support | Metal, Software (headless)     |
-| Linux    | Full support | Vulkan, GLES, Software (headless) |
-| Web      | Planned      | WebGPU                         |
+| Platform | Status       | GPU Backends                   | Input |
+|----------|--------------|--------------------------------|-------|
+| Windows  | Full support | Vulkan, DX12, GLES, Software   | Keyboard, mouse, pointer lock |
+| macOS    | Full support | Metal, Software (in progress)  | Keyboard, mouse |
+| Linux X11 | Full support | Vulkan, GLES, Software (in progress) | Keyboard, mouse, pointer lock, multi-touch (XInput2) |
+| Linux Wayland | Full support | Vulkan, GLES | Keyboard, mouse, pointer lock (`zwp_pointer_constraints_v1`), CSD |
+| Web      | Planned      | WebGPU                         | — |
 
 ## See Also
 

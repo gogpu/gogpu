@@ -20,6 +20,10 @@ type mockFenceDevice struct {
 
 func (d *mockFenceDevice) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error) { return nil, nil } //nolint:nilnil // mock
 func (d *mockFenceDevice) DestroyBuffer(_ hal.Buffer)                               {}
+func (d *mockFenceDevice) MapBuffer(_ hal.Buffer, _, _ uint64) (hal.BufferMapping, error) {
+	return hal.BufferMapping{}, nil
+}
+func (d *mockFenceDevice) UnmapBuffer(_ hal.Buffer) error { return nil }
 func (d *mockFenceDevice) CreateTexture(_ *hal.TextureDescriptor) (hal.Texture, error) {
 	return nil, nil //nolint:nilnil // mock
 }

@@ -32,7 +32,7 @@ const (
 
 	// Pointer constraints and relative pointer protocols.
 	// Used for mouse grab / pointer lock (CursorModeLocked, CursorModeConfined).
-	InterfaceZwpPointerConstraintsV1    = "zwp_pointer_constraints_v1"
+	InterfaceZwpPointerConstraintsV1     = "zwp_pointer_constraints_v1"
 	InterfaceZwpRelativePointerManagerV1 = "zwp_relative_pointer_manager_v1"
 )
 
