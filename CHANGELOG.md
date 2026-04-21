@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Adapter power preference** — `Config.PowerPreference` controls GPU selection on dual-GPU systems (laptops with integrated + discrete). `WithPowerPreference()` builder + `GOGPU_POWER_PREFERENCE` env var (`low`/`high`). Default `None` preserves existing behavior. (#176)
+
 ### Fixed
 
 - **Software backend:** removed redundant `blitSoftwareFramebuffer()` call in `EndFrame()` — was causing flicker and ~12% CPU overhead at fullscreen. `surface.Present()` already handles GDI blit via SurfaceTexture buffer.

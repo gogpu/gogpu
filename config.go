@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // Config configures the application.
@@ -46,12 +47,17 @@ type Config struct {
 	// When true, the application must provide its own title bar via
 	// WindowChrome.SetHitTestCallback for drag, resize, and button regions.
 	Frameless bool
+
+	// PowerPreference specifies GPU power consumption preference for adapter selection.
+	// On systems with both integrated and discrete GPUs (e.g. laptops),
+	// this controls which GPU is selected.
+	// PowerPreferenceNone (default) lets the driver decide.
+	PowerPreference gputypes.PowerPreference
 }
 
-// DefaultConfig returns sensible default configuration.
+// DefaultConfig returns a sensible default configuration.
 // By default, uses continuous rendering (game loop style).
 // For power-efficient UI apps, use WithContinuousRender(false).
-// DefaultConfig returns a sensible default configuration.
 //
 // The graphics API can be overridden via the GOGPU_GRAPHICS_API environment variable:
 //
@@ -61,8 +67,14 @@ type Config struct {
 //	GOGPU_GRAPHICS_API=gles     — force OpenGL ES
 //	GOGPU_GRAPHICS_API=software — force CPU software rasterizer
 //
-// This is useful for testing different backends without modifying code.
-// WithGraphicsAPI() in code takes precedence over the environment variable.
+// The GPU power preference can be overridden via the GOGPU_POWER_PREFERENCE
+// environment variable:
+//
+//	GOGPU_POWER_PREFERENCE=low  — prefer integrated GPU (power saving)
+//	GOGPU_POWER_PREFERENCE=high — prefer discrete GPU (performance)
+//
+// WithGraphicsAPI() and WithPowerPreference() in code take precedence
+// over the environment variables.
 func DefaultConfig() Config {
 	return Config{
 		Title:            "GoGPU Application",
@@ -72,6 +84,7 @@ func DefaultConfig() Config {
 		VSync:            true,
 		ContinuousRender: true,
 		GraphicsAPI:      graphicsAPIFromEnv(),
+		PowerPreference:  powerPreferenceFromEnv(),
 	}
 }
 
@@ -91,6 +104,18 @@ func graphicsAPIFromEnv() types.GraphicsAPI {
 		return types.GraphicsAPISoftware
 	default:
 		return types.GraphicsAPIAuto
+	}
+}
+
+// powerPreferenceFromEnv reads GOGPU_POWER_PREFERENCE environment variable.
+func powerPreferenceFromEnv() gputypes.PowerPreference {
+	switch strings.ToLower(os.Getenv("GOGPU_POWER_PREFERENCE")) {
+	case "lowpower", "low", "integrated":
+		return gputypes.PowerPreferenceLowPower
+	case "highperformance", "high", "discrete":
+		return gputypes.PowerPreferenceHighPerformance
+	default:
+		return gputypes.PowerPreferenceNone
 	}
 }
 
@@ -150,6 +175,15 @@ func (c Config) WithFrameless(frameless bool) Config {
 	return c
 }
 
+// WithPowerPreference returns a copy with the GPU power preference set.
+// Use gputypes.PowerPreferenceLowPower to prefer integrated GPU (battery saving).
+// Use gputypes.PowerPreferenceHighPerformance to prefer discrete GPU (performance).
+// Use gputypes.PowerPreferenceNone (default) to let the driver decide.
+func (c Config) WithPowerPreference(pref gputypes.PowerPreference) Config {
+	c.PowerPreference = pref
+	return c
+}
+
 // Re-export backend types for convenience.
 const (
 	BackendAuto   = types.BackendAuto
@@ -166,4 +200,11 @@ const (
 	GraphicsAPIMetal    = types.GraphicsAPIMetal
 	GraphicsAPIGLES     = types.GraphicsAPIGLES
 	GraphicsAPISoftware = types.GraphicsAPISoftware
+)
+
+// Re-export power preference types for convenience.
+const (
+	PowerPreferenceNone            = gputypes.PowerPreferenceNone
+	PowerPreferenceLowPower        = gputypes.PowerPreferenceLowPower
+	PowerPreferenceHighPerformance = gputypes.PowerPreferenceHighPerformance
 )

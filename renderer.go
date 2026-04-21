@@ -96,13 +96,17 @@ type Renderer struct {
 
 	// VSync preference from Config
 	vsync bool
+
+	// PowerPreference for adapter selection
+	powerPreference gputypes.PowerPreference
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool) (*Renderer, error) {
+func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference) (*Renderer, error) {
 	r := &Renderer{
-		platform: plat,
-		vsync:    vsync,
+		platform:        plat,
+		vsync:           vsync,
+		powerPreference: powerPref,
 	}
 
 	if err := r.init(backendType, graphicsAPI); err != nil {
@@ -180,6 +184,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	// adapter enumeration until a surface (GL context) is available.
 	r.adapter, err = r.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
 		CompatibleSurface: r.surface,
+		PowerPreference:   r.powerPreference,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
