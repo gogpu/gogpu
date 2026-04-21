@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.27.1
+## Current State: v0.27.2
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
@@ -52,7 +52,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix, wgpu v0.25.1 |
+| **v0.27.2** | 2026-04-23 | Ecosystem sync: wgpu v0.25.2, gpucontext v0.14.0 (TextureView), gputypes v0.5.0 (PrimitiveState zero value) |
+| **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix |
 | **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock — Win32 + X11 (SDL parity) |
 | **v0.26.4** | 2026-04-08 | Orbital particles example, wgpu v0.24.4 (software backend enterprise Present) |
 | **v0.26.3** | 2026-04-07 | wgpu v0.24.2 (Metal SetBindGroup cross-group slot fix) |
@@ -151,17 +152,19 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.26.1 | GPU application framework, windowing, input |
-| **gogpu/wgpu** | v0.23.9 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
-| **gogpu/naga** | v0.16.4 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL), all backends 100% |
-| **gogpu/gg** | v0.38.2 | 2D graphics library with GPU acceleration |
-| **gogpu/ui** | v0.1.6 | GUI toolkit: 22+ widgets, 4 themes |
-| **gogpu/gpucontext** | v0.11.0 | Shared interfaces (DeviceProvider, WindowChrome) |
-| **gogpu/gputypes** | v0.4.0 | WebGPU type definitions |
+| **gogpu/gogpu** | v0.27.1 | GPU application framework, windowing, input, pointer lock |
+| **gogpu/wgpu** | v0.25.2 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | v0.17.4 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
+| **gogpu/gg** | v0.40.1 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
+| **gogpu/ui** | v0.1.13 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
+| **gogpu/gpucontext** | v0.13.0 | Shared interfaces (DeviceProvider, TextureRegionUpdater) |
+| **gogpu/gputypes** | v0.5.0 | WebGPU type definitions (zero value = spec default) |
+| **gogpu/compose** | design | Multi-process composition library |
+| **gogpu/g3d** | design | 3D rendering (scene graph, PBR, GLTF) |
 | **gogpu/gg-pdf** | v0.1.0 | PDF export |
 | **gogpu/gg-svg** | v0.1.0 | SVG export |
 
-**Total: ~632K lines of Pure Go, zero CGO.**
+**Total: ~635K+ lines of Pure Go, zero CGO.**
 
 ---
 
