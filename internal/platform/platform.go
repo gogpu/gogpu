@@ -2,8 +2,21 @@
 package platform
 
 import (
+	"fmt"
+	"sync/atomic"
+
 	"github.com/gogpu/gpucontext"
 )
+
+// WindowID uniquely identifies a window. Zero is invalid.
+type WindowID uint32
+
+var nextWindowID atomic.Uint32
+
+// NewWindowID allocates a new unique window ID.
+func NewWindowID() WindowID {
+	return WindowID(nextWindowID.Add(1))
+}
 
 // Config holds platform-agnostic window configuration.
 type Config struct {
@@ -17,6 +30,7 @@ type Config struct {
 
 // Event represents a platform event.
 type Event struct {
+	WindowID       WindowID
 	Type           EventType
 	Width          int // for resize events: logical size (platform points/DIP)
 	Height         int // for resize events: logical size (platform points/DIP)
@@ -206,6 +220,294 @@ type Platform interface {
 // software-rendered frames (headless mode still works).
 type PixelBlitter interface {
 	BlitPixels(pixels []byte, width, height int) error
+}
+
+// PlatformManager handles process-level platform operations.
+// One per application. Manages window lifecycle and event loop.
+type PlatformManager interface {
+	// Init initializes the platform subsystem.
+	Init() error
+
+	// CreateWindow creates a new platform window and returns it.
+	CreateWindow(config Config) (PlatformWindow, error)
+
+	// PollEvents returns the next pending event across ALL windows.
+	// Returns Event with Type=EventNone if no events are pending.
+	PollEvents() Event
+
+	// WaitEvents blocks until at least one OS event is available.
+	WaitEvents()
+
+	// WakeUp unblocks WaitEvents from any goroutine. Thread-safe.
+	WakeUp()
+
+	// ClipboardRead reads text from system clipboard.
+	ClipboardRead() (string, error)
+
+	// ClipboardWrite writes text to system clipboard.
+	ClipboardWrite(text string) error
+
+	// DarkMode returns true if system dark mode is active.
+	DarkMode() bool
+
+	// ReduceMotion returns true if user prefers reduced animation.
+	ReduceMotion() bool
+
+	// HighContrast returns true if high contrast mode is active.
+	HighContrast() bool
+
+	// FontScale returns font size preference multiplier.
+	FontScale() float32
+
+	// Destroy releases all platform resources.
+	Destroy()
+}
+
+// PlatformWindow represents a single OS window.
+// Multiple PlatformWindows can exist per PlatformManager.
+type PlatformWindow interface {
+	// ID returns the unique window identifier.
+	ID() WindowID
+
+	// GetHandle returns platform-specific handles for GPU surface creation.
+	GetHandle() (instance, window uintptr)
+
+	// LogicalSize returns window size in platform points (DIP).
+	LogicalSize() (width, height int)
+
+	// PhysicalSize returns GPU framebuffer size in device pixels.
+	PhysicalSize() (width, height int)
+
+	// ScaleFactor returns the DPI scale factor.
+	ScaleFactor() float64
+
+	// PrepareFrame updates platform-specific surface state before frame acquisition.
+	PrepareFrame() PrepareFrameResult
+
+	// InSizeMove returns true during modal resize/move operations.
+	InSizeMove() bool
+
+	// ShouldClose returns true if window close was requested.
+	ShouldClose() bool
+
+	// SetTitle changes the window title.
+	SetTitle(title string)
+
+	// SetCursor changes the mouse cursor shape.
+	SetCursor(cursorID int)
+
+	// SetFrameless enables or disables frameless window mode.
+	SetFrameless(frameless bool)
+
+	// IsFrameless returns true if the window has no OS chrome.
+	IsFrameless() bool
+
+	// SetHitTestCallback sets the callback for custom hit testing in frameless mode.
+	SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult)
+
+	// Minimize minimizes the window.
+	Minimize()
+
+	// Maximize toggles between maximized and restored window state.
+	Maximize()
+
+	// IsMaximized returns true if the window is maximized.
+	IsMaximized() bool
+
+	// Close requests the window to close.
+	Close()
+
+	// SyncFrame synchronizes the rendered frame with the compositor.
+	SyncFrame()
+
+	// SetCursorMode sets the cursor confinement/lock mode.
+	SetCursorMode(mode int)
+
+	// CursorMode returns the current cursor mode.
+	CursorMode() int
+
+	// SetPointerCallback registers a callback for pointer events.
+	SetPointerCallback(fn func(gpucontext.PointerEvent))
+
+	// SetScrollCallback registers a callback for scroll events.
+	SetScrollCallback(fn func(gpucontext.ScrollEvent))
+
+	// SetKeyCallback registers a callback for keyboard events.
+	SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool))
+
+	// SetCharCallback registers a callback for Unicode character input.
+	SetCharCallback(fn func(char rune))
+
+	// SetModalFrameCallback registers a callback for platform modal operations.
+	SetModalFrameCallback(fn func())
+
+	// Destroy releases native window resources.
+	Destroy()
+}
+
+// legacyPlatformAdapter wraps a PlatformManager + single PlatformWindow
+// to implement the old Platform interface. Enables gradual migration.
+type legacyPlatformAdapter struct {
+	mgr    PlatformManager
+	window PlatformWindow
+}
+
+// Verify interface compliance.
+var _ Platform = (*legacyPlatformAdapter)(nil)
+
+func (a *legacyPlatformAdapter) Init(config Config) error {
+	if err := a.mgr.Init(); err != nil {
+		return fmt.Errorf("platform init: %w", err)
+	}
+	w, err := a.mgr.CreateWindow(config)
+	if err != nil {
+		return fmt.Errorf("create window: %w", err)
+	}
+	a.window = w
+	return nil
+}
+
+func (a *legacyPlatformAdapter) PollEvents() Event {
+	return a.mgr.PollEvents()
+}
+
+func (a *legacyPlatformAdapter) ShouldClose() bool {
+	return a.window.ShouldClose()
+}
+
+func (a *legacyPlatformAdapter) LogicalSize() (width, height int) {
+	return a.window.LogicalSize()
+}
+
+func (a *legacyPlatformAdapter) PhysicalSize() (width, height int) {
+	return a.window.PhysicalSize()
+}
+
+func (a *legacyPlatformAdapter) GetHandle() (instance, window uintptr) {
+	return a.window.GetHandle()
+}
+
+func (a *legacyPlatformAdapter) InSizeMove() bool {
+	return a.window.InSizeMove()
+}
+
+func (a *legacyPlatformAdapter) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	a.window.SetPointerCallback(fn)
+}
+
+func (a *legacyPlatformAdapter) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	a.window.SetScrollCallback(fn)
+}
+
+func (a *legacyPlatformAdapter) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	a.window.SetKeyCallback(fn)
+}
+
+func (a *legacyPlatformAdapter) SetCharCallback(fn func(char rune)) {
+	a.window.SetCharCallback(fn)
+}
+
+func (a *legacyPlatformAdapter) SetModalFrameCallback(fn func()) {
+	a.window.SetModalFrameCallback(fn)
+}
+
+func (a *legacyPlatformAdapter) WaitEvents() {
+	a.mgr.WaitEvents()
+}
+
+func (a *legacyPlatformAdapter) WakeUp() {
+	a.mgr.WakeUp()
+}
+
+func (a *legacyPlatformAdapter) Destroy() {
+	if a.window != nil {
+		a.window.Destroy()
+	}
+	a.mgr.Destroy()
+}
+
+func (a *legacyPlatformAdapter) ScaleFactor() float64 {
+	return a.window.ScaleFactor()
+}
+
+func (a *legacyPlatformAdapter) PrepareFrame() PrepareFrameResult {
+	return a.window.PrepareFrame()
+}
+
+func (a *legacyPlatformAdapter) ClipboardRead() (string, error) {
+	return a.mgr.ClipboardRead()
+}
+
+func (a *legacyPlatformAdapter) ClipboardWrite(text string) error {
+	return a.mgr.ClipboardWrite(text)
+}
+
+func (a *legacyPlatformAdapter) SetCursor(cursorID int) {
+	a.window.SetCursor(cursorID)
+}
+
+func (a *legacyPlatformAdapter) SetFrameless(frameless bool) {
+	a.window.SetFrameless(frameless)
+}
+
+func (a *legacyPlatformAdapter) IsFrameless() bool {
+	return a.window.IsFrameless()
+}
+
+func (a *legacyPlatformAdapter) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	a.window.SetHitTestCallback(fn)
+}
+
+func (a *legacyPlatformAdapter) Minimize() {
+	a.window.Minimize()
+}
+
+func (a *legacyPlatformAdapter) Maximize() {
+	a.window.Maximize()
+}
+
+func (a *legacyPlatformAdapter) IsMaximized() bool {
+	return a.window.IsMaximized()
+}
+
+func (a *legacyPlatformAdapter) CloseWindow() {
+	a.window.Close()
+}
+
+func (a *legacyPlatformAdapter) SyncFrame() {
+	a.window.SyncFrame()
+}
+
+func (a *legacyPlatformAdapter) SetCursorMode(mode int) {
+	a.window.SetCursorMode(mode)
+}
+
+func (a *legacyPlatformAdapter) CursorMode() int {
+	return a.window.CursorMode()
+}
+
+func (a *legacyPlatformAdapter) DarkMode() bool {
+	return a.mgr.DarkMode()
+}
+
+func (a *legacyPlatformAdapter) ReduceMotion() bool {
+	return a.mgr.ReduceMotion()
+}
+
+func (a *legacyPlatformAdapter) HighContrast() bool {
+	return a.mgr.HighContrast()
+}
+
+func (a *legacyPlatformAdapter) FontScale() float32 {
+	return a.mgr.FontScale()
+}
+
+// BlitPixels delegates to the window if it implements PixelBlitter.
+func (a *legacyPlatformAdapter) BlitPixels(pixels []byte, width, height int) error {
+	if blitter, ok := a.window.(PixelBlitter); ok {
+		return blitter.BlitPixels(pixels, width, height)
+	}
+	return fmt.Errorf("window does not support pixel blitting")
 }
 
 // New creates a platform-specific implementation.
