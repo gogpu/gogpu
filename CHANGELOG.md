@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-04-23
+
+### Added
+
+- **Multi-window support** — `App.NewWindow(config)` creates additional windows, each with its own GPU surface, swapchain, and per-window callbacks (`SetOnDraw`, `SetOnResize`, `SetOnClose`). Shared GPU device across all windows (one Instance/Adapter/Device, N Surfaces). Multi-window frame loop renders all visible windows per tick. Secondary windows use VSync=false to prevent N × VBlank delay (ADR-010). Verified with two-window demo on Win32 Vulkan.
+- **PlatformManager / PlatformWindow interfaces** — process-level operations (`Init`, `CreateWindow`, `PollEvents`, `WaitEvents`, clipboard, system preferences) separated from per-window operations (`GetHandle`, size/scale queries, cursor, input callbacks, lifecycle). Win32 has native implementation with Init()/CreateWindow() split. All platforms implement PlatformManager directly.
+- **WindowID** — monotonic `uint32` identifier for each window (SDL3 pattern). Zero is invalid. Assigned by `PlatformManager.CreateWindow()`.
+- **WindowManager** — tracks all open windows with `map[WindowID]*Window` + insertion order slice for deterministic render iteration. `App.PrimaryWindow()`, `App.WindowCount()`.
+- **Renderer split** — shared GPU state (instance, adapter, device, pipelines, caches) separated from per-window state (`windowSurface`: surface, format, dimensions, frame/clear state). `activeSurface()` pattern for multi-window draw dispatch.
+- **examples/multiwindow/** — two-window demo (primary blue, secondary red)
+
+### Removed
+
+- **`Platform` interface** — replaced by `PlatformManager` + `PlatformWindow`. No backward compatibility layers.
+- **`platform.New()`** — replaced by `platform.NewManager()`.
+- **`window/` package** — dead code (zero imports, all TODO stubs). Removed entirely.
+- **Adapter layers** — `legacyPlatformAdapter`, `platformManagerAdapter`, `platformWindowAdapter`, `WrapAsLegacy()` all deleted.
+
+### Changed
+
+- **Dependencies:** wgpu v0.25.3 → v0.25.4, naga v0.17.4 → v0.17.5
+
 ## [0.27.3] - 2026-04-23
 
 ### Changed

@@ -25,11 +25,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.27.3
+## Current State: v0.28.0
 
 ✅ **Production-ready** with full feature set:
+- **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
-- **Three-layer wgpu API** — renderer uses `*wgpu.Device`/`*wgpu.Queue` (not HAL direct)
+- **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
 - **Unicode text input** — SetCharCallback on all platforms (Win32/macOS/X11/Wayland)
@@ -52,6 +53,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.28.0** | 2026-04-23 | **Multi-window** — App.NewWindow(), PlatformManager/PlatformWindow, shared GPU device, per-window frame loop |
 | **v0.27.3** | 2026-04-23 | wgpu v0.25.3 |
 | **v0.27.2** | 2026-04-23 | Ecosystem sync: wgpu v0.25.2, gpucontext v0.14.0 (TextureView), gputypes v0.5.0 (PrimitiveState zero value) |
 | **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix |
@@ -80,16 +82,19 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
 
-### v0.28.0+ — Multi-Window ([RFC #167](https://github.com/orgs/gogpu/discussions/167))
+### v0.28.0 — Multi-Window ([RFC #167](https://github.com/orgs/gogpu/discussions/167))
 
-- [ ] Multi-window architecture (ADR-010 proposed, research complete — 7 framework studies)
-- [ ] PlatformManager + PlatformWindow split (23 per-window methods)
-- [ ] GPUContext (shared) + WindowSurface (per-window) renderer split
-- [ ] Monotonic WindowID, WindowManager with Go map registry
-- [ ] Per-window callbacks struct, close-as-request (Qt6 pattern)
-- [ ] VSync: primary window Fifo, secondary Immediate
+- [x] Multi-window architecture (ADR-010, 7 framework studies) (v0.28.0)
+- [x] PlatformManager + PlatformWindow split (v0.28.0)
+- [x] Renderer split: shared GPU + per-window windowSurface (v0.28.0)
+- [x] Monotonic WindowID, WindowManager with Go map registry (v0.28.0)
+- [x] Per-window callbacks (onDraw, onResize, onClose) (v0.28.0)
+- [x] VSync: primary window Fifo, secondary Immediate (v0.28.0)
+- [x] Multi-window frame loop with activeSurface() dispatch (v0.28.0)
+- [x] App.NewWindow() + real window creation + GPU surface (v0.28.0)
 - [ ] Window types: Normal, Dialog, Tool, Popup with parent-child
-- [ ] Backward compatible: existing single-window `App.Run()` unchanged
+- [ ] Close-as-request (OnClose returns bool to reject)
+- [ ] Unified platform package structure (REFACTOR-PLATFORM-001)
 
 ### v1.0.0 — Production Release
 
