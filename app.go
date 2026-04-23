@@ -50,6 +50,14 @@ type App struct {
 
 	// Resource tracker for automatic GPU resource cleanup on shutdown.
 	tracker *resourceTracker
+
+	// Multi-window management (Phase 3 of ADR-010).
+	// windowManager tracks all open windows; primaryWindow is the first window
+	// created by Run(). The existing frame loop uses a.renderer (single-window
+	// path); the multi-window frame loop will iterate windowManager when
+	// platforms implement PlatformManager.
+	windowManager *WindowManager
+	primaryWindow *Window
 }
 
 // NewApp creates a new application with the given configuration.
@@ -61,8 +69,13 @@ func NewApp(config Config) *App {
 
 // OnDraw sets the callback for rendering each frame.
 // The Context is only valid during the callback.
+// If the primary window has been created (after Run starts), its draw
+// callback is also updated to stay in sync.
 func (a *App) OnDraw(fn func(*Context)) *App {
 	a.onDraw = fn
+	if a.primaryWindow != nil {
+		a.primaryWindow.onDraw = fn
+	}
 	return a
 }
 
@@ -74,8 +87,13 @@ func (a *App) OnUpdate(fn func(float64)) *App {
 }
 
 // OnResize sets the callback for window resize events.
+// If the primary window has been created (after Run starts), its resize
+// callback is also updated to stay in sync.
 func (a *App) OnResize(fn func(width, height int)) *App {
 	a.onResize = fn
+	if a.primaryWindow != nil {
+		a.primaryWindow.onResize = fn
+	}
 	return a
 }
 
@@ -211,6 +229,23 @@ func (a *App) Run() error {
 			a.renderer.Destroy()
 		})
 	}()
+
+	// Register the primary window in the WindowManager.
+	// This validates the multi-window architecture end-to-end with the
+	// existing single-window case. The frame loop still renders via
+	// a.renderer (proven path); WindowManager tracks the window for
+	// future multi-window iteration.
+	a.windowManager = newWindowManager()
+	a.primaryWindow = &Window{
+		id:       platform.NewWindowID(),
+		config:   a.config,
+		surface:  a.renderer.primary,
+		platform: a.platform,
+		onDraw:   a.onDraw,
+		onResize: a.onResize,
+		visible:  true,
+	}
+	a.windowManager.add(a.primaryWindow)
 
 	// Main loop with three-state event-driven model:
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
