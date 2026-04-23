@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] - 2026-04-23
+
+### Added
+
+- **EventFocus** — window focus/blur events on all 4 platforms for multi-window VSync strategy (ADR-010). Win32: `WM_SETFOCUS`/`WM_KILLFOCUS`. X11: `FocusIn`/`FocusOut` with `NotifyPointer`/`NotifyNormal` filtering. Wayland: `keyboard_enter`/`keyboard_leave`. macOS: `IsKeyWindow()` polling. Events carry `WindowID` for multi-window routing. `WindowManager.setFocus()` wired on focus gain. (FEAT-MW-FOCUS-001)
+- **WindowID on all Win32 events** — `EventClose`, `EventResize` now include `WindowID` for proper multi-window event routing
+
 ## [0.28.0] - 2026-04-23
 
 ### Added

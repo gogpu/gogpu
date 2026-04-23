@@ -25,10 +25,11 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.28.0
+## Current State: v0.28.1
 
 ✅ **Production-ready** with full feature set:
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
+- **EventFocus** — window focus/blur events on all platforms for multi-window VSync routing
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
@@ -53,6 +54,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.28.1** | 2026-04-23 | EventFocus on all platforms (Win32, X11, Wayland, macOS), WindowID on all events |
 | **v0.28.0** | 2026-04-23 | **Multi-window** — App.NewWindow(), PlatformManager/PlatformWindow, shared GPU device, per-window frame loop |
 | **v0.27.3** | 2026-04-23 | wgpu v0.25.3 |
 | **v0.27.2** | 2026-04-23 | Ecosystem sync: wgpu v0.25.2, gpucontext v0.14.0 (TextureView), gputypes v0.5.0 (PrimitiveState zero value) |
@@ -92,6 +94,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - [x] VSync: primary window Fifo, secondary Immediate (v0.28.0)
 - [x] Multi-window frame loop with activeSurface() dispatch (v0.28.0)
 - [x] App.NewWindow() + real window creation + GPU surface (v0.28.0)
+- [x] EventFocus on all platforms — Win32, X11, Wayland, macOS (v0.28.1)
+- [x] WindowID on all events for multi-window routing (v0.28.1)
+- [ ] VSync mode switching on focus change (surface reconfigure)
 - [ ] Window types: Normal, Dialog, Tool, Popup with parent-child
 - [ ] Close-as-request (OnClose returns bool to reject)
 - [ ] Unified platform package structure (REFACTOR-PLATFORM-001)
