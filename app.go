@@ -335,36 +335,10 @@ func (a *App) processEventsMultiThread() bool {
 		events = append(events, event)
 	}
 
-	// Process all events, but track only the last resize per window.
-	// For the primary window, we use the deferred resize pattern (RequestResize).
-	// For secondary windows, we resize the surface directly on the render thread.
+	// Classify events by type and window.
 	var secondaryResizes []platform.Event
-
 	for i := range events {
-		event := &events[i]
-		switch event.Type {
-		case platform.EventResize:
-			isPrimary := event.WindowID == 0 ||
-				(a.primaryWindow != nil && event.WindowID == a.primaryWindow.id)
-			if isPrimary {
-				lastResize = event
-			} else {
-				secondaryResizes = append(secondaryResizes, *event)
-			}
-		case platform.EventClose:
-			// Check if this is a secondary window close.
-			isPrimary := event.WindowID == 0 ||
-				(a.primaryWindow != nil && event.WindowID == a.primaryWindow.id)
-			if isPrimary {
-				a.running = false
-			} else {
-				a.closeSecondaryWindow(event.WindowID)
-			}
-		case platform.EventFocus:
-			if event.Focused {
-				a.windowManager.setFocus(event.WindowID)
-			}
-		}
+		lastResize, secondaryResizes = a.classifyEvent(&events[i], lastResize, secondaryResizes)
 	}
 
 	// Queue primary window resize for render thread (deferred pattern).
@@ -416,6 +390,32 @@ func (a *App) handleSecondaryResize(ev platform.Event) {
 // windowFrame holds a snapshot of per-window state captured on the main thread
 // for the render thread to use. This avoids accessing window/platform state
 // from the render thread.
+// classifyEvent routes a single platform event to the appropriate handler.
+func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, secondaryResizes []platform.Event) (*platform.Event, []platform.Event) {
+	isPrimary := event.WindowID == 0 ||
+		(a.primaryWindow != nil && event.WindowID == a.primaryWindow.id)
+
+	switch event.Type {
+	case platform.EventResize:
+		if isPrimary {
+			lastResize = event
+		} else {
+			secondaryResizes = append(secondaryResizes, *event)
+		}
+	case platform.EventClose:
+		if isPrimary {
+			a.running = false
+		} else {
+			a.closeSecondaryWindow(event.WindowID)
+		}
+	case platform.EventFocus:
+		if event.Focused {
+			a.windowManager.setFocus(event.WindowID)
+		}
+	}
+	return lastResize, secondaryResizes
+}
+
 type windowFrame struct {
 	window *Window
 	onDraw func(*Context)
