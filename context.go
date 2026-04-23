@@ -135,7 +135,7 @@ func (c *Context) Renderer() *Renderer {
 // Use this with ggcanvas.RenderDirect for zero-copy GPU rendering,
 // bypassing the GPU→CPU→GPU readback path.
 func (c *Context) SurfaceView() *wgpu.TextureView {
-	return c.renderer.currentView
+	return c.renderer.primary.currentView
 }
 
 // PresentTexture draws a texture filling the entire surface.
@@ -155,8 +155,8 @@ func (c *Context) PresentTexture(tex any) error {
 		return fmt.Errorf("gogpu: PresentTexture called with nil *Texture")
 	}
 	return c.renderer.drawTexturedQuad(t, DrawTextureOptions{
-		Width:  float32(c.renderer.width),
-		Height: float32(c.renderer.height),
+		Width:  float32(c.renderer.primary.width),
+		Height: float32(c.renderer.primary.height),
 		Alpha:  1.0,
 	})
 }

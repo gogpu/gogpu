@@ -46,7 +46,7 @@ func (a *gpuContextAdapter) SurfaceFormat() gputypes.TextureFormat {
 	if a.renderer == nil {
 		return gputypes.TextureFormatUndefined
 	}
-	return mapTextureFormat(a.renderer.format)
+	return mapTextureFormat(a.renderer.primary.format)
 }
 
 // Adapter returns the GPU adapter as gpucontext.Adapter.

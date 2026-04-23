@@ -20,16 +20,38 @@ func newTestWgpuDevice(t *testing.T, mockDev *mockFenceDevice) (*wgpu.Device, er
 	)
 }
 
+// newTestRenderer creates a Renderer with a primary windowSurface for testing.
+// Sets up the minimum fields needed for read-only wrapper methods.
+func newTestRenderer(width, height uint32) *Renderer {
+	r := &Renderer{
+		primary: &windowSurface{
+			width:  width,
+			height: height,
+		},
+	}
+	r.primary.renderer = r
+	return r
+}
+
+// newTestRendererFull creates a Renderer with all commonly tested fields.
+func newTestRendererFull(width, height uint32, format gputypes.TextureFormat, backendName string) *Renderer {
+	r := &Renderer{
+		backendName: backendName,
+		primary: &windowSurface{
+			width:  width,
+			height: height,
+			format: format,
+		},
+	}
+	r.primary.renderer = r
+	return r
+}
+
 // newTestContext creates a Context with a mock Renderer for testing.
 // Only sets up the fields needed for read-only wrapper methods.
 // Uses scale=1.0 so logical == physical dimensions.
 func newTestContext(width, height uint32, format gputypes.TextureFormat, backendName string) *Context {
-	r := &Renderer{
-		width:       width,
-		height:      height,
-		format:      format,
-		backendName: backendName,
-	}
+	r := newTestRendererFull(width, height, format, backendName)
 	return newContext(r, 1.0)
 }
 
@@ -189,13 +211,8 @@ func TestContextCheckDeviceHealthNonChecker(t *testing.T) {
 		t.Fatalf("newTestWgpuDevice() error = %v", err)
 	}
 
-	r := &Renderer{
-		width:       800,
-		height:      600,
-		format:      gputypes.TextureFormatBGRA8Unorm,
-		backendName: "test",
-		device:      wgpuDevice,
-	}
+	r := newTestRendererFull(800, 600, gputypes.TextureFormatBGRA8Unorm, "test")
+	r.device = wgpuDevice
 	ctx := newContext(r, 1.0)
 
 	err = ctx.CheckDeviceHealth()
@@ -227,11 +244,7 @@ func TestContextSurfaceSize(t *testing.T) {
 }
 
 func TestContextRenderer(t *testing.T) {
-	r := &Renderer{
-		width:       800,
-		height:      600,
-		backendName: "test",
-	}
+	r := newTestRendererFull(800, 600, 0, "test")
 	ctx := newContext(r, 1.0)
 
 	if ctx.Renderer() != r {
@@ -258,12 +271,7 @@ func TestContextClearedInitiallyFalse(t *testing.T) {
 }
 
 func TestNewContext(t *testing.T) {
-	r := &Renderer{
-		width:       1024,
-		height:      768,
-		format:      gputypes.TextureFormatRGBA8Unorm,
-		backendName: "native",
-	}
+	r := newTestRendererFull(1024, 768, gputypes.TextureFormatRGBA8Unorm, "native")
 	ctx := newContext(r, 1.0)
 
 	if ctx == nil {
@@ -278,7 +286,7 @@ func TestNewContext(t *testing.T) {
 }
 
 func TestNewContextZeroScale(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, 0)
 
 	if ctx.scaleFactor != 1.0 {
@@ -287,7 +295,7 @@ func TestNewContextZeroScale(t *testing.T) {
 }
 
 func TestNewContextNegativeScale(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, -1.0)
 
 	if ctx.scaleFactor != 1.0 {
@@ -310,7 +318,7 @@ func TestContextScaleFactor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &Renderer{width: 800, height: 600}
+			r := newTestRenderer(800, 600)
 			ctx := newContext(r, tt.scale)
 			if ctx.ScaleFactor() != tt.want {
 				t.Errorf("ScaleFactor() = %f, want %f", ctx.ScaleFactor(), tt.want)
@@ -321,7 +329,7 @@ func TestContextScaleFactor(t *testing.T) {
 
 func TestContextSizeWithScaling(t *testing.T) {
 	// Physical 1600x1200 at 2x scale = logical 800x600
-	r := &Renderer{width: 1600, height: 1200}
+	r := newTestRenderer(1600, 1200)
 	ctx := newContext(r, 2.0)
 
 	w, h := ctx.Size()
@@ -331,7 +339,7 @@ func TestContextSizeWithScaling(t *testing.T) {
 }
 
 func TestContextFramebufferSize(t *testing.T) {
-	r := &Renderer{width: 1600, height: 1200}
+	r := newTestRenderer(1600, 1200)
 	ctx := newContext(r, 2.0)
 
 	w, h := ctx.FramebufferSize()
@@ -341,7 +349,7 @@ func TestContextFramebufferSize(t *testing.T) {
 }
 
 func TestContextFramebufferWidth(t *testing.T) {
-	r := &Renderer{width: 1920, height: 1080}
+	r := newTestRenderer(1920, 1080)
 	ctx := newContext(r, 1.0)
 
 	if ctx.FramebufferWidth() != 1920 {
@@ -350,7 +358,7 @@ func TestContextFramebufferWidth(t *testing.T) {
 }
 
 func TestContextFramebufferHeight(t *testing.T) {
-	r := &Renderer{width: 1920, height: 1080}
+	r := newTestRenderer(1920, 1080)
 	ctx := newContext(r, 1.0)
 
 	if ctx.FramebufferHeight() != 1080 {
@@ -359,7 +367,7 @@ func TestContextFramebufferHeight(t *testing.T) {
 }
 
 func TestContextRenderTarget(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, 1.0)
 
 	rt := ctx.RenderTarget()
@@ -385,7 +393,7 @@ func TestContextRenderTarget(t *testing.T) {
 }
 
 func TestContextAsTextureDrawer(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, 1.0)
 
 	drawer := ctx.AsTextureDrawer()
@@ -406,7 +414,7 @@ func TestContextAsTextureDrawer(t *testing.T) {
 }
 
 func TestContextPresentTextureNonTexture(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, 1.0)
 
 	// Non-Texture type must return an error (not silently ignored)
@@ -417,7 +425,7 @@ func TestContextPresentTextureNonTexture(t *testing.T) {
 }
 
 func TestContextPresentTextureNil(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, 1.0)
 
 	// nil must return an error
@@ -428,7 +436,7 @@ func TestContextPresentTextureNil(t *testing.T) {
 }
 
 func TestContextPresentTextureNilTyped(t *testing.T) {
-	r := &Renderer{width: 800, height: 600}
+	r := newTestRenderer(800, 600)
 	ctx := newContext(r, 1.0)
 
 	// (*Texture)(nil) passes the type assertion but must be caught as nil
@@ -448,7 +456,7 @@ func TestContextClearColor(t *testing.T) {
 	// we just verify the struct interface: ClearColor calls Clear calls
 	// renderer.Clear. Test the cleared flag path indirectly.
 	ctx := &Context{
-		renderer:    &Renderer{width: 800, height: 600},
+		renderer:    newTestRenderer(800, 600),
 		scaleFactor: 1.0,
 	}
 	// ClearColor with zero alpha is still valid
@@ -476,7 +484,7 @@ func TestContextSizeWithFractionalScale(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &Renderer{width: tt.physW, height: tt.physH}
+			r := newTestRenderer(tt.physW, tt.physH)
 			ctx := newContext(r, tt.scale)
 
 			w, h := ctx.Size()
@@ -494,7 +502,7 @@ func TestContextSizeWithFractionalScale(t *testing.T) {
 }
 
 func TestContextWidthHeightWithScale(t *testing.T) {
-	r := &Renderer{width: 3840, height: 2160}
+	r := newTestRenderer(3840, 2160)
 	ctx := newContext(r, 2.0)
 
 	if ctx.Width() != 1920 {
@@ -534,7 +542,7 @@ func TestContextAspectRatioEdgeCases(t *testing.T) {
 
 func TestContextFramebufferWidthHeightWithScale(t *testing.T) {
 	// Framebuffer dimensions must be physical, unaffected by scale
-	r := &Renderer{width: 3840, height: 2160}
+	r := newTestRenderer(3840, 2160)
 	ctx := newContext(r, 2.0)
 
 	if ctx.FramebufferWidth() != 3840 {
@@ -547,7 +555,7 @@ func TestContextFramebufferWidthHeightWithScale(t *testing.T) {
 
 func TestContextSurfaceSizeWithScale(t *testing.T) {
 	// SurfaceSize returns physical pixels as uint32, unaffected by scale
-	r := &Renderer{width: 2560, height: 1440}
+	r := newTestRenderer(2560, 1440)
 	ctx := newContext(r, 1.5)
 
 	w, h := ctx.SurfaceSize()
@@ -574,7 +582,7 @@ func TestNewContextScaleValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &Renderer{width: 800, height: 600}
+			r := newTestRenderer(800, 600)
 			ctx := newContext(r, tt.scale)
 			if ctx.scaleFactor != tt.want {
 				t.Errorf("scaleFactor = %f, want %f", ctx.scaleFactor, tt.want)
@@ -640,7 +648,7 @@ func TestContextRenderTargetSurfaceSize(t *testing.T) {
 func TestContextAspectRatioWithScale(t *testing.T) {
 	// AspectRatio uses logical size, so scaling should not change the ratio
 	// for proportionally scaled displays.
-	r := &Renderer{width: 3840, height: 2160}
+	r := newTestRenderer(3840, 2160)
 	ctx := newContext(r, 2.0)
 
 	got := ctx.AspectRatio()

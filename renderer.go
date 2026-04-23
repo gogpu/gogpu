@@ -20,28 +20,21 @@ import (
 // Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + premultiplied(1 float) = 32 bytes
 const texQuadUniformSize = 32
 
-// Renderer manages the GPU rendering pipeline.
-// It handles device initialization, surface management, and frame presentation.
-//
-// The renderer uses the wgpu public API for all GPU operations. Both the native
-// (Pure Go) and Rust backends are accessed through this unified API layer.
-type Renderer struct {
-	// wgpu public API objects.
-	instance *wgpu.Instance
-	adapter  *wgpu.Adapter
-	device   *wgpu.Device
-	surface  *wgpu.Surface
+// windowSurface holds per-window GPU rendering state.
+// Each window gets its own surface, format, dimensions, and frame state.
+// In multi-window mode, one Renderer holds multiple windowSurface instances.
+// Currently, only the primary windowSurface is used (single-window backward compat).
+type windowSurface struct {
+	renderer *Renderer // back-reference to shared GPU state
 
-	// Backend metadata
-	backendName string
+	surface *wgpu.Surface
+	format  gputypes.TextureFormat
+	width   uint32
+	height  uint32
 
-	// Surface configuration
-	format            gputypes.TextureFormat
-	width             uint32
-	height            uint32
-	surfaceConfigured bool // Whether surface has been configured with valid dimensions
+	configured bool // Whether surface has been configured with valid dimensions
 
-	// Current frame state
+	// Current frame state (reused, zero alloc per frame)
 	currentSurfaceTexture *wgpu.SurfaceTexture
 	currentView           *wgpu.TextureView
 	frameCleared          bool // Whether the frame has been cleared (for LoadOp selection)
@@ -54,17 +47,40 @@ type Renderer struct {
 	pendingClearColor gputypes.Color
 	hasPendingClear   bool
 
+	// VSync preference for this window
+	vsync bool
+}
+
+// Renderer manages the GPU rendering pipeline.
+// It handles device initialization, surface management, and frame presentation.
+//
+// The renderer uses the wgpu public API for all GPU operations. Both the native
+// (Pure Go) and Rust backends are accessed through this unified API layer.
+//
+// Architecture: Renderer holds shared GPU state (instance, adapter, device,
+// pipelines) and a primary windowSurface for per-window rendering state.
+// This split prepares for multi-window support where one Renderer serves
+// multiple windows.
+type Renderer struct {
+	// Shared GPU objects
+	instance *wgpu.Instance
+	adapter  *wgpu.Adapter
+	device   *wgpu.Device
+
+	// Backend metadata
+	backendName string
+
 	// Submission tracker for non-blocking resource recycling.
 	// Each Submit returns a submission index; Poll returns the last completed.
 	// Command buffers are freed when their submission completes.
 	tracker submissionTracker
 
-	// Built-in pipelines
+	// Built-in pipelines (shared across all windows)
 	trianglePipeline       *wgpu.RenderPipeline
 	trianglePipelineLayout *wgpu.PipelineLayout
 	triangleShader         *wgpu.ShaderModule
 
-	// Textured quad pipeline resources
+	// Textured quad pipeline resources (shared across all windows)
 	texQuadPipeline       *wgpu.RenderPipeline
 	texQuadShader         *wgpu.ShaderModule
 	texQuadUniformLayout  *wgpu.BindGroupLayout
@@ -77,6 +93,7 @@ type Renderer struct {
 
 	// Texture bind group cache - avoids creating new bind groups per draw call.
 	// Keyed by *wgpu.TextureView pointer identity.
+	// Device-level resource, shared across all windows.
 	texBindGroupCache map[*wgpu.TextureView]*wgpu.BindGroup
 
 	// Deferred destruction queue for resources enqueued by runtime.AddCleanup.
@@ -88,19 +105,24 @@ type Renderer struct {
 	// Platform reference
 	platform platform.Platform
 
-	// VSync preference from Config
-	vsync bool
-
 	// PowerPreference for adapter selection
 	powerPreference gputypes.PowerPreference
+
+	// Primary window surface (single-window backward compatibility).
+	// In multi-window mode, additional surfaces will be stored separately.
+	primary *windowSurface
 }
 
 // newRenderer creates and initializes a new renderer.
 func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference) (*Renderer, error) {
 	r := &Renderer{
 		platform:        plat,
-		vsync:           vsync,
 		powerPreference: powerPref,
+	}
+	// Store vsync temporarily; initCommon will move it to the primary windowSurface.
+	r.primary = &windowSurface{
+		renderer: r,
+		vsync:    vsync,
 	}
 
 	if err := r.init(backendType, graphicsAPI); err != nil {
@@ -167,17 +189,18 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	// Get platform handles for surface creation
 	displayHandle, windowHandle := r.platform.GetHandle()
 
-	// Create surface via wgpu public API
-	r.surface, err = r.instance.CreateSurface(displayHandle, windowHandle)
+	// Create surface via wgpu public API — stored on primary windowSurface
+	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create surface: %w", err)
 	}
+	r.primary.surface = surface
 
 	// Request adapter compatible with the surface.
 	// Passing CompatibleSurface is required for GLES backends which defer
 	// adapter enumeration until a surface (GL context) is available.
 	r.adapter, err = r.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
-		CompatibleSurface: r.surface,
+		CompatibleSurface: r.primary.surface,
 		PowerPreference:   r.powerPreference,
 	})
 	if err != nil {
@@ -252,8 +275,8 @@ func (r *Renderer) initRust() error {
 		return fmt.Errorf("gogpu: failed to wrap rust device: %w", err)
 	}
 
-	// Wrap HAL surface into wgpu.Surface.
-	r.surface = wgpu.NewSurfaceFromHAL(halSurface, "Rust Surface")
+	// Wrap HAL surface into wgpu.Surface — stored on primary windowSurface.
+	r.primary.surface = wgpu.NewSurfaceFromHAL(halSurface, "Rust Surface")
 
 	// Note: We don't wrap halInstance and exposed.Adapter into wgpu types
 	// because the renderer only needs them for cleanup. We store nil for
@@ -269,7 +292,7 @@ func (r *Renderer) initRust() error {
 func (r *Renderer) initCommon() error {
 	// Submission tracker is zero-value ready — no initialization needed.
 
-	// Configure surface with PHYSICAL pixel dimensions.
+	// Configure primary window surface with PHYSICAL pixel dimensions.
 	// GPU surfaces operate in device pixels, not logical points.
 	// On some platforms (especially macOS), the window may not have valid
 	// dimensions immediately after creation. In that case, we defer surface
@@ -277,36 +300,36 @@ func (r *Renderer) initCommon() error {
 	width, height := r.platform.PhysicalSize()
 
 	// Use BGRA8Unorm which is common across platforms
-	r.format = gputypes.TextureFormatBGRA8Unorm
+	r.primary.format = gputypes.TextureFormatBGRA8Unorm
 
 	// Only configure surface if dimensions are valid.
 	// If dimensions are zero (window not yet visible, minimized, or timing issue),
 	// defer configuration until Resize is called with valid dimensions.
 	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
 	if width > 0 && height > 0 {
-		r.width = uint32(width)   //nolint:gosec // G115: validated positive above
-		r.height = uint32(height) //nolint:gosec // G115: validated positive above
+		r.primary.width = uint32(width)   //nolint:gosec // G115: validated positive above
+		r.primary.height = uint32(height) //nolint:gosec // G115: validated positive above
 
-		if err := r.configureSurface(); err != nil {
+		if err := r.primary.configure(r.device, r.adapter); err != nil {
 			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
 		}
-		r.surfaceConfigured = true
+		r.primary.configured = true
 	}
-	// If dimensions are zero, surfaceConfigured remains false.
+	// If dimensions are zero, configured remains false.
 	// The surface will be configured on the first Resize event with valid dimensions.
 
 	return nil
 }
 
-// configureSurface configures the wgpu surface with current dimensions and format.
-func (r *Renderer) configureSurface() error {
-	presentMode := r.resolvePresentMode()
+// configure configures the wgpu surface with current dimensions and format.
+func (ws *windowSurface) configure(device *wgpu.Device, adapter *wgpu.Adapter) error {
+	presentMode := ws.resolvePresentMode(adapter)
 
-	return r.surface.Configure(r.device, &wgpu.SurfaceConfiguration{
-		Format:      r.format,
+	return ws.surface.Configure(device, &wgpu.SurfaceConfiguration{
+		Format:      ws.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
-		Width:       r.width,
-		Height:      r.height,
+		Width:       ws.width,
+		Height:      ws.height,
 		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
 		PresentMode: presentMode,
 	})
@@ -316,23 +339,23 @@ func (r *Renderer) configureSurface() error {
 // Rust wgpu fallback pattern. For VSync on (AutoVsync): FifoRelaxed -> Fifo.
 // For VSync off (AutoNoVsync): Immediate -> Mailbox -> Fifo.
 // Falls back to Fifo which is guaranteed by the Vulkan spec.
-func (r *Renderer) resolvePresentMode() gputypes.PresentMode {
-	caps := r.adapter.GetSurfaceCapabilities(r.surface)
+func (ws *windowSurface) resolvePresentMode(adapter *wgpu.Adapter) gputypes.PresentMode {
+	caps := adapter.GetSurfaceCapabilities(ws.surface)
 	if caps == nil {
 		// No capabilities available — use safe default.
 		mode := gputypes.PresentModeFifo
-		if !r.vsync {
+		if !ws.vsync {
 			mode = gputypes.PresentModeImmediate
 		}
 		slog.Debug("gogpu: no surface capabilities, using default present mode",
-			"mode", mode, "vsync", r.vsync)
+			"mode", mode, "vsync", ws.vsync)
 		return mode
 	}
 
 	supported := caps.PresentModes
 	var mode gputypes.PresentMode
 
-	if r.vsync {
+	if ws.vsync {
 		// VSync on: FifoRelaxed -> Fifo (like Rust AutoVsync).
 		mode = pickPresentMode(supported,
 			gputypes.PresentModeFifoRelaxed,
@@ -348,7 +371,7 @@ func (r *Renderer) resolvePresentMode() gputypes.PresentMode {
 	}
 
 	slog.Debug("gogpu: resolved present mode",
-		"mode", mode, "vsync", r.vsync, "supported", supported)
+		"mode", mode, "vsync", ws.vsync, "supported", supported)
 	return mode
 }
 
@@ -372,94 +395,105 @@ func pickPresentMode(supported []gputypes.PresentMode, preferred ...gputypes.Pre
 // This also handles deferred surface configuration when the window
 // first becomes visible with valid dimensions (especially important on macOS).
 func (r *Renderer) Resize(width, height int) {
+	r.primary.resize(width, height, r.device, r.adapter)
+}
+
+// resize handles window resize for this surface.
+func (ws *windowSurface) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) {
 	if width <= 0 || height <= 0 {
 		// Window minimized or invisible -- unconfigure surface to prevent
 		// zero-extent swapchain creation on the next frame (VK-VAL-001).
-		if r.surfaceConfigured {
-			r.surface.Unconfigure()
-			r.surfaceConfigured = false
+		if ws.configured {
+			ws.surface.Unconfigure()
+			ws.configured = false
 		}
 		return
 	}
 
 	// Skip no-op resize. ConfigureSurface is expensive (involves device wait idle
 	// and surface reconfiguration), so avoid calling it when dimensions are unchanged.
-	if uint32(width) == r.width && uint32(height) == r.height { //nolint:gosec // G115: validated positive above
+	if uint32(width) == ws.width && uint32(height) == ws.height { //nolint:gosec // G115: validated positive above
 		return
 	}
 
 	// Save old dimensions in case Configure fails -- we must keep
-	// r.width/r.height consistent with the actual swapchain size.
-	oldWidth, oldHeight := r.width, r.height
+	// width/height consistent with the actual swapchain size.
+	oldWidth, oldHeight := ws.width, ws.height
 
 	// Note: width/height validated positive above
-	r.width = uint32(width)   //nolint:gosec // G115: validated positive above
-	r.height = uint32(height) //nolint:gosec // G115: validated positive above
+	ws.width = uint32(width)   //nolint:gosec // G115: validated positive above
+	ws.height = uint32(height) //nolint:gosec // G115: validated positive above
 
 	// Configure surface with new dimensions.
-	if err := r.configureSurface(); err != nil {
-		// Restore old dimensions to keep renderer consistent with swapchain.
+	if err := ws.configure(device, adapter); err != nil {
+		// Restore old dimensions to keep surface consistent with swapchain.
 		// Next frame will retry with the new size.
-		r.width = oldWidth
-		r.height = oldHeight
+		ws.width = oldWidth
+		ws.height = oldHeight
 		return
 	}
-	r.surfaceConfigured = true
+	ws.configured = true
 }
 
 // BeginFrame prepares a new frame for rendering.
 // Returns false if frame cannot be acquired (surface not configured, minimized, etc.).
 func (r *Renderer) BeginFrame() bool {
-	// Skip if surface is not configured yet.
-	// This happens when the window has zero dimensions (minimized, not yet visible).
-	if !r.surfaceConfigured {
-		return false
-	}
-
 	// Drain deferred destruction queue at frame boundary.
 	// Resources enqueued by runtime.AddCleanup are destroyed here
 	// on the render thread where GPU operations are safe.
 	r.DrainDeferredDestroys()
 
+	return r.primary.beginFrame(r.platform, r.device, r.adapter)
+}
+
+// beginFrame acquires the next surface texture for rendering on this window.
+// Returns false if frame cannot be acquired (surface not configured, minimized, etc.).
+func (ws *windowSurface) beginFrame(plat platform.Platform, device *wgpu.Device, adapter *wgpu.Adapter) bool {
+	// Skip if surface is not configured yet.
+	// This happens when the window has zero dimensions (minimized, not yet visible).
+	if !ws.configured {
+		return false
+	}
+
 	// Before acquiring surface texture, let platform update surface state
 	// (e.g., CAMetalLayer.contentsScale on macOS for HiDPI/multi-monitor).
-	if r.platform != nil {
-		result := r.platform.PrepareFrame()
+	if plat != nil {
+		result := plat.PrepareFrame()
 		if result.ScaleChanged && result.PhysicalWidth > 0 && result.PhysicalHeight > 0 {
 			// Scale changed (window moved between monitors with different DPI).
 			// Reconfigure surface with new physical dimensions.
-			r.width = result.PhysicalWidth
-			r.height = result.PhysicalHeight
-			_ = r.configureSurface()
+			ws.width = result.PhysicalWidth
+			ws.height = result.PhysicalHeight
+			_ = ws.configure(device, adapter)
 		}
 	}
 
 	// Acquire the next surface texture via wgpu public API.
-	surfaceTexture, _, err := r.surface.GetCurrentTexture()
+	surfaceTexture, _, err := ws.surface.GetCurrentTexture()
 	if err != nil {
 		slog.Error("GET TEXTURE ERROR", "err", err)
 		// Surface needs reconfiguration (outdated or lost).
 		// Only attempt if we have valid dimensions.
-		if r.width > 0 && r.height > 0 {
-			_ = r.configureSurface()
+		if ws.width > 0 && ws.height > 0 {
+			_ = ws.configure(device, adapter)
 		}
 		return false
 	}
 
-	r.currentSurfaceTexture = surfaceTexture
+	ws.currentSurfaceTexture = surfaceTexture
 
 	// Create texture view for rendering
 	view, err := surfaceTexture.CreateView(nil)
 	if err != nil {
-		r.surface.DiscardTexture()
-		r.currentSurfaceTexture = nil
+		ws.surface.DiscardTexture()
+		ws.currentSurfaceTexture = nil
 		return false
 	}
-	r.currentView = view
+	ws.currentView = view
 
 	// Reset frame state for new frame
-	r.frameCleared = false
-	r.hasPendingClear = false
+	ws.frameCleared = false
+	ws.hasPendingClear = false
 
 	return true
 }
@@ -468,26 +502,36 @@ func (r *Renderer) BeginFrame() bool {
 func (r *Renderer) EndFrame() {
 	// Flush any pending clear that wasn't consumed by a draw call.
 	// This handles the case where user calls ClearColor without drawing.
-	r.flushClear()
+	r.primary.flushClear(r.device, r)
 
-	// Present the surface texture via wgpu Surface.
-	if r.currentSurfaceTexture != nil {
-		if err := r.surface.Present(r.currentSurfaceTexture); err != nil {
-			slog.Error("PRESENT ERROR", "err", err)
-		}
-	}
+	// Present the surface texture on the primary window.
+	r.primary.present()
 
 	// Non-blocking submission tracking: free resources for completed submissions.
 	completedIdx := r.device.Queue().Poll()
 	r.tracker.triage(completedIdx, r.device)
 
-	// Release resources after presentation
-	if r.currentView != nil {
-		r.currentView.Release()
-		r.currentView = nil
+	// Release per-frame resources after presentation.
+	r.primary.releaseFrame()
+}
+
+// present presents the surface texture to the screen.
+func (ws *windowSurface) present() {
+	if ws.currentSurfaceTexture != nil {
+		if err := ws.surface.Present(ws.currentSurfaceTexture); err != nil {
+			slog.Error("PRESENT ERROR", "err", err)
+		}
+	}
+}
+
+// releaseFrame releases per-frame resources after presentation.
+func (ws *windowSurface) releaseFrame() {
+	if ws.currentView != nil {
+		ws.currentView.Release()
+		ws.currentView = nil
 	}
 	// SurfaceTexture is consumed by Present, no need to destroy it
-	r.currentSurfaceTexture = nil
+	ws.currentSurfaceTexture = nil
 }
 
 // Clear defers a clear command to be applied at the start of the next render pass.
@@ -495,21 +539,26 @@ func (r *Renderer) EndFrame() {
 // swapchains can cause content loss due to the intermediate RT->PRESENT->RT
 // state transition between Clear and the subsequent draw pass.
 func (r *Renderer) Clear(red, green, blue, alpha float64) {
-	if r.currentView == nil {
+	r.primary.clear(red, green, blue, alpha)
+}
+
+// clear defers a clear command on this window's surface.
+func (ws *windowSurface) clear(red, green, blue, alpha float64) {
+	if ws.currentView == nil {
 		return
 	}
-	r.pendingClearColor = gputypes.Color{R: red, G: green, B: blue, A: alpha}
-	r.hasPendingClear = true
+	ws.pendingClearColor = gputypes.Color{R: red, G: green, B: blue, A: alpha}
+	ws.hasPendingClear = true
 }
 
 // flushClear applies any pending clear immediately as a standalone render pass.
 // Called by EndFrame if no draw calls consumed the pending clear.
-func (r *Renderer) flushClear() {
-	if !r.hasPendingClear || r.currentView == nil {
+func (ws *windowSurface) flushClear(device *wgpu.Device, r *Renderer) {
+	if !ws.hasPendingClear || ws.currentView == nil {
 		return
 	}
 
-	encoder, err := r.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+	encoder, err := device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "Clear",
 	})
 	if err != nil {
@@ -519,10 +568,10 @@ func (r *Renderer) flushClear() {
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       r.currentView,
+				View:       ws.currentView,
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
-				ClearValue: r.pendingClearColor,
+				ClearValue: ws.pendingClearColor,
 			},
 		},
 	})
@@ -540,8 +589,8 @@ func (r *Renderer) flushClear() {
 	}
 
 	r.submitTracked(commands)
-	r.hasPendingClear = false
-	r.frameCleared = true
+	ws.hasPendingClear = false
+	ws.frameCleared = true
 }
 
 // submitTracked submits commands with non-blocking tracking.
@@ -558,12 +607,12 @@ func (r *Renderer) submitTracked(commands *wgpu.CommandBuffer) {
 
 // Size returns the current render target size.
 func (r *Renderer) Size() (width, height int) {
-	return int(r.width), int(r.height)
+	return int(r.primary.width), int(r.primary.height)
 }
 
 // Format returns the surface texture format.
 func (r *Renderer) Format() gputypes.TextureFormat {
-	return r.format
+	return r.primary.format
 }
 
 // Backend returns the name of the active backend.
@@ -609,7 +658,7 @@ func (r *Renderer) initTrianglePipeline() error {
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
 				{
-					Format:    r.format,
+					Format:    r.primary.format,
 					WriteMask: gputypes.ColorWriteMaskAll,
 				},
 			},
@@ -624,7 +673,7 @@ func (r *Renderer) initTrianglePipeline() error {
 
 // DrawTriangle draws the built-in colored triangle.
 func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
-	if r.currentView == nil {
+	if r.primary.currentView == nil {
 		return nil
 	}
 
@@ -645,7 +694,7 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       r.currentView,
+				View:       r.primary.currentView,
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
 				ClearValue: gputypes.Color{R: clearR, G: clearG, B: clearB, A: clearA},
@@ -764,7 +813,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
 				{
-					Format:    r.format,
+					Format:    r.primary.format,
 					WriteMask: gputypes.ColorWriteMaskAll,
 					Blend: &gputypes.BlendState{
 						Color: gputypes.BlendComponent{
@@ -860,7 +909,8 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 // drawTexturedQuad draws a textured quad with the given options.
 // This is an internal method called by Context.DrawTextureEx.
 func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
-	if r.currentView == nil {
+	ws := r.primary
+	if ws.currentView == nil {
 		return nil // No frame in progress
 	}
 
@@ -891,13 +941,13 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		return fmt.Errorf("gogpu: failed to create command encoder: %w", err)
 	}
 
-	// Upload uniform data
+	// Upload uniform data — screen dimensions come from per-window state
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(r.width)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(r.height)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(ws.width)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
 	if err := r.device.Queue().WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData); err != nil {
@@ -907,10 +957,10 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	// Determine LoadOp: consume pending clear if available, otherwise preserve content.
 	loadOp := gputypes.LoadOpClear
 	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 1}
-	if r.hasPendingClear {
-		clearValue = r.pendingClearColor
-		r.hasPendingClear = false
-	} else if r.frameCleared {
+	if ws.hasPendingClear {
+		clearValue = ws.pendingClearColor
+		ws.hasPendingClear = false
+	} else if ws.frameCleared {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -918,7 +968,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       r.currentView,
+				View:       ws.currentView,
 				LoadOp:     loadOp,
 				StoreOp:    gputypes.StoreOpStore,
 				ClearValue: clearValue,
@@ -952,7 +1002,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	r.submitTracked(commands)
 
 	// Mark frame as having content (for subsequent LoadOp)
-	r.frameCleared = true
+	ws.frameCleared = true
 
 	return nil
 }
@@ -1002,13 +1052,12 @@ func (r *Renderer) Destroy() {
 	// Wait for all tracked submissions and free their command buffers.
 	r.tracker.waitAll(r.device)
 
-	if r.currentView != nil {
-		r.currentView.Release()
-		r.currentView = nil
+	// Destroy primary window surface (per-window resources first).
+	if r.primary != nil {
+		r.primary.destroy()
 	}
-	r.currentSurfaceTexture = nil
 
-	// Release cached texture bind groups
+	// Release cached texture bind groups (device-level, shared)
 	for view, bg := range r.texBindGroupCache {
 		bg.Release()
 		delete(r.texBindGroupCache, view)
@@ -1056,11 +1105,7 @@ func (r *Renderer) Destroy() {
 		r.trianglePipelineLayout = nil
 	}
 
-	// Destroy core resources in reverse order of creation
-	if r.surface != nil {
-		r.surface.Release()
-		r.surface = nil
-	}
+	// Destroy shared GPU resources in reverse order of creation
 	if r.device != nil {
 		r.device.Release()
 		r.device = nil
@@ -1072,5 +1117,19 @@ func (r *Renderer) Destroy() {
 	if r.instance != nil {
 		r.instance.Release()
 		r.instance = nil
+	}
+}
+
+// destroy releases all resources owned by this window surface.
+func (ws *windowSurface) destroy() {
+	if ws.currentView != nil {
+		ws.currentView.Release()
+		ws.currentView = nil
+	}
+	ws.currentSurfaceTexture = nil
+
+	if ws.surface != nil {
+		ws.surface.Release()
+		ws.surface = nil
 	}
 }

@@ -144,7 +144,7 @@ func TestDrawTextureExNegativeDimensions(t *testing.T) {
 }
 
 func TestDrawTextureExValidTexture(t *testing.T) {
-	ctx := &Context{renderer: &Renderer{}}
+	ctx := &Context{renderer: newTestRenderer(800, 600)}
 
 	tex := &Texture{
 		texture: newMockWgpuTexture(),
@@ -168,7 +168,7 @@ func TestDrawTextureExValidTexture(t *testing.T) {
 }
 
 func TestDrawTextureExDefaultValues(t *testing.T) {
-	ctx := &Context{renderer: &Renderer{}}
+	ctx := &Context{renderer: newTestRenderer(800, 600)}
 
 	tex := &Texture{
 		texture: newMockWgpuTexture(),
@@ -263,7 +263,7 @@ func TestDrawTextureExAlphaClamping(t *testing.T) {
 	// This test verifies the alpha clamping logic conceptually.
 	// All alpha values (including out-of-range) should pass validation and
 	// return nil when no frame is in progress.
-	ctx := &Context{renderer: &Renderer{}}
+	ctx := &Context{renderer: newTestRenderer(800, 600)}
 
 	tex := &Texture{
 		texture: newMockWgpuTexture(),

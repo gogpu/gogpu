@@ -42,7 +42,7 @@ func (p *rendererDeviceProvider) Queue() *wgpu.Queue {
 
 // SurfaceFormat returns the preferred texture format.
 func (p *rendererDeviceProvider) SurfaceFormat() gputypes.TextureFormat {
-	return p.renderer.format
+	return p.renderer.primary.format
 }
 
 // Ensure rendererDeviceProvider implements DeviceProvider.
