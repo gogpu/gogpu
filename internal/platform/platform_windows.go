@@ -403,11 +403,9 @@ type bitmapInfoHeader struct {
 	biClrImportant  uint32
 }
 
-// windowsPlatform implements Platform for Windows.
-type windowsPlatform struct {
+// win32Window holds all per-window state for a single Win32 window.
+type win32Window struct {
 	hwnd        windows.HWND
-	hinstance   windows.Handle
-	cursor      uintptr // Default arrow cursor for WM_SETCURSOR
 	width       int
 	height      int
 	shouldClose bool
@@ -450,12 +448,26 @@ type windowsPlatform struct {
 	cursorHidden  bool // tracks ShowCursor balance
 }
 
+// windowsPlatform implements Platform for Windows.
+// Holds process-level state and a registry of windows keyed by HWND.
+type windowsPlatform struct {
+	hinstance windows.Handle
+	cursor    uintptr // Default arrow cursor for WM_SETCURSOR
+
+	// Window registry keyed by HWND for WndProc routing.
+	windowMu sync.RWMutex
+	windows  map[windows.HWND]*win32Window
+
+	// Primary window for backward-compatible single-window API.
+	primary *win32Window
+}
+
 // Global instance for window procedure callback
 var globalPlatform *windowsPlatform
 
 func newPlatform() Platform {
 	return &windowsPlatform{
-		startTime: time.Now(),
+		windows: make(map[windows.HWND]*win32Window),
 	}
 }
 
@@ -471,7 +483,7 @@ func (p *windowsPlatform) Init(config Config) error {
 		procSetProcessDPIAware.Call()
 	}
 
-	// Store global reference for callback
+	// Store global reference for WndProc callback routing
 	globalPlatform = p
 
 	// Get HINSTANCE
@@ -542,10 +554,19 @@ func (p *windowsPlatform) Init(config Config) error {
 		return fmt.Errorf("CreateWindowExW failed")
 	}
 
-	p.hwnd = windows.HWND(hwnd)
-	p.width = config.Width
-	p.height = config.Height
-	p.frameless = config.Frameless
+	w := &win32Window{
+		hwnd:      windows.HWND(hwnd),
+		width:     config.Width,
+		height:    config.Height,
+		frameless: config.Frameless,
+		startTime: time.Now(),
+	}
+
+	// Register window in the map for WndProc routing
+	p.windowMu.Lock()
+	p.windows[w.hwnd] = w
+	p.windowMu.Unlock()
+	p.primary = w
 
 	// Enable DWM shadow for frameless windows.
 	if config.Frameless {
@@ -553,32 +574,32 @@ func (p *windowsPlatform) Init(config Config) error {
 			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
 		}
 		m := margins{0, 0, 0, 1}
-		procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
+		procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
 		// Force WM_NCCALCSIZE to remove NC area, then update cached size
 		// so first frame renders at full window size.
-		procSetWindowPos.Call(uintptr(p.hwnd), 0, 0, 0, 0, 0,
+		procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
 			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
-		p.updateSize()
+		w.updateSize()
 	}
 
 	// Show window (frameless was created hidden to avoid first-frame artifact)
-	procShowWindow.Call(uintptr(p.hwnd), swShowNormal)
-	procUpdateWindow.Call(uintptr(p.hwnd))
+	procShowWindow.Call(uintptr(w.hwnd), swShowNormal)
+	procUpdateWindow.Call(uintptr(w.hwnd))
 
 	// Get actual client size
-	p.updateSize()
+	w.updateSize()
 
 	return nil
 }
 
-func (p *windowsPlatform) updateSize() {
+func (w *win32Window) updateSize() {
 	var r rect
-	procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+	procGetClientRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&r)))
 
-	p.sizeMu.Lock()
-	p.width = int(r.right - r.left)
-	p.height = int(r.bottom - r.top)
-	p.sizeMu.Unlock()
+	w.sizeMu.Lock()
+	w.width = int(r.right - r.left)
+	w.height = int(r.bottom - r.top)
+	w.sizeMu.Unlock()
 }
 
 func (p *windowsPlatform) PollEvents() Event {
@@ -597,13 +618,16 @@ func (p *windowsPlatform) PollEvents() Event {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 
-	// Return queued event if any
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
+	return p.primary.dequeueEvent()
+}
 
-	if len(p.events) > 0 {
-		event := p.events[0]
-		p.events = p.events[1:]
+func (w *win32Window) dequeueEvent() Event {
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+
+	if len(w.events) > 0 {
+		event := w.events[0]
+		w.events = w.events[1:]
 		return event
 	}
 
@@ -611,80 +635,96 @@ func (p *windowsPlatform) PollEvents() Event {
 }
 
 func (p *windowsPlatform) ShouldClose() bool {
-	return p.shouldClose
+	return p.primary.shouldClose
 }
 
-// LogicalSize returns the window client area in DIP (device-independent pixels).
-// On Windows with DPI awareness, this is the client rect divided by DPI scale.
-// For most Windows apps at 100% scaling, this equals PhysicalSize.
 func (p *windowsPlatform) LogicalSize() (width, height int) {
-	p.sizeMu.RLock()
-	defer p.sizeMu.RUnlock()
-
-	scale := p.scaleFactor()
-	if scale <= 0 || scale == 1.0 {
-		return p.width, p.height
-	}
-	return int(float64(p.width) / scale), int(float64(p.height) / scale)
+	return p.primary.LogicalSize()
 }
 
-// PhysicalSize returns the GPU framebuffer size in device pixels.
-// On Windows this is the actual client rect size (GetClientRect).
+func (w *win32Window) LogicalSize() (width, height int) {
+	w.sizeMu.RLock()
+	defer w.sizeMu.RUnlock()
+
+	scale := w.scaleFactor()
+	if scale <= 0 || scale == 1.0 {
+		return w.width, w.height
+	}
+	return int(float64(w.width) / scale), int(float64(w.height) / scale)
+}
+
 func (p *windowsPlatform) PhysicalSize() (width, height int) {
-	p.sizeMu.RLock()
-	defer p.sizeMu.RUnlock()
-	return p.width, p.height
+	return p.primary.PhysicalSize()
+}
+
+func (w *win32Window) PhysicalSize() (width, height int) {
+	w.sizeMu.RLock()
+	defer w.sizeMu.RUnlock()
+	return w.width, w.height
 }
 
 // scaleFactor returns the DPI scale factor for the window.
 // Must NOT hold sizeMu (calls syscall).
-func (p *windowsPlatform) scaleFactor() float64 {
-	dpi, _, _ := procGetDpiForWindow.Call(uintptr(p.hwnd))
+func (w *win32Window) scaleFactor() float64 {
+	dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
 	if dpi == 0 {
 		return 1.0
 	}
 	return float64(dpi) / 96.0
 }
 
-// InSizeMove returns true if the window is in a modal resize/move loop.
-// During this time, rendering should continue but swapchain recreation
-// should be deferred to prevent hangs.
 func (p *windowsPlatform) InSizeMove() bool {
-	p.sizeMu.RLock()
-	defer p.sizeMu.RUnlock()
-	return p.inSizeMove
+	return p.primary.InSizeMove()
+}
+
+func (w *win32Window) InSizeMove() bool {
+	w.sizeMu.RLock()
+	defer w.sizeMu.RUnlock()
+	return w.inSizeMove
 }
 
 func (p *windowsPlatform) GetHandle() (instance, window uintptr) {
-	return uintptr(p.hinstance), uintptr(p.hwnd)
+	return uintptr(p.hinstance), uintptr(p.primary.hwnd)
 }
 
-// SetPointerCallback registers a callback for pointer events.
 func (p *windowsPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	p.callbackMu.Lock()
-	p.pointerCallback = fn
-	p.callbackMu.Unlock()
+	p.primary.setPointerCallback(fn)
 }
 
-// SetScrollCallback registers a callback for scroll events.
+func (w *win32Window) setPointerCallback(fn func(gpucontext.PointerEvent)) {
+	w.callbackMu.Lock()
+	w.pointerCallback = fn
+	w.callbackMu.Unlock()
+}
+
 func (p *windowsPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	p.callbackMu.Lock()
-	p.scrollCallback = fn
-	p.callbackMu.Unlock()
+	p.primary.setScrollCallback(fn)
 }
 
-// SetKeyCallback registers a callback for keyboard events.
+func (w *win32Window) setScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	w.callbackMu.Lock()
+	w.scrollCallback = fn
+	w.callbackMu.Unlock()
+}
+
 func (p *windowsPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	p.callbackMu.Lock()
-	p.keyboardCallback = fn
-	p.callbackMu.Unlock()
+	p.primary.setKeyCallback(fn)
 }
 
-// SetCharCallback registers a callback for Unicode character input.
+func (w *win32Window) setKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	w.callbackMu.Lock()
+	w.keyboardCallback = fn
+	w.callbackMu.Unlock()
+}
+
 func (p *windowsPlatform) SetCharCallback(fn func(rune)) {
-	p.callbackMu.Lock()
-	p.charCallback = fn
-	p.callbackMu.Unlock()
+	p.primary.setCharCallback(fn)
+}
+
+func (w *win32Window) setCharCallback(fn func(rune)) {
+	w.callbackMu.Lock()
+	w.charCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetModalFrameCallback registers a callback invoked via WM_TIMER during
@@ -701,15 +741,25 @@ func (p *windowsPlatform) SetCharCallback(fn func(rune)) {
 // Future: An independent render thread would eliminate this mechanism
 // by decoupling the render loop from the message pump. See ROADMAP.md.
 func (p *windowsPlatform) SetModalFrameCallback(fn func()) {
-	p.callbackMu.Lock()
-	p.modalFrameCallback = fn
-	p.callbackMu.Unlock()
+	p.primary.setModalFrameCallback(fn)
+}
+
+func (w *win32Window) setModalFrameCallback(fn func()) {
+	w.callbackMu.Lock()
+	w.modalFrameCallback = fn
+	w.callbackMu.Unlock()
 }
 
 func (p *windowsPlatform) Destroy() {
-	if p.hwnd != 0 {
-		procDestroyWindow.Call(uintptr(p.hwnd))
-		p.hwnd = 0
+	w := p.primary
+	if w != nil && w.hwnd != 0 {
+		p.windowMu.Lock()
+		delete(p.windows, w.hwnd)
+		p.windowMu.Unlock()
+
+		procDestroyWindow.Call(uintptr(w.hwnd))
+		w.hwnd = 0
+		p.primary = nil
 	}
 	globalPlatform = nil
 }
@@ -731,30 +781,26 @@ func (p *windowsPlatform) WaitEvents() {
 // WakeUp unblocks WaitEvents from any goroutine.
 // PostMessageW is thread-safe and wakes MsgWaitForMultipleObjectsEx.
 func (p *windowsPlatform) WakeUp() {
-	procPostMessageW.Call(uintptr(p.hwnd), uintptr(wmWakeUp), 0, 0)
+	procPostMessageW.Call(uintptr(p.primary.hwnd), uintptr(wmWakeUp), 0, 0)
 }
 
-// ScaleFactor returns the DPI scale factor for the window.
-// 1.0 = 96 DPI (standard), 2.0 = 192 DPI (HiDPI).
 // ScaleFactor returns the DPI scale factor.
 // 1.0 = 96 DPI (standard), 1.25 = 120 DPI, 1.5 = 144 DPI, 2.0 = 192 DPI.
 func (p *windowsPlatform) ScaleFactor() float64 {
-	return p.scaleFactor()
+	return p.primary.scaleFactor()
 }
 
-// PrepareFrame returns current DPI state for the Windows platform.
 func (p *windowsPlatform) PrepareFrame() PrepareFrameResult {
-	w, h := p.PhysicalSize()
+	w, h := p.primary.PhysicalSize()
 	return PrepareFrameResult{
-		ScaleFactor:    p.scaleFactor(),
+		ScaleFactor:    p.primary.scaleFactor(),
 		PhysicalWidth:  uint32(w),
 		PhysicalHeight: uint32(h),
 	}
 }
 
-// ClipboardRead reads text from the system clipboard.
 func (p *windowsPlatform) ClipboardRead() (string, error) {
-	ret, _, _ := procOpenClipboard.Call(uintptr(p.hwnd))
+	ret, _, _ := procOpenClipboard.Call(uintptr(p.primary.hwnd))
 	if ret == 0 {
 		return "", fmt.Errorf("OpenClipboard failed")
 	}
@@ -780,9 +826,8 @@ func (p *windowsPlatform) ClipboardRead() (string, error) {
 	return text, nil
 }
 
-// ClipboardWrite writes text to the system clipboard.
 func (p *windowsPlatform) ClipboardWrite(text string) error {
-	ret, _, _ := procOpenClipboard.Call(uintptr(p.hwnd))
+	ret, _, _ := procOpenClipboard.Call(uintptr(p.primary.hwnd))
 	if ret == 0 {
 		return fmt.Errorf("OpenClipboard failed")
 	}
@@ -826,8 +871,6 @@ func (p *windowsPlatform) ClipboardWrite(text string) error {
 	return nil
 }
 
-// SetCursor changes the mouse cursor shape.
-// cursorID maps to gpucontext.CursorShape values (0-11).
 func (p *windowsPlatform) SetCursor(cursorID int) {
 	var idc uintptr
 	switch cursorID {
@@ -853,7 +896,7 @@ func (p *windowsPlatform) SetCursor(cursorID int) {
 		idc = idcNo // NotAllowed
 	case 10:
 		idc = idcWait // Wait
-	case 11: // None — hide cursor
+	case 11: // None -- hide cursor
 		p.cursor = 0
 		procSetCursor.Call(0)
 		return
@@ -949,32 +992,34 @@ func (p *windowsPlatform) FontScale() float32 {
 	return float32(p.ScaleFactor())
 }
 
-// SetCursorMode sets cursor confinement/lock mode.
-// 0=normal, 1=locked (hidden + confined + relative deltas), 2=confined (visible + confined).
 func (p *windowsPlatform) SetCursorMode(mode int) {
-	if mode == p.cursorMode {
+	p.primary.setCursorMode(mode)
+}
+
+func (w *win32Window) setCursorMode(mode int) {
+	if mode == w.cursorMode {
 		return
 	}
 
-	oldMode := p.cursorMode
-	p.cursorMode = mode
+	oldMode := w.cursorMode
+	w.cursorMode = mode
 
 	switch mode {
 	case 1: // Locked
 		// Save current cursor position for restoration
 		var pt point
 		procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-		p.savedCursorX = pt.x
-		p.savedCursorY = pt.y
+		w.savedCursorX = pt.x
+		w.savedCursorY = pt.y
 
 		// Compute window center in screen coordinates
-		p.updateCursorClipRect()
+		w.updateCursorClipRect()
 
 		// Clip cursor to window
 		var r rect
-		procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+		procGetClientRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&r)))
 		var origin point
-		procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+		procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&origin)))
 		clipRect := rect{
 			left:   origin.x + r.left,
 			top:    origin.y + r.top,
@@ -984,20 +1029,20 @@ func (p *windowsPlatform) SetCursorMode(mode int) {
 		procClipCursor.Call(uintptr(unsafe.Pointer(&clipRect)))
 
 		// Hide cursor
-		if !p.cursorHidden {
+		if !w.cursorHidden {
 			procShowCursorW.Call(0) // FALSE = hide
-			p.cursorHidden = true
+			w.cursorHidden = true
 		}
 
 		// Warp to center
-		procSetCursorPos.Call(uintptr(p.cursorCenterX), uintptr(p.cursorCenterY))
+		procSetCursorPos.Call(uintptr(w.cursorCenterX), uintptr(w.cursorCenterY))
 
 	case 2: // Confined
 		// Clip cursor to window
 		var r rect
-		procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+		procGetClientRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&r)))
 		var origin point
-		procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+		procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&origin)))
 		clipRect := rect{
 			left:   origin.x + r.left,
 			top:    origin.y + r.top,
@@ -1007,14 +1052,14 @@ func (p *windowsPlatform) SetCursorMode(mode int) {
 		procClipCursor.Call(uintptr(unsafe.Pointer(&clipRect)))
 
 		// Show cursor if it was hidden
-		if p.cursorHidden {
+		if w.cursorHidden {
 			procShowCursorW.Call(1) // TRUE = show
-			p.cursorHidden = false
+			w.cursorHidden = false
 		}
 
 		// Restore cursor position if coming from locked mode
 		if oldMode == 1 {
-			procSetCursorPos.Call(uintptr(p.savedCursorX), uintptr(p.savedCursorY))
+			procSetCursorPos.Call(uintptr(w.savedCursorX), uintptr(w.savedCursorY))
 		}
 
 	default: // Normal (0)
@@ -1022,38 +1067,36 @@ func (p *windowsPlatform) SetCursorMode(mode int) {
 		procClipCursor.Call(0)
 
 		// Show cursor if hidden
-		if p.cursorHidden {
+		if w.cursorHidden {
 			procShowCursorW.Call(1) // TRUE = show
-			p.cursorHidden = false
+			w.cursorHidden = false
 		}
 
 		// Restore cursor position if coming from locked mode
 		if oldMode == 1 {
-			procSetCursorPos.Call(uintptr(p.savedCursorX), uintptr(p.savedCursorY))
+			procSetCursorPos.Call(uintptr(w.savedCursorX), uintptr(w.savedCursorY))
 		}
 	}
 }
 
-// CursorMode returns the current cursor mode.
 func (p *windowsPlatform) CursorMode() int {
-	return p.cursorMode
+	return p.primary.cursorMode
 }
 
-// updateCursorClipRect computes the window center in screen coordinates.
-// Called when entering locked mode or when the window moves/resizes while locked.
-func (p *windowsPlatform) updateCursorClipRect() {
+func (w *win32Window) updateCursorClipRect() {
 	var r rect
-	procGetClientRect.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&r)))
+	procGetClientRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&r)))
 	var origin point
-	procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
-	p.cursorCenterX = origin.x + (r.right-r.left)/2
-	p.cursorCenterY = origin.y + (r.bottom-r.top)/2
+	procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&origin)))
+	w.cursorCenterX = origin.x + (r.right-r.left)/2
+	w.cursorCenterY = origin.y + (r.bottom-r.top)/2
 }
 
 func (p *windowsPlatform) SetFrameless(frameless bool) {
-	p.callbackMu.Lock()
-	p.frameless = frameless
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.frameless = frameless
+	w.callbackMu.Unlock()
 
 	// Style is always WS_OVERLAPPEDWINDOW (Chrome approach).
 	// WM_NCCALCSIZE removes the title bar when frameless=true.
@@ -1065,67 +1108,66 @@ func (p *windowsPlatform) SetFrameless(frameless bool) {
 	if frameless {
 		m = margins{0, 0, 0, 1} // 1px bottom = enable DWM shadow
 	}
-	procDwmExtendFrameIntoClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&m)))
+	procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
 
 	// Force WM_NCCALCSIZE recalculation
-	procSetWindowPos.Call(uintptr(p.hwnd), 0, 0, 0, 0, 0,
+	procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
 		swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
 }
 
 func (p *windowsPlatform) IsFrameless() bool {
-	p.callbackMu.RLock()
-	defer p.callbackMu.RUnlock()
-	return p.frameless
+	w := p.primary
+	w.callbackMu.RLock()
+	defer w.callbackMu.RUnlock()
+	return w.frameless
 }
 
 func (p *windowsPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
-	p.callbackMu.Lock()
-	defer p.callbackMu.Unlock()
-	p.hitTestCallback = fn
+	w := p.primary
+	w.callbackMu.Lock()
+	defer w.callbackMu.Unlock()
+	w.hitTestCallback = fn
 }
 
 func (p *windowsPlatform) SyncFrame() {
 	// DwmFlush synchronizes with Desktop Window Manager composition.
 	// During resize, this ensures our rendered frame and the DWM window
 	// border update appear in the same composition cycle, reducing lag.
-	p.sizeMu.RLock()
-	resizing := p.inSizeMove
-	p.sizeMu.RUnlock()
-	if resizing {
+	if p.primary.InSizeMove() {
 		procDwmFlush.Call()
 	}
 }
 
 func (p *windowsPlatform) Minimize() {
-	procShowWindow.Call(uintptr(p.hwnd), swMinimize)
+	procShowWindow.Call(uintptr(p.primary.hwnd), swMinimize)
 }
 
 func (p *windowsPlatform) Maximize() {
 	if p.IsMaximized() {
-		procShowWindow.Call(uintptr(p.hwnd), swRestore)
+		procShowWindow.Call(uintptr(p.primary.hwnd), swRestore)
 	} else {
-		procShowWindow.Call(uintptr(p.hwnd), swMaximize)
+		procShowWindow.Call(uintptr(p.primary.hwnd), swMaximize)
 	}
 }
 
 func (p *windowsPlatform) IsMaximized() bool {
-	ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd))
+	ret, _, _ := procIsZoomed.Call(uintptr(p.primary.hwnd))
 	return ret != 0
 }
 
 func (p *windowsPlatform) CloseWindow() {
-	procPostMessageW.Call(uintptr(p.hwnd), wmClose, 0, 0)
+	procPostMessageW.Call(uintptr(p.primary.hwnd), wmClose, 0, 0)
 }
 
-func (p *windowsPlatform) queueEvent(event Event) {
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
+func (w *win32Window) queueEvent(event Event) {
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
 
 	// Coalesce resize events to avoid swapchain recreation storm.
 	// During drag resize, Windows sends hundreds of WM_SIZE messages.
 	// We only care about the final size.
-	if event.Type == EventResize && len(p.events) > 0 {
-		last := &p.events[len(p.events)-1]
+	if event.Type == EventResize && len(w.events) > 0 {
+		last := &w.events[len(w.events)-1]
 		if last.Type == EventResize {
 			// Update existing resize event with new dimensions
 			last.Width = event.Width
@@ -1134,7 +1176,7 @@ func (p *windowsPlatform) queueEvent(event Event) {
 		}
 	}
 
-	p.events = append(p.events, event)
+	w.events = append(w.events, event)
 }
 
 // extractMousePos extracts mouse position from lParam.
@@ -1201,33 +1243,30 @@ func extractXButton(wParam uintptr) gpucontext.Button {
 	return gpucontext.ButtonNone
 }
 
-// dispatchPointerEvent dispatches a pointer event to the registered callback.
-func (p *windowsPlatform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	p.callbackMu.RLock()
-	callback := p.pointerCallback
-	p.callbackMu.RUnlock()
+func (w *win32Window) dispatchPointerEvent(ev gpucontext.PointerEvent) {
+	w.callbackMu.RLock()
+	callback := w.pointerCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(ev)
 	}
 }
 
-// dispatchScrollEvent dispatches a scroll event to the registered callback.
-func (p *windowsPlatform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	p.callbackMu.RLock()
-	callback := p.scrollCallback
-	p.callbackMu.RUnlock()
+func (w *win32Window) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
+	w.callbackMu.RLock()
+	callback := w.scrollCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(ev)
 	}
 }
 
-// dispatchKeyEvent dispatches a keyboard event to the registered callback.
-func (p *windowsPlatform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	p.callbackMu.RLock()
-	callback := p.keyboardCallback
-	p.callbackMu.RUnlock()
+func (w *win32Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	w.callbackMu.RLock()
+	callback := w.keyboardCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(key, mods, pressed)
@@ -1560,25 +1599,22 @@ func isAltGrSequence() bool {
 	return false
 }
 
-// trackMouseLeave enables WM_MOUSELEAVE tracking.
-func (p *windowsPlatform) trackMouseLeave() {
+func (w *win32Window) trackMouseLeave() {
 	tme := trackMouseEventStruct{
 		cbSize:    uint32(unsafe.Sizeof(trackMouseEventStruct{})),
 		dwFlags:   tmeLeave,
-		hwndTrack: p.hwnd,
+		hwndTrack: w.hwnd,
 	}
 	// TrackMouseEvent returns BOOL; we ignore the result as failure is non-fatal
 	ret, _, _ := procTrackMouseEvent.Call(uintptr(unsafe.Pointer(&tme)))
 	_ = ret // Ignore return value
 }
 
-// eventTimestamp returns the event timestamp as duration since start.
-func (p *windowsPlatform) eventTimestamp() time.Duration {
-	return time.Since(p.startTime)
+func (w *win32Window) eventTimestamp() time.Duration {
+	return time.Since(w.startTime)
 }
 
-// createPointerEvent creates a PointerEvent with common fields filled in.
-func (p *windowsPlatform) createPointerEvent(
+func (w *win32Window) createPointerEvent(
 	eventType gpucontext.PointerEventType,
 	button gpucontext.Button,
 	x, y float64,
@@ -1587,10 +1623,10 @@ func (p *windowsPlatform) createPointerEvent(
 	buttons := extractButtons(wParam)
 	modifiers := extractModifiers(wParam)
 
-	// Convert physical pixels → logical (DIP) coordinates.
+	// Convert physical pixels -> logical (DIP) coordinates.
 	// With DPI awareness, WM_MOUSEMOVE reports physical pixels, but UI layout
 	// uses logical coordinates (App.Size() returns LogicalSize).
-	scale := p.scaleFactor()
+	scale := w.scaleFactor()
 	if scale > 1.0 {
 		x /= scale
 		y /= scale
@@ -1618,34 +1654,27 @@ func (p *windowsPlatform) createPointerEvent(
 		Button:      button,
 		Buttons:     buttons,
 		Modifiers:   modifiers,
-		Timestamp:   p.eventTimestamp(),
+		Timestamp:   w.eventTimestamp(),
 	}
 }
 
-// mouseCapture calls SetCapture on the first button press to track mouse
-// movement outside the window boundary during drag operations (sliders,
-// scrollbars, text selection). Must be called BEFORE dispatching the event
-// so the button state in p.buttons reflects the pre-press state.
-func (p *windowsPlatform) mouseCapture(wParam uintptr) {
-	p.mouseMu.Lock()
-	wasPressedBefore := p.buttons != gpucontext.ButtonsNone
-	p.buttons = extractButtons(wParam)
-	p.mouseMu.Unlock()
+func (w *win32Window) mouseCapture(wParam uintptr) {
+	w.mouseMu.Lock()
+	wasPressedBefore := w.buttons != gpucontext.ButtonsNone
+	w.buttons = extractButtons(wParam)
+	w.mouseMu.Unlock()
 
 	if !wasPressedBefore {
-		procSetCapture.Call(uintptr(p.hwnd))
+		procSetCapture.Call(uintptr(w.hwnd))
 	}
 }
 
-// mouseRelease calls ReleaseCapture when the last button is released.
-// Must be called AFTER dispatching the event so the PointerUp event
-// still has correct button state.
-func (p *windowsPlatform) mouseRelease(wParam uintptr) {
+func (w *win32Window) mouseRelease(wParam uintptr) {
 	newButtons := extractButtons(wParam)
 
-	p.mouseMu.Lock()
-	p.buttons = newButtons
-	p.mouseMu.Unlock()
+	w.mouseMu.Lock()
+	w.buttons = newButtons
+	w.mouseMu.Unlock()
 
 	if newButtons == gpucontext.ButtonsNone {
 		procReleaseCapture.Call()
@@ -1732,10 +1761,7 @@ func buttonFromEventType(eventType gpucontext.PointerEventType, flags uint32) gp
 	return gpucontext.ButtonNone
 }
 
-// createPointerEventFromWMPointer creates a PointerEvent from WM_POINTER* message data.
-// It calls GetPointerInfo to retrieve pointer details, and for pen input also
-// calls GetPointerPenInfo to get pressure and tilt data.
-func (p *windowsPlatform) createPointerEventFromWMPointer(
+func (w *win32Window) createPointerEventFromWMPointer(
 	eventType gpucontext.PointerEventType,
 	wParam, lParam uintptr,
 ) gpucontext.PointerEvent {
@@ -1756,17 +1782,17 @@ func (p *windowsPlatform) createPointerEventFromWMPointer(
 			Height:      1,
 			PointerType: gpucontext.PointerTypeMouse,
 			IsPrimary:   true,
-			Timestamp:   p.eventTimestamp(),
+			Timestamp:   w.eventTimestamp(),
 		}
 	}
 
 	// Convert screen coordinates to client coordinates (physical pixels),
 	// then to logical (DIP) coordinates for UI layout.
 	var origin point
-	procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&origin)))
+	procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&origin)))
 	x := float64(info.ptPixelLocation.x - origin.x)
 	y := float64(info.ptPixelLocation.y - origin.y)
-	if scale := p.scaleFactor(); scale > 1.0 {
+	if scale := w.scaleFactor(); scale > 1.0 {
 		x /= scale
 		y /= scale
 	}
@@ -1791,7 +1817,7 @@ func (p *windowsPlatform) createPointerEventFromWMPointer(
 		var penInfo pointerPenInfo
 		ret, _, _ = procGetPointerPenInfo.Call(uintptr(pointerID), uintptr(unsafe.Pointer(&penInfo)))
 		if ret != 0 {
-			// Pressure: 0-1024 → 0.0-1.0
+			// Pressure: 0-1024 -> 0.0-1.0
 			pressure = float32(penInfo.pressure) / 1024.0
 			tiltX = float32(penInfo.tiltX)
 			tiltY = float32(penInfo.tiltY)
@@ -1800,7 +1826,7 @@ func (p *windowsPlatform) createPointerEventFromWMPointer(
 
 	// For touch input, pressure is 0.5 when in contact (already set above)
 	// Width/Height could come from contact rect, but GetPointerTouchInfo
-	// would be needed — keep defaults for now
+	// would be needed -- keep defaults for now
 
 	return gpucontext.PointerEvent{
 		Type:        eventType,
@@ -1817,7 +1843,7 @@ func (p *windowsPlatform) createPointerEventFromWMPointer(
 		Button:      button,
 		Buttons:     buttons,
 		Modifiers:   modifiers,
-		Timestamp:   p.eventTimestamp(),
+		Timestamp:   w.eventTimestamp(),
 	}
 }
 
@@ -1831,19 +1857,27 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return ret
 	}
 
+	p.windowMu.RLock()
+	w := p.windows[hwnd]
+	p.windowMu.RUnlock()
+	if w == nil {
+		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		return ret
+	}
+
 	switch message {
 	case wmClose:
-		p.shouldClose = true
-		p.queueEvent(Event{Type: EventClose})
+		w.shouldClose = true
+		w.queueEvent(Event{Type: EventClose})
 		return 0
 
 	case wmNCUAHDrawCaption, wmNCUAHDrawFrame:
 		// Block undocumented UxTheme caption/frame drawing messages.
 		// These cause border artifacts on frameless windows.
 		// Source: rossy/borderless-window, wangwenx190/framelesshelper
-		p.callbackMu.RLock()
-		frameless := p.frameless
-		p.callbackMu.RUnlock()
+		w.callbackMu.RLock()
+		frameless := w.frameless
+		w.callbackMu.RUnlock()
 		if frameless {
 			return 0
 		}
@@ -1854,26 +1888,26 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// but SKIPS repainting the non-client area. This eliminates the
 		// visible border flash when the window gains/loses focus.
 		// Source: Chromium, Electron, rossy/borderless-window, FramelessHelper
-		p.callbackMu.RLock()
-		frameless := p.frameless
-		p.callbackMu.RUnlock()
+		w.callbackMu.RLock()
+		frameless := w.frameless
+		w.callbackMu.RUnlock()
 		if frameless {
 			// Invalidate client area to force GPU redraw over any NC artifacts.
-			procInvalidateRect.Call(uintptr(p.hwnd), 0, 0)
+			procInvalidateRect.Call(uintptr(w.hwnd), 0, 0)
 			return 1
 		}
 
 	case wmNCPaint:
-		// Let DefWindowProc handle WM_NCPAINT — DWM draws shadow + borders.
+		// Let DefWindowProc handle WM_NCPAINT -- DWM draws shadow + borders.
 		// Our GPU renderer covers the borders. JBR approach.
 
 	case wmNCCalcSize:
 		// JBR approach: remove ONLY the title bar (top NC area).
 		// Keep left/right/bottom NC borders so DWM shadow works.
 		// GPU renderer draws over the thin NC borders.
-		p.callbackMu.RLock()
-		frameless := p.frameless
-		p.callbackMu.RUnlock()
+		w.callbackMu.RLock()
+		frameless := w.frameless
+		w.callbackMu.RUnlock()
 
 		if frameless && wParam != 0 {
 			// Save original top before DefWindowProc adjusts it
@@ -1883,10 +1917,10 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			// Let Windows calculate NC area (borders, title bar)
 			procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 
-			// Restore top — removes title bar but keeps side/bottom borders
+			// Restore top -- removes title bar but keeps side/bottom borders
 			rgrc.top = frameTop
 
-			if ret, _, _ := procIsZoomed.Call(uintptr(p.hwnd)); ret != 0 {
+			if ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd)); ret != 0 {
 				// When maximized, add frame border to top to prevent
 				// window from extending above the screen
 				borderY, _, _ := procGetSystemMetrics.Call(smCYSizeFrame)
@@ -1898,10 +1932,10 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmNCHitTest:
 		// Custom hit testing for frameless windows
-		p.callbackMu.RLock()
-		cb := p.hitTestCallback
-		frameless := p.frameless
-		p.callbackMu.RUnlock()
+		w.callbackMu.RLock()
+		cb := w.hitTestCallback
+		frameless := w.frameless
+		w.callbackMu.RUnlock()
 
 		if frameless && cb != nil {
 			// Get cursor position in screen coordinates from lParam
@@ -1910,10 +1944,10 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 			// Convert screen to client coordinates
 			pt := point{x: int32(screenX), y: int32(screenY)}
-			procScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&pt)))
+			procScreenToClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&pt)))
 
 			// Convert to logical (DIP) coordinates
-			scale := p.scaleFactor()
+			scale := w.scaleFactor()
 			logX := float64(pt.x)
 			logY := float64(pt.y)
 			if scale > 1.0 {
@@ -1929,18 +1963,18 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Release cursor grab on focus loss, re-grab on focus gain.
 		activationState := wParam & 0xFFFF
 		if activationState == waInactive {
-			// Window lost focus — temporarily release cursor constraints
-			if p.cursorMode != 0 {
+			// Window lost focus -- temporarily release cursor constraints
+			if w.cursorMode != 0 {
 				procClipCursor.Call(0)
-				if p.cursorHidden {
+				if w.cursorHidden {
 					procShowCursorW.Call(1)
-					p.cursorHidden = false
+					w.cursorHidden = false
 				}
 			}
 		} else {
-			// Window gained focus — re-apply cursor mode
-			if p.cursorMode != 0 {
-				p.SetCursorMode(p.cursorMode)
+			// Window gained focus -- re-apply cursor mode
+			if w.cursorMode != 0 {
+				w.setCursorMode(w.cursorMode)
 			}
 		}
 
@@ -1952,7 +1986,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Window moved to a monitor with different DPI.
 		// lParam points to a RECT with the suggested new position/size.
 		suggestedRect := (*rect)(unsafe.Pointer(lParam)) //nolint:govet // lParam is RECT*
-		procSetWindowPos.Call(uintptr(p.hwnd), 0,
+		procSetWindowPos.Call(uintptr(w.hwnd), 0,
 			uintptr(suggestedRect.left),
 			uintptr(suggestedRect.top),
 			uintptr(suggestedRect.right-suggestedRect.left),
@@ -1960,12 +1994,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			swpNoZOrder|swpNoActivate)
 
 		// Update cached client size after DPI-driven resize.
-		p.updateSize()
+		w.updateSize()
 
 		// Queue resize event with new DPI-adjusted dimensions.
-		physW, physH := p.PhysicalSize()
-		logW, logH := p.LogicalSize()
-		p.queueEvent(Event{
+		physW, physH := w.PhysicalSize()
+		logW, logH := w.LogicalSize()
+		w.queueEvent(Event{
 			Type:           EventResize,
 			Width:          logW,
 			Height:         logH,
@@ -1997,14 +2031,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		newWidth := int(lParam & 0xFFFF)
 		newHeight := int((lParam >> 16) & 0xFFFF)
 
-		p.sizeMu.Lock()
-		sizeChanged := newWidth > 0 && newHeight > 0 && (newWidth != p.width || newHeight != p.height)
-		inSizeMove := p.inSizeMove
+		w.sizeMu.Lock()
+		sizeChanged := newWidth > 0 && newHeight > 0 && (newWidth != w.width || newHeight != w.height)
+		inSizeMove := w.inSizeMove
 		if sizeChanged {
-			p.width = newWidth
-			p.height = newHeight
+			w.width = newWidth
+			w.height = newHeight
 		}
-		p.sizeMu.Unlock()
+		w.sizeMu.Unlock()
 
 		// During modal resize loop, don't queue events - wait for WM_EXITSIZEMOVE.
 		// DWM stretches the old swapchain content to the new window size; this is
@@ -2016,13 +2050,13 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			// On Windows, WM_SIZE provides physical pixels (client rect).
 			// Compute logical size from DPI scale for the event.
 			logW, logH := newWidth, newHeight
-			dpi, _, _ := procGetDpiForWindow.Call(uintptr(p.hwnd))
+			dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
 			if dpi > 0 && dpi != 96 {
 				scale := float64(dpi) / 96.0
 				logW = int(float64(newWidth) / scale)
 				logH = int(float64(newHeight) / scale)
 			}
-			p.queueEvent(Event{
+			w.queueEvent(Event{
 				Type:           EventResize,
 				Width:          logW,
 				Height:         logH,
@@ -2031,8 +2065,8 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			})
 
 			// Update cursor clip rect if locked or confined
-			if p.cursorMode != 0 {
-				p.SetCursorMode(p.cursorMode)
+			if w.cursorMode != 0 {
+				w.setCursorMode(w.cursorMode)
 			}
 		}
 		return 0
@@ -2042,45 +2076,45 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// When the user clicks the title bar or resize border, DefWindowProc runs
 		// a nested modal loop to distinguish click from drag (~500ms delay).
 		// Starting the timer here keeps animation alive during that delay.
-		procSetTimer.Call(uintptr(p.hwnd), renderTimerID, renderTimerMS, 0)
+		procSetTimer.Call(uintptr(w.hwnd), renderTimerID, renderTimerMS, 0)
 
 		// DefWindowProc handles the actual drag/resize detection (may block).
 		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 
 		// If DefWindowProc returned without entering a modal loop, kill the timer.
 		// WM_ENTERSIZEMOVE sets inSizeMove=true; if still false, no modal loop started.
-		p.sizeMu.RLock()
-		inModal := p.inSizeMove
-		p.sizeMu.RUnlock()
+		w.sizeMu.RLock()
+		inModal := w.inSizeMove
+		w.sizeMu.RUnlock()
 		if !inModal {
-			procKillTimer.Call(uintptr(p.hwnd), renderTimerID)
+			procKillTimer.Call(uintptr(w.hwnd), renderTimerID)
 		}
 		return ret
 
 	case wmEnterSizeMove:
-		p.sizeMu.Lock()
-		p.inSizeMove = true
-		p.sizeMu.Unlock()
+		w.sizeMu.Lock()
+		w.inSizeMove = true
+		w.sizeMu.Unlock()
 
 		// Ensure render timer is running for the modal resize/move loop.
 		// Timer may already be running from WM_NCLBUTTONDOWN; SetTimer with
 		// the same ID safely replaces it (no duplicate timers).
-		procSetTimer.Call(uintptr(p.hwnd), renderTimerID, renderTimerMS, 0)
+		procSetTimer.Call(uintptr(w.hwnd), renderTimerID, renderTimerMS, 0)
 		return 0
 
 	case wmExitSizeMove:
-		// Stop the render timer — normal main loop rendering resumes.
-		procKillTimer.Call(uintptr(p.hwnd), renderTimerID)
+		// Stop the render timer -- normal main loop rendering resumes.
+		procKillTimer.Call(uintptr(w.hwnd), renderTimerID)
 
-		p.sizeMu.Lock()
-		p.inSizeMove = false
-		p.sizeMu.Unlock()
+		w.sizeMu.Lock()
+		w.inSizeMove = false
+		w.sizeMu.Unlock()
 
 		// Queue final resize event when resize ends
-		p.updateSize()
-		physW, physH := p.PhysicalSize()
-		logW, logH := p.LogicalSize()
-		p.queueEvent(Event{
+		w.updateSize()
+		physW, physH := w.PhysicalSize()
+		logW, logH := w.LogicalSize()
+		w.queueEvent(Event{
 			Type:           EventResize,
 			Width:          logW,
 			Height:         logH,
@@ -2094,9 +2128,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			// Invoke the modal frame callback to render a frame during
 			// the modal drag/resize loop. The callback runs on the main
 			// thread, preserving serialization with onUpdate/onDraw.
-			p.callbackMu.RLock()
-			callback := p.modalFrameCallback
-			p.callbackMu.RUnlock()
+			w.callbackMu.RLock()
+			callback := w.modalFrameCallback
+			w.callbackMu.RUnlock()
 
 			if callback != nil {
 				callback()
@@ -2116,12 +2150,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 
 		// Dispatch keyboard event
-		p.dispatchKeyEvent(key, mods, true)
+		w.dispatchKeyEvent(key, mods, true)
 
 		// ESC to close (convenience)
 		if wParam == vkEscape {
-			p.shouldClose = true
-			p.queueEvent(Event{Type: EventClose})
+			w.shouldClose = true
+			w.queueEvent(Event{Type: EventClose})
 		}
 
 		// For WM_SYSKEYDOWN: let DefWindowProc handle Alt+F4, Alt+Tab
@@ -2148,37 +2182,37 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 
 		// Dispatch keyboard event
-		p.dispatchKeyEvent(key, mods, false)
+		w.dispatchKeyEvent(key, mods, false)
 
 		// For WM_SYSKEYUP: suppress menu activation
 		return 0
 
 	case wmChar, wmSysChar:
 		// WM_CHAR/WM_SYSCHAR are generated by TranslateMessage().
-		// wParam is a UTF-16 code unit — supplementary characters (emoji, CJK)
+		// wParam is a UTF-16 code unit -- supplementary characters (emoji, CJK)
 		// arrive as two consecutive messages: high surrogate then low surrogate.
 		// Pattern: GLFW 3.4 win32_window.c + Ebiten textinput_windows.go
-		w := uint16(wParam)
-		if w >= 0xD800 && w <= 0xDBFF {
-			// High surrogate — store and wait for low surrogate
-			p.highSurrogate = w
+		codeUnit := uint16(wParam)
+		if codeUnit >= 0xD800 && codeUnit <= 0xDBFF {
+			// High surrogate -- store and wait for low surrogate
+			w.highSurrogate = codeUnit
 			return 0
 		}
 		var char rune
-		if w >= 0xDC00 && w <= 0xDFFF {
-			// Low surrogate — combine with stored high surrogate
-			if p.highSurrogate != 0 {
-				char = (rune(p.highSurrogate)-0xD800)<<10 + (rune(w) - 0xDC00) + 0x10000
+		if codeUnit >= 0xDC00 && codeUnit <= 0xDFFF {
+			// Low surrogate -- combine with stored high surrogate
+			if w.highSurrogate != 0 {
+				char = (rune(w.highSurrogate)-0xD800)<<10 + (rune(codeUnit) - 0xDC00) + 0x10000
 			}
 		} else {
-			char = rune(w)
+			char = rune(codeUnit)
 		}
-		p.highSurrogate = 0
+		w.highSurrogate = 0
 		// Filter control characters (Ctrl+A..Z = 0x01..0x1A, DEL = 0x7F)
 		if char >= 32 && char != 127 {
-			p.callbackMu.RLock()
-			callback := p.charCallback
-			p.callbackMu.RUnlock()
+			w.callbackMu.RLock()
+			callback := w.charCallback
+			w.callbackMu.RUnlock()
 			if callback != nil {
 				callback(char)
 			}
@@ -2186,15 +2220,15 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 0
 
 	case wmUnichar:
-		// WM_UNICHAR from third-party IMEs — wParam is a full Unicode codepoint.
+		// WM_UNICHAR from third-party IMEs -- wParam is a full Unicode codepoint.
 		if wParam == unicodeNochar {
 			return 1 // "Yes, we support WM_UNICHAR"
 		}
 		char := rune(wParam)
 		if char >= 32 && char != 127 {
-			p.callbackMu.RLock()
-			callback := p.charCallback
-			p.callbackMu.RUnlock()
+			w.callbackMu.RLock()
+			callback := w.charCallback
+			w.callbackMu.RUnlock()
 			if callback != nil {
 				callback(char)
 			}
@@ -2217,28 +2251,28 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	// WM_POINTER* fires for touch and pen input by default.
 	// Mouse continues via WM_MOUSE* messages (no EnableMouseInPointer).
 	case wmPointerDown:
-		ev := p.createPointerEventFromWMPointer(gpucontext.PointerDown, wParam, lParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEventFromWMPointer(gpucontext.PointerDown, wParam, lParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmPointerUp:
-		ev := p.createPointerEventFromWMPointer(gpucontext.PointerUp, wParam, lParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEventFromWMPointer(gpucontext.PointerUp, wParam, lParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmPointerUpdate:
-		ev := p.createPointerEventFromWMPointer(gpucontext.PointerMove, wParam, lParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEventFromWMPointer(gpucontext.PointerMove, wParam, lParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmPointerEnter:
-		ev := p.createPointerEventFromWMPointer(gpucontext.PointerEnter, wParam, lParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEventFromWMPointer(gpucontext.PointerEnter, wParam, lParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmPointerLeave:
-		ev := p.createPointerEventFromWMPointer(gpucontext.PointerLeave, wParam, lParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEventFromWMPointer(gpucontext.PointerLeave, wParam, lParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	// Mouse movement
@@ -2246,15 +2280,15 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		x, y := extractMousePos(lParam)
 
 		// In locked mode, compute delta from center and warp back
-		if p.cursorMode == 1 {
+		if w.cursorMode == 1 {
 			// Convert client coords to screen coords to compare with center
 			var screenPt point
 			screenPt.x = int32(x)
 			screenPt.y = int32(y)
-			procClientToScreen.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&screenPt)))
+			procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&screenPt)))
 
-			deltaX := float64(screenPt.x - p.cursorCenterX)
-			deltaY := float64(screenPt.y - p.cursorCenterY)
+			deltaX := float64(screenPt.x - w.cursorCenterX)
+			deltaY := float64(screenPt.y - w.cursorCenterY)
 
 			// Skip the warp-back event (delta=0 means cursor is at center)
 			if deltaX == 0 && deltaY == 0 {
@@ -2262,52 +2296,52 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			}
 
 			// Warp cursor back to center
-			procSetCursorPos.Call(uintptr(p.cursorCenterX), uintptr(p.cursorCenterY))
+			procSetCursorPos.Call(uintptr(w.cursorCenterX), uintptr(w.cursorCenterY))
 
 			// Update mouse state
-			p.mouseMu.Lock()
-			p.buttons = extractButtons(wParam)
-			p.modifiers = extractModifiers(wParam)
-			p.mouseInWindow = true
-			p.mouseMu.Unlock()
+			w.mouseMu.Lock()
+			w.buttons = extractButtons(wParam)
+			w.modifiers = extractModifiers(wParam)
+			w.mouseInWindow = true
+			w.mouseMu.Unlock()
 
 			// Emit move event with relative deltas
-			ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, wParam)
+			ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, wParam)
 			ev.DeltaX = deltaX
 			ev.DeltaY = deltaY
-			p.dispatchPointerEvent(ev)
+			w.dispatchPointerEvent(ev)
 			return 0
 		}
 
 		// Track mouse enter/leave
-		p.mouseMu.Lock()
-		wasInWindow := p.mouseInWindow
-		p.mouseX = x
-		p.mouseY = y
-		p.buttons = extractButtons(wParam)
-		p.modifiers = extractModifiers(wParam)
-		p.mouseInWindow = true
-		p.mouseMu.Unlock()
+		w.mouseMu.Lock()
+		wasInWindow := w.mouseInWindow
+		w.mouseX = x
+		w.mouseY = y
+		w.buttons = extractButtons(wParam)
+		w.modifiers = extractModifiers(wParam)
+		w.mouseInWindow = true
+		w.mouseMu.Unlock()
 
 		// First move in window - send PointerEnter
 		if !wasInWindow {
-			p.trackMouseLeave()
-			ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, x, y, wParam)
-			p.dispatchPointerEvent(ev)
+			w.trackMouseLeave()
+			ev := w.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, x, y, wParam)
+			w.dispatchPointerEvent(ev)
 		}
 
 		// Always send PointerMove
-		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, wParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, wParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmMouseLeave:
-		p.mouseMu.Lock()
-		x, y := p.mouseX, p.mouseY
-		buttons := p.buttons
-		modifiers := p.modifiers
-		p.mouseInWindow = false
-		p.mouseMu.Unlock()
+		w.mouseMu.Lock()
+		x, y := w.mouseX, w.mouseY
+		buttons := w.buttons
+		modifiers := w.modifiers
+		w.mouseInWindow = false
+		w.mouseMu.Unlock()
 
 		ev := gpucontext.PointerEvent{
 			Type:        gpucontext.PointerLeave,
@@ -2322,71 +2356,71 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			Button:      gpucontext.ButtonNone,
 			Buttons:     buttons,
 			Modifiers:   modifiers,
-			Timestamp:   p.eventTimestamp(),
+			Timestamp:   w.eventTimestamp(),
 		}
-		p.dispatchPointerEvent(ev)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	// Left button
 	case wmLButtonDown:
-		p.mouseCapture(wParam)
+		w.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
-		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonLeft, x, y, wParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonLeft, x, y, wParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmLButtonUp:
 		x, y := extractMousePos(lParam)
-		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonLeft, x, y, wParam)
-		p.dispatchPointerEvent(ev)
-		p.mouseRelease(wParam)
+		ev := w.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonLeft, x, y, wParam)
+		w.dispatchPointerEvent(ev)
+		w.mouseRelease(wParam)
 		return 0
 
 	// Right button
 	case wmRButtonDown:
-		p.mouseCapture(wParam)
+		w.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
-		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonRight, x, y, wParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonRight, x, y, wParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmRButtonUp:
 		x, y := extractMousePos(lParam)
-		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonRight, x, y, wParam)
-		p.dispatchPointerEvent(ev)
-		p.mouseRelease(wParam)
+		ev := w.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonRight, x, y, wParam)
+		w.dispatchPointerEvent(ev)
+		w.mouseRelease(wParam)
 		return 0
 
 	// Middle button
 	case wmMButtonDown:
-		p.mouseCapture(wParam)
+		w.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
-		ev := p.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonMiddle, x, y, wParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonMiddle, x, y, wParam)
+		w.dispatchPointerEvent(ev)
 		return 0
 
 	case wmMButtonUp:
 		x, y := extractMousePos(lParam)
-		ev := p.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonMiddle, x, y, wParam)
-		p.dispatchPointerEvent(ev)
-		p.mouseRelease(wParam)
+		ev := w.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonMiddle, x, y, wParam)
+		w.dispatchPointerEvent(ev)
+		w.mouseRelease(wParam)
 		return 0
 
 	// X buttons (back/forward)
 	case wmXButtonDown:
-		p.mouseCapture(wParam)
+		w.mouseCapture(wParam)
 		x, y := extractMousePos(lParam)
 		button := extractXButton(wParam)
-		ev := p.createPointerEvent(gpucontext.PointerDown, button, x, y, wParam)
-		p.dispatchPointerEvent(ev)
+		ev := w.createPointerEvent(gpucontext.PointerDown, button, x, y, wParam)
+		w.dispatchPointerEvent(ev)
 		return 1 // Must return TRUE for XBUTTON messages
 
 	case wmXButtonUp:
 		x, y := extractMousePos(lParam)
 		button := extractXButton(wParam)
-		ev := p.createPointerEvent(gpucontext.PointerUp, button, x, y, wParam)
-		p.dispatchPointerEvent(ev)
-		p.mouseRelease(wParam)
+		ev := w.createPointerEvent(gpucontext.PointerUp, button, x, y, wParam)
+		w.dispatchPointerEvent(ev)
+		w.mouseRelease(wParam)
 		return 1 // Must return TRUE for XBUTTON messages
 
 	// Vertical scroll wheel
@@ -2395,7 +2429,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Convert to client coordinates using ScreenToClient
 		screenX, screenY := extractMousePos(lParam)
 		pt := point{x: int32(screenX), y: int32(screenY)}
-		procScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&pt)))
+		procScreenToClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&pt)))
 		x, y := float64(pt.x), float64(pt.y)
 		deltaY := extractWheelDelta(wParam)
 
@@ -2406,9 +2440,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			DeltaY:    -deltaY, // Invert: wheel up = scroll content up = negative deltaY
 			DeltaMode: gpucontext.ScrollDeltaLine,
 			Modifiers: extractModifiers(wParam),
-			Timestamp: p.eventTimestamp(),
+			Timestamp: w.eventTimestamp(),
 		}
-		p.dispatchScrollEvent(ev)
+		w.dispatchScrollEvent(ev)
 		return 0
 
 	// Horizontal scroll wheel
@@ -2417,7 +2451,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Convert to client coordinates using ScreenToClient
 		screenX, screenY := extractMousePos(lParam)
 		pt := point{x: int32(screenX), y: int32(screenY)}
-		procScreenToClient.Call(uintptr(p.hwnd), uintptr(unsafe.Pointer(&pt)))
+		procScreenToClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&pt)))
 		x, y := float64(pt.x), float64(pt.y)
 		deltaX := extractWheelDelta(wParam)
 
@@ -2428,9 +2462,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			DeltaY:    0,
 			DeltaMode: gpucontext.ScrollDeltaLine,
 			Modifiers: extractModifiers(wParam),
-			Timestamp: p.eventTimestamp(),
+			Timestamp: w.eventTimestamp(),
 		}
-		p.dispatchScrollEvent(ev)
+		w.dispatchScrollEvent(ev)
 		return 0
 	}
 
@@ -2438,14 +2472,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	return ret
 }
 
-// BlitPixels copies RGBA pixel data to the window using GDI SetDIBitsToDevice.
-// Implements the PixelBlitter interface for software backend presentation.
 func (p *windowsPlatform) BlitPixels(pixels []byte, width, height int) error {
-	hdc, _, _ := procGetDC.Call(uintptr(p.hwnd))
+	hdc, _, _ := procGetDC.Call(uintptr(p.primary.hwnd))
 	if hdc == 0 {
 		return fmt.Errorf("gogpu: GetDC failed")
 	}
-	defer procReleaseDC.Call(uintptr(p.hwnd), hdc)
+	defer procReleaseDC.Call(uintptr(p.primary.hwnd), hdc)
 
 	bmi := bitmapInfoHeader{
 		biSize:     40,
