@@ -22,7 +22,8 @@ import (
 // operations like swapchain recreation.
 type App struct {
 	config   Config
-	platform platform.Platform
+	manager  platform.PlatformManager // process-level (multi-window)
+	platform platform.Platform        // legacy wrapper (for renderer compat)
 	renderer *Renderer
 
 	// Multi-thread rendering
@@ -157,20 +158,31 @@ func (a *App) Run() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// Initialize platform (window) - must be on main thread
+	// Initialize platform manager (process-level) — must be on main thread.
 	platform.SetLogger(slogger())
-	a.platform = platform.New()
-	if err := a.platform.Init(platform.Config{
+	a.manager = platform.NewManager()
+	if err := a.manager.Init(); err != nil {
+		return err
+	}
+	defer a.manager.Destroy()
+
+	// Create primary platform window.
+	platWindow, err := a.manager.CreateWindow(platform.Config{
 		Title:      a.config.Title,
 		Width:      a.config.Width,
 		Height:     a.config.Height,
 		Resizable:  a.config.Resizable,
 		Fullscreen: a.config.Fullscreen,
 		Frameless:  a.config.Frameless,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	defer a.platform.Destroy()
+	defer platWindow.Destroy()
+
+	// Keep a legacy Platform wrapper for renderer compatibility.
+	// The renderer still uses platform.Platform; this bridges the gap.
+	a.platform = platform.WrapAsLegacy(a.manager, platWindow)
 
 	// Initialize input state BEFORE setting up event callbacks.
 	// This ensures keyboard/mouse state is captured from the first event.

@@ -404,7 +404,12 @@ type bitmapInfoHeader struct {
 }
 
 // win32Window holds all per-window state for a single Win32 window.
+// Implements both per-window methods on windowsPlatform (legacy Platform)
+// and the PlatformWindow interface (multi-window PlatformManager).
 type win32Window struct {
+	id       WindowID         // unique ID assigned by PlatformManager.CreateWindow
+	platform *windowsPlatform // back-reference for process-level operations (cursor, clipboard, etc.)
+
 	hwnd        windows.HWND
 	width       int
 	height      int
@@ -465,18 +470,30 @@ type windowsPlatform struct {
 // Global instance for window procedure callback
 var globalPlatform *windowsPlatform
 
+// newPlatform is unused on Windows (New() goes through NewManager()),
+// but kept for source-level consistency across platforms.
 func newPlatform() Platform {
+	mgr := newPlatformManager()
+	return &legacyPlatformAdapter{mgr: mgr}
+}
+
+// newPlatformManager returns a real PlatformManager for Win32.
+// windowsPlatform implements PlatformManager natively: process-level Init()
+// sets up DPI awareness, HINSTANCE, and registers the window class; then
+// CreateWindow() creates individual HWND windows.
+func newPlatformManager() PlatformManager {
 	return &windowsPlatform{
 		windows: make(map[windows.HWND]*win32Window),
 	}
 }
 
-func (p *windowsPlatform) Init(config Config) error {
+// --- PlatformManager implementation on windowsPlatform ---
+
+// initProcess performs process-level Win32 initialization:
+// DPI awareness, HINSTANCE, window class registration, default cursor.
+// Called by both the PlatformManager Init() and the legacy Platform Init(config).
+func (p *windowsPlatform) initProcess() error {
 	// Enable per-monitor DPI awareness programmatically.
-	// Without this, Windows bitmap-upscales the app on high-DPI displays (200%+),
-	// causing blurry text and incorrect mouse coordinates.
-	// Try PerMonitorV2 (Win10 1703+), fallback to basic DPI aware (Vista+).
-	// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 	if err := procSetProcessDpiAwarenessContext.Find(); err == nil {
 		procSetProcessDpiAwarenessContext.Call(^uintptr(3)) // -4 as uintptr
 	} else if err := procSetProcessDPIAware.Find(); err == nil {
@@ -498,41 +515,43 @@ func (p *windowsPlatform) Init(config Config) error {
 
 	wndClass := wndClassExW{
 		cbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
-		style:         0, // No CS_HREDRAW|CS_VREDRAW: prevents full invalidation on resize
+		style:         0,
 		lpfnWndProc:   syscall.NewCallback(wndProc),
 		hInstance:     p.hinstance,
 		lpszClassName: className,
 	}
 
-	// Set black background brush to prevent gray flash during resize/focus loss.
-	// Without this, Windows draws the system default background (gray) between
-	// GPU frame renders, causing visible flicker.
 	blackBrush, _, _ := procGetStockObject.Call(4) // BLACK_BRUSH = 4
 	wndClass.hbrBackground = windows.Handle(blackBrush)
 
-	// Load default cursor
 	cursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	wndClass.hCursor = windows.Handle(cursor)
-	p.cursor = cursor // Store for WM_SETCURSOR handling
+	p.cursor = cursor
 
 	ret, _, _ = procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass)))
 	if ret == 0 {
 		return fmt.Errorf("RegisterClassExW failed")
 	}
 
-	// Create window
-	titlePtr, err := windows.UTF16PtrFromString(config.Title)
+	return nil
+}
+
+// createWindowWin32 creates a new Win32 HWND window from the given config.
+// Shared between PlatformManager.CreateWindow and the legacy Init(config).
+func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error) {
+	className, err := windows.UTF16PtrFromString("GoGPUWindow")
 	if err != nil {
-		return fmt.Errorf("utf16 title: %w", err)
+		return nil, fmt.Errorf("utf16 class name: %w", err)
 	}
 
-	// Both frameless and normal use WS_OVERLAPPEDWINDOW for native resize + DWM shadow.
-	// For frameless: WM_NCCALCSIZE removes title bar, WM_NCACTIVATE(-1) prevents
-	// border repaint, WM_NCUAHDRAW* blocks UxTheme painting.
+	titlePtr, err := windows.UTF16PtrFromString(config.Title)
+	if err != nil {
+		return nil, fmt.Errorf("utf16 title: %w", err)
+	}
+
 	var style uintptr
 	if config.Frameless {
-		// Create hidden — show after DWM setup + WM_NCCALCSIZE to avoid first-frame artifact.
-		style = uintptr(wsOverlappedWindow)
+		style = uintptr(wsOverlappedWindow) // hidden, show after DWM setup
 	} else {
 		style = uintptr(wsOverlappedWindow | wsVisible)
 	}
@@ -551,7 +570,7 @@ func (p *windowsPlatform) Init(config Config) error {
 		0,
 	)
 	if hwnd == 0 {
-		return fmt.Errorf("CreateWindowExW failed")
+		return nil, fmt.Errorf("CreateWindowExW failed")
 	}
 
 	w := &win32Window{
@@ -566,30 +585,185 @@ func (p *windowsPlatform) Init(config Config) error {
 	p.windowMu.Lock()
 	p.windows[w.hwnd] = w
 	p.windowMu.Unlock()
-	p.primary = w
 
-	// Enable DWM shadow for frameless windows.
+	// Enable DWM shadow for frameless windows
 	if config.Frameless {
 		type margins struct {
 			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
 		}
 		m := margins{0, 0, 0, 1}
 		procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
-		// Force WM_NCCALCSIZE to remove NC area, then update cached size
-		// so first frame renders at full window size.
 		procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
 			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
 		w.updateSize()
 	}
 
-	// Show window (frameless was created hidden to avoid first-frame artifact)
 	procShowWindow.Call(uintptr(w.hwnd), swShowNormal)
 	procUpdateWindow.Call(uintptr(w.hwnd))
-
-	// Get actual client size
 	w.updateSize()
 
-	return nil
+	return w, nil
+}
+
+// CreateWindow implements PlatformManager.CreateWindow.
+func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	w, err := p.createWindowWin32(config)
+	if err != nil {
+		return nil, err
+	}
+	w.id = NewWindowID()
+	w.platform = p
+	if p.primary == nil {
+		p.primary = w
+	}
+	return w, nil
+}
+
+// --- PlatformWindow implementation on win32Window ---
+
+func (w *win32Window) ID() WindowID { return w.id }
+
+func (w *win32Window) GetHandle() (instance, window uintptr) {
+	if w.platform != nil {
+		return uintptr(w.platform.hinstance), uintptr(w.hwnd)
+	}
+	return 0, uintptr(w.hwnd)
+}
+
+func (w *win32Window) ScaleFactor() float64 { return w.scaleFactor() }
+
+func (w *win32Window) PrepareFrame() PrepareFrameResult {
+	physW, physH := w.PhysicalSize()
+	return PrepareFrameResult{
+		ScaleFactor:    w.scaleFactor(),
+		PhysicalWidth:  uint32(physW),
+		PhysicalHeight: uint32(physH),
+	}
+}
+
+func (w *win32Window) ShouldClose() bool { return w.shouldClose }
+
+func (w *win32Window) SetTitle(title string) {
+	if titlePtr, err := windows.UTF16PtrFromString(title); err == nil {
+		procSetWindowTextW := user32.NewProc("SetWindowTextW")
+		procSetWindowTextW.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(titlePtr)))
+	}
+}
+
+func (w *win32Window) SetCursor(cursorID int) {
+	if w.platform != nil {
+		w.platform.SetCursor(cursorID)
+	}
+}
+
+func (w *win32Window) SetFrameless(frameless bool) {
+	w.callbackMu.Lock()
+	w.frameless = frameless
+	w.callbackMu.Unlock()
+
+	type margins struct {
+		cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
+	}
+	var m margins
+	if frameless {
+		m = margins{0, 0, 0, 1}
+	}
+	procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+	procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
+		swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
+}
+
+func (w *win32Window) IsFrameless() bool {
+	w.callbackMu.RLock()
+	defer w.callbackMu.RUnlock()
+	return w.frameless
+}
+
+func (w *win32Window) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	w.callbackMu.Lock()
+	defer w.callbackMu.Unlock()
+	w.hitTestCallback = fn
+}
+
+func (w *win32Window) Minimize() {
+	procShowWindow.Call(uintptr(w.hwnd), swMinimize)
+}
+
+func (w *win32Window) Maximize() {
+	ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
+	if ret != 0 {
+		procShowWindow.Call(uintptr(w.hwnd), swRestore)
+	} else {
+		procShowWindow.Call(uintptr(w.hwnd), swMaximize)
+	}
+}
+
+func (w *win32Window) IsMaximized() bool {
+	ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
+	return ret != 0
+}
+
+func (w *win32Window) Close() {
+	procPostMessageW.Call(uintptr(w.hwnd), wmClose, 0, 0)
+}
+
+func (w *win32Window) SyncFrame() {
+	if w.InSizeMove() {
+		procDwmFlush.Call()
+	}
+}
+
+func (w *win32Window) SetCursorMode(mode int) {
+	w.setCursorMode(mode)
+}
+
+func (w *win32Window) CursorMode() int {
+	return w.cursorMode
+}
+
+func (w *win32Window) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	w.setPointerCallback(fn)
+}
+
+func (w *win32Window) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	w.setScrollCallback(fn)
+}
+
+func (w *win32Window) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	w.setKeyCallback(fn)
+}
+
+func (w *win32Window) SetCharCallback(fn func(char rune)) {
+	w.setCharCallback(fn)
+}
+
+func (w *win32Window) SetModalFrameCallback(fn func()) {
+	w.setModalFrameCallback(fn)
+}
+
+func (w *win32Window) Destroy() {
+	if w.platform != nil {
+		w.platform.windowMu.Lock()
+		delete(w.platform.windows, w.hwnd)
+		w.platform.windowMu.Unlock()
+	}
+	if w.hwnd != 0 {
+		procDestroyWindow.Call(uintptr(w.hwnd))
+		w.hwnd = 0
+	}
+}
+
+// Verify PlatformWindow interface compliance.
+var _ PlatformWindow = (*win32Window)(nil)
+
+// Verify PlatformManager interface compliance (the manager methods are
+// split between initManager/CreateWindow above and the existing process-level
+// methods like PollEvents, WaitEvents, etc. already on windowsPlatform).
+var _ PlatformManager = (*windowsPlatform)(nil)
+
+// Init implements PlatformManager.Init — process-level initialization only.
+func (p *windowsPlatform) Init() error {
+	return p.initProcess()
 }
 
 func (w *win32Window) updateSize() {
@@ -750,17 +924,20 @@ func (w *win32Window) setModalFrameCallback(fn func()) {
 	w.callbackMu.Unlock()
 }
 
+// Destroy implements PlatformManager.Destroy.
+// Destroys all remaining windows and releases process-level resources.
 func (p *windowsPlatform) Destroy() {
-	w := p.primary
-	if w != nil && w.hwnd != 0 {
-		p.windowMu.Lock()
-		delete(p.windows, w.hwnd)
-		p.windowMu.Unlock()
-
-		procDestroyWindow.Call(uintptr(w.hwnd))
-		w.hwnd = 0
-		p.primary = nil
+	// Destroy any remaining windows
+	p.windowMu.Lock()
+	for hwnd, w := range p.windows {
+		if w.hwnd != 0 {
+			procDestroyWindow.Call(uintptr(w.hwnd))
+			w.hwnd = 0
+		}
+		delete(p.windows, hwnd)
 	}
+	p.windowMu.Unlock()
+	p.primary = nil
 	globalPlatform = nil
 }
 
@@ -2473,11 +2650,20 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 }
 
 func (p *windowsPlatform) BlitPixels(pixels []byte, width, height int) error {
-	hdc, _, _ := procGetDC.Call(uintptr(p.primary.hwnd))
+	if p.primary != nil {
+		return p.primary.BlitPixels(pixels, width, height)
+	}
+	return fmt.Errorf("gogpu: no primary window for BlitPixels")
+}
+
+// BlitPixels copies RGBA pixel data to the window using GDI SetDIBitsToDevice.
+// Implements the PixelBlitter interface for software backend presentation.
+func (w *win32Window) BlitPixels(pixels []byte, width, height int) error {
+	hdc, _, _ := procGetDC.Call(uintptr(w.hwnd))
 	if hdc == 0 {
 		return fmt.Errorf("gogpu: GetDC failed")
 	}
-	defer procReleaseDC.Call(uintptr(p.primary.hwnd), hdc)
+	defer procReleaseDC.Call(uintptr(w.hwnd), hdc)
 
 	bmi := bitmapInfoHeader{
 		biSize:     40,

@@ -58,6 +58,13 @@ type darwinPlatform struct {
 	primary *darwinWindow
 }
 
+// newPlatformManager returns a PlatformManager for macOS.
+// Uses platformManagerAdapter to wrap the legacy darwinPlatform until
+// it is migrated natively.
+func newPlatformManager() PlatformManager {
+	return &platformManagerAdapter{factory: newPlatform}
+}
+
 func newPlatform() Platform {
 	return &darwinPlatform{}
 }

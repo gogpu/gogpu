@@ -97,6 +97,13 @@ type x11Platform struct {
 	wakeCh chan struct{}
 }
 
+// newPlatformManager returns a PlatformManager for Linux.
+// Uses platformManagerAdapter to wrap the legacy Platform implementations
+// (x11Platform or waylandPlatform) until they are migrated natively.
+func newPlatformManager() PlatformManager {
+	return &platformManagerAdapter{factory: newPlatform}
+}
+
 // newPlatform creates the platform-specific implementation.
 // On Linux, this returns a Wayland platform if available, otherwise X11.
 func newPlatform() Platform {

@@ -510,8 +510,194 @@ func (a *legacyPlatformAdapter) BlitPixels(pixels []byte, width, height int) err
 	return fmt.Errorf("window does not support pixel blitting")
 }
 
-// New creates a platform-specific implementation.
-// This is implemented in platform-specific files.
+// NewManager creates a platform-specific PlatformManager.
+// Each platform file provides newPlatformManager().
+func NewManager() PlatformManager {
+	return newPlatformManager()
+}
+
+// WrapAsLegacy wraps a PlatformManager and PlatformWindow into a legacy Platform.
+// Used by App.Run() to bridge the new multi-window API with the existing
+// renderer that still expects platform.Platform.
+func WrapAsLegacy(mgr PlatformManager, win PlatformWindow) Platform {
+	return &legacyPlatformAdapter{mgr: mgr, window: win}
+}
+
+// New creates a platform-specific implementation via the legacy adapter.
+//
+// Deprecated: Use NewManager() for multi-window support.
 func New() Platform {
-	return newPlatform()
+	mgr := NewManager()
+	return &legacyPlatformAdapter{mgr: mgr}
+}
+
+// platformManagerAdapter wraps a legacy Platform factory to implement PlatformManager.
+// Used for platforms that haven't been migrated to native PlatformManager yet
+// (Linux/X11, Linux/Wayland, macOS). The adapter defers Platform creation until
+// CreateWindow, which calls the old Platform.Init(config) under the hood.
+type platformManagerAdapter struct {
+	factory func() Platform
+	plat    Platform
+}
+
+// Verify interface compliance.
+var _ PlatformManager = (*platformManagerAdapter)(nil)
+
+func (a *platformManagerAdapter) Init() error {
+	// Platform struct is created eagerly so process-level state (e.g. DPI
+	// awareness) can be initialized, but the old Init(config) that creates
+	// the window is deferred to CreateWindow.
+	a.plat = a.factory()
+	return nil
+}
+
+func (a *platformManagerAdapter) CreateWindow(config Config) (PlatformWindow, error) {
+	if a.plat == nil {
+		return nil, fmt.Errorf("platform not initialized: call Init() first")
+	}
+	if err := a.plat.Init(config); err != nil {
+		return nil, err
+	}
+	return &platformWindowAdapter{
+		id:   NewWindowID(),
+		plat: a.plat,
+	}, nil
+}
+
+func (a *platformManagerAdapter) PollEvents() Event {
+	if a.plat == nil {
+		return Event{Type: EventNone}
+	}
+	return a.plat.PollEvents()
+}
+
+func (a *platformManagerAdapter) WaitEvents() {
+	if a.plat != nil {
+		a.plat.WaitEvents()
+	}
+}
+
+func (a *platformManagerAdapter) WakeUp() {
+	if a.plat != nil {
+		a.plat.WakeUp()
+	}
+}
+
+func (a *platformManagerAdapter) ClipboardRead() (string, error) {
+	if a.plat != nil {
+		return a.plat.ClipboardRead()
+	}
+	return "", nil
+}
+
+func (a *platformManagerAdapter) ClipboardWrite(text string) error {
+	if a.plat != nil {
+		return a.plat.ClipboardWrite(text)
+	}
+	return nil
+}
+
+func (a *platformManagerAdapter) DarkMode() bool {
+	if a.plat != nil {
+		return a.plat.DarkMode()
+	}
+	return false
+}
+
+func (a *platformManagerAdapter) ReduceMotion() bool {
+	if a.plat != nil {
+		return a.plat.ReduceMotion()
+	}
+	return false
+}
+
+func (a *platformManagerAdapter) HighContrast() bool {
+	if a.plat != nil {
+		return a.plat.HighContrast()
+	}
+	return false
+}
+
+func (a *platformManagerAdapter) FontScale() float32 {
+	if a.plat != nil {
+		return a.plat.FontScale()
+	}
+	return 1.0
+}
+
+func (a *platformManagerAdapter) Destroy() {
+	if a.plat != nil {
+		a.plat.Destroy()
+		a.plat = nil
+	}
+}
+
+// platformWindowAdapter wraps a legacy Platform to provide PlatformWindow.
+// Used by platformManagerAdapter for platforms that haven't been migrated yet.
+type platformWindowAdapter struct {
+	id   WindowID
+	plat Platform
+}
+
+// Verify interface compliance.
+var _ PlatformWindow = (*platformWindowAdapter)(nil)
+
+func (w *platformWindowAdapter) ID() WindowID                     { return w.id }
+func (w *platformWindowAdapter) GetHandle() (uintptr, uintptr)    { return w.plat.GetHandle() }
+func (w *platformWindowAdapter) LogicalSize() (int, int)          { return w.plat.LogicalSize() }
+func (w *platformWindowAdapter) PhysicalSize() (int, int)         { return w.plat.PhysicalSize() }
+func (w *platformWindowAdapter) ScaleFactor() float64             { return w.plat.ScaleFactor() }
+func (w *platformWindowAdapter) PrepareFrame() PrepareFrameResult { return w.plat.PrepareFrame() }
+func (w *platformWindowAdapter) InSizeMove() bool                 { return w.plat.InSizeMove() }
+func (w *platformWindowAdapter) ShouldClose() bool                { return w.plat.ShouldClose() }
+func (w *platformWindowAdapter) SetTitle(_ string)                {} // legacy Platform has no SetTitle
+func (w *platformWindowAdapter) SetCursor(cursorID int)           { w.plat.SetCursor(cursorID) }
+func (w *platformWindowAdapter) SetFrameless(frameless bool)      { w.plat.SetFrameless(frameless) }
+func (w *platformWindowAdapter) IsFrameless() bool                { return w.plat.IsFrameless() }
+
+func (w *platformWindowAdapter) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	w.plat.SetHitTestCallback(fn)
+}
+
+func (w *platformWindowAdapter) Minimize()              { w.plat.Minimize() }
+func (w *platformWindowAdapter) Maximize()              { w.plat.Maximize() }
+func (w *platformWindowAdapter) IsMaximized() bool      { return w.plat.IsMaximized() }
+func (w *platformWindowAdapter) Close()                 { w.plat.CloseWindow() }
+func (w *platformWindowAdapter) SyncFrame()             { w.plat.SyncFrame() }
+func (w *platformWindowAdapter) SetCursorMode(mode int) { w.plat.SetCursorMode(mode) }
+func (w *platformWindowAdapter) CursorMode() int        { return w.plat.CursorMode() }
+
+func (w *platformWindowAdapter) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	w.plat.SetPointerCallback(fn)
+}
+
+func (w *platformWindowAdapter) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	w.plat.SetScrollCallback(fn)
+}
+
+func (w *platformWindowAdapter) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	w.plat.SetKeyCallback(fn)
+}
+
+func (w *platformWindowAdapter) SetCharCallback(fn func(char rune)) {
+	w.plat.SetCharCallback(fn)
+}
+
+func (w *platformWindowAdapter) SetModalFrameCallback(fn func()) {
+	w.plat.SetModalFrameCallback(fn)
+}
+
+// BlitPixels delegates to the underlying platform if it supports pixel blitting.
+// This enables the software backend to work through the adapter on all platforms.
+func (w *platformWindowAdapter) BlitPixels(pixels []byte, width, height int) error {
+	if blitter, ok := w.plat.(PixelBlitter); ok {
+		return blitter.BlitPixels(pixels, width, height)
+	}
+	return fmt.Errorf("platform does not support pixel blitting")
+}
+
+func (w *platformWindowAdapter) Destroy() {
+	// Destruction is handled by platformManagerAdapter.Destroy() which
+	// calls plat.Destroy(). Individual window adapter destroy is a no-op
+	// to avoid double-free for single-window legacy platforms.
 }
