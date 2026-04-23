@@ -57,10 +57,10 @@ func TestWindowChromeNilPlatform(t *testing.T) {
 
 // TestWindowChromeWithPlatform verifies WindowChrome delegates to platform.
 func TestWindowChromeWithPlatform(t *testing.T) {
-	mock := &mockPlatform{width: 800, height: 600, scaleFactor: 1.0}
+	mock := &mockWindow{width: 800, height: 600, scaleFactor: 1.0}
 	app := &App{
-		config:   Config{Width: 800, Height: 600},
-		platform: mock,
+		config:     Config{Width: 800, Height: 600},
+		platWindow: mock,
 	}
 
 	t.Run("SetFramelessAndQuery", func(t *testing.T) {

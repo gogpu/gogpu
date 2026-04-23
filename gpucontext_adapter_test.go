@@ -118,8 +118,8 @@ func TestMapTextureFormat(t *testing.T) {
 // TestGPUContextAdapterWindowProvider tests WindowProvider delegation.
 func TestGPUContextAdapterWindowProvider(t *testing.T) {
 	t.Run("Size with app", func(t *testing.T) {
-		mock := &mockPlatform{width: 1280, height: 720, scaleFactor: 1.0}
-		app := &App{platform: mock}
+		mock := &mockWindow{width: 1280, height: 720, scaleFactor: 1.0}
+		app := &App{platWindow: mock}
 		adapter := &gpuContextAdapter{app: app}
 
 		w, h := adapter.Size()
@@ -138,8 +138,8 @@ func TestGPUContextAdapterWindowProvider(t *testing.T) {
 	})
 
 	t.Run("ScaleFactor with app", func(t *testing.T) {
-		mock := &mockPlatform{scaleFactor: 2.0}
-		app := &App{platform: mock}
+		mock := &mockWindow{scaleFactor: 2.0}
+		app := &App{platWindow: mock}
 		adapter := &gpuContextAdapter{app: app}
 
 		sf := adapter.ScaleFactor()

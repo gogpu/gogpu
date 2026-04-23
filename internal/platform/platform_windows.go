@@ -470,13 +470,6 @@ type windowsPlatform struct {
 // Global instance for window procedure callback
 var globalPlatform *windowsPlatform
 
-// newPlatform is unused on Windows (New() goes through NewManager()),
-// but kept for source-level consistency across platforms.
-func newPlatform() Platform {
-	mgr := newPlatformManager()
-	return &legacyPlatformAdapter{mgr: mgr}
-}
-
 // newPlatformManager returns a real PlatformManager for Win32.
 // windowsPlatform implements PlatformManager natively: process-level Init()
 // sets up DPI awareness, HINSTANCE, and registers the window class; then

@@ -3,16 +3,25 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/gogpu/gogpu/internal/platform"
 )
 
 func main() {
+	runtime.LockOSThread()
+
 	fmt.Println("Timing Test - finding where blocking happens")
 
-	plat := platform.New()
-	err := plat.Init(platform.Config{
+	mgr := platform.NewManager()
+	if err := mgr.Init(); err != nil {
+		fmt.Println("Failed:", err)
+		return
+	}
+	defer mgr.Destroy()
+
+	win, err := mgr.CreateWindow(platform.Config{
 		Title:  "Timing Test",
 		Width:  800,
 		Height: 600,
@@ -21,18 +30,18 @@ func main() {
 		fmt.Println("Failed:", err)
 		return
 	}
-	defer plat.Destroy()
+	defer win.Destroy()
 
 	frameCount := 0
 	lastReport := time.Now()
 
 	var maxPoll, maxSleep time.Duration
 
-	for !plat.ShouldClose() {
+	for !win.ShouldClose() {
 		// Measure event polling
 		t1 := time.Now()
 		for {
-			event := plat.PollEvents()
+			event := mgr.PollEvents()
 			if event.Type == platform.EventNone {
 				break
 			}

@@ -98,15 +98,8 @@ type x11Platform struct {
 }
 
 // newPlatformManager returns a PlatformManager for Linux.
-// Uses platformManagerAdapter to wrap the legacy Platform implementations
-// (x11Platform or waylandPlatform) until they are migrated natively.
+// Detects Wayland vs X11 from environment variables.
 func newPlatformManager() PlatformManager {
-	return &platformManagerAdapter{factory: newPlatform}
-}
-
-// newPlatform creates the platform-specific implementation.
-// On Linux, this returns a Wayland platform if available, otherwise X11.
-func newPlatform() Platform {
 	// Prefer Wayland if WAYLAND_DISPLAY is set
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		logger().Info("platform selected", "type", "wayland", "WAYLAND_DISPLAY", os.Getenv("WAYLAND_DISPLAY"))
@@ -118,7 +111,7 @@ func newPlatform() Platform {
 	if os.Getenv("DISPLAY") != "" {
 		logger().Info("platform selected", "type", "x11", "DISPLAY", os.Getenv("DISPLAY"))
 		x11.SetLogger(loggerPtr.Load().WithGroup("x11"))
-		return &x11Platform{inner: x11.NewPlatform()}
+		return &x11Platform{}
 	}
 	// Default to Wayland (will fail in Init if not available)
 	logger().Info("platform selected", "type", "wayland", "reason", "default (no WAYLAND_DISPLAY or DISPLAY)")
@@ -127,8 +120,17 @@ func newPlatform() Platform {
 	}
 }
 
-// Init creates the X11 window.
-func (p *x11Platform) Init(config Config) error {
+// --- PlatformManager implementation on x11Platform ---
+
+// Init initializes the X11 platform subsystem (process-level, no window).
+func (p *x11Platform) Init() error {
+	p.inner = x11.NewPlatform()
+	p.wakeCh = make(chan struct{}, 1)
+	return nil
+}
+
+// CreateWindow creates an X11 window.
+func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 	x11Config := x11.Config{
 		Title:      config.Title,
 		Width:      config.Width,
@@ -138,12 +140,9 @@ func (p *x11Platform) Init(config Config) error {
 		Frameless:  config.Frameless,
 	}
 	if err := p.inner.Init(x11Config); err != nil {
-		return err
+		return nil, err
 	}
-
-	p.wakeCh = make(chan struct{}, 1)
-
-	return nil
+	return &x11PlatformWindow{platform: p, id: NewWindowID()}, nil
 }
 
 // PollEvents processes pending X11 events.
@@ -165,64 +164,6 @@ func (p *x11Platform) PollEvents() Event {
 		return Event{Type: EventNone}
 	}
 }
-
-// ShouldClose returns true if window close was requested.
-func (p *x11Platform) ShouldClose() bool {
-	return p.inner.ShouldClose()
-}
-
-// LogicalSize returns the window size in platform points.
-// X11 baseline: scale=1.0, logical == physical.
-func (p *x11Platform) LogicalSize() (width, height int) {
-	return p.inner.GetSize()
-}
-
-// PhysicalSize returns the GPU framebuffer size in device pixels.
-// X11 baseline: scale=1.0, logical == physical.
-func (p *x11Platform) PhysicalSize() (width, height int) {
-	return p.inner.GetSize()
-}
-
-// GetHandle returns platform-specific handles for Vulkan surface creation.
-func (p *x11Platform) GetHandle() (instance, window uintptr) {
-	return p.inner.GetHandle()
-}
-
-// Destroy closes the window and releases resources.
-func (p *x11Platform) Destroy() {
-	p.inner.Destroy()
-}
-
-// InSizeMove returns true during live resize on X11.
-// X11 doesn't have modal resize loops like Windows.
-func (p *x11Platform) InSizeMove() bool {
-	return false
-}
-
-// SetPointerCallback registers a callback for pointer events.
-func (p *x11Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	p.inner.SetPointerCallback(fn)
-}
-
-// SetScrollCallback registers a callback for scroll events.
-func (p *x11Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	p.inner.SetScrollCallback(fn)
-}
-
-// SetKeyCallback registers a callback for keyboard events.
-func (p *x11Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	p.inner.SetKeyCallback(fn)
-}
-
-// SetCharCallback registers a callback for Unicode character input.
-// TODO: Implement via libxkbcommon xkb_state_key_get_utf8 for full Unicode support.
-func (p *x11Platform) SetCharCallback(fn func(rune)) {
-	p.inner.SetCharCallback(fn)
-}
-
-// SetModalFrameCallback is a no-op on X11.
-// X11 doesn't have modal resize loops.
-func (p *x11Platform) SetModalFrameCallback(_ func()) {}
 
 // WaitEvents blocks until at least one OS event is available or WakeUp is called.
 // Uses PollEventTimeout on the X11 net.Conn (Go runtime netpoller) with periodic
@@ -258,16 +199,235 @@ func (p *x11Platform) WakeUp() {
 	}
 }
 
-// Init creates the Wayland window using a single C libwayland connection.
-// All Wayland objects (display, registry, compositor, surface, xdg-shell, seat,
-// pointer, keyboard, touch) are created on this one connection via goffi.
-func (p *waylandPlatform) Init(config Config) error {
+// ClipboardRead reads text from the system clipboard.
+// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
+func (p *x11Platform) ClipboardRead() (string, error) { return "", nil }
+
+// ClipboardWrite writes text to the system clipboard.
+// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
+func (p *x11Platform) ClipboardWrite(string) error { return nil }
+
+// DarkMode returns true if the system dark mode is active.
+func (p *x11Platform) DarkMode() bool { return detectDarkMode() }
+
+// ReduceMotion returns true if the user prefers reduced animation.
+func (p *x11Platform) ReduceMotion() bool { return detectReduceMotion() }
+
+// HighContrast returns true if high contrast mode is active.
+func (p *x11Platform) HighContrast() bool { return detectHighContrast() }
+
+// FontScale returns font size preference multiplier.
+func (p *x11Platform) FontScale() float32 { return detectFontScale() }
+
+// Destroy closes all windows and releases resources.
+func (p *x11Platform) Destroy() {
+	p.inner.Destroy()
+}
+
+// --- x11PlatformWindow implements PlatformWindow ---
+
+// x11PlatformWindow wraps x11Platform to implement PlatformWindow.
+type x11PlatformWindow struct {
+	platform *x11Platform
+	id       WindowID
+}
+
+func (w *x11PlatformWindow) ID() WindowID                   { return w.id }
+func (w *x11PlatformWindow) GetHandle() (uintptr, uintptr)  { return w.platform.inner.GetHandle() }
+func (w *x11PlatformWindow) LogicalSize() (int, int)        { return w.platform.inner.GetSize() }
+func (w *x11PlatformWindow) PhysicalSize() (int, int)       { return w.platform.inner.GetSize() }
+func (w *x11PlatformWindow) ScaleFactor() float64           { return w.platform.inner.ScaleFactor() }
+func (w *x11PlatformWindow) ShouldClose() bool              { return w.platform.inner.ShouldClose() }
+func (w *x11PlatformWindow) InSizeMove() bool               { return false }
+func (w *x11PlatformWindow) SetTitle(_ string)              {}
+func (w *x11PlatformWindow) SetCursor(cursorID int)         { w.platform.inner.SetCursor(cursorID) }
+func (w *x11PlatformWindow) SetCursorMode(mode int)         { w.platform.inner.SetCursorMode(mode) }
+func (w *x11PlatformWindow) CursorMode() int                { return w.platform.inner.GetCursorMode() }
+func (w *x11PlatformWindow) SyncFrame()                     {}
+func (w *x11PlatformWindow) SetModalFrameCallback(_ func()) {}
+
+func (w *x11PlatformWindow) PrepareFrame() PrepareFrameResult {
+	pw, ph := w.platform.inner.GetSize()
+	return PrepareFrameResult{
+		ScaleFactor:    w.platform.inner.ScaleFactor(),
+		PhysicalWidth:  uint32(pw),
+		PhysicalHeight: uint32(ph),
+	}
+}
+
+func (w *x11PlatformWindow) SetFrameless(frameless bool) {
+	w.platform.inner.SetFrameless(frameless)
+}
+
+func (w *x11PlatformWindow) IsFrameless() bool {
+	return w.platform.inner.IsFrameless()
+}
+
+func (w *x11PlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	w.platform.inner.SetHitTestCallback(fn)
+}
+
+func (w *x11PlatformWindow) Minimize()         { w.platform.inner.Minimize() }
+func (w *x11PlatformWindow) Maximize()         { w.platform.inner.Maximize() }
+func (w *x11PlatformWindow) IsMaximized() bool { return w.platform.inner.IsMaximized() }
+func (w *x11PlatformWindow) Close()            { w.platform.inner.CloseWindow() }
+
+func (w *x11PlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	w.platform.inner.SetPointerCallback(fn)
+}
+
+func (w *x11PlatformWindow) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	w.platform.inner.SetScrollCallback(fn)
+}
+
+func (w *x11PlatformWindow) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	w.platform.inner.SetKeyCallback(fn)
+}
+
+func (w *x11PlatformWindow) SetCharCallback(fn func(rune)) {
+	w.platform.inner.SetCharCallback(fn)
+}
+
+// BlitPixels copies RGBA pixel data to the window using X11 PutImage.
+func (w *x11PlatformWindow) BlitPixels(pixels []byte, width, height int) error {
+	return w.platform.inner.BlitPixels(pixels, width, height)
+}
+
+func (w *x11PlatformWindow) Destroy() {
+	// Destruction handled by platform.Destroy()
+}
+
+// --- waylandPlatformWindow implements PlatformWindow ---
+
+// waylandPlatformWindow wraps waylandPlatform to implement PlatformWindow.
+type waylandPlatformWindow struct {
+	platform *waylandPlatform
+	id       WindowID
+}
+
+func (w *waylandPlatformWindow) ID() WindowID { return w.id }
+
+func (w *waylandPlatformWindow) GetHandle() (uintptr, uintptr) {
+	if w.platform.libwl != nil {
+		return w.platform.libwl.Display(), w.platform.libwl.Surface()
+	}
+	return 0, 0
+}
+
+func (w *waylandPlatformWindow) LogicalSize() (int, int) {
+	wp := w.platform.primary
+	wp.eventMu.Lock()
+	defer wp.eventMu.Unlock()
+	return wp.width, wp.height
+}
+
+func (w *waylandPlatformWindow) PhysicalSize() (int, int) {
+	return w.LogicalSize() // Wayland: scale tracking TODO
+}
+
+func (w *waylandPlatformWindow) ScaleFactor() float64 {
+	return w.platform.ScaleFactor()
+}
+
+func (w *waylandPlatformWindow) ShouldClose() bool {
+	wp := w.platform.primary
+	wp.eventMu.Lock()
+	defer wp.eventMu.Unlock()
+	return wp.shouldClose
+}
+
+func (w *waylandPlatformWindow) InSizeMove() bool { return false }
+func (w *waylandPlatformWindow) SetTitle(_ string) {
+	// TODO: libwl.SetTitle for runtime title change
+}
+
+func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
+	pw, ph := w.PhysicalSize()
+	return PrepareFrameResult{
+		ScaleFactor:    w.ScaleFactor(),
+		PhysicalWidth:  uint32(pw),
+		PhysicalHeight: uint32(ph),
+	}
+}
+
+func (w *waylandPlatformWindow) SetCursor(cursorID int) {
+	w.platform.SetCursor(cursorID)
+}
+
+func (w *waylandPlatformWindow) SetCursorMode(mode int) {
+	w.platform.SetCursorMode(mode)
+}
+
+func (w *waylandPlatformWindow) CursorMode() int {
+	return w.platform.CursorMode()
+}
+
+func (w *waylandPlatformWindow) SyncFrame() {}
+
+func (w *waylandPlatformWindow) SetFrameless(frameless bool) {
+	w.platform.SetFrameless(frameless)
+}
+
+func (w *waylandPlatformWindow) IsFrameless() bool {
+	return w.platform.IsFrameless()
+}
+
+func (w *waylandPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	w.platform.SetHitTestCallback(fn)
+}
+
+func (w *waylandPlatformWindow) Minimize()         { w.platform.Minimize() }
+func (w *waylandPlatformWindow) Maximize()         { w.platform.Maximize() }
+func (w *waylandPlatformWindow) IsMaximized() bool { return w.platform.IsMaximized() }
+func (w *waylandPlatformWindow) Close()            { w.platform.CloseWindow() }
+
+func (w *waylandPlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
+	w.platform.SetPointerCallback(fn)
+}
+
+func (w *waylandPlatformWindow) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
+	w.platform.SetScrollCallback(fn)
+}
+
+func (w *waylandPlatformWindow) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
+	w.platform.SetKeyCallback(fn)
+}
+
+func (w *waylandPlatformWindow) SetCharCallback(fn func(rune)) {
+	w.platform.SetCharCallback(fn)
+}
+
+func (w *waylandPlatformWindow) SetModalFrameCallback(_ func()) {}
+
+func (w *waylandPlatformWindow) Destroy() {
+	// Destruction handled by platform.Destroy()
+}
+
+// --- PlatformManager implementation on waylandPlatform ---
+
+// Init initializes the Wayland platform subsystem (process-level).
+// Creates the wake pipe for cross-goroutine event unblocking.
+// Does NOT create any windows — that is deferred to CreateWindow.
+func (p *waylandPlatform) Init() error {
 	// Check if Wayland is available
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
 		return fmt.Errorf("wayland: WAYLAND_DISPLAY not set")
 	}
 
-	return p.initSingleConnection(config)
+	// Create wakeup pipe for WakeUp → WaitEvents unblocking
+	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
+		return fmt.Errorf("wayland: wakeup pipe: %w", err)
+	}
+
+	return nil
+}
+
+// CreateWindow creates a Wayland window with the given configuration.
+func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	if err := p.initSingleConnection(config); err != nil {
+		return nil, err
+	}
+	return &waylandPlatformWindow{platform: p, id: NewWindowID()}, nil
 }
 
 // initSingleConnection initializes using a single C libwayland connection.
@@ -367,13 +527,6 @@ func (p *waylandPlatform) initSingleConnection(config Config) error {
 	}
 
 	p.primary.configured = true
-
-	// Create wakeup pipe for WakeUp → WaitEvents unblocking
-	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
-		libwl.Close()
-		_ = display.Close()
-		return fmt.Errorf("wayland: wakeup pipe: %w", err)
-	}
 
 	// Detect env-based scale factor as fallback
 	p.envScaleFactor = detectEnvScaleFactor()
@@ -1662,41 +1815,25 @@ func (p *waylandPlatform) PollEvents() Event {
 	return Event{Type: EventNone}
 }
 
-// ShouldClose returns true if window close was requested.
-func (p *waylandPlatform) ShouldClose() bool {
-	w := p.primary
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	return w.shouldClose
-}
+// ClipboardRead reads text from the system clipboard.
+// TODO(PLAT-008): Implement using wl_data_device and wl_data_offer.
+func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
 
-// LogicalSize returns the window size in platform points.
-// Wayland baseline: scale=1.0, logical == physical.
-func (p *waylandPlatform) LogicalSize() (width, height int) {
-	w := p.primary
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	return w.width, w.height
-}
+// ClipboardWrite writes text to the system clipboard.
+// TODO(PLAT-008): Implement using wl_data_device and wl_data_source.
+func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
 
-// PhysicalSize returns the GPU framebuffer size in device pixels.
-// Wayland baseline: scale=1.0, logical == physical.
-func (p *waylandPlatform) PhysicalSize() (width, height int) {
-	w := p.primary
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	return w.width, w.height
-}
+// DarkMode returns true if the system dark mode is active.
+func (p *waylandPlatform) DarkMode() bool { return detectDarkMode() }
 
-// GetHandle returns platform-specific handles for Vulkan surface creation.
-// Returns (wl_display*, wl_surface*) from libwayland-client if available.
-// Returns (0, 0) if libwayland-client was not loaded (software backend fallback).
-func (p *waylandPlatform) GetHandle() (instance, window uintptr) {
-	if p.libwl != nil {
-		return p.libwl.Display(), p.libwl.Surface()
-	}
-	return 0, 0
-}
+// ReduceMotion returns true if the user prefers reduced animation.
+func (p *waylandPlatform) ReduceMotion() bool { return detectReduceMotion() }
+
+// HighContrast returns true if high contrast mode is active.
+func (p *waylandPlatform) HighContrast() bool { return detectHighContrast() }
+
+// FontScale returns font size preference multiplier.
+func (p *waylandPlatform) FontScale() float32 { return detectFontScale() }
 
 // Destroy closes the window and releases resources.
 func (p *waylandPlatform) Destroy() {
@@ -1841,30 +1978,6 @@ func (p *waylandPlatform) ScaleFactor() float64 {
 	return 1.0
 }
 
-// PrepareFrame returns current scale/size state for the Wayland platform.
-func (p *waylandPlatform) PrepareFrame() PrepareFrameResult {
-	w, h := p.PhysicalSize()
-	return PrepareFrameResult{
-		ScaleFactor:    p.ScaleFactor(),
-		PhysicalWidth:  uint32(w),
-		PhysicalHeight: uint32(h),
-	}
-}
-
-// ClipboardRead reads text from the system clipboard.
-// TODO(PLAT-008): Implement using wl_data_device and wl_data_offer.
-// Wayland clipboard requires wl_data_device_manager binding, wl_data_offer
-// event handling (offer -> receive via pipe fd), and MIME type negotiation.
-// Effort: ~3 (async protocol, pipe-based data transfer).
-func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
-
-// ClipboardWrite writes text to the system clipboard.
-// TODO(PLAT-008): Implement using wl_data_device and wl_data_source.
-// Requires creating wl_data_source, setting MIME types, handling send events
-// by writing to the provided fd. The source must remain valid while owned.
-// Effort: ~3 (async protocol, fd-based data transfer).
-func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
-
 // SetCursor changes the mouse cursor shape.
 // TODO(PLAT-008): Implement using wp_cursor_shape_manager_v1 or xcursor theme loading.
 // wp_cursor_shape_manager_v1 is the modern approach (Wayland protocol extension).
@@ -1978,125 +2091,6 @@ func (p *waylandPlatform) CursorMode() int {
 	defer w.pointerMu.RUnlock()
 	return w.cursorMode
 }
-
-// DarkMode returns true if the system dark mode is active.
-// Checks GTK_THEME environment variable and KDE kdeglobals config.
-// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
-func (p *waylandPlatform) DarkMode() bool { return detectDarkMode() }
-
-// ReduceMotion returns true if the user prefers reduced animation.
-// Checks GTK_ENABLE_ANIMATIONS environment variable.
-// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
-func (p *waylandPlatform) ReduceMotion() bool { return detectReduceMotion() }
-
-// HighContrast returns true if high contrast mode is active.
-// Checks GTK_THEME environment variable for HighContrast theme names.
-func (p *waylandPlatform) HighContrast() bool { return detectHighContrast() }
-
-// FontScale returns font size preference multiplier.
-// Checks GDK_DPI_SCALE environment variable.
-// For full support, GSettings text-scaling-factor via D-Bus is needed.
-func (p *waylandPlatform) FontScale() float32 { return detectFontScale() }
-
-// x11Platform provider stubs
-
-// ScaleFactor returns the DPI scale factor.
-// Reads Xft.dpi from X RESOURCE_MANAGER property, with screen physical size fallback.
-func (p *x11Platform) ScaleFactor() float64 { return p.inner.ScaleFactor() }
-
-// PrepareFrame returns current scale/size state for the X11 platform.
-// X11 has static DPI — no per-frame updates needed.
-func (p *x11Platform) PrepareFrame() PrepareFrameResult {
-	w, h := p.PhysicalSize()
-	return PrepareFrameResult{
-		ScaleFactor:    p.ScaleFactor(),
-		PhysicalWidth:  uint32(w),
-		PhysicalHeight: uint32(h),
-	}
-}
-
-// ClipboardRead reads text from the system clipboard.
-// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
-// X11 clipboard uses the selections protocol: SetSelectionOwner, ConvertSelection,
-// SelectionNotify events, and incremental transfer (INCR) for large data.
-// Effort: ~5 (complex async event-driven protocol with multiple round trips).
-func (p *x11Platform) ClipboardRead() (string, error) { return "", nil }
-
-// ClipboardWrite writes text to the system clipboard.
-// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
-// Requires becoming selection owner (SetSelectionOwner), then responding to
-// SelectionRequest events from other clients. Must handle TARGETS, UTF8_STRING,
-// and INCR protocol for large transfers.
-// Effort: ~5 (must handle ongoing SelectionRequest events while owning clipboard).
-func (p *x11Platform) ClipboardWrite(string) error { return nil }
-
-// SetCursor changes the mouse cursor shape using the standard X11 cursor font.
-// cursorID maps to gpucontext.CursorShape values (0-11).
-func (p *x11Platform) SetCursor(cursorID int) { p.inner.SetCursor(cursorID) }
-
-// SetCursorMode sets cursor confinement/lock mode.
-func (p *x11Platform) SetCursorMode(mode int) { p.inner.SetCursorMode(mode) }
-
-// CursorMode returns the current cursor mode.
-func (p *x11Platform) CursorMode() int { return p.inner.GetCursorMode() }
-
-// DarkMode returns true if the system dark mode is active.
-// Checks GTK_THEME environment variable and KDE kdeglobals config.
-// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
-func (p *x11Platform) DarkMode() bool { return detectDarkMode() }
-
-// ReduceMotion returns true if the user prefers reduced animation.
-// Checks GTK_ENABLE_ANIMATIONS environment variable.
-// For full support, org.freedesktop.portal.Settings D-Bus interface is needed.
-func (p *x11Platform) ReduceMotion() bool { return detectReduceMotion() }
-
-// HighContrast returns true if high contrast mode is active.
-// Checks GTK_THEME environment variable for HighContrast theme names.
-func (p *x11Platform) HighContrast() bool { return detectHighContrast() }
-
-// FontScale returns font size preference multiplier.
-// Checks GDK_DPI_SCALE environment variable, with Xft.dpi as context via ScaleFactor.
-func (p *x11Platform) FontScale() float32 { return detectFontScale() }
-
-// Frameless window support — x11Platform
-
-func (p *x11Platform) SetFrameless(frameless bool) {
-	p.inner.SetFrameless(frameless)
-}
-
-func (p *x11Platform) IsFrameless() bool {
-	return p.inner.IsFrameless()
-}
-
-func (p *x11Platform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
-	p.inner.SetHitTestCallback(fn)
-}
-
-func (p *x11Platform) Minimize() {
-	p.inner.Minimize()
-}
-
-func (p *x11Platform) Maximize() {
-	p.inner.Maximize()
-}
-
-func (p *x11Platform) IsMaximized() bool {
-	return p.inner.IsMaximized()
-}
-
-func (p *x11Platform) CloseWindow() {
-	p.inner.CloseWindow()
-}
-
-func (p *x11Platform) SyncFrame() {}
-
-// BlitPixels copies RGBA pixel data to the window using X11 PutImage.
-// Implements the PixelBlitter interface for software backend presentation.
-func (p *x11Platform) BlitPixels(pixels []byte, width, height int) error {
-	return p.inner.BlitPixels(pixels, width, height)
-}
-
-func (p *waylandPlatform) SyncFrame() {}
 
 // Frameless window support — waylandPlatform
 

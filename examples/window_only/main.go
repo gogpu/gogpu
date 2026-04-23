@@ -4,23 +4,32 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/gogpu/gogpu/internal/platform"
 )
 
 func main() {
-	plat := platform.New()
-	err := plat.Init(platform.Config{
+	runtime.LockOSThread()
+
+	mgr := platform.NewManager()
+	if err := mgr.Init(); err != nil {
+		fmt.Println("Failed to init platform:", err)
+		return
+	}
+	defer mgr.Destroy()
+
+	win, err := mgr.CreateWindow(platform.Config{
 		Title:  "Window Only Test - No GPU",
 		Width:  800,
 		Height: 600,
 	})
 	if err != nil {
-		fmt.Println("Failed to init platform:", err)
+		fmt.Println("Failed to create window:", err)
 		return
 	}
-	defer plat.Destroy()
+	defer win.Destroy()
 
 	fmt.Println("Window created. Testing responsiveness WITHOUT GPU...")
 	fmt.Println("Try dragging/resizing the window.")
@@ -28,10 +37,10 @@ func main() {
 	frameCount := 0
 	lastReport := time.Now()
 
-	for !plat.ShouldClose() {
+	for !win.ShouldClose() {
 		// Just process events - no rendering
 		for {
-			event := plat.PollEvents()
+			event := mgr.PollEvents()
 			if event.Type == platform.EventNone {
 				break
 			}

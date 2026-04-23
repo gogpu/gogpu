@@ -102,8 +102,8 @@ type Renderer struct {
 	deferredDestroys   []func()
 	deferredDestroysMu sync.Mutex
 
-	// Platform reference
-	platform platform.Platform
+	// Platform window reference for surface creation and frame queries
+	platWindow platform.PlatformWindow
 
 	// PowerPreference for adapter selection
 	powerPreference gputypes.PowerPreference
@@ -114,9 +114,9 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(plat platform.Platform, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference) (*Renderer, error) {
+func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference) (*Renderer, error) {
 	r := &Renderer{
-		platform:        plat,
+		platWindow:      platWin,
 		powerPreference: powerPref,
 	}
 	// Store vsync temporarily; initCommon will move it to the primary windowSurface.
@@ -187,7 +187,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	}
 
 	// Get platform handles for surface creation
-	displayHandle, windowHandle := r.platform.GetHandle()
+	displayHandle, windowHandle := r.platWindow.GetHandle()
 
 	// Create surface via wgpu public API — stored on primary windowSurface
 	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
@@ -234,7 +234,7 @@ func (r *Renderer) initRust() error {
 	}
 
 	// Get platform handles for surface creation
-	displayHandle, windowHandle := r.platform.GetHandle()
+	displayHandle, windowHandle := r.platWindow.GetHandle()
 
 	// Create HAL surface
 	halSurface, err := halInstance.CreateSurface(displayHandle, windowHandle)
@@ -297,7 +297,7 @@ func (r *Renderer) initCommon() error {
 	// On some platforms (especially macOS), the window may not have valid
 	// dimensions immediately after creation. In that case, we defer surface
 	// configuration until the first Resize event.
-	width, height := r.platform.PhysicalSize()
+	width, height := r.platWindow.PhysicalSize()
 
 	// Use BGRA8Unorm which is common across platforms
 	r.primary.format = gputypes.TextureFormatBGRA8Unorm
@@ -443,12 +443,12 @@ func (r *Renderer) BeginFrame() bool {
 	// on the render thread where GPU operations are safe.
 	r.DrainDeferredDestroys()
 
-	return r.primary.beginFrame(r.platform, r.device, r.adapter)
+	return r.primary.beginFrame(r.platWindow, r.device, r.adapter)
 }
 
 // beginFrame acquires the next surface texture for rendering on this window.
 // Returns false if frame cannot be acquired (surface not configured, minimized, etc.).
-func (ws *windowSurface) beginFrame(plat platform.Platform, device *wgpu.Device, adapter *wgpu.Adapter) bool {
+func (ws *windowSurface) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) bool {
 	// Skip if surface is not configured yet.
 	// This happens when the window has zero dimensions (minimized, not yet visible).
 	if !ws.configured {
@@ -457,8 +457,8 @@ func (ws *windowSurface) beginFrame(plat platform.Platform, device *wgpu.Device,
 
 	// Before acquiring surface texture, let platform update surface state
 	// (e.g., CAMetalLayer.contentsScale on macOS for HiDPI/multi-monitor).
-	if plat != nil {
-		result := plat.PrepareFrame()
+	if platWin != nil {
+		result := platWin.PrepareFrame()
 		if result.ScaleChanged && result.PhysicalWidth > 0 && result.PhysicalHeight > 0 {
 			// Scale changed (window moved between monitors with different DPI).
 			// Reconfigure surface with new physical dimensions.

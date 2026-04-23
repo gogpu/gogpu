@@ -18,10 +18,10 @@ type WindowID = platform.WindowID
 // is supported. Multi-window rendering will be enabled when platforms
 // implement PlatformManager.
 type Window struct {
-	id       WindowID
-	config   Config
-	surface  *windowSurface
-	platform platform.Platform // underlying platform window (legacy adapter)
+	id         WindowID
+	config     Config
+	surface    *windowSurface
+	platWindow platform.PlatformWindow // underlying platform window
 
 	// Per-window callbacks
 	onDraw   func(*Context)
@@ -55,23 +55,23 @@ func (w *Window) SetOnClose(fn func() bool) {
 
 // Close requests this window to close.
 func (w *Window) Close() {
-	if w.platform != nil {
-		w.platform.CloseWindow()
+	if w.platWindow != nil {
+		w.platWindow.Close()
 	}
 }
 
 // Size returns the logical window size in platform points (DIP).
 func (w *Window) Size() (int, int) {
-	if w.platform != nil {
-		return w.platform.LogicalSize()
+	if w.platWindow != nil {
+		return w.platWindow.LogicalSize()
 	}
 	return w.config.Width, w.config.Height
 }
 
 // PhysicalSize returns the GPU framebuffer size in device pixels.
 func (w *Window) PhysicalSize() (int, int) {
-	if w.platform != nil {
-		return w.platform.PhysicalSize()
+	if w.platWindow != nil {
+		return w.platWindow.PhysicalSize()
 	}
 	return w.config.Width, w.config.Height
 }

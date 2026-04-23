@@ -154,8 +154,8 @@ func TestAppSizeNilPlatform(t *testing.T) {
 }
 
 func TestAppSizeWithPlatform(t *testing.T) {
-	mock := &mockPlatform{width: 1920, height: 1080, scaleFactor: 1.0}
-	app := &App{platform: mock}
+	mock := &mockWindow{width: 1920, height: 1080, scaleFactor: 1.0}
+	app := &App{platWindow: mock}
 
 	w, h := app.Size()
 	if w != 1920 || h != 1080 {
@@ -173,8 +173,8 @@ func TestAppPhysicalSizeNilPlatform(t *testing.T) {
 }
 
 func TestAppPhysicalSizeWithPlatform(t *testing.T) {
-	mock := &mockPlatform{width: 800, height: 600, scaleFactor: 2.0}
-	app := &App{platform: mock}
+	mock := &mockWindow{width: 800, height: 600, scaleFactor: 2.0}
+	app := &App{platWindow: mock}
 
 	w, h := app.PhysicalSize()
 	if w != 1600 || h != 1200 {

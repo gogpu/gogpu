@@ -7,18 +7,15 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
-// mockPlatform implements platform.Platform for testing.
+// mockWindow implements platform.PlatformWindow for testing.
 // Only the methods needed for WindowProvider/PlatformProvider are functional;
 // the rest are no-ops.
-type mockPlatform struct {
-	width, height int
-	scaleFactor   float64
-	clipboardText string
-	cursorID      int
-	darkMode      bool
-	reduceMotion  bool
-	highContrast  bool
-	fontScale     float32
+type mockWindow struct {
+	windowID    platform.WindowID
+	width       int
+	height      int
+	scaleFactor float64
+	cursorID    int
 
 	// Frameless window state
 	frameless       bool
@@ -28,29 +25,27 @@ type mockPlatform struct {
 	hitTestCallback func(float64, float64) gpucontext.HitTestResult
 }
 
-func (m *mockPlatform) Init(platform.Config) error { return nil }
-func (m *mockPlatform) PollEvents() platform.Event { return platform.Event{} }
-func (m *mockPlatform) ShouldClose() bool          { return false }
-func (m *mockPlatform) LogicalSize() (int, int)    { return m.width, m.height }
-func (m *mockPlatform) PhysicalSize() (int, int) {
+func (m *mockWindow) ID() platform.WindowID   { return m.windowID }
+func (m *mockWindow) ShouldClose() bool       { return false }
+func (m *mockWindow) LogicalSize() (int, int) { return m.width, m.height }
+func (m *mockWindow) PhysicalSize() (int, int) {
 	s := m.scaleFactor
 	if s <= 0 {
 		s = 1.0
 	}
 	return int(float64(m.width) * s), int(float64(m.height) * s)
 }
-func (m *mockPlatform) GetHandle() (uintptr, uintptr)                                   { return 0, 0 }
-func (m *mockPlatform) InSizeMove() bool                                                { return false }
-func (m *mockPlatform) SetPointerCallback(func(gpucontext.PointerEvent))                {}
-func (m *mockPlatform) SetScrollCallback(func(gpucontext.ScrollEvent))                  {}
-func (m *mockPlatform) SetKeyCallback(func(gpucontext.Key, gpucontext.Modifiers, bool)) {}
-func (m *mockPlatform) SetCharCallback(func(rune))                                      {}
-func (m *mockPlatform) SetModalFrameCallback(func())                                    {}
-func (m *mockPlatform) WaitEvents()                                                     {}
-func (m *mockPlatform) WakeUp()                                                         {}
-func (m *mockPlatform) Destroy()                                                        {}
-func (m *mockPlatform) ScaleFactor() float64                                            { return m.scaleFactor }
-func (m *mockPlatform) PrepareFrame() platform.PrepareFrameResult {
+func (m *mockWindow) GetHandle() (uintptr, uintptr)                                   { return 0, 0 }
+func (m *mockWindow) InSizeMove() bool                                                { return false }
+func (m *mockWindow) SetTitle(_ string)                                               {}
+func (m *mockWindow) SetPointerCallback(func(gpucontext.PointerEvent))                {}
+func (m *mockWindow) SetScrollCallback(func(gpucontext.ScrollEvent))                  {}
+func (m *mockWindow) SetKeyCallback(func(gpucontext.Key, gpucontext.Modifiers, bool)) {}
+func (m *mockWindow) SetCharCallback(func(rune))                                      {}
+func (m *mockWindow) SetModalFrameCallback(func())                                    {}
+func (m *mockWindow) Destroy()                                                        {}
+func (m *mockWindow) ScaleFactor() float64                                            { return m.scaleFactor }
+func (m *mockWindow) PrepareFrame() platform.PrepareFrameResult {
 	w, h := m.PhysicalSize()
 	return platform.PrepareFrameResult{
 		ScaleFactor:    m.scaleFactor,
@@ -58,26 +53,41 @@ func (m *mockPlatform) PrepareFrame() platform.PrepareFrameResult {
 		PhysicalHeight: uint32(h),
 	}
 }
-func (m *mockPlatform) ClipboardRead() (string, error)   { return m.clipboardText, nil }
-func (m *mockPlatform) ClipboardWrite(text string) error { m.clipboardText = text; return nil }
-func (m *mockPlatform) SetCursor(cursorID int)           { m.cursorID = cursorID }
-func (m *mockPlatform) SetCursorMode(int)                {}
-func (m *mockPlatform) CursorMode() int                  { return 0 }
-func (m *mockPlatform) DarkMode() bool                   { return m.darkMode }
-func (m *mockPlatform) ReduceMotion() bool               { return m.reduceMotion }
-func (m *mockPlatform) HighContrast() bool               { return m.highContrast }
-func (m *mockPlatform) FontScale() float32               { return m.fontScale }
-
-func (m *mockPlatform) SyncFrame()          {}
-func (m *mockPlatform) SetFrameless(v bool) { m.frameless = v }
-func (m *mockPlatform) IsFrameless() bool   { return m.frameless }
-func (m *mockPlatform) SetHitTestCallback(fn func(float64, float64) gpucontext.HitTestResult) {
+func (m *mockWindow) SetCursor(cursorID int) { m.cursorID = cursorID }
+func (m *mockWindow) SetCursorMode(int)      {}
+func (m *mockWindow) CursorMode() int        { return 0 }
+func (m *mockWindow) SyncFrame()             {}
+func (m *mockWindow) SetFrameless(v bool)    { m.frameless = v }
+func (m *mockWindow) IsFrameless() bool      { return m.frameless }
+func (m *mockWindow) SetHitTestCallback(fn func(float64, float64) gpucontext.HitTestResult) {
 	m.hitTestCallback = fn
 }
-func (m *mockPlatform) Minimize()         { m.minimized = true }
-func (m *mockPlatform) Maximize()         { m.maximized = !m.maximized }
-func (m *mockPlatform) IsMaximized() bool { return m.maximized }
-func (m *mockPlatform) CloseWindow()      { m.closed = true }
+func (m *mockWindow) Minimize()         { m.minimized = true }
+func (m *mockWindow) Maximize()         { m.maximized = !m.maximized }
+func (m *mockWindow) IsMaximized() bool { return m.maximized }
+func (m *mockWindow) Close()            { m.closed = true }
+
+// mockManager implements platform.PlatformManager for testing.
+type mockManager struct {
+	clipboardText string
+	darkMode      bool
+	reduceMotion  bool
+	highContrast  bool
+	fontScale     float32
+}
+
+func (m *mockManager) Init() error                                                   { return nil }
+func (m *mockManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) { return nil, nil }
+func (m *mockManager) PollEvents() platform.Event                                    { return platform.Event{} }
+func (m *mockManager) WaitEvents()                                                   {}
+func (m *mockManager) WakeUp()                                                       {}
+func (m *mockManager) ClipboardRead() (string, error)                                { return m.clipboardText, nil }
+func (m *mockManager) ClipboardWrite(text string) error                              { m.clipboardText = text; return nil }
+func (m *mockManager) DarkMode() bool                                                { return m.darkMode }
+func (m *mockManager) ReduceMotion() bool                                            { return m.reduceMotion }
+func (m *mockManager) HighContrast() bool                                            { return m.highContrast }
+func (m *mockManager) FontScale() float32                                            { return m.fontScale }
+func (m *mockManager) Destroy()                                                      {}
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {
@@ -162,12 +172,12 @@ func TestPlatformProviderNilPlatform(t *testing.T) {
 
 // TestWindowProviderDelegation verifies App delegates to platform correctly.
 func TestWindowProviderDelegation(t *testing.T) {
-	mock := &mockPlatform{
+	mock := &mockWindow{
 		width:       1920,
 		height:      1080,
 		scaleFactor: 2.0,
 	}
-	app := &App{platform: mock}
+	app := &App{platWindow: mock}
 
 	t.Run("Size", func(t *testing.T) {
 		w, h := app.Size()
@@ -186,14 +196,19 @@ func TestWindowProviderDelegation(t *testing.T) {
 
 // TestPlatformProviderDelegation verifies App delegates PlatformProvider to platform.
 func TestPlatformProviderDelegation(t *testing.T) {
-	mock := &mockPlatform{
+	mockMgr := &mockManager{
 		clipboardText: "hello from clipboard",
 		darkMode:      true,
 		reduceMotion:  true,
 		highContrast:  true,
 		fontScale:     1.5,
 	}
-	app := &App{platform: mock}
+	mockWin := &mockWindow{
+		width:       800,
+		height:      600,
+		scaleFactor: 1.0,
+	}
+	app := &App{manager: mockMgr, platWindow: mockWin}
 
 	t.Run("ClipboardRead", func(t *testing.T) {
 		text, err := app.ClipboardRead()
@@ -210,8 +225,8 @@ func TestPlatformProviderDelegation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClipboardWrite() error = %v", err)
 		}
-		if mock.clipboardText != "new text" {
-			t.Errorf("clipboard = %q, want %q", mock.clipboardText, "new text")
+		if mockMgr.clipboardText != "new text" {
+			t.Errorf("clipboard = %q, want %q", mockMgr.clipboardText, "new text")
 		}
 	})
 
@@ -249,8 +264,8 @@ func TestPlatformProviderDelegation(t *testing.T) {
 		}
 		for _, tc := range cursors {
 			app.SetCursor(tc.shape)
-			if mock.cursorID != tc.id {
-				t.Errorf("SetCursor(%v): platform got cursorID=%d, want %d", tc.shape, mock.cursorID, tc.id)
+			if mockWin.cursorID != tc.id {
+				t.Errorf("SetCursor(%v): platform got cursorID=%d, want %d", tc.shape, mockWin.cursorID, tc.id)
 			}
 		}
 	})
@@ -283,11 +298,8 @@ func TestPlatformProviderDelegation(t *testing.T) {
 
 // TestPlatformProviderFalseValues verifies delegation when platform returns false/default values.
 func TestPlatformProviderFalseValues(t *testing.T) {
-	mock := &mockPlatform{
-		scaleFactor: 1.0,
-		fontScale:   1.0,
-	}
-	app := &App{platform: mock}
+	mockMgr := &mockManager{fontScale: 1.0}
+	app := &App{manager: mockMgr, platWindow: &mockWindow{scaleFactor: 1.0}}
 
 	if app.DarkMode() {
 		t.Error("DarkMode() should be false")

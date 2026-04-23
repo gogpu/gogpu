@@ -21,10 +21,10 @@ import (
 // This separation ensures the window stays responsive during heavy GPU
 // operations like swapchain recreation.
 type App struct {
-	config   Config
-	manager  platform.PlatformManager // process-level (multi-window)
-	platform platform.Platform        // legacy wrapper (for renderer compat)
-	renderer *Renderer
+	config     Config
+	manager    platform.PlatformManager // process-level (multi-window)
+	platWindow platform.PlatformWindow  // primary window (per-window ops)
+	renderer   *Renderer
 
 	// Multi-thread rendering
 	renderLoop *thread.RenderLoop
@@ -180,9 +180,8 @@ func (a *App) Run() error {
 	}
 	defer platWindow.Destroy()
 
-	// Keep a legacy Platform wrapper for renderer compatibility.
-	// The renderer still uses platform.Platform; this bridges the gap.
-	a.platform = platform.WrapAsLegacy(a.manager, platWindow)
+	// Store the primary platform window for per-window operations.
+	a.platWindow = platWindow
 
 	// Initialize input state BEFORE setting up event callbacks.
 	// This ensures keyboard/mouse state is captured from the first event.
@@ -206,7 +205,7 @@ func (a *App) Run() error {
 	//
 	// Future: An independent render thread running on its own schedule
 	// would eliminate this callback entirely. See ROADMAP.md for details.
-	a.platform.SetModalFrameCallback(a.modalFrameTick)
+	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
 
 	// Create render loop with dedicated render thread
 	a.renderLoop = thread.NewRenderLoop()
@@ -215,7 +214,7 @@ func (a *App) Run() error {
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(a.platform, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference)
+		a.renderer, initErr = newRenderer(a.platWindow, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference)
 	})
 	if initErr != nil {
 		return initErr
@@ -249,13 +248,13 @@ func (a *App) Run() error {
 	// future multi-window iteration.
 	a.windowManager = newWindowManager()
 	a.primaryWindow = &Window{
-		id:       platform.NewWindowID(),
-		config:   a.config,
-		surface:  a.renderer.primary,
-		platform: a.platform,
-		onDraw:   a.onDraw,
-		onResize: a.onResize,
-		visible:  true,
+		id:         platWindow.ID(),
+		config:     a.config,
+		surface:    a.renderer.primary,
+		platWindow: a.platWindow,
+		onDraw:     a.onDraw,
+		onResize:   a.onResize,
+		visible:    true,
 	}
 	a.windowManager.add(a.primaryWindow)
 
@@ -265,18 +264,18 @@ func (a *App) Run() error {
 	//   3. CONTINUOUS: ContinuousRender=true — always render (game loop)
 	a.running = true
 	a.lastFrame = time.Now()
-	a.invalidator = newInvalidator(a.platform.WakeUp)
+	a.invalidator = newInvalidator(a.manager.WakeUp)
 	a.animations = &AnimationController{}
 	a.invalidator.Invalidate() // Request initial frame
 
-	for a.running && !a.platform.ShouldClose() {
+	for a.running && !a.platWindow.ShouldClose() {
 		// Determine rendering state
 		continuous := a.config.ContinuousRender || a.animations.IsAnimating()
 		invalidated := a.invalidator.Consume()
 
 		if !continuous && !invalidated {
 			// IDLE STATE: Block on OS events (0% CPU, <1ms response)
-			a.platform.WaitEvents()
+			a.manager.WaitEvents()
 		}
 
 		// Process all pending platform events
@@ -329,7 +328,7 @@ func (a *App) processEventsMultiThread() bool {
 	var events []platform.Event
 
 	for {
-		event := a.platform.PollEvents()
+		event := a.manager.PollEvents()
 		if event.Type == platform.EventNone {
 			break
 		}
@@ -349,7 +348,7 @@ func (a *App) processEventsMultiThread() bool {
 
 	// Queue resize for render thread (deferred pattern)
 	// Don't apply resize during modal resize loop (Windows)
-	if lastResize != nil && !a.platform.InSizeMove() {
+	if lastResize != nil && !a.platWindow.InSizeMove() {
 		// Queue PHYSICAL size for render thread (GPU surface reconfiguration)
 		physW, physH := lastResize.PhysicalWidth, lastResize.PhysicalHeight
 		if physW > 0 && physH > 0 {
@@ -374,14 +373,14 @@ func (a *App) processEventsMultiThread() bool {
 // All GPU operations happen on the render thread to keep main thread responsive.
 func (a *App) renderFrameMultiThread() {
 	// Skip rendering if window is minimized (zero physical dimensions)
-	width, height := a.platform.PhysicalSize()
+	width, height := a.platWindow.PhysicalSize()
 	if width <= 0 || height <= 0 {
 		return // Window minimized, skip frame
 	}
 
 	// Capture callback and scale factor for render thread
 	onDraw := a.onDraw
-	scale := a.platform.ScaleFactor()
+	scale := a.platWindow.ScaleFactor()
 
 	// Execute GPU operations on render thread
 	a.renderLoop.RunOnRenderThreadVoid(func() {
@@ -440,7 +439,7 @@ func (a *App) modalFrameTick() {
 	// Propagate PHYSICAL window size to render thread for swapchain resize.
 	// During modal loop, processEventsMultiThread doesn't run, so
 	// RequestResize wouldn't be called otherwise.
-	width, height := a.platform.PhysicalSize()
+	width, height := a.platWindow.PhysicalSize()
 	if width > 0 && height > 0 {
 		a.renderLoop.RequestResize(uint32(width), uint32(height)) //nolint:gosec // G115: validated positive
 	}
@@ -451,7 +450,7 @@ func (a *App) modalFrameTick() {
 	// Synchronize with compositor (DwmFlush on Windows).
 	// This ensures our frame and the DWM window border update
 	// appear in the same composition cycle, reducing resize lag.
-	a.platform.SyncFrame()
+	a.platWindow.SyncFrame()
 }
 
 // Quit requests the application to quit.
@@ -482,8 +481,8 @@ func (a *App) StartAnimation() *AnimationToken {
 // Size returns the current window size in logical points (DIP).
 // Use this for layout, UI coordinates, and user-facing dimensions.
 func (a *App) Size() (width, height int) {
-	if a.platform != nil {
-		return a.platform.LogicalSize()
+	if a.platWindow != nil {
+		return a.platWindow.LogicalSize()
 	}
 	return a.config.Width, a.config.Height
 }
@@ -491,8 +490,8 @@ func (a *App) Size() (width, height int) {
 // PhysicalSize returns the current GPU framebuffer size in device pixels.
 // On Retina/HiDPI displays this is larger than Size() by ScaleFactor().
 func (a *App) PhysicalSize() (width, height int) {
-	if a.platform != nil {
-		return a.platform.PhysicalSize()
+	if a.platWindow != nil {
+		return a.platWindow.PhysicalSize()
 	}
 	return a.config.Width, a.config.Height
 }
@@ -501,8 +500,8 @@ func (a *App) PhysicalSize() (width, height int) {
 // 1.0 = standard (96 DPI on Windows, 72 on macOS), 2.0 = Retina/HiDPI.
 // Implements gpucontext.WindowProvider.
 func (a *App) ScaleFactor() float64 {
-	if a.platform != nil {
-		return a.platform.ScaleFactor()
+	if a.platWindow != nil {
+		return a.platWindow.ScaleFactor()
 	}
 	return 1.0
 }
@@ -510,8 +509,8 @@ func (a *App) ScaleFactor() float64 {
 // ClipboardRead reads text content from the system clipboard.
 // Implements gpucontext.PlatformProvider.
 func (a *App) ClipboardRead() (string, error) {
-	if a.platform != nil {
-		return a.platform.ClipboardRead()
+	if a.manager != nil {
+		return a.manager.ClipboardRead()
 	}
 	return "", nil
 }
@@ -519,8 +518,8 @@ func (a *App) ClipboardRead() (string, error) {
 // ClipboardWrite writes text content to the system clipboard.
 // Implements gpucontext.PlatformProvider.
 func (a *App) ClipboardWrite(text string) error {
-	if a.platform != nil {
-		return a.platform.ClipboardWrite(text)
+	if a.manager != nil {
+		return a.manager.ClipboardWrite(text)
 	}
 	return nil
 }
@@ -528,8 +527,8 @@ func (a *App) ClipboardWrite(text string) error {
 // SetCursor changes the mouse cursor shape.
 // Implements gpucontext.PlatformProvider.
 func (a *App) SetCursor(cursor gpucontext.CursorShape) {
-	if a.platform != nil {
-		a.platform.SetCursor(int(cursor))
+	if a.platWindow != nil {
+		a.platWindow.SetCursor(int(cursor))
 	}
 }
 
@@ -552,15 +551,15 @@ func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 //   - Linux/Wayland: Stub (not yet implemented, requires pointer constraints protocol).
 //   - macOS: Stub (not yet implemented, requires CGAssociateMouseAndMouseCursorPosition).
 func (a *App) SetCursorMode(mode gpucontext.CursorMode) {
-	if a.platform != nil {
-		a.platform.SetCursorMode(int(mode))
+	if a.platWindow != nil {
+		a.platWindow.SetCursorMode(int(mode))
 	}
 }
 
 // CursorMode returns the current cursor confinement mode.
 func (a *App) CursorMode() gpucontext.CursorMode {
-	if a.platform != nil {
-		return gpucontext.CursorMode(a.platform.CursorMode())
+	if a.platWindow != nil {
+		return gpucontext.CursorMode(a.platWindow.CursorMode())
 	}
 	return gpucontext.CursorModeNormal
 }
@@ -568,8 +567,8 @@ func (a *App) CursorMode() gpucontext.CursorMode {
 // DarkMode returns true if the system dark mode is active.
 // Implements gpucontext.PlatformProvider.
 func (a *App) DarkMode() bool {
-	if a.platform != nil {
-		return a.platform.DarkMode()
+	if a.manager != nil {
+		return a.manager.DarkMode()
 	}
 	return false
 }
@@ -577,8 +576,8 @@ func (a *App) DarkMode() bool {
 // ReduceMotion returns true if the user prefers reduced animation.
 // Implements gpucontext.PlatformProvider.
 func (a *App) ReduceMotion() bool {
-	if a.platform != nil {
-		return a.platform.ReduceMotion()
+	if a.manager != nil {
+		return a.manager.ReduceMotion()
 	}
 	return false
 }
@@ -586,8 +585,8 @@ func (a *App) ReduceMotion() bool {
 // HighContrast returns true if high contrast mode is active.
 // Implements gpucontext.PlatformProvider.
 func (a *App) HighContrast() bool {
-	if a.platform != nil {
-		return a.platform.HighContrast()
+	if a.manager != nil {
+		return a.manager.HighContrast()
 	}
 	return false
 }
@@ -595,8 +594,8 @@ func (a *App) HighContrast() bool {
 // FontScale returns the user's font size preference multiplier.
 // Implements gpucontext.PlatformProvider.
 func (a *App) FontScale() float32 {
-	if a.platform != nil {
-		return a.platform.FontScale()
+	if a.manager != nil {
+		return a.manager.FontScale()
 	}
 	return 1.0
 }
@@ -604,16 +603,16 @@ func (a *App) FontScale() float32 {
 // SetFrameless enables or disables frameless window mode.
 // Implements gpucontext.WindowChrome.
 func (a *App) SetFrameless(frameless bool) {
-	if a.platform != nil {
-		a.platform.SetFrameless(frameless)
+	if a.platWindow != nil {
+		a.platWindow.SetFrameless(frameless)
 	}
 }
 
 // IsFrameless returns true if the window is in frameless mode.
 // Implements gpucontext.WindowChrome.
 func (a *App) IsFrameless() bool {
-	if a.platform != nil {
-		return a.platform.IsFrameless()
+	if a.platWindow != nil {
+		return a.platWindow.IsFrameless()
 	}
 	return false
 }
@@ -621,8 +620,8 @@ func (a *App) IsFrameless() bool {
 // SetHitTestCallback sets the callback for custom hit testing in frameless mode.
 // Implements gpucontext.WindowChrome.
 func (a *App) SetHitTestCallback(callback gpucontext.HitTestCallback) {
-	if a.platform != nil {
-		a.platform.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
+	if a.platWindow != nil {
+		a.platWindow.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
 			if callback != nil {
 				return callback(x, y)
 			}
@@ -634,24 +633,24 @@ func (a *App) SetHitTestCallback(callback gpucontext.HitTestCallback) {
 // Minimize minimizes the window.
 // Implements gpucontext.WindowChrome.
 func (a *App) Minimize() {
-	if a.platform != nil {
-		a.platform.Minimize()
+	if a.platWindow != nil {
+		a.platWindow.Minimize()
 	}
 }
 
 // Maximize toggles between maximized and restored window state.
 // Implements gpucontext.WindowChrome.
 func (a *App) Maximize() {
-	if a.platform != nil {
-		a.platform.Maximize()
+	if a.platWindow != nil {
+		a.platWindow.Maximize()
 	}
 }
 
 // IsMaximized returns true if the window is maximized.
 // Implements gpucontext.WindowChrome.
 func (a *App) IsMaximized() bool {
-	if a.platform != nil {
-		return a.platform.IsMaximized()
+	if a.platWindow != nil {
+		return a.platWindow.IsMaximized()
 	}
 	return false
 }
@@ -659,8 +658,8 @@ func (a *App) IsMaximized() bool {
 // Close requests the window to close.
 // Implements gpucontext.WindowChrome.
 func (a *App) Close() {
-	if a.platform != nil {
-		a.platform.CloseWindow()
+	if a.platWindow != nil {
+		a.platWindow.Close()
 	}
 }
 
@@ -734,13 +733,13 @@ func (a *App) setupInputEvents() {
 	}
 
 	// Wire pointer events from platform to eventSource
-	a.platform.SetPointerCallback(func(ev gpucontext.PointerEvent) {
+	a.platWindow.SetPointerCallback(func(ev gpucontext.PointerEvent) {
 		a.eventSource.dispatchPointerEvent(ev)
 		a.updateMouseStateFromPointer(ev)
 	})
 
 	// Wire scroll events from platform to eventSource
-	a.platform.SetScrollCallback(func(ev gpucontext.ScrollEvent) {
+	a.platWindow.SetScrollCallback(func(ev gpucontext.ScrollEvent) {
 		a.eventSource.dispatchScrollEventDetailed(ev)
 
 		// Update input state for Ebiten-style polling
@@ -750,7 +749,7 @@ func (a *App) setupInputEvents() {
 	})
 
 	// Wire keyboard events from platform to eventSource
-	a.platform.SetKeyCallback(func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	a.platWindow.SetKeyCallback(func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
 		// Dispatch to callbacks (gpucontext.EventSource interface)
 		if pressed {
 			a.eventSource.dispatchKeyPress(key, mods)
@@ -768,7 +767,7 @@ func (a *App) setupInputEvents() {
 	})
 
 	// Wire character input from platform to eventSource
-	a.platform.SetCharCallback(func(char rune) {
+	a.platWindow.SetCharCallback(func(char rune) {
 		a.eventSource.dispatchTextInput(string(char))
 	})
 }
