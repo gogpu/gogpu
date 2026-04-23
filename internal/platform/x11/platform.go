@@ -57,27 +57,12 @@ type xlibHandle struct {
 	cifClose      *types.CallInterface
 }
 
-// Platform implements X11 windowing support.
-type Platform struct {
-	mu sync.Mutex
-
-	// X11 connection (pure Go wire protocol for events)
-	conn *Connection
-
-	// Xlib Display* for Vulkan surface creation
-	xlib *xlibHandle
-
-	// Standard atoms
-	atoms *StandardAtoms
-
-	// Window
+// x11Window holds all per-window state.
+// In Phase 1 (single-window), there is exactly one instance referenced as primary.
+// Phase 2 will add multi-window support via the window registry.
+type x11Window struct {
+	// X11 window ID
 	window ResourceID
-
-	// XInput2 extension (nil if unavailable)
-	xi *XIExtension
-
-	// Keyboard mapping
-	keymap *KeyboardMapping
 
 	// Window state
 	width       int
@@ -101,10 +86,6 @@ type Platform struct {
 	primaryTouch  uint32
 	hasPrimary    bool
 
-	// Cursor state
-	cursorFontID ResourceID         // "cursor" font ID (0 = not opened yet)
-	cursorCache  map[int]ResourceID // cursor shape → X11 cursor resource ID
-
 	// Frameless window state
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -116,11 +97,8 @@ type Platform struct {
 	charCallback     func(rune)
 	callbackMu       sync.RWMutex
 
-	// DPI scale factor (from Xft.dpi or screen physical size)
-	scaleFactor float64
-
 	// Graphics context for BlitPixels (software backend presentation).
-	// Lazily created on first BlitPixels call.
+	// Lazily created on first BlitPixels call. Bound to this window's drawable.
 	blitGC ResourceID
 
 	// Timestamp reference for event timing
@@ -128,19 +106,54 @@ type Platform struct {
 
 	// Cursor mode state (0=normal, 1=locked, 2=confined)
 	cursorMode    int
-	blankCursorID ResourceID // 1x1 transparent cursor for locked mode
-	savedMouseX   float64    // saved position before locking
+	savedMouseX   float64 // saved position before locking
 	savedMouseY   float64
 	cursorCenterX int16 // window center for warp-back in locked mode
 	cursorCenterY int16
 	cursorGrabbed bool // whether XGrabPointer is active
 }
 
+// Platform implements X11 windowing support.
+// Holds process-level state shared across all windows and a registry
+// of x11Window instances keyed by X11 ResourceID.
+type Platform struct {
+	mu sync.Mutex
+
+	// X11 connection (pure Go wire protocol for events) — process-level
+	conn *Connection
+
+	// Xlib Display* for Vulkan surface creation — process-level
+	xlib *xlibHandle
+
+	// Standard atoms — process-level
+	atoms *StandardAtoms
+
+	// XInput2 extension (nil if unavailable) — process-level
+	xi *XIExtension
+
+	// Keyboard mapping — process-level
+	keymap *KeyboardMapping
+
+	// DPI scale factor (from Xft.dpi or screen physical size) — process-level
+	scaleFactor float64
+
+	// Cursor resources — process-level (shared across windows)
+	cursorFontID  ResourceID         // "cursor" font ID (0 = not opened yet)
+	cursorCache   map[int]ResourceID // cursor shape → X11 cursor resource ID
+	blankCursorID ResourceID         // 1x1 transparent cursor for locked mode
+
+	// Window registry keyed by X11 ResourceID for event routing.
+	windowMu sync.RWMutex
+	windows  map[ResourceID]*x11Window
+
+	// Primary window for backward-compatible single-window API.
+	primary *x11Window
+}
+
 // NewPlatform creates a new X11 platform instance.
 func NewPlatform() *Platform {
 	return &Platform{
-		startTime:     time.Now(),
-		activeTouches: make(map[uint32]bool),
+		windows: make(map[ResourceID]*x11Window),
 	}
 }
 
@@ -253,7 +266,16 @@ func (p *Platform) Init(config Config) error {
 		_ = conn.Close()
 		return fmt.Errorf("x11: failed to create window: %w", err)
 	}
-	p.window = window
+
+	// Create per-window state
+	w := &x11Window{
+		window:        window,
+		width:         config.Width,
+		height:        config.Height,
+		startTime:     time.Now(),
+		activeTouches: make(map[uint32]bool),
+		frameless:     config.Frameless,
+	}
 
 	// Set window properties
 	if err := conn.SetWindowTitle(window, config.Title, atoms); err != nil {
@@ -281,7 +303,6 @@ func (p *Platform) Init(config Config) error {
 
 	// Handle frameless windows via Motif hints
 	if config.Frameless {
-		p.frameless = true
 		_ = conn.SetWindowBorderless(window, atoms)
 	}
 
@@ -325,10 +346,14 @@ func (p *Platform) Init(config Config) error {
 		_ = conn.SetFullscreen(window, true, atoms)
 	}
 
-	// Store initial size
-	p.width = config.Width
-	p.height = config.Height
-	p.configured = true
+	// Mark window as configured
+	w.configured = true
+
+	// Register window in the map and set as primary
+	p.windowMu.Lock()
+	p.windows[window] = w
+	p.windowMu.Unlock()
+	p.primary = w
 
 	// Flush to ensure all requests are sent
 	_ = conn.Flush()
@@ -354,9 +379,9 @@ func (p *Platform) Init(config Config) error {
 	}
 
 	if xlib != nil {
-		logger().Info("x11 init complete", "window", fmt.Sprintf("%#x", p.window), "display", fmt.Sprintf("%#x", xlib.display))
+		logger().Info("x11 init complete", "window", fmt.Sprintf("%#x", w.window), "display", fmt.Sprintf("%#x", xlib.display))
 	} else {
-		logger().Warn("x11 init without xlib", "window", fmt.Sprintf("%#x", p.window))
+		logger().Warn("x11 init without xlib", "window", fmt.Sprintf("%#x", w.window))
 	}
 
 	return nil
@@ -434,24 +459,21 @@ func parseXftDPI(resources string) float64 {
 
 // PollEvents processes pending X11 events.
 func (p *Platform) PollEvents() PlatformEvent {
+	w := p.primary
+
 	// First, drain queued events (from previous X11 reads).
-	p.eventMu.Lock()
-	if len(p.events) > 0 {
-		event := p.events[0]
-		p.events = p.events[1:]
-		p.eventMu.Unlock()
+	if event, ok := w.dequeueEvent(); ok {
 		return event
 	}
-	p.eventMu.Unlock()
 
 	// Read and process all available X11 events into the queue.
 	for {
 		event, err := p.conn.PollEvent()
 		if err != nil {
-			p.mu.Lock()
-			p.shouldClose = true
-			p.mu.Unlock()
-			p.queueEvent(PlatformEvent{Type: EventTypeClose})
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
+			w.queueEvent(PlatformEvent{Type: EventTypeClose})
 			break
 		}
 
@@ -460,32 +482,41 @@ func (p *Platform) PollEvents() PlatformEvent {
 		}
 
 		if platformEvent := p.handleEvent(event); platformEvent.Type != EventTypeNone {
-			p.queueEvent(platformEvent)
+			w.queueEvent(platformEvent)
 		}
 	}
 
 	// Return first queued event, or EventNone if empty.
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-	if len(p.events) > 0 {
-		event := p.events[0]
-		p.events = p.events[1:]
+	if event, ok := w.dequeueEvent(); ok {
 		return event
 	}
 	return PlatformEvent{Type: EventTypeNone}
 }
 
-// queueEvent appends a platform event to the event queue.
-func (p *Platform) queueEvent(event PlatformEvent) {
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-	p.events = append(p.events, event)
+// dequeueEvent removes and returns the first event from the queue.
+// Returns false if the queue is empty.
+func (w *x11Window) dequeueEvent() (PlatformEvent, bool) {
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	if len(w.events) > 0 {
+		event := w.events[0]
+		w.events = w.events[1:]
+		return event, true
+	}
+	return PlatformEvent{}, false
+}
+
+// queueEvent appends a platform event to the window's event queue.
+func (w *x11Window) queueEvent(event PlatformEvent) {
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	w.events = append(w.events, event)
 }
 
 // QueueEvent is an exported wrapper for queueEvent, used by the platform
 // layer's WaitEvents to enqueue events read during idle wait.
 func (p *Platform) QueueEvent(event PlatformEvent) {
-	p.queueEvent(event)
+	p.primary.queueEvent(event)
 }
 
 // HandleEvent is an exported wrapper for handleEvent, used by the platform
@@ -495,19 +526,24 @@ func (p *Platform) HandleEvent(event Event) PlatformEvent {
 }
 
 // handleEvent processes a single X11 event.
+// Routes to the appropriate window based on the event's window ID.
 func (p *Platform) handleEvent(event Event) PlatformEvent {
+	// For Phase 1 (single-window), all events go to primary.
+	// Phase 2 will look up window from event's Window field.
+	w := p.primary
+
 	switch e := event.(type) {
 	case *ConfigureNotifyEvent:
-		if e.Window == p.window {
+		if e.Window == w.window {
 			newWidth := int(e.Width)
 			newHeight := int(e.Height)
-			p.mu.Lock()
-			changed := newWidth != p.width || newHeight != p.height
+			w.eventMu.Lock()
+			changed := newWidth != w.width || newHeight != w.height
 			if changed {
-				p.width = newWidth
-				p.height = newHeight
+				w.width = newWidth
+				w.height = newHeight
 			}
-			p.mu.Unlock()
+			w.eventMu.Unlock()
 			if changed {
 				return PlatformEvent{
 					Type:   EventTypeResize,
@@ -519,17 +555,17 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 	case *ClientMessageEvent:
 		if e.IsDeleteWindow(p.atoms) {
-			p.mu.Lock()
-			p.shouldClose = true
-			p.mu.Unlock()
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
 			return PlatformEvent{Type: EventTypeClose}
 		}
 
 	case *DestroyNotifyEvent:
-		if e.Window == p.window {
-			p.mu.Lock()
-			p.shouldClose = true
-			p.mu.Unlock()
+		if e.Window == w.window {
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
 			return PlatformEvent{Type: EventTypeClose}
 		}
 
@@ -538,60 +574,60 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		// The main render loop should handle this
 
 	case *MapNotifyEvent:
-		p.mu.Lock()
-		p.configured = true
-		p.mu.Unlock()
+		w.eventMu.Lock()
+		w.configured = true
+		w.eventMu.Unlock()
 
 	case *KeyPressEvent:
-		p.handleKeyEvent(e.Detail, e.State, true)
+		p.handleKeyEvent(w, e.Detail, e.State, true)
 
 	case *KeyReleaseEvent:
-		p.handleKeyEvent(e.Detail, e.State, false)
+		p.handleKeyEvent(w, e.Detail, e.State, false)
 
 	case *MotionNotifyEvent:
-		p.handleMotionNotify(e)
+		p.handleMotionNotify(w, e)
 
 	case *ButtonPressEvent:
-		p.handleButtonPress(e)
+		p.handleButtonPress(w, e)
 
 	case *ButtonReleaseEvent:
-		p.handleButtonRelease(e)
+		p.handleButtonRelease(w, e)
 
 	case *EnterNotifyEvent:
-		p.handleEnterNotify(e)
+		p.handleEnterNotify(w, e)
 
 	case *LeaveNotifyEvent:
-		p.handleLeaveNotify(e)
+		p.handleLeaveNotify(w, e)
 
 	case *FocusInEvent:
 		// Re-grab pointer if cursor mode requires it
-		p.handleFocusIn()
+		p.handleFocusIn(w)
 
 	case *FocusOutEvent:
 		// Release pointer grab on focus loss
-		p.handleFocusOut()
+		p.handleFocusOut(w)
 
 	case *GenericEvent:
-		p.handleGenericEvent(e)
+		p.handleGenericEvent(w, e)
 	}
 
 	return PlatformEvent{Type: EventTypeNone}
 }
 
 // handleMotionNotify processes mouse movement events.
-func (p *Platform) handleMotionNotify(e *MotionNotifyEvent) {
+func (p *Platform) handleMotionNotify(w *x11Window, e *MotionNotifyEvent) {
 	x := float64(e.EventX)
 	y := float64(e.EventY)
 
-	p.mu.Lock()
-	cursorMode := p.cursorMode
-	centerX := float64(p.cursorCenterX)
-	centerY := float64(p.cursorCenterY)
-	p.mouseX = x
-	p.mouseY = y
-	p.buttons = extractButtons(e.State)
-	p.modifiers = extractModifiers(e.State)
-	p.mu.Unlock()
+	w.eventMu.Lock()
+	cursorMode := w.cursorMode
+	centerX := float64(w.cursorCenterX)
+	centerY := float64(w.cursorCenterY)
+	w.mouseX = x
+	w.mouseY = y
+	w.buttons = extractButtons(e.State)
+	w.modifiers = extractModifiers(e.State)
+	w.eventMu.Unlock()
 
 	// In locked mode, compute delta from center and warp back
 	if cursorMode == 1 {
@@ -604,29 +640,29 @@ func (p *Platform) handleMotionNotify(e *MotionNotifyEvent) {
 		}
 
 		// Warp cursor back to center
-		_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0,
+		_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0,
 			int16(centerX), int16(centerY))
 
 		// Emit event with relative deltas
-		ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
+		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
 		ev.DeltaX = deltaX
 		ev.DeltaY = deltaY
-		p.dispatchPointerEvent(ev)
+		w.dispatchPointerEvent(ev)
 		return
 	}
 
-	ev := p.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
-	p.dispatchPointerEvent(ev)
+	ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
+	w.dispatchPointerEvent(ev)
 }
 
 // handleButtonPress processes mouse button press events.
-func (p *Platform) handleButtonPress(e *ButtonPressEvent) {
+func (p *Platform) handleButtonPress(w *x11Window, e *ButtonPressEvent) {
 	x := float64(e.EventX)
 	y := float64(e.EventY)
 
 	// Scroll buttons (4-7) are emulated as button presses in X11
 	if isScrollButton(e.Detail) {
-		p.handleScrollButton(e.Detail, x, y, e.State)
+		p.handleScrollButton(w, e.Detail, x, y, e.State)
 		return
 	}
 
@@ -636,26 +672,26 @@ func (p *Platform) handleButtonPress(e *ButtonPressEvent) {
 		return // Unknown button
 	}
 
-	p.mu.Lock()
-	p.mouseX = x
-	p.mouseY = y
+	w.eventMu.Lock()
+	w.mouseX = x
+	w.mouseY = y
 	// Update button state - button is now pressed
 	switch button {
 	case gpucontext.ButtonLeft:
-		p.buttons |= gpucontext.ButtonsLeft
+		w.buttons |= gpucontext.ButtonsLeft
 	case gpucontext.ButtonMiddle:
-		p.buttons |= gpucontext.ButtonsMiddle
+		w.buttons |= gpucontext.ButtonsMiddle
 	case gpucontext.ButtonRight:
-		p.buttons |= gpucontext.ButtonsRight
+		w.buttons |= gpucontext.ButtonsRight
 	case gpucontext.ButtonX1:
-		p.buttons |= gpucontext.ButtonsX1
+		w.buttons |= gpucontext.ButtonsX1
 	case gpucontext.ButtonX2:
-		p.buttons |= gpucontext.ButtonsX2
+		w.buttons |= gpucontext.ButtonsX2
 	}
-	p.modifiers = extractModifiers(e.State)
-	p.mu.Unlock()
+	w.modifiers = extractModifiers(e.State)
+	w.eventMu.Unlock()
 
-	ev := p.createPointerEvent(gpucontext.PointerDown, button, x, y, e.State)
+	ev := w.createPointerEvent(gpucontext.PointerDown, button, x, y, e.State)
 	// Add the pressed button to the buttons mask for PointerDown
 	switch button {
 	case gpucontext.ButtonLeft:
@@ -669,11 +705,11 @@ func (p *Platform) handleButtonPress(e *ButtonPressEvent) {
 	case gpucontext.ButtonX2:
 		ev.Buttons |= gpucontext.ButtonsX2
 	}
-	p.dispatchPointerEvent(ev)
+	w.dispatchPointerEvent(ev)
 }
 
 // handleButtonRelease processes mouse button release events.
-func (p *Platform) handleButtonRelease(e *ButtonReleaseEvent) {
+func (p *Platform) handleButtonRelease(w *x11Window, e *ButtonReleaseEvent) {
 	x := float64(e.EventX)
 	y := float64(e.EventY)
 
@@ -688,31 +724,31 @@ func (p *Platform) handleButtonRelease(e *ButtonReleaseEvent) {
 		return // Unknown button
 	}
 
-	p.mu.Lock()
-	p.mouseX = x
-	p.mouseY = y
+	w.eventMu.Lock()
+	w.mouseX = x
+	w.mouseY = y
 	// Update button state - button is now released
 	switch button {
 	case gpucontext.ButtonLeft:
-		p.buttons &^= gpucontext.ButtonsLeft
+		w.buttons &^= gpucontext.ButtonsLeft
 	case gpucontext.ButtonMiddle:
-		p.buttons &^= gpucontext.ButtonsMiddle
+		w.buttons &^= gpucontext.ButtonsMiddle
 	case gpucontext.ButtonRight:
-		p.buttons &^= gpucontext.ButtonsRight
+		w.buttons &^= gpucontext.ButtonsRight
 	case gpucontext.ButtonX1:
-		p.buttons &^= gpucontext.ButtonsX1
+		w.buttons &^= gpucontext.ButtonsX1
 	case gpucontext.ButtonX2:
-		p.buttons &^= gpucontext.ButtonsX2
+		w.buttons &^= gpucontext.ButtonsX2
 	}
-	p.modifiers = extractModifiers(e.State)
-	p.mu.Unlock()
+	w.modifiers = extractModifiers(e.State)
+	w.eventMu.Unlock()
 
-	ev := p.createPointerEvent(gpucontext.PointerUp, button, x, y, e.State)
-	p.dispatchPointerEvent(ev)
+	ev := w.createPointerEvent(gpucontext.PointerUp, button, x, y, e.State)
+	w.dispatchPointerEvent(ev)
 }
 
 // handleScrollButton processes X11 scroll button events (buttons 4-7).
-func (p *Platform) handleScrollButton(detail uint8, x, y float64, state uint16) {
+func (p *Platform) handleScrollButton(w *x11Window, detail uint8, x, y float64, state uint16) {
 	var deltaX, deltaY float64
 
 	switch detail {
@@ -735,40 +771,40 @@ func (p *Platform) handleScrollButton(detail uint8, x, y float64, state uint16) 
 		DeltaY:    deltaY,
 		DeltaMode: gpucontext.ScrollDeltaLine,
 		Modifiers: extractModifiers(state),
-		Timestamp: p.eventTimestamp(),
+		Timestamp: w.eventTimestamp(),
 	}
-	p.dispatchScrollEvent(ev)
+	w.dispatchScrollEvent(ev)
 }
 
 // handleEnterNotify processes pointer enter events.
-func (p *Platform) handleEnterNotify(e *EnterNotifyEvent) {
+func (p *Platform) handleEnterNotify(w *x11Window, e *EnterNotifyEvent) {
 	x := float64(e.EventX)
 	y := float64(e.EventY)
 
-	p.mu.Lock()
-	p.mouseX = x
-	p.mouseY = y
-	p.buttons = extractButtons(e.State)
-	p.modifiers = extractModifiers(e.State)
-	p.mouseInWindow = true
-	p.mu.Unlock()
+	w.eventMu.Lock()
+	w.mouseX = x
+	w.mouseY = y
+	w.buttons = extractButtons(e.State)
+	w.modifiers = extractModifiers(e.State)
+	w.mouseInWindow = true
+	w.eventMu.Unlock()
 
-	ev := p.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, x, y, e.State)
-	p.dispatchPointerEvent(ev)
+	ev := w.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, x, y, e.State)
+	w.dispatchPointerEvent(ev)
 }
 
 // handleLeaveNotify processes pointer leave events.
-func (p *Platform) handleLeaveNotify(e *LeaveNotifyEvent) {
+func (p *Platform) handleLeaveNotify(w *x11Window, e *LeaveNotifyEvent) {
 	x := float64(e.EventX)
 	y := float64(e.EventY)
 
-	p.mu.Lock()
-	p.mouseX = x
-	p.mouseY = y
-	p.buttons = extractButtons(e.State)
-	p.modifiers = extractModifiers(e.State)
-	p.mouseInWindow = false
-	p.mu.Unlock()
+	w.eventMu.Lock()
+	w.mouseX = x
+	w.mouseY = y
+	w.buttons = extractButtons(e.State)
+	w.modifiers = extractModifiers(e.State)
+	w.mouseInWindow = false
+	w.eventMu.Unlock()
 
 	ev := gpucontext.PointerEvent{
 		Type:        gpucontext.PointerLeave,
@@ -783,13 +819,13 @@ func (p *Platform) handleLeaveNotify(e *LeaveNotifyEvent) {
 		Button:      gpucontext.ButtonNone,
 		Buttons:     extractButtons(e.State),
 		Modifiers:   extractModifiers(e.State),
-		Timestamp:   p.eventTimestamp(),
+		Timestamp:   w.eventTimestamp(),
 	}
-	p.dispatchPointerEvent(ev)
+	w.dispatchPointerEvent(ev)
 }
 
 // handleGenericEvent processes X11 GenericEvent (type 35) for extension events.
-func (p *Platform) handleGenericEvent(ge *GenericEvent) {
+func (p *Platform) handleGenericEvent(w *x11Window, ge *GenericEvent) {
 	if p.xi == nil || ge.Extension != p.xi.MajorOpcode {
 		return
 	}
@@ -800,38 +836,38 @@ func (p *Platform) handleGenericEvent(ge *GenericEvent) {
 		if err != nil {
 			return
 		}
-		p.handleXITouchEvent(dev)
+		w.handleXITouchEvent(dev)
 	}
 }
 
 // handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.
-func (p *Platform) handleXITouchEvent(e *XIDeviceEvent) {
+func (w *x11Window) handleXITouchEvent(e *XIDeviceEvent) {
 	var pointerType gpucontext.PointerEventType
 
-	p.mu.Lock()
+	w.eventMu.Lock()
 	switch e.EventType {
 	case XITouchBegin:
 		pointerType = gpucontext.PointerDown
-		p.activeTouches[e.Detail] = true
-		if !p.hasPrimary {
-			p.primaryTouch = e.Detail
-			p.hasPrimary = true
+		w.activeTouches[e.Detail] = true
+		if !w.hasPrimary {
+			w.primaryTouch = e.Detail
+			w.hasPrimary = true
 		}
 	case XITouchUpdate:
 		pointerType = gpucontext.PointerMove
 	case XITouchEnd:
 		pointerType = gpucontext.PointerUp
-		delete(p.activeTouches, e.Detail)
-		if p.hasPrimary && p.primaryTouch == e.Detail {
-			p.hasPrimary = false
+		delete(w.activeTouches, e.Detail)
+		if w.hasPrimary && w.primaryTouch == e.Detail {
+			w.hasPrimary = false
 		}
 	default:
-		p.mu.Unlock()
+		w.eventMu.Unlock()
 		return
 	}
-	isPrimary := p.hasPrimary && p.primaryTouch == e.Detail
-	mods := p.modifiers
-	p.mu.Unlock()
+	isPrimary := w.hasPrimary && w.primaryTouch == e.Detail
+	mods := w.modifiers
+	w.eventMu.Unlock()
 
 	var pressure float32
 	if e.EventType == XITouchBegin || e.EventType == XITouchUpdate {
@@ -851,7 +887,7 @@ func (p *Platform) handleXITouchEvent(e *XIDeviceEvent) {
 		Button:      gpucontext.ButtonLeft,
 		Buttons:     gpucontext.ButtonsLeft,
 		Modifiers:   mods,
-		Timestamp:   p.eventTimestamp(),
+		Timestamp:   w.eventTimestamp(),
 	}
 
 	// For PointerUp, clear button
@@ -859,21 +895,23 @@ func (p *Platform) handleXITouchEvent(e *XIDeviceEvent) {
 		ev.Buttons = gpucontext.ButtonsNone
 	}
 
-	p.dispatchPointerEvent(ev)
+	w.dispatchPointerEvent(ev)
 }
 
 // ShouldClose returns true if window close was requested.
 func (p *Platform) ShouldClose() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.shouldClose
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.shouldClose
 }
 
 // GetSize returns current window size in pixels.
 func (p *Platform) GetSize() (width, height int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.width, p.height
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.width, w.height
 }
 
 // GetHandle returns platform-specific handles for Vulkan surface creation.
@@ -885,13 +923,14 @@ func (p *Platform) GetHandle() (display, window uintptr) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	w := p.primary
 	if p.xlib == nil || p.xlib.display == 0 {
 		logger().Warn("GetHandle returning zero handles", "reason", "no xlib display")
 		return 0, 0
 	}
 
-	logger().Debug("GetHandle", "display", fmt.Sprintf("%#x", p.xlib.display), "window", fmt.Sprintf("%#x", uintptr(p.window)))
-	return p.xlib.display, uintptr(p.window)
+	logger().Debug("GetHandle", "display", fmt.Sprintf("%#x", p.xlib.display), "window", fmt.Sprintf("%#x", uintptr(w.window)))
+	return p.xlib.display, uintptr(w.window)
 }
 
 // PollEventTimeout checks for a pending X11 event with a configurable timeout.
@@ -908,6 +947,8 @@ func (p *Platform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	w := p.primary
+
 	// Close Xlib Display* (Vulkan surface handle)
 	if p.xlib != nil {
 		p.xlib.close()
@@ -915,13 +956,15 @@ func (p *Platform) Destroy() {
 	}
 
 	if p.conn != nil {
-		// Free blit GC before destroying window/connection
-		if p.blitGC != 0 {
-			_ = p.conn.FreeGC(p.blitGC)
-			p.blitGC = 0
+		// Free per-window resources
+		if w != nil {
+			if w.blitGC != 0 {
+				_ = p.conn.FreeGC(w.blitGC)
+				w.blitGC = 0
+			}
 		}
 
-		// Free cached cursors and cursor font before destroying window/connection
+		// Free process-level cursor resources
 		for _, cursor := range p.cursorCache {
 			_ = p.conn.FreeCursor(cursor)
 		}
@@ -930,53 +973,67 @@ func (p *Platform) Destroy() {
 			_ = p.conn.CloseFont(p.cursorFontID)
 			p.cursorFontID = 0
 		}
+		if p.blankCursorID != 0 {
+			_ = p.conn.FreeCursor(p.blankCursorID)
+			p.blankCursorID = 0
+		}
 
-		if p.window != 0 {
-			_ = p.conn.DestroyWindow(p.window)
-			p.window = 0
+		// Destroy window and unregister
+		if w != nil && w.window != 0 {
+			p.windowMu.Lock()
+			delete(p.windows, w.window)
+			p.windowMu.Unlock()
+
+			_ = p.conn.DestroyWindow(w.window)
+			w.window = 0
 		}
 		_ = p.conn.Close()
 		p.conn = nil
 	}
 
+	p.primary = nil
 	p.atoms = nil
 	p.keymap = nil
 }
 
 // SetPointerCallback registers a callback for pointer events.
 func (p *Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	p.callbackMu.Lock()
-	p.pointerCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.pointerCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetScrollCallback registers a callback for scroll events.
 func (p *Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	p.callbackMu.Lock()
-	p.scrollCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.scrollCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetKeyCallback registers a callback for keyboard events.
 func (p *Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	p.callbackMu.Lock()
-	p.keyboardCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.keyboardCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetCharCallback registers a callback for Unicode character input.
 // TODO: Implement via libxkbcommon xkb_state_key_get_utf8 for full Unicode support.
 func (p *Platform) SetCharCallback(fn func(rune)) {
-	p.callbackMu.Lock()
-	p.charCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.charCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // dispatchPointerEvent dispatches a pointer event to the registered callback.
-func (p *Platform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	p.callbackMu.RLock()
-	callback := p.pointerCallback
-	p.callbackMu.RUnlock()
+func (w *x11Window) dispatchPointerEvent(ev gpucontext.PointerEvent) {
+	w.callbackMu.RLock()
+	callback := w.pointerCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(ev)
@@ -984,10 +1041,10 @@ func (p *Platform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 }
 
 // dispatchScrollEvent dispatches a scroll event to the registered callback.
-func (p *Platform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	p.callbackMu.RLock()
-	callback := p.scrollCallback
-	p.callbackMu.RUnlock()
+func (w *x11Window) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
+	w.callbackMu.RLock()
+	callback := w.scrollCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(ev)
@@ -995,10 +1052,10 @@ func (p *Platform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
 }
 
 // dispatchKeyEvent dispatches a keyboard event to the registered callback.
-func (p *Platform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	p.callbackMu.RLock()
-	callback := p.keyboardCallback
-	p.callbackMu.RUnlock()
+func (w *x11Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	w.callbackMu.RLock()
+	callback := w.keyboardCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(key, mods, pressed)
@@ -1007,11 +1064,14 @@ func (p *Platform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifier
 
 // handleKeyEvent processes a key press or release event.
 // X11 keycodes = evdev keycodes + 8.
-func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
+func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pressed bool) {
 	mods := extractModifiers(state)
 
+	w.eventMu.Lock()
+	w.modifiers = mods
+	w.eventMu.Unlock()
+
 	p.mu.Lock()
-	p.modifiers = mods
 	keymap := p.keymap
 	p.mu.Unlock()
 
@@ -1021,7 +1081,7 @@ func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
 		return
 	}
 
-	p.dispatchKeyEvent(key, mods, pressed)
+	w.dispatchKeyEvent(key, mods, pressed)
 
 	// Dispatch character input on key press only.
 	// Skip when Ctrl/Alt/Super are held — those are shortcuts, not text input.
@@ -1032,9 +1092,9 @@ func (p *Platform) handleKeyEvent(keycode uint8, state uint16, pressed bool) {
 		keysym := keymap.KeycodeToKeysym(keycode, shift, capsLock)
 		str := KeysymToString(keysym)
 		if str != "" {
-			p.callbackMu.RLock()
-			cb := p.charCallback
-			p.callbackMu.RUnlock()
+			w.callbackMu.RLock()
+			cb := w.charCallback
+			w.callbackMu.RUnlock()
 			if cb != nil {
 				for _, r := range str {
 					if r >= 32 && r != 127 {
@@ -1286,8 +1346,8 @@ func x11KeycodeToKey(keycode uint8) gpucontext.Key {
 }
 
 // eventTimestamp returns the event timestamp as duration since start.
-func (p *Platform) eventTimestamp() time.Duration {
-	return time.Since(p.startTime)
+func (w *x11Window) eventTimestamp() time.Duration {
+	return time.Since(w.startTime)
 }
 
 // X11 button constants.
@@ -1381,7 +1441,7 @@ func isScrollButton(detail uint8) bool {
 }
 
 // createPointerEvent creates a PointerEvent with common fields filled in.
-func (p *Platform) createPointerEvent(
+func (w *x11Window) createPointerEvent(
 	eventType gpucontext.PointerEventType,
 	button gpucontext.Button,
 	x, y float64,
@@ -1412,39 +1472,42 @@ func (p *Platform) createPointerEvent(
 		Button:      button,
 		Buttons:     buttons,
 		Modifiers:   modifiers,
-		Timestamp:   p.eventTimestamp(),
+		Timestamp:   w.eventTimestamp(),
 	}
 }
 
 // Frameless window support
 
 func (p *Platform) SetFrameless(frameless bool) {
-	p.mu.Lock()
-	p.frameless = frameless
-	p.mu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.frameless = frameless
+	w.callbackMu.Unlock()
 
 	if frameless {
-		_ = p.conn.SetWindowBorderless(p.window, p.atoms)
+		_ = p.conn.SetWindowBorderless(w.window, p.atoms)
 	} else {
 		// Restore decorations
 		hints := &MotifWMHints{
 			Flags:       MotifHintsDecorations,
 			Decorations: MotifDecorAll,
 		}
-		_ = p.conn.SetMotifWMHints(p.window, hints, p.atoms)
+		_ = p.conn.SetMotifWMHints(w.window, hints, p.atoms)
 	}
 }
 
 func (p *Platform) IsFrameless() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.frameless
+	w := p.primary
+	w.callbackMu.RLock()
+	defer w.callbackMu.RUnlock()
+	return w.frameless
 }
 
 func (p *Platform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
-	p.callbackMu.Lock()
-	defer p.callbackMu.Unlock()
-	p.hitTestCallback = fn
+	w := p.primary
+	w.callbackMu.Lock()
+	defer w.callbackMu.Unlock()
+	w.hitTestCallback = fn
 }
 
 func (p *Platform) Minimize() {
@@ -1461,9 +1524,10 @@ func (p *Platform) IsMaximized() bool {
 }
 
 func (p *Platform) CloseWindow() {
-	p.mu.Lock()
-	p.shouldClose = true
-	p.mu.Unlock()
+	w := p.primary
+	w.eventMu.Lock()
+	w.shouldClose = true
+	w.eventMu.Unlock()
 }
 
 // SetCursor changes the mouse cursor shape using the standard X11 cursor font.
@@ -1472,29 +1536,30 @@ func (p *Platform) SetCursor(cursorID int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.conn == nil || p.window == 0 {
+	w := p.primary
+	if p.conn == nil || w == nil || w.window == 0 {
 		return
 	}
 
 	// CursorNone (11): hide cursor by setting a blank 1x1 cursor
 	if cursorID == 11 {
-		p.setBlankCursor()
+		p.setBlankCursor(w)
 		return
 	}
 
 	// Map gpucontext.CursorShape to X11 cursor font glyph index
 	glyphIndex := cursorShapeToGlyph(cursorID)
 
-	// Check cursor cache
+	// Check cursor cache (process-level)
 	if p.cursorCache == nil {
 		p.cursorCache = make(map[int]ResourceID)
 	}
 	if cached, ok := p.cursorCache[cursorID]; ok {
-		_ = p.conn.ChangeWindowCursor(p.window, cached)
+		_ = p.conn.ChangeWindowCursor(w.window, cached)
 		return
 	}
 
-	// Ensure cursor font is opened
+	// Ensure cursor font is opened (process-level)
 	if p.cursorFontID == 0 {
 		fontID, err := p.conn.OpenFont("cursor")
 		if err != nil {
@@ -1515,20 +1580,21 @@ func (p *Platform) SetCursor(cursorID int) {
 	}
 
 	p.cursorCache[cursorID] = cursor
-	_ = p.conn.ChangeWindowCursor(p.window, cursor)
+	_ = p.conn.ChangeWindowCursor(w.window, cursor)
 }
 
 // setBlankCursor creates and sets a 1x1 transparent cursor to hide the pointer.
-func (p *Platform) setBlankCursor() {
+// Must be called with p.mu held.
+func (p *Platform) setBlankCursor(w *x11Window) {
 	if cached, ok := p.cursorCache[11]; ok {
-		_ = p.conn.ChangeWindowCursor(p.window, cached)
+		_ = p.conn.ChangeWindowCursor(w.window, cached)
 		return
 	}
 
 	// Revert to parent cursor (0 = None in X11 means inherit from parent).
 	// For true cursor hiding we would need CreateCursor with empty pixmaps,
 	// which requires CreatePixmap + CreateGC. For now, revert to default.
-	_ = p.conn.ChangeWindowCursor(p.window, 0)
+	_ = p.conn.ChangeWindowCursor(w.window, 0)
 }
 
 // FreeCursors releases all cached cursor resources and closes the cursor font.
@@ -1588,90 +1654,92 @@ func (p *Platform) SetCursorMode(mode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.conn == nil || p.window == 0 {
+	w := p.primary
+	if p.conn == nil || w == nil || w.window == 0 {
 		return
 	}
 
-	if mode == p.cursorMode {
+	if mode == w.cursorMode {
 		return
 	}
 
-	oldMode := p.cursorMode
-	p.cursorMode = mode
+	oldMode := w.cursorMode
+	w.cursorMode = mode
 
 	switch mode {
 	case 1: // Locked
 		// Save current mouse position
 		if oldMode == 0 {
-			p.savedMouseX = p.mouseX
-			p.savedMouseY = p.mouseY
+			w.savedMouseX = w.mouseX
+			w.savedMouseY = w.mouseY
 		}
 
 		// Compute window center
-		p.cursorCenterX = int16(p.width / 2)
-		p.cursorCenterY = int16(p.height / 2)
+		w.cursorCenterX = int16(w.width / 2)
+		w.cursorCenterY = int16(w.height / 2)
 
-		// Create invisible cursor if not already created
+		// Create invisible cursor if not already created (process-level resource)
 		if p.blankCursorID == 0 {
-			p.createBlankCursor()
+			p.createBlankCursor(w)
 		}
 
 		// Grab pointer with invisible cursor, confined to our window
 		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
-		_, _ = p.conn.GrabPointer(true, p.window, grabMask,
-			GrabModeAsync, GrabModeAsync, p.window, p.blankCursorID, 0)
-		p.cursorGrabbed = true
+		_, _ = p.conn.GrabPointer(true, w.window, grabMask,
+			GrabModeAsync, GrabModeAsync, w.window, p.blankCursorID, 0)
+		w.cursorGrabbed = true
 
 		// Warp to center
-		_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0, p.cursorCenterX, p.cursorCenterY)
+		_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0, w.cursorCenterX, w.cursorCenterY)
 
 	case 2: // Confined
 		// Grab pointer with normal cursor, confined to window
 		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
-		_, _ = p.conn.GrabPointer(true, p.window, grabMask,
-			GrabModeAsync, GrabModeAsync, p.window, 0, 0)
-		p.cursorGrabbed = true
+		_, _ = p.conn.GrabPointer(true, w.window, grabMask,
+			GrabModeAsync, GrabModeAsync, w.window, 0, 0)
+		w.cursorGrabbed = true
 
 		// Restore cursor position if coming from locked mode
 		if oldMode == 1 {
-			_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0,
-				int16(p.savedMouseX), int16(p.savedMouseY))
+			_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0,
+				int16(w.savedMouseX), int16(w.savedMouseY))
 		}
 
 	default: // Normal (0)
 		// Release pointer grab
-		if p.cursorGrabbed {
+		if w.cursorGrabbed {
 			_ = p.conn.UngrabPointer(0)
-			p.cursorGrabbed = false
+			w.cursorGrabbed = false
 		}
 
 		// Restore cursor (revert to normal)
-		_ = p.conn.ChangeWindowCursor(p.window, 0)
+		_ = p.conn.ChangeWindowCursor(w.window, 0)
 
 		// Restore mouse position if coming from locked mode
 		if oldMode == 1 {
-			_ = p.conn.WarpPointer(0, p.window, 0, 0, 0, 0,
-				int16(p.savedMouseX), int16(p.savedMouseY))
+			_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0,
+				int16(w.savedMouseX), int16(w.savedMouseY))
 		}
 	}
 }
 
 // GetCursorMode returns the current cursor mode.
 func (p *Platform) GetCursorMode() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.cursorMode
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.cursorMode
 }
 
 // handleFocusIn re-applies cursor grab when window regains focus.
-func (p *Platform) handleFocusIn() {
-	p.mu.Lock()
-	mode := p.cursorMode
+func (p *Platform) handleFocusIn(w *x11Window) {
+	w.eventMu.Lock()
+	mode := w.cursorMode
 	// Reset cursorMode temporarily so SetCursorMode doesn't early-return
 	if mode != 0 {
-		p.cursorMode = 0
+		w.cursorMode = 0
 	}
-	p.mu.Unlock()
+	w.eventMu.Unlock()
 
 	if mode != 0 {
 		p.SetCursorMode(mode)
@@ -1679,25 +1747,25 @@ func (p *Platform) handleFocusIn() {
 }
 
 // handleFocusOut releases cursor grab when window loses focus.
-func (p *Platform) handleFocusOut() {
+func (p *Platform) handleFocusOut(w *x11Window) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.cursorGrabbed && p.conn != nil {
+	if w.cursorGrabbed && p.conn != nil {
 		_ = p.conn.UngrabPointer(0)
-		p.cursorGrabbed = false
+		w.cursorGrabbed = false
 	}
 }
 
 // createBlankCursor creates a 1x1 transparent cursor for hiding the pointer.
-// Must be called with p.mu held.
-func (p *Platform) createBlankCursor() {
-	if p.conn == nil || p.window == 0 {
+// Must be called with p.mu held. The cursor is a process-level resource.
+func (p *Platform) createBlankCursor(w *x11Window) {
+	if p.conn == nil || w.window == 0 {
 		return
 	}
 
 	// Create 1x1 pixmap (depth 1 for cursor source/mask)
-	pixmap, err := p.conn.CreatePixmap(1, p.window, 1, 1)
+	pixmap, err := p.conn.CreatePixmap(1, w.window, 1, 1)
 	if err != nil {
 		return
 	}
@@ -1726,7 +1794,8 @@ func (p *Platform) BlitPixels(pixels []byte, width, height int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.conn == nil || p.window == 0 {
+	w := p.primary
+	if p.conn == nil || w == nil || w.window == 0 {
 		return fmt.Errorf("x11: BlitPixels: no connection or window")
 	}
 
@@ -1735,13 +1804,13 @@ func (p *Platform) BlitPixels(pixels []byte, width, height int) error {
 		return fmt.Errorf("x11: BlitPixels: no default screen")
 	}
 
-	// Lazily create a GC for blitting
-	if p.blitGC == 0 {
-		gc, err := p.conn.CreateGC(p.window)
+	// Lazily create a GC for blitting (per-window, bound to this drawable)
+	if w.blitGC == 0 {
+		gc, err := p.conn.CreateGC(w.window)
 		if err != nil {
 			return fmt.Errorf("x11: BlitPixels: failed to create GC: %w", err)
 		}
-		p.blitGC = gc
+		w.blitGC = gc
 	}
 
 	// Convert RGBA to BGRA (X11 ZPixmap on little-endian expects BGRA)
@@ -1754,7 +1823,7 @@ func (p *Platform) BlitPixels(pixels []byte, width, height int) error {
 	}
 
 	err := p.conn.PutImage(
-		p.window, p.blitGC,
+		w.window, w.blitGC,
 		uint16(width), uint16(height),
 		0, 0, // dst x, y
 		screen.RootDepth,
