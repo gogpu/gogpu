@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.27.2
+## Current State: v0.27.3
 
 ✅ **Production-ready** with full feature set:
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
@@ -52,6 +52,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.27.3** | 2026-04-23 | wgpu v0.25.3 |
 | **v0.27.2** | 2026-04-23 | Ecosystem sync: wgpu v0.25.2, gpucontext v0.14.0 (TextureView), gputypes v0.5.0 (PrimitiveState zero value) |
 | **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix |
 | **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock — Win32 + X11 (SDL parity) |
