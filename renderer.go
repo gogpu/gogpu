@@ -111,6 +111,13 @@ type Renderer struct {
 	// Primary window surface (single-window backward compatibility).
 	// In multi-window mode, additional surfaces will be stored separately.
 	primary *windowSurface
+
+	// currentSurface is set during multi-window rendering to the windowSurface
+	// of the window being drawn. Draw methods (drawTexturedQuad, DrawTriangle)
+	// use activeSurface() which returns currentSurface if set, otherwise primary.
+	// Set by the multi-window frame loop before each window's draw callback,
+	// cleared after endFrame.
+	currentSurface *windowSurface
 }
 
 // newRenderer creates and initializes a new renderer.
@@ -391,6 +398,16 @@ func pickPresentMode(supported []gputypes.PresentMode, preferred ...gputypes.Pre
 	return gputypes.PresentModeFifo
 }
 
+// activeSurface returns the currently active windowSurface for draw operations.
+// During multi-window rendering, this returns the surface of the window being drawn.
+// Otherwise, it returns the primary window surface.
+func (r *Renderer) activeSurface() *windowSurface {
+	if r.currentSurface != nil {
+		return r.currentSurface
+	}
+	return r.primary
+}
+
 // Resize handles window resize.
 // This also handles deferred surface configuration when the window
 // first becomes visible with valid dimensions (especially important on macOS).
@@ -498,7 +515,7 @@ func (ws *windowSurface) beginFrame(platWin platform.PlatformWindow, device *wgp
 	return true
 }
 
-// EndFrame presents the rendered frame.
+// EndFrame presents the rendered frame on the primary window.
 func (r *Renderer) EndFrame() {
 	// Flush any pending clear that wasn't consumed by a draw call.
 	// This handles the case where user calls ClearColor without drawing.
@@ -508,11 +525,26 @@ func (r *Renderer) EndFrame() {
 	r.primary.present()
 
 	// Non-blocking submission tracking: free resources for completed submissions.
-	completedIdx := r.device.Queue().Poll()
-	r.tracker.triage(completedIdx, r.device)
+	r.pollSubmissions()
 
 	// Release per-frame resources after presentation.
 	r.primary.releaseFrame()
+}
+
+// endFrameForSurface flushes, presents, and releases frame resources for a
+// specific windowSurface. Used by the multi-window frame loop. Unlike EndFrame,
+// it does NOT poll submissions -- the caller polls once after all windows.
+func (r *Renderer) endFrameForSurface(ws *windowSurface) {
+	ws.flushClear(r.device, r)
+	ws.present()
+	ws.releaseFrame()
+}
+
+// pollSubmissions performs non-blocking submission tracking: frees GPU resources
+// for completed submissions. Called once per frame after all windows are presented.
+func (r *Renderer) pollSubmissions() {
+	completedIdx := r.device.Queue().Poll()
+	r.tracker.triage(completedIdx, r.device)
 }
 
 // present presents the surface texture to the screen.
@@ -539,7 +571,7 @@ func (ws *windowSurface) releaseFrame() {
 // swapchains can cause content loss due to the intermediate RT->PRESENT->RT
 // state transition between Clear and the subsequent draw pass.
 func (r *Renderer) Clear(red, green, blue, alpha float64) {
-	r.primary.clear(red, green, blue, alpha)
+	r.activeSurface().clear(red, green, blue, alpha)
 }
 
 // clear defers a clear command on this window's surface.
@@ -606,13 +638,16 @@ func (r *Renderer) submitTracked(commands *wgpu.CommandBuffer) {
 }
 
 // Size returns the current render target size.
+// During multi-window rendering, returns the size of the active window surface.
 func (r *Renderer) Size() (width, height int) {
-	return int(r.primary.width), int(r.primary.height)
+	ws := r.activeSurface()
+	return int(ws.width), int(ws.height)
 }
 
 // Format returns the surface texture format.
+// During multi-window rendering, returns the format of the active window surface.
 func (r *Renderer) Format() gputypes.TextureFormat {
-	return r.primary.format
+	return r.activeSurface().format
 }
 
 // Backend returns the name of the active backend.
@@ -673,7 +708,8 @@ func (r *Renderer) initTrianglePipeline() error {
 
 // DrawTriangle draws the built-in colored triangle.
 func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
-	if r.primary.currentView == nil {
+	ws := r.activeSurface()
+	if ws.currentView == nil {
 		return nil
 	}
 
@@ -694,7 +730,7 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       r.primary.currentView,
+				View:       ws.currentView,
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
 				ClearValue: gputypes.Color{R: clearR, G: clearG, B: clearB, A: clearA},
@@ -909,7 +945,7 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 // drawTexturedQuad draws a textured quad with the given options.
 // This is an internal method called by Context.DrawTextureEx.
 func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
-	ws := r.primary
+	ws := r.activeSurface()
 	if ws.currentView == nil {
 		return nil // No frame in progress
 	}

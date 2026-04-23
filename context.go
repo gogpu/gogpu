@@ -11,13 +11,18 @@ import (
 
 // Context provides drawing operations for a single frame.
 // It is only valid during the OnDraw callback and should not be stored.
+//
+// In multi-window mode, each Context targets a specific window surface.
+// The surface field points to the target windowSurface; if nil, the
+// renderer's primary surface is used (single-window backward compat).
 type Context struct {
 	renderer    *Renderer
-	scaleFactor float64 // DPI scale factor (1.0 = standard, 2.0 = Retina/HiDPI)
+	surface     *windowSurface // target window surface (nil = use renderer.primary)
+	scaleFactor float64        // DPI scale factor (1.0 = standard, 2.0 = Retina/HiDPI)
 	cleared     bool
 }
 
-// newContext creates a new drawing context for a frame.
+// newContext creates a new drawing context for the primary window.
 func newContext(renderer *Renderer, scaleFactor float64) *Context {
 	if scaleFactor <= 0 {
 		scaleFactor = 1.0
@@ -26,6 +31,27 @@ func newContext(renderer *Renderer, scaleFactor float64) *Context {
 		renderer:    renderer,
 		scaleFactor: scaleFactor,
 	}
+}
+
+// newContextForSurface creates a Context targeting a specific window surface.
+// Used by the multi-window frame loop to create per-window contexts.
+func newContextForSurface(renderer *Renderer, ws *windowSurface, scaleFactor float64) *Context {
+	if scaleFactor <= 0 {
+		scaleFactor = 1.0
+	}
+	return &Context{
+		renderer:    renderer,
+		surface:     ws,
+		scaleFactor: scaleFactor,
+	}
+}
+
+// activeSurface returns the windowSurface targeted by this Context.
+func (c *Context) activeSurface() *windowSurface {
+	if c.surface != nil {
+		return c.surface
+	}
+	return c.renderer.primary
 }
 
 // Clear clears the framebuffer with the specified RGBA color.
@@ -135,7 +161,7 @@ func (c *Context) Renderer() *Renderer {
 // Use this with ggcanvas.RenderDirect for zero-copy GPU rendering,
 // bypassing the GPU→CPU→GPU readback path.
 func (c *Context) SurfaceView() *wgpu.TextureView {
-	return c.renderer.primary.currentView
+	return c.activeSurface().currentView
 }
 
 // PresentTexture draws a texture filling the entire surface.
@@ -154,9 +180,10 @@ func (c *Context) PresentTexture(tex any) error {
 	if t == nil {
 		return fmt.Errorf("gogpu: PresentTexture called with nil *Texture")
 	}
+	ws := c.activeSurface()
 	return c.renderer.drawTexturedQuad(t, DrawTextureOptions{
-		Width:  float32(c.renderer.primary.width),
-		Height: float32(c.renderer.primary.height),
+		Width:  float32(ws.width),
+		Height: float32(ws.height),
 		Alpha:  1.0,
 	})
 }
@@ -207,6 +234,6 @@ func (c *Context) CheckDeviceHealth() error {
 // SurfaceSize returns the current GPU surface dimensions in physical device pixels.
 // This is the same as FramebufferSize but returns uint32 for GPU API compatibility.
 func (c *Context) SurfaceSize() (width, height uint32) {
-	w, h := c.renderer.Size()
-	return uint32(w), uint32(h) //nolint:gosec // G115: renderer validates dimensions
+	ws := c.activeSurface()
+	return ws.width, ws.height
 }

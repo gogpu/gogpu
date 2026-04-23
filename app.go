@@ -335,19 +335,36 @@ func (a *App) processEventsMultiThread() bool {
 		events = append(events, event)
 	}
 
-	// Process all events, but track only the last resize
+	// Process all events, but track only the last resize per window.
+	// For the primary window, we use the deferred resize pattern (RequestResize).
+	// For secondary windows, we resize the surface directly on the render thread.
+	var secondaryResizes []platform.Event
+
 	for i := range events {
 		event := &events[i]
 		switch event.Type {
 		case platform.EventResize:
-			lastResize = event
+			isPrimary := event.WindowID == 0 ||
+				(a.primaryWindow != nil && event.WindowID == a.primaryWindow.id)
+			if isPrimary {
+				lastResize = event
+			} else {
+				secondaryResizes = append(secondaryResizes, *event)
+			}
 		case platform.EventClose:
-			a.running = false
+			// Check if this is a secondary window close.
+			isPrimary := event.WindowID == 0 ||
+				(a.primaryWindow != nil && event.WindowID == a.primaryWindow.id)
+			if isPrimary {
+				a.running = false
+			} else {
+				a.closeSecondaryWindow(event.WindowID)
+			}
 		}
 	}
 
-	// Queue resize for render thread (deferred pattern)
-	// Don't apply resize during modal resize loop (Windows)
+	// Queue primary window resize for render thread (deferred pattern).
+	// Don't apply resize during modal resize loop (Windows).
 	if lastResize != nil && !a.platWindow.InSizeMove() {
 		// Queue PHYSICAL size for render thread (GPU surface reconfiguration)
 		physW, physH := lastResize.PhysicalWidth, lastResize.PhysicalHeight
@@ -361,6 +378,26 @@ func (a *App) processEventsMultiThread() bool {
 		}
 	}
 
+	// Handle secondary window resize events.
+	for _, ev := range secondaryResizes {
+		w := a.windowManager.get(ev.WindowID)
+		if w == nil || w.surface == nil {
+			continue
+		}
+		// Resize the secondary window's surface on the render thread.
+		physW, physH := ev.PhysicalWidth, ev.PhysicalHeight
+		if physW > 0 && physH > 0 {
+			ws := w.surface
+			a.renderLoop.RunOnRenderThreadVoid(func() {
+				ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
+			})
+		}
+		// Call per-window resize callback with logical size.
+		if w.onResize != nil {
+			w.onResize(ev.Width, ev.Height)
+		}
+	}
+
 	// Dispatch end-of-frame events (gestures computed from pointer events)
 	if a.eventSource != nil {
 		a.eventSource.dispatchEndFrame()
@@ -369,39 +406,88 @@ func (a *App) processEventsMultiThread() bool {
 	return len(events) > 0
 }
 
+// windowFrame holds a snapshot of per-window state captured on the main thread
+// for the render thread to use. This avoids accessing window/platform state
+// from the render thread.
+type windowFrame struct {
+	window *Window
+	onDraw func(*Context)
+	scale  float64
+	physW  int
+	physH  int
+}
+
 // renderFrameMultiThread renders a frame using the render thread.
 // All GPU operations happen on the render thread to keep main thread responsive.
+//
+// When multiple windows are open, each window with an onDraw callback gets
+// its own beginFrame/draw/endFrame cycle. GPU submission polling happens once
+// after all windows are presented.
 func (a *App) renderFrameMultiThread() {
-	// Skip rendering if window is minimized (zero physical dimensions)
-	width, height := a.platWindow.PhysicalSize()
-	if width <= 0 || height <= 0 {
-		return // Window minimized, skip frame
+	// Collect visible windows with their main-thread state.
+	a.windowManager.mu.RLock()
+	frames := make([]windowFrame, 0, len(a.windowManager.order))
+	for _, id := range a.windowManager.order {
+		w := a.windowManager.windows[id]
+		if w == nil || !w.visible || w.onDraw == nil {
+			continue
+		}
+		pw, ph := w.platWindow.PhysicalSize()
+		if pw <= 0 || ph <= 0 {
+			continue // Minimized
+		}
+		frames = append(frames, windowFrame{
+			window: w,
+			onDraw: w.onDraw,
+			scale:  w.platWindow.ScaleFactor(),
+			physW:  pw,
+			physH:  ph,
+		})
+	}
+	a.windowManager.mu.RUnlock()
+
+	if len(frames) == 0 {
+		return
 	}
 
-	// Capture callback and scale factor for render thread
-	onDraw := a.onDraw
-	scale := a.platWindow.ScaleFactor()
-
-	// Execute GPU operations on render thread
+	// Execute GPU operations on render thread.
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		// Apply pending resize (deferred from main thread)
+		// Apply pending resize for the primary window.
 		if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
 			a.renderer.Resize(int(w), int(h))
 		}
 
-		// Acquire frame
-		if !a.renderer.BeginFrame() {
-			return // Frame not available
+		// Drain deferred destroys once per frame, not per window.
+		a.renderer.DrainDeferredDestroys()
+
+		for _, frame := range frames {
+			ws := frame.window.surface
+			if ws == nil {
+				continue
+			}
+
+			// Determine which platform window to use for PrepareFrame.
+			platWin := frame.window.platWindow
+
+			// Begin frame for this window's surface.
+			if !ws.beginFrame(platWin, a.renderer.device, a.renderer.adapter) {
+				continue
+			}
+
+			// Set renderer's currentSurface so draw methods target this window.
+			a.renderer.currentSurface = ws
+
+			// Call per-window draw callback.
+			ctx := newContextForSurface(a.renderer, ws, frame.scale)
+			frame.onDraw(ctx)
+
+			// End frame: flush clear, present, release view.
+			a.renderer.endFrameForSurface(ws)
+			a.renderer.currentSurface = nil
 		}
 
-		// Create context and call draw callback
-		if onDraw != nil {
-			ctx := newContext(a.renderer, scale)
-			onDraw(ctx)
-		}
-
-		// Present frame
-		a.renderer.EndFrame()
+		// Poll submissions once after all windows are presented.
+		a.renderer.pollSubmissions()
 	})
 }
 

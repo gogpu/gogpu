@@ -2,9 +2,11 @@ package gogpu
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/wgpu"
 )
 
 // WindowID uniquely identifies a window. Zero is invalid.
@@ -163,13 +165,84 @@ func (wm *WindowManager) setFocus(id WindowID) {
 	}
 }
 
-// NewWindow creates a new window. Returns an error because multi-window
-// rendering is not yet supported -- platforms must implement PlatformManager
-// before additional windows can be created.
+// NewWindow creates a new secondary window with its own rendering surface.
+// The window is registered in the WindowManager and participates in the
+// multi-window frame loop. Set OnDraw via Window.SetOnDraw() to render content.
+//
+// Must be called after Run() has started (the renderer must be initialized).
+// The GPU surface is created on the render thread. Secondary windows default
+// to VSync off (Immediate present mode) following ADR-010 strategy.
 //
 // The primary window (created by Run) is always available via PrimaryWindow().
-func (a *App) NewWindow(_ Config) (*Window, error) {
-	return nil, fmt.Errorf("gogpu: multi-window not yet implemented; use Run() for single-window apps")
+func (a *App) NewWindow(config Config) (*Window, error) {
+	if a.manager == nil || a.renderer == nil {
+		return nil, fmt.Errorf("gogpu: NewWindow called before Run()")
+	}
+
+	// Create platform window via PlatformManager.
+	platWindow, err := a.manager.CreateWindow(platform.Config{
+		Title:      config.Title,
+		Width:      config.Width,
+		Height:     config.Height,
+		Resizable:  config.Resizable,
+		Fullscreen: config.Fullscreen,
+		Frameless:  config.Frameless,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gogpu: create window: %w", err)
+	}
+
+	// Create GPU surface for the new window on the render thread.
+	// GPU operations are thread-bound; surface creation must happen there.
+	var surface *wgpu.Surface
+	var surfaceErr error
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		displayHandle, windowHandle := platWindow.GetHandle()
+		surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
+	})
+	if surfaceErr != nil {
+		platWindow.Destroy()
+		return nil, fmt.Errorf("gogpu: create surface: %w", surfaceErr)
+	}
+
+	// Create windowSurface for this window.
+	ws := &windowSurface{
+		renderer: a.renderer,
+		surface:  surface,
+		format:   a.renderer.primary.format,
+		vsync:    false, // Secondary windows: Immediate (ADR-010 VSync strategy)
+	}
+
+	// Configure surface with initial dimensions on the render thread.
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		pw, ph := platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
+			ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
+			if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
+				slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
+			} else {
+				ws.configured = true
+			}
+		}
+	})
+
+	// Create Window and register in WindowManager.
+	w := &Window{
+		id:         platWindow.ID(),
+		config:     config,
+		surface:    ws,
+		platWindow: platWindow,
+		visible:    true,
+	}
+	a.windowManager.add(w)
+
+	// Request a redraw so the new window gets its first frame.
+	if a.invalidator != nil {
+		a.invalidator.Invalidate()
+	}
+
+	return w, nil
 }
 
 // PrimaryWindow returns the primary application window.
@@ -188,4 +261,34 @@ func (a *App) WindowCount() int {
 		return 0
 	}
 	return a.windowManager.count()
+}
+
+// closeSecondaryWindow removes a secondary window and releases its GPU and
+// platform resources. The GPU surface is released on the render thread.
+// Does nothing if the window is the primary window (use Quit() instead).
+func (a *App) closeSecondaryWindow(id WindowID) {
+	if a.primaryWindow != nil && id == a.primaryWindow.id {
+		return // Primary window closes via a.running = false
+	}
+
+	w := a.windowManager.get(id)
+	if w == nil {
+		return
+	}
+
+	a.windowManager.remove(id)
+
+	// Release GPU surface on the render thread.
+	if w.surface != nil {
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			w.surface.destroy()
+		})
+	}
+
+	// Destroy the platform window.
+	if w.platWindow != nil {
+		w.platWindow.Destroy()
+	}
+
+	w.visible = false
 }
