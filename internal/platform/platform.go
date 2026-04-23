@@ -31,10 +31,11 @@ type Config struct {
 type Event struct {
 	WindowID       WindowID
 	Type           EventType
-	Width          int // for resize events: logical size (platform points/DIP)
-	Height         int // for resize events: logical size (platform points/DIP)
-	PhysicalWidth  int // for resize events: physical pixels (GPU framebuffer)
-	PhysicalHeight int // for resize events: physical pixels (GPU framebuffer)
+	Width          int  // for resize events: logical size (platform points/DIP)
+	Height         int  // for resize events: logical size (platform points/DIP)
+	PhysicalWidth  int  // for resize events: physical pixels (GPU framebuffer)
+	PhysicalHeight int  // for resize events: physical pixels (GPU framebuffer)
+	Focused        bool // for focus events: true = gained focus, false = lost focus
 }
 
 // EventType represents the type of platform event.
@@ -44,6 +45,7 @@ const (
 	EventNone EventType = iota
 	EventClose
 	EventResize
+	EventFocus
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.

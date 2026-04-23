@@ -194,6 +194,8 @@ const (
 	wmDpiChanged = 0x02E0 // WM_DPICHANGED
 
 	// Focus messages
+	wmSetFocus    = 0x0007 // WM_SETFOCUS
+	wmKillFocus   = 0x0008 // WM_KILLFOCUS
 	wmActivate    = 0x0006 // WM_ACTIVATE
 	waInactive    = 0      // WA_INACTIVE
 	waActive      = 1      // WA_ACTIVE
@@ -2038,7 +2040,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	switch message {
 	case wmClose:
 		w.shouldClose = true
-		w.queueEvent(Event{Type: EventClose})
+		w.queueEvent(Event{Type: EventClose, WindowID: w.id})
 		return 0
 
 	case wmNCUAHDrawCaption, wmNCUAHDrawFrame:
@@ -2129,6 +2131,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			return hitTestResultToWin32(result)
 		}
 
+	case wmSetFocus:
+		w.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: true})
+		return 0
+
+	case wmKillFocus:
+		w.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: false})
+		return 0
+
 	case wmActivate:
 		// Release cursor grab on focus loss, re-grab on focus gain.
 		activationState := wParam & 0xFFFF
@@ -2171,6 +2181,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		logW, logH := w.LogicalSize()
 		w.queueEvent(Event{
 			Type:           EventResize,
+			WindowID:       w.id,
 			Width:          logW,
 			Height:         logH,
 			PhysicalWidth:  physW,
@@ -2228,6 +2239,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			}
 			w.queueEvent(Event{
 				Type:           EventResize,
+				WindowID:       w.id,
 				Width:          logW,
 				Height:         logH,
 				PhysicalWidth:  newWidth,
@@ -2286,6 +2298,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		logW, logH := w.LogicalSize()
 		w.queueEvent(Event{
 			Type:           EventResize,
+			WindowID:       w.id,
 			Width:          logW,
 			Height:         logH,
 			PhysicalWidth:  physW,
@@ -2325,7 +2338,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// ESC to close (convenience)
 		if wParam == vkEscape {
 			w.shouldClose = true
-			w.queueEvent(Event{Type: EventClose})
+			w.queueEvent(Event{Type: EventClose, WindowID: w.id})
 		}
 
 		// For WM_SYSKEYDOWN: let DefWindowProc handle Alt+F4, Alt+Tab

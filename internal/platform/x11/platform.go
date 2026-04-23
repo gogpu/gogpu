@@ -35,14 +35,16 @@ const (
 	EventTypeNone EventType = iota
 	EventTypeClose
 	EventTypeResize
+	EventTypeFocus
 )
 
 // PlatformEvent represents a platform event.
 // This mirrors platform.Event to avoid import cycles.
 type PlatformEvent struct {
-	Type   EventType
-	Width  int
-	Height int
+	Type    EventType
+	Width   int
+	Height  int
+	Focused bool // for focus events: true = gained, false = lost
 }
 
 // xlibHandle holds the Xlib Display* pointer required for Vulkan surface creation.
@@ -603,9 +605,21 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		// Re-grab pointer if cursor mode requires it
 		p.handleFocusIn(w)
 
+		// Emit focus event only for meaningful focus changes.
+		// Filter out NotifyPointer (5) and NotifyPointerRoot (6) which are noise,
+		// and only accept NotifyNormal mode (0) to avoid spurious events from grabs.
+		if e.Detail != 5 && e.Detail != 6 && e.Mode == 0 {
+			return PlatformEvent{Type: EventTypeFocus, Focused: true}
+		}
+
 	case *FocusOutEvent:
 		// Release pointer grab on focus loss
 		p.handleFocusOut(w)
+
+		// Emit focus event with same filtering as FocusIn.
+		if e.Detail != 5 && e.Detail != 6 && e.Mode == 0 {
+			return PlatformEvent{Type: EventTypeFocus, Focused: false}
+		}
 
 	case *GenericEvent:
 		p.handleGenericEvent(w, e)

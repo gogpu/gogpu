@@ -160,6 +160,8 @@ func (p *x11Platform) PollEvents() Event {
 			PhysicalWidth:  event.Width,
 			PhysicalHeight: event.Height,
 		}
+	case x11.EventTypeFocus:
+		return Event{Type: EventFocus, Focused: event.Focused}
 	default:
 		return Event{Type: EventNone}
 	}
@@ -793,11 +795,13 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.pointerMu.Lock()
 			w.keyboardFocused = true
 			w.pointerMu.Unlock()
+			w.queueEvent(Event{Type: EventFocus, Focused: true})
 		},
 		OnKeyboardLeave: func(serial uint32) {
 			w.pointerMu.Lock()
 			w.keyboardFocused = false
 			w.pointerMu.Unlock()
+			w.queueEvent(Event{Type: EventFocus, Focused: false})
 		},
 		OnKeyboardKey: func(serial, timeMs, key, state uint32) {
 			w.pointerMu.RLock()

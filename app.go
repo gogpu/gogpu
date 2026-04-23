@@ -360,6 +360,10 @@ func (a *App) processEventsMultiThread() bool {
 			} else {
 				a.closeSecondaryWindow(event.WindowID)
 			}
+		case platform.EventFocus:
+			if event.Focused {
+				a.windowManager.setFocus(event.WindowID)
+			}
 		}
 	}
 

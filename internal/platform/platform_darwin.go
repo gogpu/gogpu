@@ -46,6 +46,10 @@ type darwinWindow struct {
 
 	// Last known scale factor for change detection in PrepareFrame.
 	lastScale float64
+
+	// Focus tracking: last known key window status for change detection.
+	lastKeyWindow bool
+	focusInited   bool // true after first pollEvents call
 }
 
 // darwinPlatform implements Platform for macOS using Cocoa/AppKit.
@@ -432,6 +436,19 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 				PhysicalWidth:  physW,
 				PhysicalHeight: physH,
 			})
+		}
+	}
+
+	// Check for focus change — macOS uses key window status.
+	// NSWindow.isKeyWindow is true when the window has keyboard focus.
+	if w.window != nil {
+		isKey := w.window.IsKeyWindow()
+		if !w.focusInited {
+			w.lastKeyWindow = isKey
+			w.focusInited = true
+		} else if isKey != w.lastKeyWindow {
+			w.lastKeyWindow = isKey
+			w.events = append(w.events, Event{Type: EventFocus, Focused: isKey})
 		}
 	}
 
