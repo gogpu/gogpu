@@ -76,18 +76,20 @@ type mockManager struct {
 	fontScale     float32
 }
 
-func (m *mockManager) Init() error                                                   { return nil }
-func (m *mockManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) { return nil, nil }
-func (m *mockManager) PollEvents() platform.Event                                    { return platform.Event{} }
-func (m *mockManager) WaitEvents()                                                   {}
-func (m *mockManager) WakeUp()                                                       {}
-func (m *mockManager) ClipboardRead() (string, error)                                { return m.clipboardText, nil }
-func (m *mockManager) ClipboardWrite(text string) error                              { m.clipboardText = text; return nil }
-func (m *mockManager) DarkMode() bool                                                { return m.darkMode }
-func (m *mockManager) ReduceMotion() bool                                            { return m.reduceMotion }
-func (m *mockManager) HighContrast() bool                                            { return m.highContrast }
-func (m *mockManager) FontScale() float32                                            { return m.fontScale }
-func (m *mockManager) Destroy()                                                      {}
+func (m *mockManager) Init() error { return nil }
+func (m *mockManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) {
+	return &mockWindow{}, nil
+}
+func (m *mockManager) PollEvents() platform.Event       { return platform.Event{} }
+func (m *mockManager) WaitEvents()                      {}
+func (m *mockManager) WakeUp()                          {}
+func (m *mockManager) ClipboardRead() (string, error)   { return m.clipboardText, nil }
+func (m *mockManager) ClipboardWrite(text string) error { m.clipboardText = text; return nil }
+func (m *mockManager) DarkMode() bool                   { return m.darkMode }
+func (m *mockManager) ReduceMotion() bool               { return m.reduceMotion }
+func (m *mockManager) HighContrast() bool               { return m.highContrast }
+func (m *mockManager) FontScale() float32               { return m.fontScale }
+func (m *mockManager) Destroy()                         {}
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {

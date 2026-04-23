@@ -380,22 +380,7 @@ func (a *App) processEventsMultiThread() bool {
 
 	// Handle secondary window resize events.
 	for _, ev := range secondaryResizes {
-		w := a.windowManager.get(ev.WindowID)
-		if w == nil || w.surface == nil {
-			continue
-		}
-		// Resize the secondary window's surface on the render thread.
-		physW, physH := ev.PhysicalWidth, ev.PhysicalHeight
-		if physW > 0 && physH > 0 {
-			ws := w.surface
-			a.renderLoop.RunOnRenderThreadVoid(func() {
-				ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
-			})
-		}
-		// Call per-window resize callback with logical size.
-		if w.onResize != nil {
-			w.onResize(ev.Width, ev.Height)
-		}
+		a.handleSecondaryResize(ev)
 	}
 
 	// Dispatch end-of-frame events (gestures computed from pointer events)
@@ -404,6 +389,24 @@ func (a *App) processEventsMultiThread() bool {
 	}
 
 	return len(events) > 0
+}
+
+// handleSecondaryResize resizes a secondary window's surface on the render thread.
+func (a *App) handleSecondaryResize(ev platform.Event) {
+	w := a.windowManager.get(ev.WindowID)
+	if w == nil || w.surface == nil {
+		return
+	}
+	physW, physH := ev.PhysicalWidth, ev.PhysicalHeight
+	if physW > 0 && physH > 0 {
+		ws := w.surface
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
+		})
+	}
+	if w.onResize != nil {
+		w.onResize(ev.Width, ev.Height)
+	}
 }
 
 // windowFrame holds a snapshot of per-window state captured on the main thread

@@ -147,7 +147,9 @@ func (wm *WindowManager) count() int {
 }
 
 // focusedWindow returns the currently focused window, or nil if none.
-func (wm *WindowManager) focusedWindow() *Window {
+// Used by VSync strategy: focused window = Fifo, others = Immediate (ADR-010).
+// Called when platform sends focus events (EventFocus — not yet implemented).
+func (wm *WindowManager) focusedWindow() *Window { //nolint:unused // VSync focus switching, wired when EventFocus is added
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
 	if wm.focused == 0 {
@@ -156,8 +158,9 @@ func (wm *WindowManager) focusedWindow() *Window {
 	return wm.windows[wm.focused]
 }
 
-// setFocus changes the focused window.
-func (wm *WindowManager) setFocus(id WindowID) {
+// setFocus changes the focused window and adjusts VSync strategy.
+// Called when platform sends focus events (EventFocus — not yet implemented).
+func (wm *WindowManager) setFocus(id WindowID) { //nolint:unused // VSync focus switching, wired when EventFocus is added
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 	if _, ok := wm.windows[id]; ok {
