@@ -16,33 +16,12 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
-// waylandPlatform implements the Platform interface using Wayland.
-// Uses a single libwayland-client C connection for everything:
-// display, registry, compositor, surface, xdg-shell, input, CSD.
-type waylandPlatform struct {
-	mu sync.Mutex
-
-	// Wakeup pipe for cross-goroutine WakeUp → WaitEvents unblocking.
-	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
-	wakePipe [2]int
-
-	// Single C libwayland connection — owns everything.
-	libwl *wayland.LibwaylandHandle
-
-	// Pure Go protocol objects — kept for registry global discovery only.
-	// The Pure Go display is used during init to discover global names,
-	// then those names are used to bind on the C connection.
-	// After init, only libwl is used for event dispatch.
-	display  *wayland.Display
-	registry *wayland.Registry
-
+// waylandWindow holds all per-window state for a Wayland surface.
+type waylandWindow struct {
 	// Frameless window state
 	frameless       bool
 	maximized       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
-
-	// Scale factor from environment variables (fallback)
-	envScaleFactor float64
 
 	// Window state
 	width       int
@@ -80,6 +59,34 @@ type waylandPlatform struct {
 	callbackMu       sync.RWMutex
 }
 
+// waylandPlatform implements the Platform interface using Wayland.
+// Uses a single libwayland-client C connection for everything:
+// display, registry, compositor, surface, xdg-shell, input, CSD.
+// Holds process-level state and delegates per-window operations to primary.
+type waylandPlatform struct {
+	mu sync.Mutex
+
+	// Wakeup pipe for cross-goroutine WakeUp → WaitEvents unblocking.
+	// [0]=read, [1]=write. Created with O_NONBLOCK|O_CLOEXEC.
+	wakePipe [2]int
+
+	// Single C libwayland connection — owns everything.
+	libwl *wayland.LibwaylandHandle
+
+	// Pure Go protocol objects — kept for registry global discovery only.
+	// The Pure Go display is used during init to discover global names,
+	// then those names are used to bind on the C connection.
+	// After init, only libwl is used for event dispatch.
+	display  *wayland.Display
+	registry *wayland.Registry
+
+	// Scale factor from environment variables (fallback)
+	envScaleFactor float64
+
+	// Primary window for backward-compatible single-window API.
+	primary *waylandWindow
+}
+
 // x11Platform wraps x11.Platform to implement the Platform interface.
 type x11Platform struct {
 	inner *x11.Platform
@@ -97,7 +104,7 @@ func newPlatform() Platform {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		logger().Info("platform selected", "type", "wayland", "WAYLAND_DISPLAY", os.Getenv("WAYLAND_DISPLAY"))
 		return &waylandPlatform{
-			startTime: time.Now(),
+			primary: &waylandWindow{startTime: time.Now()},
 		}
 	}
 	// Fall back to X11 if DISPLAY is set
@@ -109,7 +116,7 @@ func newPlatform() Platform {
 	// Default to Wayland (will fail in Init if not available)
 	logger().Info("platform selected", "type", "wayland", "reason", "default (no WAYLAND_DISPLAY or DISPLAY)")
 	return &waylandPlatform{
-		startTime: time.Now(),
+		primary: &waylandWindow{startTime: time.Now()},
 	}
 }
 
@@ -312,9 +319,9 @@ func (p *waylandPlatform) initSingleConnection(config Config) error {
 	}
 	p.libwl = libwl
 
-	// Set initial size
-	p.width = config.Width
-	p.height = config.Height
+	// Set initial size on the primary window
+	p.primary.width = config.Width
+	p.primary.height = config.Height
 
 	// Set window properties on C xdg_toplevel
 	libwl.SetTitle(config.Title)
@@ -352,7 +359,7 @@ func (p *waylandPlatform) initSingleConnection(config Config) error {
 		return fmt.Errorf("wayland: roundtrip failed: %w", err)
 	}
 
-	p.configured = true
+	p.primary.configured = true
 
 	// Create wakeup pipe for WakeUp → WaitEvents unblocking
 	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
@@ -436,10 +443,11 @@ func (p *waylandPlatform) initCSD(config Config) error {
 		nil, // DefaultCSDPainter
 		func() {
 			logger().Info("CSD close button pressed")
-			p.mu.Lock()
-			p.shouldClose = true
-			p.mu.Unlock()
-			p.queueEvent(Event{Type: EventClose})
+			w := p.primary
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
+			w.queueEvent(Event{Type: EventClose})
 			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
 		},
 	); err != nil {
@@ -455,19 +463,21 @@ func (p *waylandPlatform) initCSD(config Config) error {
 
 // setupInputCallbacks creates Go-side input callbacks and wires them to
 // the LibwaylandHandle. These callbacks are invoked by goffi from C context.
+// All per-window state access goes through p.primary.
 //
 //nolint:gocognit,maintidx // callback setup is inherently complex but well-structured per event type
 func (p *waylandPlatform) setupInputCallbacks() {
+	w := p.primary
 	cb := &wayland.InputCallbacks{
 		// Pointer events
 		OnPointerEnter: func(serial uint32, x, y float64) {
-			p.pointerMu.Lock()
-			p.pointerX = x
-			p.pointerY = y
-			p.pointerIn = true
-			p.pointerMu.Unlock()
+			w.pointerMu.Lock()
+			w.pointerX = x
+			w.pointerY = y
+			w.pointerIn = true
+			w.pointerMu.Unlock()
 
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerEnter,
 				PointerID:   1,
 				X:           x,
@@ -477,19 +487,19 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				PointerType: gpucontext.PointerTypeMouse,
 				IsPrimary:   true,
 				Button:      gpucontext.ButtonNone,
-				Buttons:     p.getButtons(),
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Buttons:     w.getButtons(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnPointerLeave: func(serial uint32) {
-			p.pointerMu.Lock()
-			x := p.pointerX
-			y := p.pointerY
-			p.pointerIn = false
-			p.pointerMu.Unlock()
+			w.pointerMu.Lock()
+			x := w.pointerX
+			y := w.pointerY
+			w.pointerIn = false
+			w.pointerMu.Unlock()
 
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerLeave,
 				PointerID:   1,
 				X:           x,
@@ -499,28 +509,28 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				PointerType: gpucontext.PointerTypeMouse,
 				IsPrimary:   true,
 				Button:      gpucontext.ButtonNone,
-				Buttons:     p.getButtons(),
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Buttons:     w.getButtons(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnPointerMotion: func(timeMs uint32, x, y float64) {
-			p.pointerMu.Lock()
-			if !p.pointerIn {
-				p.pointerMu.Unlock()
+			w.pointerMu.Lock()
+			if !w.pointerIn {
+				w.pointerMu.Unlock()
 				return
 			}
-			p.pointerX = x
-			p.pointerY = y
-			buttons := p.buttons
-			p.pointerMu.Unlock()
+			w.pointerX = x
+			w.pointerY = y
+			buttons := w.buttons
+			w.pointerMu.Unlock()
 
 			var pressure float32
 			if buttons != gpucontext.ButtonsNone {
 				pressure = 0.5
 			}
 
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerMove,
 				PointerID:   1,
 				X:           x,
@@ -532,14 +542,14 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				IsPrimary:   true,
 				Button:      gpucontext.ButtonNone,
 				Buttons:     buttons,
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnPointerButton: func(serial, timeMs, button, state uint32) {
-			p.pointerMu.Lock()
-			if !p.pointerIn {
-				p.pointerMu.Unlock()
+			w.pointerMu.Lock()
+			if !w.pointerIn {
+				w.pointerMu.Unlock()
 				return
 			}
 
@@ -547,15 +557,15 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			mask := buttonToMask(btn)
 
 			if state == wayland.PointerButtonStatePressed {
-				p.buttons |= mask
+				w.buttons |= mask
 			} else {
-				p.buttons &^= mask
+				w.buttons &^= mask
 			}
 
-			buttons := p.buttons
-			x := p.pointerX
-			y := p.pointerY
-			p.pointerMu.Unlock()
+			buttons := w.buttons
+			x := w.pointerX
+			y := w.pointerY
+			w.pointerMu.Unlock()
 
 			var eventType gpucontext.PointerEventType
 			if state == wayland.PointerButtonStatePressed {
@@ -569,7 +579,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				pressure = 0.5
 			}
 
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        eventType,
 				PointerID:   1,
 				X:           x,
@@ -581,19 +591,19 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				IsPrimary:   true,
 				Button:      btn,
 				Buttons:     buttons,
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnPointerAxis: func(timeMs, axis uint32, value float64) {
-			p.pointerMu.Lock()
-			if !p.pointerIn {
-				p.pointerMu.Unlock()
+			w.pointerMu.Lock()
+			if !w.pointerIn {
+				w.pointerMu.Unlock()
 				return
 			}
-			x := p.pointerX
-			y := p.pointerY
-			p.pointerMu.Unlock()
+			x := w.pointerX
+			y := w.pointerY
+			w.pointerMu.Unlock()
 
 			var deltaX, deltaY float64
 			switch axis {
@@ -603,14 +613,14 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				deltaX = value
 			}
 
-			p.dispatchScrollEvent(gpucontext.ScrollEvent{
+			w.dispatchScrollEvent(gpucontext.ScrollEvent{
 				X:         x,
 				Y:         y,
 				DeltaX:    deltaX,
 				DeltaY:    deltaY,
 				DeltaMode: gpucontext.ScrollDeltaPixel,
-				Modifiers: p.getModifiers(),
-				Timestamp: p.eventTimestamp(),
+				Modifiers: w.getModifiers(),
+				Timestamp: w.eventTimestamp(),
 			})
 		},
 
@@ -620,37 +630,37 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			// Full libxkbcommon integration is a future task.
 		},
 		OnKeyboardEnter: func(serial uint32, keys []uint32) {
-			p.mu.Lock()
-			p.keyboardFocused = true
-			p.mu.Unlock()
+			w.pointerMu.Lock()
+			w.keyboardFocused = true
+			w.pointerMu.Unlock()
 		},
 		OnKeyboardLeave: func(serial uint32) {
-			p.mu.Lock()
-			p.keyboardFocused = false
-			p.mu.Unlock()
+			w.pointerMu.Lock()
+			w.keyboardFocused = false
+			w.pointerMu.Unlock()
 		},
 		OnKeyboardKey: func(serial, timeMs, key, state uint32) {
-			p.mu.Lock()
-			focused := p.keyboardFocused
-			p.mu.Unlock()
+			w.pointerMu.RLock()
+			focused := w.keyboardFocused
+			w.pointerMu.RUnlock()
 			if !focused {
 				return
 			}
 
 			gpuKey := evdevToKey(key)
-			mods := p.getModifiers()
+			mods := w.getModifiers()
 			pressed := state == wayland.KeyStatePressed
 
-			p.dispatchKeyEvent(gpuKey, mods, pressed)
+			w.dispatchKeyEvent(gpuKey, mods, pressed)
 
 			// Dispatch character input on key press only.
 			if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
 				shift := mods&gpucontext.ModShift != 0
 				capsLock := mods&gpucontext.ModCapsLock != 0
 				if r := evdevKeycodeToRune(key, shift, capsLock); r != 0 {
-					p.callbackMu.RLock()
-					cb := p.charCallback
-					p.callbackMu.RUnlock()
+					w.callbackMu.RLock()
+					cb := w.charCallback
+					w.callbackMu.RUnlock()
 					if cb != nil {
 						cb(r)
 					}
@@ -658,9 +668,9 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			}
 		},
 		OnKeyboardModifiers: func(serial, modsDepressed, modsLatched, modsLocked, group uint32) {
-			p.pointerMu.Lock()
-			p.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
-			p.pointerMu.Unlock()
+			w.pointerMu.Lock()
+			w.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
+			w.pointerMu.Unlock()
 		},
 		OnKeyboardRepeat: func(rate, delay int32) {
 			// Stored for future key repeat implementation
@@ -668,7 +678,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 
 		// Touch events
 		OnTouchDown: func(serial, timeMs uint32, id int32, x, y float64) {
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerDown,
 				PointerID:   int(id) + 2,
 				X:           x,
@@ -680,12 +690,12 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				IsPrimary:   id == 0,
 				Button:      gpucontext.ButtonLeft,
 				Buttons:     gpucontext.ButtonsLeft,
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnTouchUp: func(serial, timeMs uint32, id int32) {
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerUp,
 				PointerID:   int(id) + 2,
 				Pressure:    0,
@@ -695,12 +705,12 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				IsPrimary:   id == 0,
 				Button:      gpucontext.ButtonLeft,
 				Buttons:     gpucontext.ButtonsNone,
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnTouchMotion: func(timeMs uint32, id int32, x, y float64) {
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerMove,
 				PointerID:   int(id) + 2,
 				X:           x,
@@ -712,17 +722,17 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				IsPrimary:   id == 0,
 				Button:      gpucontext.ButtonNone,
 				Buttons:     gpucontext.ButtonsLeft,
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 		OnTouchCancel: func() {
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerLeave,
 				PointerID:   2,
 				PointerType: gpucontext.PointerTypeTouch,
 				IsPrimary:   true,
-				Timestamp:   p.eventTimestamp(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 
@@ -734,10 +744,11 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			logger().Debug("wayland: pointer lock deactivated by compositor")
 		},
 		OnRelativePointerMotion: func(timeUs uint64, dx, dy, dxUnaccel, dyUnaccel float64) {
-			// Read cursor mode under p.mu (SetCursorMode writes under p.mu).
-			p.mu.Lock()
-			mode := p.cursorMode
-			p.mu.Unlock()
+			// Read cursor mode under pointerMu (SetCursorMode writes under p.mu).
+			w.pointerMu.RLock()
+			mode := w.cursorMode
+			buttons := w.buttons
+			w.pointerMu.RUnlock()
 
 			// Only dispatch relative motion when in locked mode.
 			// In normal/confined mode, absolute motion events are used.
@@ -745,17 +756,13 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				return
 			}
 
-			p.pointerMu.RLock()
-			buttons := p.buttons
-			p.pointerMu.RUnlock()
-
 			var pressure float32
 			if buttons != gpucontext.ButtonsNone {
 				pressure = 0.5
 			}
 
 			// In locked mode, X/Y stay at the lock position; only DeltaX/DeltaY matter.
-			p.dispatchPointerEvent(gpucontext.PointerEvent{
+			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerMove,
 				PointerID:   1,
 				DeltaX:      dx,
@@ -767,45 +774,45 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				IsPrimary:   true,
 				Button:      gpucontext.ButtonNone,
 				Buttons:     buttons,
-				Modifiers:   p.getModifiers(),
-				Timestamp:   p.eventTimestamp(),
+				Modifiers:   w.getModifiers(),
+				Timestamp:   w.eventTimestamp(),
 			})
 		},
 
 		// xdg_toplevel events
 		OnClose: func() {
 			logger().Info("xdg_toplevel close event from compositor")
-			p.mu.Lock()
-			p.shouldClose = true
-			p.mu.Unlock()
-			p.queueEvent(Event{Type: EventClose})
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
+			w.queueEvent(Event{Type: EventClose})
 			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
 		},
 		OnConfigure: func(width, height int32) {
 			logger().Debug("wayland toplevel.configure", "rawW", width, "rawH", height)
-			p.mu.Lock()
-			defer p.mu.Unlock()
+			w.eventMu.Lock()
+			defer w.eventMu.Unlock()
 
 			isMaximized := p.libwl != nil && p.libwl.CSDActive() && p.libwl.IsMaximized()
 
 			// Save pre-maximize size ONLY when transitioning TO maximized.
 			// Don't overwrite on every configure — restore needs the original size.
-			if isMaximized && p.savedWidth == 0 && p.width > 0 {
-				p.savedWidth = p.width
-				p.savedHeight = p.height
+			if isMaximized && w.savedWidth == 0 && w.width > 0 {
+				w.savedWidth = w.width
+				w.savedHeight = w.height
 			}
 			// Clear saved size when restored (so next maximize saves fresh)
-			if !isMaximized && p.savedWidth > 0 && width > 0 {
-				p.savedWidth = 0
-				p.savedHeight = 0
+			if !isMaximized && w.savedWidth > 0 && width > 0 {
+				w.savedWidth = 0
+				w.savedHeight = 0
 			}
 
 			// Width/height of 0 means client can choose — restore to saved size.
-			if width == 0 && height == 0 && p.savedWidth > 0 {
-				width = int32(p.savedWidth)
-				height = int32(p.savedHeight)
-				p.savedWidth = 0
-				p.savedHeight = 0
+			if width == 0 && height == 0 && w.savedWidth > 0 {
+				width = int32(w.savedWidth)
+				height = int32(w.savedHeight)
+				w.savedWidth = 0
+				w.savedHeight = 0
 			}
 			if width > 0 && height > 0 {
 				newWidth := int(width)
@@ -825,10 +832,10 @@ func (p *waylandPlatform) setupInputCallbacks() {
 					}
 				}
 				logger().Debug("wayland configure", "vulkanW", vulkanW, "vulkanH", vulkanH)
-				if vulkanW != p.width || vulkanH != p.height {
-					p.width = vulkanW
-					p.height = vulkanH
-					p.queueEvent(Event{
+				if vulkanW != w.width || vulkanH != w.height {
+					w.width = vulkanW
+					w.height = vulkanH
+					w.events = append(w.events, Event{
 						Type:           EventResize,
 						Width:          vulkanW,
 						Height:         vulkanH,
@@ -884,29 +891,29 @@ func buttonToMask(button gpucontext.Button) gpucontext.Buttons {
 }
 
 // getButtons returns the current button state (thread-safe).
-func (p *waylandPlatform) getButtons() gpucontext.Buttons {
-	p.pointerMu.RLock()
-	defer p.pointerMu.RUnlock()
-	return p.buttons
+func (w *waylandWindow) getButtons() gpucontext.Buttons {
+	w.pointerMu.RLock()
+	defer w.pointerMu.RUnlock()
+	return w.buttons
 }
 
 // getModifiers returns the current modifier state (thread-safe).
-func (p *waylandPlatform) getModifiers() gpucontext.Modifiers {
-	p.pointerMu.RLock()
-	defer p.pointerMu.RUnlock()
-	return p.modifiers
+func (w *waylandWindow) getModifiers() gpucontext.Modifiers {
+	w.pointerMu.RLock()
+	defer w.pointerMu.RUnlock()
+	return w.modifiers
 }
 
 // eventTimestamp returns the event timestamp as duration since start.
-func (p *waylandPlatform) eventTimestamp() time.Duration {
-	return time.Since(p.startTime)
+func (w *waylandWindow) eventTimestamp() time.Duration {
+	return time.Since(w.startTime)
 }
 
 // dispatchPointerEvent dispatches a pointer event to the registered callback.
-func (p *waylandPlatform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	p.callbackMu.RLock()
-	callback := p.pointerCallback
-	p.callbackMu.RUnlock()
+func (w *waylandWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
+	w.callbackMu.RLock()
+	callback := w.pointerCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(ev)
@@ -914,10 +921,10 @@ func (p *waylandPlatform) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 }
 
 // dispatchScrollEvent dispatches a scroll event to the registered callback.
-func (p *waylandPlatform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	p.callbackMu.RLock()
-	callback := p.scrollCallback
-	p.callbackMu.RUnlock()
+func (w *waylandWindow) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
+	w.callbackMu.RLock()
+	callback := w.scrollCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(ev)
@@ -925,14 +932,21 @@ func (p *waylandPlatform) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
 }
 
 // dispatchKeyEvent dispatches a keyboard event to the registered callback.
-func (p *waylandPlatform) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	p.callbackMu.RLock()
-	callback := p.keyboardCallback
-	p.callbackMu.RUnlock()
+func (w *waylandWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	w.callbackMu.RLock()
+	callback := w.keyboardCallback
+	w.callbackMu.RUnlock()
 
 	if callback != nil {
 		callback(key, mods, pressed)
 	}
+}
+
+// queueEvent appends a platform event to the window's event queue.
+func (w *waylandWindow) queueEvent(event Event) {
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	w.events = append(w.events, event)
 }
 
 // evdevModsToModifiers converts evdev modifier bitmasks to gpucontext.Modifiers.
@@ -1598,15 +1612,17 @@ func evdevKeycodeToRune(keycode uint32, shift, capsLock bool) rune {
 // Same architecture as X11 and Windows platforms: callbacks queue events,
 // PollEvents dequeues one at a time.
 func (p *waylandPlatform) PollEvents() Event {
+	w := p.primary
+
 	// First, drain queued events (from previous dispatch).
-	p.eventMu.Lock()
-	if len(p.events) > 0 {
-		event := p.events[0]
-		p.events = p.events[1:]
-		p.eventMu.Unlock()
+	w.eventMu.Lock()
+	if len(w.events) > 0 {
+		event := w.events[0]
+		w.events = w.events[1:]
+		w.eventMu.Unlock()
 		return event
 	}
-	p.eventMu.Unlock()
+	w.eventMu.Unlock()
 
 	// Dispatch all pending events on the C display (single connection).
 	// Callbacks will queue events via queueEvent().
@@ -1614,10 +1630,10 @@ func (p *waylandPlatform) PollEvents() Event {
 		// Read from socket + dispatch default queue (xdg, pointer, keyboard, touch)
 		if err := p.libwl.DispatchDefaultQueue(); err != nil {
 			logger().Error("wayland dispatch error — closing window", "error", err)
-			p.mu.Lock()
-			p.shouldClose = true
-			p.mu.Unlock()
-			p.queueEvent(Event{Type: EventClose})
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
+			w.queueEvent(Event{Type: EventClose})
 		}
 
 		// Dispatch CSD events (separate queue, read by DispatchDefaultQueue above)
@@ -1629,44 +1645,40 @@ func (p *waylandPlatform) PollEvents() Event {
 	}
 
 	// Return first queued event, or EventNone if empty.
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-	if len(p.events) > 0 {
-		event := p.events[0]
-		p.events = p.events[1:]
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	if len(w.events) > 0 {
+		event := w.events[0]
+		w.events = w.events[1:]
 		return event
 	}
 	return Event{Type: EventNone}
 }
 
-// queueEvent appends a platform event to the event queue.
-func (p *waylandPlatform) queueEvent(event Event) {
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-	p.events = append(p.events, event)
-}
-
 // ShouldClose returns true if window close was requested.
 func (p *waylandPlatform) ShouldClose() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.shouldClose
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.shouldClose
 }
 
 // LogicalSize returns the window size in platform points.
 // Wayland baseline: scale=1.0, logical == physical.
 func (p *waylandPlatform) LogicalSize() (width, height int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.width, p.height
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.width, w.height
 }
 
 // PhysicalSize returns the GPU framebuffer size in device pixels.
 // Wayland baseline: scale=1.0, logical == physical.
 func (p *waylandPlatform) PhysicalSize() (width, height int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.width, p.height
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.width, w.height
 }
 
 // GetHandle returns platform-specific handles for Vulkan surface creation.
@@ -1684,7 +1696,7 @@ func (p *waylandPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Close wakeup pipe
+	// Close wakeup pipe (process-level)
 	if p.wakePipe[0] != 0 {
 		_ = unix.Close(p.wakePipe[0])
 		_ = unix.Close(p.wakePipe[1])
@@ -1712,31 +1724,35 @@ func (p *waylandPlatform) InSizeMove() bool {
 
 // SetPointerCallback registers a callback for pointer events.
 func (p *waylandPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	p.callbackMu.Lock()
-	p.pointerCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.pointerCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetScrollCallback registers a callback for scroll events.
 func (p *waylandPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	p.callbackMu.Lock()
-	p.scrollCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.scrollCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetKeyCallback registers a callback for keyboard events.
 func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	p.callbackMu.Lock()
-	p.keyboardCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.keyboardCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetCharCallback registers a callback for Unicode character input.
 // TODO: Implement via libxkbcommon xkb_state_key_get_utf8 for full Unicode support.
 func (p *waylandPlatform) SetCharCallback(fn func(rune)) {
-	p.callbackMu.Lock()
-	p.charCallback = fn
-	p.callbackMu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.charCallback = fn
+	w.callbackMu.Unlock()
 }
 
 // SetModalFrameCallback is a no-op on Wayland.
@@ -1856,7 +1872,12 @@ func (p *waylandPlatform) SetCursorMode(mode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if mode == p.cursorMode {
+	w := p.primary
+	w.pointerMu.Lock()
+	currentMode := w.cursorMode
+	w.pointerMu.Unlock()
+
+	if mode == currentMode {
 		return
 	}
 
@@ -1897,7 +1918,9 @@ func (p *waylandPlatform) SetCursorMode(mode int) {
 		// Hide cursor: set_cursor with NULL surface
 		p.libwl.HideCursor(p.libwl.PointerEnterSerial())
 
-		p.cursorMode = 1
+		w.pointerMu.Lock()
+		w.cursorMode = 1
+		w.pointerMu.Unlock()
 
 	case 2: // Confined — cursor visible but confined to surface bounds
 		if !p.libwl.HasPointerConstraints() {
@@ -1911,13 +1934,17 @@ func (p *waylandPlatform) SetCursorMode(mode int) {
 			return
 		}
 
-		p.cursorMode = 2
+		w.pointerMu.Lock()
+		w.cursorMode = 2
+		w.pointerMu.Unlock()
 
 	default: // Normal (0) — release all constraints, show cursor
 		// Constraints already released by releasePointerConstraints above.
 		// Cursor restoration happens automatically when the compositor processes
 		// the constraint destroy and the pointer re-enters the surface.
-		p.cursorMode = 0
+		w.pointerMu.Lock()
+		w.cursorMode = 0
+		w.pointerMu.Unlock()
 	}
 
 	// Flush to send all protocol requests immediately
@@ -1939,9 +1966,10 @@ func (p *waylandPlatform) releasePointerConstraints() {
 
 // CursorMode returns the current cursor mode.
 func (p *waylandPlatform) CursorMode() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.cursorMode
+	w := p.primary
+	w.pointerMu.RLock()
+	defer w.pointerMu.RUnlock()
+	return w.cursorMode
 }
 
 // DarkMode returns true if the system dark mode is active.
@@ -2066,23 +2094,26 @@ func (p *waylandPlatform) SyncFrame() {}
 // Frameless window support — waylandPlatform
 
 func (p *waylandPlatform) SetFrameless(frameless bool) {
-	p.mu.Lock()
-	p.frameless = frameless
-	p.mu.Unlock()
+	w := p.primary
+	w.callbackMu.Lock()
+	w.frameless = frameless
+	w.callbackMu.Unlock()
 	// SSD/CSD mode switching on C display is not yet implemented.
 	// The decoration mode is set during Init based on config.Frameless.
 }
 
 func (p *waylandPlatform) IsFrameless() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.frameless
+	w := p.primary
+	w.callbackMu.RLock()
+	defer w.callbackMu.RUnlock()
+	return w.frameless
 }
 
 func (p *waylandPlatform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.hitTestCallback = fn
+	w := p.primary
+	w.callbackMu.Lock()
+	defer w.callbackMu.Unlock()
+	w.hitTestCallback = fn
 }
 
 func (p *waylandPlatform) Minimize() {
@@ -2092,9 +2123,10 @@ func (p *waylandPlatform) Minimize() {
 }
 
 func (p *waylandPlatform) Maximize() {
-	p.mu.Lock()
-	maximized := p.maximized
-	p.mu.Unlock()
+	w := p.primary
+	w.eventMu.Lock()
+	maximized := w.maximized
+	w.eventMu.Unlock()
 
 	if p.libwl != nil && p.libwl.Toplevel() != 0 {
 		if maximized {
@@ -2106,14 +2138,16 @@ func (p *waylandPlatform) Maximize() {
 }
 
 func (p *waylandPlatform) IsMaximized() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.maximized
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.maximized
 }
 
 func (p *waylandPlatform) CloseWindow() {
-	p.mu.Lock()
-	p.shouldClose = true
-	p.mu.Unlock()
-	p.queueEvent(Event{Type: EventClose})
+	w := p.primary
+	w.eventMu.Lock()
+	w.shouldClose = true
+	w.eventMu.Unlock()
+	w.queueEvent(Event{Type: EventClose})
 }
