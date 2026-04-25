@@ -5,11 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.28.5] - 2026-04-25
+## [0.29.0] - 2026-04-25
+
+### Added
+
+- **Damage-aware surface presentation** — `Context.SetDamageRects([]image.Rectangle)` passes dirty regions to the platform compositor, allowing it to skip recompositing unchanged pixels. Rects are in physical pixels (top-left origin), consumed after presentation. Works on all wgpu backends: Vulkan (`VK_KHR_incremental_present`), DX12 (`Present1` + dirty rects), GLES (`eglSwapBuffersWithDamageKHR`), Software (partial `BitBlt`/`XPutImage`). `ContextRenderTarget.SetDamageRects()` adapter for ggcanvas integration. ADR-013.
+- **`Texture.TextureView()`** — returns `gpucontext.TextureView` for duck-typed access from packages that cannot import gogpu (e.g., gg/ggcanvas uses Go structural typing to call this method without import cycle).
 
 ### Changed
 
-- **deps:** update wgpu v0.26.2 — damage-aware surface presentation (`PresentWithDamage`) on all backends, automatic Buffer/BindGroup cleanup via `runtime.AddCleanup`, zero-alloc WriteBuffer batching
+- **deps:** update wgpu v0.26.2 — damage-aware `PresentWithDamage` API, automatic Buffer/BindGroup cleanup via `runtime.AddCleanup`, zero-alloc WriteBuffer batching
 
 ## [0.28.1] - 2026-04-23
 

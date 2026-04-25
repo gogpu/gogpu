@@ -33,7 +33,7 @@
 | **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
-| **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering |
+| **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
 | **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |

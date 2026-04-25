@@ -25,11 +25,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.28.1
+## Current State: v0.29.0
 
 ✅ **Production-ready** with full feature set:
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
 - **EventFocus** — window focus/blur events on all platforms for multi-window VSync routing
+- **Damage-aware presentation** — `Context.SetDamageRects()` passes dirty regions to compositor (ADR-013)
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
@@ -54,16 +55,11 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.29.0** | 2026-04-25 | **Damage-aware presentation** — `SetDamageRects` + `PresentWithDamage`, `Texture.TextureView()`, wgpu v0.26.2 |
 | **v0.28.1** | 2026-04-23 | EventFocus on all platforms (Win32, X11, Wayland, macOS), WindowID on all events |
 | **v0.28.0** | 2026-04-23 | **Multi-window** — App.NewWindow(), PlatformManager/PlatformWindow, shared GPU device, per-window frame loop |
-| **v0.27.3** | 2026-04-23 | wgpu v0.25.3 |
-| **v0.27.2** | 2026-04-23 | Ecosystem sync: wgpu v0.25.2, gpucontext v0.14.0 (TextureView), gputypes v0.5.0 (PrimitiveState zero value) |
 | **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix |
 | **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock — Win32 + X11 (SDL parity) |
-| **v0.26.4** | 2026-04-08 | Orbital particles example, wgpu v0.24.4 (software backend enterprise Present) |
-| **v0.26.3** | 2026-04-07 | wgpu v0.24.2 (Metal SetBindGroup cross-group slot fix) |
-| **v0.26.2** | 2026-04-07 | wgpu v0.24.1, naga v0.17.0 (DXIL backend) |
-| **v0.26.1** | 2026-04-05 | CSD resize overhaul, event queue pattern, programmatic DPI awareness |
 | **v0.26.0** | 2026-03-31 | Enterprise fence architecture, Wayland CSD, GPU particles, present mode fallback |
 | **v0.25.0** | 2026-03-21 | Frameless windows (Win32/macOS/X11/Wayland), WM_DPICHANGED, VSync config |
 
@@ -83,6 +79,13 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - [ ] CSD resize click jump fix (BUG-CSD-002)
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
+
+### v0.29.0 — Damage-Aware Presentation (current)
+
+- [x] `Context.SetDamageRects()` — pass dirty regions to platform compositor (v0.29.0, ADR-013)
+- [x] `ContextRenderTarget.SetDamageRects()` — adapter for ggcanvas integration (v0.29.0)
+- [x] `Texture.TextureView()` — `gpucontext.TextureView` for duck-typed access (v0.29.0)
+- [x] wgpu v0.26.2 — damage-aware `PresentWithDamage` on all backends (v0.29.0)
 
 ### v0.28.0 — Multi-Window ([RFC #167](https://github.com/orgs/gogpu/discussions/167))
 
@@ -115,7 +118,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Theme | Description | Status |
 |-------|-------------|--------|
-| **Multi-Window** | Multiple windows per App (IDE/tool pattern) | Research in progress |
+| **Multi-Window** | Multiple windows per App (IDE/tool pattern) | ✅ Shipped (v0.28.0) |
 | **WebAssembly** | WASM target for browser via WebGPU | Backlog (WASM-001) |
 | **Android** | Android platform support | Backlog (ANDROID-001) |
 | **iOS** | iOS platform support | Planned |
@@ -163,12 +166,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.27.1 | GPU application framework, windowing, input, pointer lock |
-| **gogpu/wgpu** | v0.25.2 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
-| **gogpu/naga** | v0.17.4 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
-| **gogpu/gg** | v0.40.1 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
+| **gogpu/gogpu** | v0.29.0 | GPU application framework, windowing, multi-window, damage-aware present |
+| **gogpu/wgpu** | v0.26.2 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | v0.17.6 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
+| **gogpu/gg** | v0.41.2 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
 | **gogpu/ui** | v0.1.13 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
-| **gogpu/gpucontext** | v0.13.0 | Shared interfaces (DeviceProvider, TextureRegionUpdater) |
+| **gogpu/gpucontext** | v0.14.0 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
 | **gogpu/gputypes** | v0.5.0 | WebGPU type definitions (zero value = spec default) |
 | **gogpu/compose** | design | Multi-process composition library |
 | **gogpu/g3d** | design | 3D rendering (scene graph, PBR, GLTF) |
@@ -183,6 +186,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.29.0** | 2026-04-25 | Damage-aware presentation (SetDamageRects, ADR-013), Texture.TextureView(), wgpu v0.26.2 |
+| **v0.28.1** | 2026-04-23 | EventFocus on all platforms, WindowID on all events |
+| **v0.28.0** | 2026-04-23 | Multi-window (ADR-010), PlatformManager/PlatformWindow, WindowManager |
+| **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock (SDL parity) |
 | **v0.26.1** | 2026-04-05 | CSD resize overhaul, event queue pattern, DPI awareness |
 | **v0.26.0** | 2026-03-31 | Enterprise fence, Wayland CSD + single connection, GPU particles, present mode fallback |
 | **v0.25.1** | 2026-03-25 | X11/Wayland DPI, macOS platform stubs, BlitPixels cross-platform |

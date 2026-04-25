@@ -510,8 +510,8 @@ Platform Layer          InputState               Game Loop
 2. init()          → Instance → Surface → Adapter → Device (*wgpu.Device) → Queue (*wgpu.Queue)
 3. BeginFrame()    → surface.AcquireTexture() → device.CreateTextureView()
 4. User draws      → Via Context in OnDraw callback
-5. EndFrame()      → queue.Submit() → queue.Present() → blitSoftwareFramebuffer()
-                     (software backend: reads framebuffer, blits to window via PixelBlitter)
+5. EndFrame()      → queue.Submit() → surface.PresentWithDamage(texture, damageRects)
+                     (damage rects optional — nil = full present, set via Context.SetDamageRects)
 ```
 
 ## Why Different GPU Models?
