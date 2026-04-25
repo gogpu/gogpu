@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **deps:** update wgpu v0.26.1 — damage-aware surface presentation (`PresentWithDamage`) on all backends (Software, Vulkan VK_KHR_incremental_present, DX12 Present1, GLES eglSwapBuffersWithDamageKHR)
+- **deps:** update wgpu v0.26.2 — damage-aware surface presentation (`PresentWithDamage`) on all backends, automatic Buffer/BindGroup cleanup via `runtime.AddCleanup`, zero-alloc WriteBuffer batching
 
 ## [0.28.1] - 2026-04-23
 
