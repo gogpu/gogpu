@@ -595,20 +595,11 @@ func TestContextRenderTargetSurfaceViewNil(t *testing.T) {
 	ctx := newTestContext(800, 600, gputypes.TextureFormatBGRA8Unorm, "test")
 	rt := ctx.RenderTarget()
 
-	// SurfaceView returns any wrapping a nil *wgpu.TextureView.
-	// In Go, an interface holding a typed nil is not == nil,
-	// so we check the underlying *wgpu.TextureView value.
+	// SurfaceView returns gpucontext.TextureView (opaque handle struct).
+	// When no frame is in progress, the underlying pointer is nil.
 	sv := rt.SurfaceView()
-	tvPtr, ok := sv.(*wgpu.TextureView)
-	if !ok {
-		// If the return is untyped nil, that's also acceptable
-		if sv != nil {
-			t.Errorf("RenderTarget().SurfaceView() unexpected type %T", sv)
-		}
-		return
-	}
-	if tvPtr != nil {
-		t.Errorf("RenderTarget().SurfaceView() = %v, want nil *TextureView (no frame)", tvPtr)
+	if !sv.IsNil() {
+		t.Errorf("RenderTarget().SurfaceView().IsNil() = false, want true (no frame in progress)")
 	}
 }
 

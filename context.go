@@ -3,6 +3,7 @@ package gogpu
 import (
 	"fmt"
 	"image"
+	"unsafe"
 
 	"github.com/gogpu/gogpu/gmath"
 	"github.com/gogpu/gpucontext"
@@ -210,8 +211,14 @@ func (c *Context) RenderTarget() *ContextRenderTarget {
 // ContextRenderTarget adapts *Context to ggcanvas.RenderTarget interface.
 type ContextRenderTarget struct{ ctx *Context }
 
-// SurfaceView returns the surface texture view as any.
-func (r *ContextRenderTarget) SurfaceView() any { return r.ctx.SurfaceView() }
+// SurfaceView returns the surface texture view as a type-safe opaque handle.
+func (r *ContextRenderTarget) SurfaceView() gpucontext.TextureView {
+	tv := r.ctx.SurfaceView()
+	if tv == nil {
+		return gpucontext.TextureView{}
+	}
+	return gpucontext.NewTextureView(unsafe.Pointer(tv)) //nolint:gosec // Go spec Rule 1: *T → unsafe.Pointer (ADR-018 opaque handle)
+}
 
 // SurfaceSize returns the surface dimensions.
 func (r *ContextRenderTarget) SurfaceSize() (uint32, uint32) { return r.ctx.SurfaceSize() }

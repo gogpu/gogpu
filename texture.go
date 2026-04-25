@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"unsafe"
 
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
@@ -104,11 +105,14 @@ func (t *Texture) View() *wgpu.TextureView {
 	return t.view
 }
 
-// TextureView returns the texture view as gpucontext.TextureView.
+// TextureView returns the texture view as gpucontext.TextureView opaque handle.
 // This enables duck-typed access from packages that cannot import gogpu
 // (e.g., gg/ggcanvas uses structural typing to call this method).
 func (t *Texture) TextureView() gpucontext.TextureView {
-	return t.view
+	if t.view == nil {
+		return gpucontext.TextureView{}
+	}
+	return gpucontext.NewTextureView(unsafe.Pointer(t.view)) //nolint:gosec // Go spec Rule 1: *T → unsafe.Pointer (ADR-018 opaque handle)
 }
 
 // Sampler returns the sampler.

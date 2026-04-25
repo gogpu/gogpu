@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.3] - 2026-04-25
+
+### Changed
+
+- **Type-safe GPU handles** (ADR-018) — `ContextRenderTarget.SurfaceView()` returns
+  `gpucontext.TextureView` (opaque struct) instead of `any`. `Texture.TextureView()`
+  returns `gpucontext.TextureView`. Compile-time type safety, zero `any` in surface API.
+  Breaking: callers must use `.IsNil()` instead of `== nil`.
+- **deps:** gpucontext v0.14.0 → v0.15.0 (type-safe TextureView/CommandEncoder handles)
+
 ## [0.29.2] - 2026-04-25
 
 ### Fixed
