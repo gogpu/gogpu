@@ -110,6 +110,7 @@ func (q *mockQueue) GetTimestampPeriod() float32                                
 func (q *mockQueue) Destroy()                                                        {}
 func (q *mockQueue) CopyExternalImageToTexture(_ any, _ *hal.ImageCopyTexture) error { return nil }
 func (q *mockQueue) SupportsCommandBufferCopies() bool                               { return false }
+func (q *mockQueue) SetSwapchainSuppressed(_ bool)                                   {}
 
 // Verify the mockQueue satisfies the hal.Queue interface at compile time.
 var _ hal.Queue = (*mockQueue)(nil)
