@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.29.0
+## Current State: v0.29.2
 
 ✅ **Production-ready** with full feature set:
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
@@ -55,7 +55,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v0.29.0** | 2026-04-25 | **Damage-aware presentation** — `SetDamageRects` + `PresentWithDamage`, `Texture.TextureView()`, wgpu v0.26.2 |
+| **v0.29.2** | 2026-04-25 | **Damage-aware presentation** + Vulkan validation fixes (uniform buffer CopyDst, PRESENT_SRC_KHR), wgpu v0.26.4 |
 | **v0.28.1** | 2026-04-23 | EventFocus on all platforms (Win32, X11, Wayland, macOS), WindowID on all events |
 | **v0.28.0** | 2026-04-23 | **Multi-window** — App.NewWindow(), PlatformManager/PlatformWindow, shared GPU device, per-window frame loop |
 | **v0.27.1** | 2026-04-21 | Wayland pointer lock, adapter power preference, X11 event loop fix, macOS blit fix |
@@ -166,8 +166,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.29.0 | GPU application framework, windowing, multi-window, damage-aware present |
-| **gogpu/wgpu** | v0.26.2 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/gogpu** | v0.29.2 | GPU application framework, windowing, multi-window, damage-aware present |
+| **gogpu/wgpu** | v0.26.4 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
 | **gogpu/naga** | v0.17.6 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
 | **gogpu/gg** | v0.41.2 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
 | **gogpu/ui** | v0.1.13 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
@@ -186,7 +186,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.29.0** | 2026-04-25 | Damage-aware presentation (SetDamageRects, ADR-013), Texture.TextureView(), wgpu v0.26.2 |
+| **v0.29.2** | 2026-04-25 | Damage-aware presentation, Vulkan validation fixes, wgpu v0.26.4 |
 | **v0.28.1** | 2026-04-23 | EventFocus on all platforms, WindowID on all events |
 | **v0.28.0** | 2026-04-23 | Multi-window (ADR-010), PlatformManager/PlatformWindow, WindowManager |
 | **v0.27.0** | 2026-04-09 | Mouse grab / pointer lock (SDL parity) |
