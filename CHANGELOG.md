@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.2] - 2026-04-25
+
+### Fixed
+
+- **Vulkan validation error on uniform buffer** (BUG-GOGPU-UNIFORM-TRANSFER-DST-001) — `texQuadUniformBuffer` was created with `Uniform | MapWrite` but `Queue.WriteBuffer()` requires `CopyDst` for PendingWrites staging copy. Fixed to `Uniform | CopyDst`. Also removed dead `MapWrite` and `MappedAtCreation` flags (buffer was never re-mapped after creation).
+
 ## [0.29.1] - 2026-04-25
 
 ### Changed

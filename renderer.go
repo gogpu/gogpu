@@ -883,12 +883,14 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		return fmt.Errorf("gogpu: failed to create render pipeline: %w", err)
 	}
 
-	// Create uniform buffer
+	// Create uniform buffer. CopyDst required because Queue.WriteBuffer uses
+	// PendingWrites staging → CopyBufferRegion internally.
+	// MapWrite + MappedAtCreation removed: buffer is never re-mapped after
+	// creation, and initial data is written via WriteBuffer each frame.
 	r.texQuadUniformBuffer, err = r.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label:            "Textured Quad Uniforms",
-		Size:             texQuadUniformSize,
-		Usage:            gputypes.BufferUsageUniform | gputypes.BufferUsageMapWrite,
-		MappedAtCreation: true,
+		Label: "Textured Quad Uniforms",
+		Size:  texQuadUniformSize,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create uniform buffer: %w", err)
