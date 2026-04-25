@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -100,6 +101,13 @@ func (t *Texture) Handle() *wgpu.Texture {
 
 // View returns the texture view.
 func (t *Texture) View() *wgpu.TextureView {
+	return t.view
+}
+
+// TextureView returns the texture view as gpucontext.TextureView.
+// This enables duck-typed access from packages that cannot import gogpu
+// (e.g., gg/ggcanvas uses structural typing to call this method).
+func (t *Texture) TextureView() gpucontext.TextureView {
 	return t.view
 }
 
