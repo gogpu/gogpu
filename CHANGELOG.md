@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Vulkan validation error on uniform buffer** (BUG-GOGPU-UNIFORM-TRANSFER-DST-001) — `texQuadUniformBuffer` was created with `Uniform | MapWrite` but `Queue.WriteBuffer()` requires `CopyDst` for PendingWrites staging copy. Fixed to `Uniform | CopyDst`. Also removed dead `MapWrite` and `MappedAtCreation` flags (buffer was never re-mapped after creation).
 
+### Changed
+
+- **deps:** update wgpu v0.26.4 — Vulkan PRESENT_SRC_KHR layout transition fix (BUG-WGPU-VK-006), per-image layout tracking, fence-synchronized barrier pool
+
 ## [0.29.1] - 2026-04-25
 
 ### Changed
