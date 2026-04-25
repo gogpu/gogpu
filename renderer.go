@@ -3,6 +3,7 @@ package gogpu
 import (
 	"encoding/binary"
 	"fmt"
+	"image"
 	"log/slog"
 	"math"
 	"os"
@@ -49,6 +50,14 @@ type windowSurface struct {
 
 	// VSync preference for this window
 	vsync bool
+
+	// damageRects holds the dirty regions for the current frame (physical pixels,
+	// top-left origin). Set by Context.SetDamageRects(), consumed and cleared by
+	// present(). When nil, the full surface is presented (backward compatible).
+	// Passed to wgpu Surface.PresentWithDamage() which forwards to the platform
+	// compositor (Vulkan VK_KHR_incremental_present, DX12 Present1, GLES
+	// eglSwapBuffersWithDamageKHR, Software partial BitBlt/XPutImage).
+	damageRects []image.Rectangle
 }
 
 // Renderer manages the GPU rendering pipeline.
@@ -547,12 +556,15 @@ func (r *Renderer) pollSubmissions() {
 	r.tracker.triage(completedIdx, r.device)
 }
 
-// present presents the surface texture to the screen.
+// present presents the surface texture to the screen, passing any
+// damage rects to the platform compositor. Damage rects are consumed
+// (set to nil) after presentation so they don't leak to the next frame.
 func (ws *windowSurface) present() {
 	if ws.currentSurfaceTexture != nil {
-		if err := ws.surface.Present(ws.currentSurfaceTexture); err != nil {
+		if err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects); err != nil {
 			slog.Error("PRESENT ERROR", "err", err)
 		}
+		ws.damageRects = nil
 	}
 }
 

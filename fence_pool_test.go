@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"fmt"
+	"image"
 	"sync"
 	"testing"
 	"time"
@@ -101,8 +102,10 @@ func (q *mockQueue) WriteBuffer(_ hal.Buffer, _ uint64, _ []byte) error { return
 func (q *mockQueue) WriteTexture(_ *hal.ImageCopyTexture, _ []byte, _ *hal.ImageDataLayout, _ *hal.Extent3D) error {
 	return nil
 }
-func (q *mockQueue) ReadBuffer(_ hal.Buffer, _ uint64, _ []byte) error               { return nil }
-func (q *mockQueue) Present(_ hal.Surface, _ hal.SurfaceTexture) error               { return nil }
+func (q *mockQueue) ReadBuffer(_ hal.Buffer, _ uint64, _ []byte) error { return nil }
+func (q *mockQueue) Present(_ hal.Surface, _ hal.SurfaceTexture, _ []image.Rectangle) error {
+	return nil
+}
 func (q *mockQueue) GetTimestampPeriod() float32                                     { return 0 }
 func (q *mockQueue) Destroy()                                                        {}
 func (q *mockQueue) CopyExternalImageToTexture(_ any, _ *hal.ImageCopyTexture) error { return nil }

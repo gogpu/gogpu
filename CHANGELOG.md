@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.5] - 2026-04-25
+
+### Changed
+
+- **deps:** update wgpu v0.26.1 — damage-aware surface presentation (`PresentWithDamage`) on all backends (Software, Vulkan VK_KHR_incremental_present, DX12 Present1, GLES eglSwapBuffersWithDamageKHR)
+
 ## [0.28.1] - 2026-04-23
 
 ### Added

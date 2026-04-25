@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"fmt"
+	"image"
 
 	"github.com/gogpu/gogpu/gmath"
 	"github.com/gogpu/gpucontext"
@@ -52,6 +53,18 @@ func (c *Context) activeSurface() *windowSurface {
 		return c.surface
 	}
 	return c.renderer.primary
+}
+
+// SetDamageRects specifies which regions of the surface changed this frame.
+// Rects are in physical pixels with top-left origin (image.Rectangle).
+// The rects are passed to the platform compositor at present time, allowing it
+// to skip recompositing unchanged pixels. Callers must convert from logical DIP
+// using the window's scale factor before calling this method.
+//
+// When rects is nil or empty, the full surface is presented (default behavior).
+// Rects are consumed after presentation and do not persist across frames.
+func (c *Context) SetDamageRects(rects []image.Rectangle) {
+	c.activeSurface().damageRects = rects
 }
 
 // Clear clears the framebuffer with the specified RGBA color.
@@ -205,6 +218,12 @@ func (r *ContextRenderTarget) SurfaceSize() (uint32, uint32) { return r.ctx.Surf
 
 // PresentTexture draws a texture filling the entire surface.
 func (r *ContextRenderTarget) PresentTexture(tex any) error { return r.ctx.PresentTexture(tex) }
+
+// SetDamageRects specifies which surface regions changed this frame.
+// See Context.SetDamageRects for details.
+func (r *ContextRenderTarget) SetDamageRects(rects []image.Rectangle) {
+	r.ctx.SetDamageRects(rects)
+}
 
 // TextureCreator returns the texture creator for promoting pending textures.
 // This enables the universal rendering path (CPU pixmap -> GPU texture -> present)
