@@ -67,7 +67,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Upcoming
 
-### v0.27.x — Platform Polish (current)
+### v0.27.x — Platform Polish
 
 - [x] Mouse grab / pointer lock — Win32 + X11 (v0.27.0)
 - [x] Wayland pointer lock — `zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1` (v0.27.1, #175)
@@ -80,7 +80,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - [ ] Adapter.GetInfo() API
 - [ ] RenderTo method for offscreen rendering
 
-### v0.29.0 — Damage-Aware Presentation (current)
+### v0.29.0 — Damage-Aware Presentation
 
 - [x] `Context.SetDamageRects()` — pass dirty regions to platform compositor (v0.29.0, ADR-013)
 - [x] `ContextRenderTarget.SetDamageRects()` — adapter for ggcanvas integration (v0.29.0)
