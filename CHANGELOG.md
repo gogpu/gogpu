@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.4] - 2026-04-26
+
+### Changed
+
+- **deps:** update wgpu v0.26.6 — compute dispatch memory barriers (VAL-008), workgroup count validation (VAL-009), workgroup_size pipeline validation (VAL-010)
+
 ## [0.29.3] - 2026-04-25
 
 ### Changed
