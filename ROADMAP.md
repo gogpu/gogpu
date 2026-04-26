@@ -50,6 +50,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Deferred resource destruction** — Rust LifetimeTracker parity in wgpu
 - **Mouse grab / pointer lock** — locked, confined, normal modes (SDL parity, Win32 + X11 + Wayland)
 - **Adapter power preference** — `GOGPU_POWER_PREFERENCE` env var for dual-GPU laptops
+- **Event-driven frame pacing** — render only on invalidation, 0% GPU when idle (winit/Flutter/Qt pattern)
 
 ### Recent Highlights
 

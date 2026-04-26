@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Event-driven frame pacing** (ADR-007) — render loop no longer renders on every platform event. Only `RequestRedraw()` (invalidation) or continuous mode triggers a frame. Resize, focus call `RequestRedraw()` explicitly; mouse moves over static UI produce zero render calls. Matches winit/Flutter/Qt pattern: handlers decide when to invalidate, render loop never guesses. `processEventsMultiThread` no longer returns bool.
+
 ## [0.29.4] - 2026-04-26
 
 ### Changed

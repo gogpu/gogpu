@@ -278,10 +278,12 @@ func (a *App) Run() error {
 			a.manager.WaitEvents()
 		}
 
-		// Process all pending platform events
-		hasEvents := a.processEventsMultiThread()
+		// Process all pending platform events.
+		// Events may call RequestRedraw() which sets invalidated for next check.
+		a.processEventsMultiThread()
 
 		// Check if invalidation arrived during event processing
+		// (e.g., resize or UI framework responding to hover/click).
 		if a.invalidator.Consume() {
 			invalidated = true
 		}
@@ -309,8 +311,11 @@ func (a *App) Run() error {
 			a.onUpdate(deltaTime)
 		}
 
-		// Render frame if needed
-		if continuous || invalidated || hasEvents {
+		// Render frame if needed.
+		// Render only when explicitly requested (invalidated) or in continuous mode.
+		// Platform events (mouse move, etc.) only trigger a render when the UI
+		// framework calls RequestRedraw() in response — not on every event.
+		if continuous || invalidated {
 			a.renderFrameMultiThread()
 		}
 	}
@@ -320,8 +325,11 @@ func (a *App) Run() error {
 
 // processEventsMultiThread handles platform events with multi-thread pattern.
 // Resize events are deferred to the render thread via RequestResize.
-// Returns true if any events were processed (used for event-driven rendering).
-func (a *App) processEventsMultiThread() bool {
+// Events that require visual update (resize, focus) call RequestRedraw()
+// explicitly — the render loop renders only when invalidated or continuous.
+// This matches the winit/Flutter/Qt pattern: platform layer delivers events,
+// handlers decide whether to invalidate, render loop never guesses.
+func (a *App) processEventsMultiThread() {
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
 	var lastResize *platform.Event
@@ -354,6 +362,9 @@ func (a *App) processEventsMultiThread() bool {
 		if a.onResize != nil {
 			a.onResize(lastResize.Width, lastResize.Height)
 		}
+
+		// Resize requires a render to reconfigure swapchain and repaint.
+		a.RequestRedraw()
 	}
 
 	// Handle secondary window resize events.
@@ -366,7 +377,6 @@ func (a *App) processEventsMultiThread() bool {
 		a.eventSource.dispatchEndFrame()
 	}
 
-	return len(events) > 0
 }
 
 // handleSecondaryResize resizes a secondary window's surface on the render thread.
@@ -385,6 +395,7 @@ func (a *App) handleSecondaryResize(ev platform.Event) {
 	if w.onResize != nil {
 		w.onResize(ev.Width, ev.Height)
 	}
+	a.RequestRedraw()
 }
 
 // windowFrame holds a snapshot of per-window state captured on the main thread
@@ -412,6 +423,7 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		if event.Focused {
 			a.windowManager.setFocus(event.WindowID)
 		}
+		a.RequestRedraw()
 	}
 	return lastResize, secondaryResizes
 }
