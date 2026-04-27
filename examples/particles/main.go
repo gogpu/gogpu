@@ -287,36 +287,32 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 }
 
 func (s *sim) frame(sv *wgpu.TextureView) error {
+	// Ping-pong: alternate input/output buffers each frame.
+	// Even frames: read A → write B, render B.
+	// Odd frames:  read B → write A, render A.
+	var bg *wgpu.BindGroup
+	var outputBuf *wgpu.Buffer
+	if s.frameNum%2 == 0 {
+		bg = s.compBG0
+		outputBuf = s.bufB
+	} else {
+		bg = s.compBG1
+		outputBuf = s.bufA
+	}
+
+	// Compute pass: update particle positions on GPU.
 	enc, err := s.dev.CreateCommandEncoder(nil)
 	if err != nil {
 		return err
 	}
-
-	// Compute
 	cp, err := enc.BeginComputePass(nil)
 	if err != nil {
 		return err
 	}
-	// Create fresh bind group every frame (workaround for descriptor set reuse crash)
-	freshBG, err := s.dev.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Layout: s.compBGL,
-		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: s.bufA, Size: bufSize},
-			{Binding: 1, Buffer: s.bufB, Size: bufSize},
-			{Binding: 2, Buffer: s.uniform, Size: 8},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	defer freshBG.Release()
-
-	// Submit 1: Compute
 	cp.SetPipeline(s.compPipe)
-	cp.SetBindGroup(0, freshBG, nil)
+	cp.SetBindGroup(0, bg, nil)
 	cp.Dispatch(uint32((numParticles+63)/64), 1, 1)
 	cp.End()
-	enc.CopyBufferToBuffer(s.bufB, 0, s.bufA, 0, bufSize)
 	cmds1, err := enc.Finish()
 	if err != nil {
 		return err
@@ -325,7 +321,7 @@ func (s *sim) frame(sv *wgpu.TextureView) error {
 		return err
 	}
 
-	// Submit 2: Render
+	// Render pass: draw particles from the compute output buffer.
 	enc2, err := s.dev.CreateCommandEncoder(nil)
 	if err != nil {
 		return err
@@ -340,8 +336,8 @@ func (s *sim) frame(sv *wgpu.TextureView) error {
 		return err
 	}
 	rp.SetPipeline(s.rendPipe)
-	rp.SetVertexBuffer(0, s.bufB, 0)
-	rp.Draw(4, numParticles, 0, 0) // 4 verts per quad, N instances
+	rp.SetVertexBuffer(0, outputBuf, 0)
+	rp.Draw(4, numParticles, 0, 0)
 	rp.End()
 	cmds2, err := enc2.Finish()
 	if err != nil {
@@ -355,7 +351,8 @@ func (s *sim) frame(sv *wgpu.TextureView) error {
 
 func (s *sim) release() {
 	for _, r := range []interface{ Release() }{
-		s.rendPipe, s.compPipe, s.compBG0, s.compBG1, s.bufA, s.bufB, s.uniform,
+		s.rendPipe, s.rendPL, s.compPipe, s.compPL, s.compBGL,
+		s.compBG0, s.compBG1, s.bufA, s.bufB, s.uniform,
 	} {
 		if r != nil {
 			r.Release()

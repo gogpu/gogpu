@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Event-driven frame pacing** (ADR-007) — render loop no longer renders on every platform event. Only `RequestRedraw()` (invalidation) or continuous mode triggers a frame. Resize, focus call `RequestRedraw()` explicitly; mouse moves over static UI produce zero render calls. Matches winit/Flutter/Qt pattern: handlers decide when to invalidate, render loop never guesses. `processEventsMultiThread` no longer returns bool.
 - **deps:** update wgpu v0.26.8 — DX12 buffer state tracking (BUG-DX12-012), pipeline overridable constants (FEAT-COMPUTE-001), zero-init workgroup memory (FEAT-COMPUTE-002), 7 Vulkan buffer mapping fixes (BUG-VK-009)
 
+### Fixed
+
+- **Particles example: proper ping-pong** — restored double-buffer ping-pong pattern (compBG0/compBG1 alternation by frame parity). Removed per-frame bind group allocation and unnecessary `CopyBufferToBuffer`. Fixed resource leak: `release()` now frees `BindGroupLayout`, both `PipelineLayout`s.
+
 ## [0.29.4] - 2026-04-26
 
 ### Changed
