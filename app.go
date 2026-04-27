@@ -376,7 +376,6 @@ func (a *App) processEventsMultiThread() {
 	if a.eventSource != nil {
 		a.eventSource.dispatchEndFrame()
 	}
-
 }
 
 // handleSecondaryResize resizes a secondary window's surface on the render thread.
