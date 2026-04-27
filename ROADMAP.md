@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.29.4
+## Current State: v0.30.0
 
 ✅ **Production-ready** with full feature set:
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
