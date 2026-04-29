@@ -11,16 +11,16 @@ import (
 
 // Menu-related selectors (initialized lazily).
 var menuSels struct {
-	initWithTitle              SEL
-	addItem                    SEL
-	setSubmenu                 SEL
-	setMainMenu                SEL
-	separatorItem              SEL
-	setKeyEquivalentModMask    SEL
-	setServicesMenu            SEL
+	initWithTitle               SEL
+	addItem                     SEL
+	setSubmenu                  SEL
+	setMainMenu                 SEL
+	separatorItem               SEL
+	setKeyEquivalentModMask     SEL
+	setServicesMenu             SEL
 	initWithTitleActionKeyEquiv SEL
 	addItemWithTitleActionKey   SEL
-	setWindowsMenu             SEL
+	setWindowsMenu              SEL
 }
 
 func initMenuSelectors() {
@@ -161,7 +161,7 @@ func createMenuItem(nsMenuItemClass Class, title ID, action SEL, keyEquiv string
 		}
 	}
 
-	return msgSend3Ptr(item, menuSels.initWithTitleActionKeyEquiv, title.Ptr(), uintptr(action), keyPtr)
+	return MsgSend3Ptr(item, menuSels.initWithTitleActionKeyEquiv, title.Ptr(), uintptr(action), keyPtr)
 }
 
 // addMenuItem is a convenience that creates and adds a menu item in one step.
@@ -172,8 +172,8 @@ func addMenuItem(nsMenuItemClass Class, menu ID, title ID, action SEL, keyEquiv 
 	}
 }
 
-// msgSend3Ptr calls objc_msgSend with self, sel, and 3 pointer arguments.
-func msgSend3Ptr(id ID, sel SEL, arg0, arg1, arg2 uintptr) ID {
+// MsgSend3Ptr calls objc_msgSend with self, sel, and 3 pointer arguments.
+func MsgSend3Ptr(id ID, sel SEL, arg0, arg1, arg2 uintptr) ID {
 	if err := initRuntime(); err != nil {
 		return 0
 	}
