@@ -43,11 +43,14 @@ type objcRuntime struct {
 	coreFoundation unsafe.Pointer
 
 	// Function pointers
-	objcGetClass     unsafe.Pointer
-	objcMsgSend      unsafe.Pointer
-	objcMsgSendFpret unsafe.Pointer
-	objcMsgSendStret unsafe.Pointer
-	selRegisterName  unsafe.Pointer
+	objcGetClass          unsafe.Pointer
+	objcMsgSend           unsafe.Pointer
+	objcMsgSendFpret      unsafe.Pointer
+	objcMsgSendStret      unsafe.Pointer
+	selRegisterName       unsafe.Pointer
+	objcAllocateClassPair unsafe.Pointer
+	classAddMethod        unsafe.Pointer
+	objcRegisterClassPair unsafe.Pointer
 
 	// Call interfaces (reusable)
 	cifVoidPtr  *types.CallInterface // Returns void*, takes variadic args
@@ -172,6 +175,20 @@ func loadRuntime() error {
 
 	// Resolve sel_registerName
 	objcRT.selRegisterName, err = ffi.GetSymbol(objcRT.libobjc, "sel_registerName")
+	if err != nil {
+		return errors.Join(ErrSymbolNotFound, err)
+	}
+
+	// Resolve class registration functions (for custom NSView subclass)
+	objcRT.objcAllocateClassPair, err = ffi.GetSymbol(objcRT.libobjc, "objc_allocateClassPair")
+	if err != nil {
+		return errors.Join(ErrSymbolNotFound, err)
+	}
+	objcRT.classAddMethod, err = ffi.GetSymbol(objcRT.libobjc, "class_addMethod")
+	if err != nil {
+		return errors.Join(ErrSymbolNotFound, err)
+	}
+	objcRT.objcRegisterClassPair, err = ffi.GetSymbol(objcRT.libobjc, "objc_registerClassPair")
 	if err != nil {
 		return errors.Join(ErrSymbolNotFound, err)
 	}
@@ -1115,4 +1132,114 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 
 	ret := ID(result)
 	return ret
+}
+
+// AllocateClassPair creates a new ObjC class as a subclass of superclass.
+// Returns the new Class, or 0 if allocation fails.
+// Call RegisterClassPair after adding methods.
+func AllocateClassPair(superclass Class, name string) Class {
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	nameBytes := append([]byte(name), 0)
+
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
+		types.PointerTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+		},
+	); err != nil {
+		return 0
+	}
+
+	super := uintptr(superclass)
+	namePtr := uintptr(unsafe.Pointer(&nameBytes[0]))
+	var extraBytes uintptr
+
+	var result uintptr
+	if err := ffi.CallFunction(cif,
+		objcRT.objcAllocateClassPair,
+		unsafe.Pointer(&result),
+		[]unsafe.Pointer{
+			unsafe.Pointer(&super),
+			unsafe.Pointer(&namePtr),
+			unsafe.Pointer(&extraBytes),
+		},
+	); err != nil {
+		return 0
+	}
+	return Class(result)
+}
+
+// ClassAddMethod adds a method to a class. imp is a C function pointer
+// (use ffi.NewCallback to create from Go function). types is the ObjC
+// type encoding string (e.g., "v@:@" for void(id,SEL,id)).
+func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
+	if err := initRuntime(); err != nil {
+		return false
+	}
+
+	typeBytes := append([]byte(typeEncoding), 0)
+
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
+		types.PointerTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+			types.PointerTypeDescriptor,
+		},
+	); err != nil {
+		return false
+	}
+
+	clsPtr := uintptr(cls)
+	selPtr := uintptr(sel)
+	typePtr := uintptr(unsafe.Pointer(&typeBytes[0]))
+
+	var result uintptr
+	if err := ffi.CallFunction(cif,
+		objcRT.classAddMethod,
+		unsafe.Pointer(&result),
+		[]unsafe.Pointer{
+			unsafe.Pointer(&clsPtr),
+			unsafe.Pointer(&selPtr),
+			unsafe.Pointer(&imp),
+			unsafe.Pointer(&typePtr),
+		},
+	); err != nil {
+		return false
+	}
+	return result != 0
+}
+
+// RegisterClassPair registers a class that was allocated with AllocateClassPair.
+func RegisterClassPair(cls Class) {
+	if err := initRuntime(); err != nil {
+		return
+	}
+
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
+		types.VoidTypeDescriptor,
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor,
+		},
+	); err != nil {
+		return
+	}
+
+	clsPtr := uintptr(cls)
+	_ = ffi.CallFunction(cif,
+		objcRT.objcRegisterClassPair,
+		nil,
+		[]unsafe.Pointer{
+			unsafe.Pointer(&clsPtr),
+		},
+	)
 }

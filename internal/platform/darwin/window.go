@@ -91,10 +91,19 @@ func NewWindow(config WindowConfig) (*Window, error) {
 		}
 	}
 
-	// Get content view
-	w.contentView = nsWindow.Send(selectors.contentView)
-	if w.contentView.IsNil() {
-		return nil, ErrViewCreationFailed
+	// Create custom GoGPUView (ADR-015: prevents macOS system beep on key press).
+	// Every enterprise framework (Qt6, Chromium, Flutter, GLFW, SDL3) uses a custom
+	// NSView subclass that overrides keyDown:/doCommandBySelector: to prevent NSBeep.
+	goGPUView, viewErr := CreateGoGPUView(MakeRect(0, 0, CGFloat(config.Width), CGFloat(config.Height)))
+	if viewErr != nil {
+		// Fallback to stock contentView if custom class registration fails.
+		w.contentView = nsWindow.Send(selectors.contentView)
+		if w.contentView.IsNil() {
+			return nil, ErrViewCreationFailed
+		}
+	} else {
+		nsWindow.SendPtr(selectors.setContentView, goGPUView.Ptr())
+		w.contentView = goGPUView
 	}
 
 	// Enable mouse events

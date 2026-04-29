@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] - 2026-04-29
+
+### Fixed
+
+- **macOS: system beep on key press** (BUG-DARWIN-001, [#194](https://github.com/gogpu/gogpu/issues/194)) — registered custom `GoGPUView` NSView subclass via ObjC runtime API. Overrides `keyDown:`, `keyUp:`, `flagsChanged:`, `doCommandBySelector:` (no-op), `acceptsFirstResponder` (YES). Prevents NSBeep without breaking menu shortcuts (Cmd+Q/C/V) or window chrome. Matches Qt6, Chromium, Flutter, GTK4, winit, GLFW, SDL3 pattern (ADR-015). Graceful fallback to stock NSView if class registration fails.
+
+### Added
+
+- **ObjC runtime class registration API** — `AllocateClassPair`, `ClassAddMethod`, `RegisterClassPair` in `internal/platform/darwin/objc.go`. Foundation for custom NSView and future IME/NSTextInputClient support.
+
 ## [0.30.0] - 2026-04-27
 
 ### Changed
