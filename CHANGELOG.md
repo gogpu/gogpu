@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.2] - 2026-04-29
+
+### Added
+
+- **macOS application menu** (FEAT-DARWIN-002, ADR-016) — standard menu bar with Quit (Cmd+Q), Hide (Cmd+H), Hide Others (Cmd+Opt+H), Show All, Minimize (Cmd+M), Zoom. Matches GLFW/SDL3/winit menu bar pattern. Resolves Cmd+Q not working ([#194](https://github.com/gogpu/gogpu/issues/194)).
+
 ## [0.30.1] - 2026-04-29
 
 ### Fixed

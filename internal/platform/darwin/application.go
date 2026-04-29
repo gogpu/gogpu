@@ -72,6 +72,9 @@ func (a *Application) Init() error {
 	// Set activation policy to regular app (with dock icon)
 	a.nsApp.SendInt(selectors.setActivationPolicy, int64(NSApplicationActivationPolicyRegular))
 
+	// Create default application menu (ADR-016: Cmd+Q, Cmd+H, Cmd+M).
+	a.createMenuBar("GoGPU")
+
 	// Finish launching (required for event processing)
 	a.nsApp.Send(selectors.finishLaunching)
 
