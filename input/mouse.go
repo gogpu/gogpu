@@ -22,6 +22,7 @@ type MouseState struct {
 	mu               sync.RWMutex
 	x, y             float32
 	prevX, prevY     float32
+	isScrolled       bool
 	scrollX, scrollY float32
 	current          [MouseButtonCount]bool
 	previous         [MouseButtonCount]bool
@@ -55,6 +56,8 @@ func (m *MouseState) SetButton(button MouseButton, pressed bool) {
 func (m *MouseState) SetScroll(x, y float32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.isScrolled = true
 	m.scrollX = x
 	m.scrollY = y
 }
@@ -141,6 +144,10 @@ func (m *MouseState) UpdateFrame() {
 	m.previous = m.current
 	m.prevX = m.x
 	m.prevY = m.y
-	m.scrollX = 0
-	m.scrollY = 0
+
+	if !m.isScrolled {
+		m.scrollX, m.scrollY = 0, 0
+	}
+
+	m.isScrolled = false
 }
