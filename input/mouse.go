@@ -19,13 +19,13 @@ const (
 // MouseState holds mouse input state.
 // All methods are thread-safe.
 type MouseState struct {
-	mu               sync.RWMutex
-	x, y             float32
-	prevX, prevY     float32
-	isScrolled       bool
-	scrollX, scrollY float32
-	current          [MouseButtonCount]bool
-	previous         [MouseButtonCount]bool
+	mu                         sync.RWMutex
+	x, y                       float32
+	prevX, prevY               float32
+	scrollX, scrollY           float32
+	frameScrollX, frameScrollY float32
+	current                    [MouseButtonCount]bool
+	previous                   [MouseButtonCount]bool
 }
 
 func newMouseState() MouseState {
@@ -57,9 +57,8 @@ func (m *MouseState) SetScroll(x, y float32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.isScrolled = true
-	m.scrollX = x
-	m.scrollY = y
+	m.scrollX += x
+	m.scrollY += y
 }
 
 // Position returns current mouse position.
@@ -99,7 +98,8 @@ func (m *MouseState) Delta() (dx, dy float32) {
 func (m *MouseState) Scroll() (x, y float32) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.scrollX, m.scrollY
+
+	return m.frameScrollX, m.frameScrollY
 }
 
 // Pressed returns true if button is currently pressed.
@@ -145,9 +145,7 @@ func (m *MouseState) UpdateFrame() {
 	m.prevX = m.x
 	m.prevY = m.y
 
-	if !m.isScrolled {
-		m.scrollX, m.scrollY = 0, 0
-	}
-
-	m.isScrolled = false
+	m.frameScrollX = m.scrollX
+	m.frameScrollY = m.scrollY
+	m.scrollX, m.scrollY = 0, 0
 }
