@@ -153,6 +153,16 @@ type PlatformWindow interface {
 	// IsFrameless returns true if the window has no OS chrome.
 	IsFrameless() bool
 
+	// SetFullscreen enters or exits fullscreen mode.
+	// On Windows: borderless fullscreen (Chromium/GLFW pattern).
+	// On macOS: native toggleFullScreen with animation.
+	// On X11: _NET_WM_STATE_FULLSCREEN via EWMH.
+	// On Wayland: xdg_toplevel.set_fullscreen / unset_fullscreen.
+	SetFullscreen(fullscreen bool)
+
+	// IsFullscreen returns true if the window is currently in fullscreen mode.
+	IsFullscreen() bool
+
 	// SetHitTestCallback sets the callback for custom hit testing in frameless mode.
 	SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult)
 

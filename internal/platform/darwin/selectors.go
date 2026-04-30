@@ -57,6 +57,8 @@ var selectors struct {
 	isZoomed                                 SEL
 	setReleasedWhenClosed                    SEL
 	center                                   SEL
+	toggleFullScreen                         SEL
+	setCollectionBehavior                    SEL
 
 	// NSView - View management
 	setWantsLayer   SEL
@@ -243,6 +245,8 @@ func initSelectors() {
 		selectors.isZoomed = RegisterSelector("isZoomed")
 		selectors.setReleasedWhenClosed = RegisterSelector("setReleasedWhenClosed:")
 		selectors.center = RegisterSelector("center")
+		selectors.toggleFullScreen = RegisterSelector("toggleFullScreen:")
+		selectors.setCollectionBehavior = RegisterSelector("setCollectionBehavior:")
 
 		// NSView
 		selectors.setWantsLayer = RegisterSelector("setWantsLayer:")

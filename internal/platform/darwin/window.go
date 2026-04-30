@@ -106,6 +106,11 @@ func NewWindow(config WindowConfig) (*Window, error) {
 		w.contentView = goGPUView
 	}
 
+	// Enable native fullscreen support (green button / toggleFullScreen:).
+	// Must be set before makeKeyAndOrderFront.
+	nsWindow.SendUint(selectors.setCollectionBehavior,
+		uint64(NSWindowCollectionBehaviorFullScreenPrimary))
+
 	// Enable mouse events
 	nsWindow.SendBool(selectors.setAcceptsMouseMovedEvents, true)
 
@@ -491,4 +496,44 @@ func (w *Window) IsKeyWindow() bool {
 
 	result := w.nsWindow.Send(selectors.isKeyWindow)
 	return result != 0
+}
+
+// SetCollectionBehavior sets the window's collection behavior flags.
+// Used to enable fullscreen support via NSWindowCollectionBehaviorFullScreenPrimary.
+func (w *Window) SetCollectionBehavior(behavior NSWindowCollectionBehavior) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	w.nsWindow.SendUint(selectors.setCollectionBehavior, uint64(behavior))
+}
+
+// ToggleFullScreen toggles native macOS fullscreen mode.
+// Sends the toggleFullScreen: selector to the NSWindow.
+func (w *Window) ToggleFullScreen() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	w.nsWindow.SendPtr(selectors.toggleFullScreen, 0)
+}
+
+// IsFullScreen returns true if the window is in native macOS fullscreen mode.
+// Checks whether NSWindowStyleMaskFullScreen is set in the window's style mask.
+func (w *Window) IsFullScreen() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return false
+	}
+
+	mask := uintptr(w.nsWindow.Send(selectors.styleMask))
+	return mask&uintptr(NSWindowStyleMaskFullScreen) != 0
 }

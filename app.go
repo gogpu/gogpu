@@ -759,6 +759,33 @@ func (a *App) IsMaximized() bool {
 	return false
 }
 
+// SetFullscreen enters or exits fullscreen mode.
+// On Windows: borderless fullscreen (Chromium/GLFW pattern).
+// On macOS: native toggleFullScreen with animation.
+// On X11: _NET_WM_STATE_FULLSCREEN via EWMH.
+// On Wayland: xdg_toplevel.set_fullscreen / unset_fullscreen.
+// Implements gpucontext.WindowChrome.
+func (a *App) SetFullscreen(fullscreen bool) {
+	if a.platWindow != nil {
+		a.platWindow.SetFullscreen(fullscreen)
+	}
+}
+
+// IsFullscreen returns true if the window is currently in fullscreen mode.
+// Implements gpucontext.WindowChrome.
+func (a *App) IsFullscreen() bool {
+	if a.platWindow != nil {
+		return a.platWindow.IsFullscreen()
+	}
+	return false
+}
+
+// ToggleFullscreen toggles between fullscreen and windowed mode.
+// Convenience method equivalent to SetFullscreen(!IsFullscreen()).
+func (a *App) ToggleFullscreen() {
+	a.SetFullscreen(!a.IsFullscreen())
+}
+
 // Close requests the window to close.
 // Implements gpucontext.WindowChrome.
 func (a *App) Close() {

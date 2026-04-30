@@ -19,6 +19,7 @@ type mockWindow struct {
 
 	// Frameless window state
 	frameless       bool
+	fullscreen      bool
 	maximized       bool
 	minimized       bool
 	closed          bool
@@ -62,10 +63,12 @@ func (m *mockWindow) IsFrameless() bool      { return m.frameless }
 func (m *mockWindow) SetHitTestCallback(fn func(float64, float64) gpucontext.HitTestResult) {
 	m.hitTestCallback = fn
 }
-func (m *mockWindow) Minimize()         { m.minimized = true }
-func (m *mockWindow) Maximize()         { m.maximized = !m.maximized }
-func (m *mockWindow) IsMaximized() bool { return m.maximized }
-func (m *mockWindow) Close()            { m.closed = true }
+func (m *mockWindow) Minimize()            { m.minimized = true }
+func (m *mockWindow) Maximize()            { m.maximized = !m.maximized }
+func (m *mockWindow) IsMaximized() bool    { return m.maximized }
+func (m *mockWindow) SetFullscreen(v bool) { m.fullscreen = v }
+func (m *mockWindow) IsFullscreen() bool   { return m.fullscreen }
+func (m *mockWindow) Close()               { m.closed = true }
 
 // mockManager implements platform.PlatformManager for testing.
 type mockManager struct {

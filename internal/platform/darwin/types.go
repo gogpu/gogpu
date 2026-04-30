@@ -79,6 +79,18 @@ const (
 	NSWindowStyleMaskFullSizeContentView NSWindowStyleMask = 1 << 15
 )
 
+// NSWindowCollectionBehavior controls how the window participates in
+// Spaces, Expose, and fullscreen.
+type NSWindowCollectionBehavior NSUInteger
+
+// Collection behavior values.
+const (
+	// NSWindowCollectionBehaviorFullScreenPrimary allows the window
+	// to enter native macOS fullscreen mode via the green button or
+	// toggleFullScreen: selector.
+	NSWindowCollectionBehaviorFullScreenPrimary NSWindowCollectionBehavior = 1 << 7
+)
+
 // NSBackingStoreType specifies how the window buffer is stored.
 type NSBackingStoreType NSUInteger
 

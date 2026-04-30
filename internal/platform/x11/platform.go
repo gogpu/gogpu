@@ -90,6 +90,7 @@ type x11Window struct {
 
 	// Frameless window state
 	frameless       bool
+	fullscreen      bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 
 	// Callbacks for pointer, scroll, and keyboard events
@@ -1535,6 +1536,25 @@ func (p *Platform) Maximize() {
 func (p *Platform) IsMaximized() bool {
 	// TODO: Query _NET_WM_STATE
 	return false
+}
+
+// SetFullscreen enters or exits fullscreen mode via _NET_WM_STATE_FULLSCREEN.
+func (p *Platform) SetFullscreen(fullscreen bool) {
+	w := p.primary
+	if w == nil || p.conn == nil {
+		return
+	}
+	_ = p.conn.SetFullscreen(w.window, fullscreen, p.atoms)
+	w.fullscreen = fullscreen
+}
+
+// IsFullscreen returns true if the window is in fullscreen mode.
+func (p *Platform) IsFullscreen() bool {
+	w := p.primary
+	if w == nil {
+		return false
+	}
+	return w.fullscreen
 }
 
 func (p *Platform) CloseWindow() {

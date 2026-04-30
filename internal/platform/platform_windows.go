@@ -184,6 +184,13 @@ const (
 	swpNoZOrder     = 0x0004
 	swpFrameChanged = 0x0020
 
+	// GetWindowLongPtr index
+	gwlStyle = ^uintptr(15) // GWL_STYLE = -16 as unsigned uintptr
+
+	// SetWindowPos hwnd constants for Z-order
+	hwndTopmost   = ^uintptr(0)                 // HWND_TOPMOST (-1)
+	hwndNotopmost = uintptr(0xFFFFFFFFFFFFFFFE) // HWND_NOTOPMOST (-2)
+
 	// GetSystemMetrics / MonitorFromWindow constants
 	smCXSizeFrame           = 32 // SM_CXSIZEFRAME
 	smCYSizeFrame           = 33 // SM_CYSIZEFRAME
@@ -249,8 +256,11 @@ var (
 	procGetMessageTime     = user32.NewProc("GetMessageTime")
 	procSetTimer           = user32.NewProc("SetTimer")
 	procKillTimer          = user32.NewProc("KillTimer")
+	procGetWindowLongPtrW  = user32.NewProc("GetWindowLongPtrW")
 	procSetWindowLongPtrW  = user32.NewProc("SetWindowLongPtrW")
 	procSetWindowPos       = user32.NewProc("SetWindowPos")
+	procGetWindowPlacement = user32.NewProc("GetWindowPlacement")
+	procSetWindowPlacement = user32.NewProc("SetWindowPlacement")
 	procIsZoomed           = user32.NewProc("IsZoomed")
 	procScreenToClient     = user32.NewProc("ScreenToClient")
 	procInvalidateRect     = user32.NewProc("InvalidateRect")
@@ -405,6 +415,24 @@ type bitmapInfoHeader struct {
 	biClrImportant  uint32
 }
 
+// windowPlacement is the Win32 WINDOWPLACEMENT structure.
+type windowPlacement struct {
+	length           uint32
+	flags            uint32
+	showCmd          uint32
+	ptMinPosition    point
+	ptMaxPosition    point
+	rcNormalPosition rect
+}
+
+// monitorInfo is the Win32 MONITORINFO structure.
+type monitorInfo struct {
+	cbSize    uint32
+	rcMonitor rect
+	rcWork    rect
+	dwFlags   uint32
+}
+
 // win32Window holds all per-window state for a single Win32 window.
 // Implements both per-window methods on windowsPlatform (legacy Platform)
 // and the PlatformWindow interface (multi-window PlatformManager).
@@ -431,6 +459,11 @@ type win32Window struct {
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 	maximized       bool
+
+	// Fullscreen state (borderless fullscreen, Chromium/GLFW pattern)
+	fullscreen     bool
+	savedPlacement windowPlacement
+	savedStyle     uint32
 
 	// Callbacks for pointer, scroll, keyboard, and character input events
 	pointerCallback    func(gpucontext.PointerEvent)
@@ -700,6 +733,53 @@ func (w *win32Window) Maximize() {
 func (w *win32Window) IsMaximized() bool {
 	ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
 	return ret != 0
+}
+
+// SetFullscreen enters or exits borderless fullscreen mode (Chromium/GLFW pattern).
+// On enter: saves window style and placement, removes decorations, covers the monitor.
+// On exit: restores saved style and placement, removes topmost z-order.
+func (w *win32Window) SetFullscreen(fullscreen bool) {
+	if fullscreen == w.fullscreen {
+		return
+	}
+	if fullscreen {
+		// Save current window placement and style for restore.
+		w.savedPlacement.length = uint32(unsafe.Sizeof(w.savedPlacement))
+		procGetWindowPlacement.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&w.savedPlacement)))
+		style, _, _ := procGetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle)
+		w.savedStyle = uint32(style)
+
+		// Remove window decorations.
+		procSetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle,
+			style & ^uintptr(wsOverlappedWindow))
+
+		// Get the monitor that contains this window.
+		monitor, _, _ := procMonitorFromWindow.Call(uintptr(w.hwnd), monitorDefaultToNearest)
+		var mi monitorInfo
+		mi.cbSize = uint32(unsafe.Sizeof(mi))
+		procGetMonitorInfoW.Call(monitor, uintptr(unsafe.Pointer(&mi)))
+
+		// Cover the entire monitor and set topmost.
+		procSetWindowPos.Call(uintptr(w.hwnd), hwndTopmost,
+			uintptr(mi.rcMonitor.left), uintptr(mi.rcMonitor.top),
+			uintptr(mi.rcMonitor.right-mi.rcMonitor.left),
+			uintptr(mi.rcMonitor.bottom-mi.rcMonitor.top),
+			swpNoActivate|swpFrameChanged)
+	} else {
+		// Restore window decorations.
+		procSetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle, uintptr(w.savedStyle))
+		// Restore window placement (position and size).
+		procSetWindowPlacement.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&w.savedPlacement)))
+		// Remove topmost z-order.
+		procSetWindowPos.Call(uintptr(w.hwnd), hwndNotopmost,
+			0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpFrameChanged)
+	}
+	w.fullscreen = fullscreen
+}
+
+// IsFullscreen returns true if the window is in borderless fullscreen mode.
+func (w *win32Window) IsFullscreen() bool {
+	return w.fullscreen
 }
 
 func (w *win32Window) Close() {

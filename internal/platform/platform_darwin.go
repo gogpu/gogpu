@@ -329,6 +329,28 @@ func (dw *darwinPlatformWindow) Close() {
 	}
 }
 
+// SetFullscreen enters or exits native macOS fullscreen mode.
+// Uses NSWindow toggleFullScreen: which provides the standard animation.
+func (dw *darwinPlatformWindow) SetFullscreen(fullscreen bool) {
+	w := dw.platform.primary
+	if w.window == nil {
+		return
+	}
+	// Only toggle if current state differs from desired state.
+	if fullscreen != w.window.IsFullScreen() {
+		w.window.ToggleFullScreen()
+	}
+}
+
+// IsFullscreen returns true if the window is in native macOS fullscreen mode.
+func (dw *darwinPlatformWindow) IsFullscreen() bool {
+	w := dw.platform.primary
+	if w.window != nil {
+		return w.window.IsFullScreen()
+	}
+	return false
+}
+
 func (dw *darwinPlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
 	w := dw.platform.primary
 	w.callbackMu.Lock()

@@ -167,6 +167,17 @@ func (c Config) WithContinuousRender(continuous bool) Config {
 	return c
 }
 
+// WithFullscreen starts the window in fullscreen mode.
+// On Windows: borderless fullscreen (Chromium/GLFW pattern).
+// On macOS: native fullscreen with animation.
+// On X11: _NET_WM_STATE_FULLSCREEN via EWMH.
+// On Wayland: xdg_toplevel.set_fullscreen.
+// Use App.SetFullscreen(false) or App.ToggleFullscreen() to exit at runtime.
+func (c Config) WithFullscreen() Config {
+	c.Fullscreen = true
+	return c
+}
+
 // WithFrameless enables or disables frameless window mode.
 // When true, the OS title bar and borders are removed.
 // Use WindowChrome.SetHitTestCallback to define drag, resize, and button regions.

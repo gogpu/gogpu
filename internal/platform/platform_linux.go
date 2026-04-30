@@ -21,6 +21,7 @@ type waylandWindow struct {
 	// Frameless window state
 	frameless       bool
 	maximized       bool
+	fullscreen      bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 
 	// Window state
@@ -272,7 +273,16 @@ func (w *x11PlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.
 func (w *x11PlatformWindow) Minimize()         { w.platform.inner.Minimize() }
 func (w *x11PlatformWindow) Maximize()         { w.platform.inner.Maximize() }
 func (w *x11PlatformWindow) IsMaximized() bool { return w.platform.inner.IsMaximized() }
-func (w *x11PlatformWindow) Close()            { w.platform.inner.CloseWindow() }
+
+func (w *x11PlatformWindow) SetFullscreen(fullscreen bool) {
+	w.platform.inner.SetFullscreen(fullscreen)
+}
+
+func (w *x11PlatformWindow) IsFullscreen() bool {
+	return w.platform.inner.IsFullscreen()
+}
+
+func (w *x11PlatformWindow) Close() { w.platform.inner.CloseWindow() }
 
 func (w *x11PlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
 	w.platform.inner.SetPointerCallback(fn)
@@ -381,7 +391,16 @@ func (w *waylandPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucont
 func (w *waylandPlatformWindow) Minimize()         { w.platform.Minimize() }
 func (w *waylandPlatformWindow) Maximize()         { w.platform.Maximize() }
 func (w *waylandPlatformWindow) IsMaximized() bool { return w.platform.IsMaximized() }
-func (w *waylandPlatformWindow) Close()            { w.platform.CloseWindow() }
+
+func (w *waylandPlatformWindow) SetFullscreen(fullscreen bool) {
+	w.platform.SetFullscreen(fullscreen)
+}
+
+func (w *waylandPlatformWindow) IsFullscreen() bool {
+	return w.platform.IsFullscreen()
+}
+
+func (w *waylandPlatformWindow) Close() { w.platform.CloseWindow() }
 
 func (w *waylandPlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
 	w.platform.SetPointerCallback(fn)
@@ -2147,6 +2166,39 @@ func (p *waylandPlatform) IsMaximized() bool {
 	w.eventMu.Lock()
 	defer w.eventMu.Unlock()
 	return w.maximized
+}
+
+// SetFullscreen enters or exits fullscreen mode via xdg_toplevel.
+// set_fullscreen (opcode 11, output=NULL) / unset_fullscreen (opcode 12).
+func (p *waylandPlatform) SetFullscreen(fullscreen bool) {
+	w := p.primary
+	w.eventMu.Lock()
+	current := w.fullscreen
+	w.eventMu.Unlock()
+
+	if fullscreen == current {
+		return
+	}
+
+	if p.libwl != nil && p.libwl.Toplevel() != 0 {
+		if fullscreen {
+			p.libwl.SetFullscreen()
+		} else {
+			p.libwl.MarshalVoidOnToplevel(12) // unset_fullscreen = opcode 12
+		}
+	}
+
+	w.eventMu.Lock()
+	w.fullscreen = fullscreen
+	w.eventMu.Unlock()
+}
+
+// IsFullscreen returns true if the window is in fullscreen mode.
+func (p *waylandPlatform) IsFullscreen() bool {
+	w := p.primary
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	return w.fullscreen
 }
 
 func (p *waylandPlatform) CloseWindow() {
