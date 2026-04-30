@@ -416,9 +416,7 @@ type win32Window struct {
 	width       int
 	height      int
 	shouldClose bool
-	inSizeMove  bool // True during modal resize/move loop
-	events      []Event
-	eventMu     sync.Mutex
+	inSizeMove  bool         // True during modal resize/move loop
 	sizeMu      sync.RWMutex // Protects width, height, inSizeMove for thread-safe access
 
 	// Mouse state tracking
@@ -467,6 +465,12 @@ type windowsPlatform struct {
 
 	// Primary window for backward-compatible single-window API.
 	primary *win32Window
+
+	// Unified event queue for ALL windows (ADR-017).
+	// wndProc pushes events here; PollEvents dequeues.
+	// Qt6/GTK4/SDL3/winit all use this pattern.
+	eventMu sync.Mutex
+	events  []Event
 }
 
 // Global instance for window procedure callback
@@ -772,7 +776,7 @@ func (w *win32Window) updateSize() {
 }
 
 func (p *windowsPlatform) PollEvents() Event {
-	// Process all pending Windows messages
+	// Process all pending Windows messages (NULL HWND = all windows on this thread).
 	var m msg
 	for {
 		ret, _, _ := procPeekMessageW.Call(
@@ -787,20 +791,7 @@ func (p *windowsPlatform) PollEvents() Event {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 
-	return p.primary.dequeueEvent()
-}
-
-func (w *win32Window) dequeueEvent() Event {
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-
-	if len(w.events) > 0 {
-		event := w.events[0]
-		w.events = w.events[1:]
-		return event
-	}
-
-	return Event{Type: EventNone}
+	return p.dequeueEvent()
 }
 
 func (p *windowsPlatform) ShouldClose() bool {
@@ -921,17 +912,22 @@ func (w *win32Window) setModalFrameCallback(fn func()) {
 
 // Destroy implements PlatformManager.Destroy.
 // Destroys all remaining windows and releases process-level resources.
+// Pattern: collect + remove under lock, then DestroyWindow outside lock.
+// DestroyWindow sends WM_DESTROY synchronously to wndProc, which needs
+// windowMu.RLock — holding the write lock would deadlock.
+// Same pattern as win32Window.Destroy and GLFW's RemovePropW-before-DestroyWindow.
 func (p *windowsPlatform) Destroy() {
-	// Destroy any remaining windows
 	p.windowMu.Lock()
-	for hwnd, w := range p.windows {
-		if w.hwnd != 0 {
-			procDestroyWindow.Call(uintptr(w.hwnd))
-			w.hwnd = 0
-		}
+	toDestroy := make([]windows.HWND, 0, len(p.windows))
+	for hwnd := range p.windows {
+		toDestroy = append(toDestroy, hwnd)
 		delete(p.windows, hwnd)
 	}
 	p.windowMu.Unlock()
+
+	for _, hwnd := range toDestroy {
+		procDestroyWindow.Call(uintptr(hwnd))
+	}
 	p.primary = nil
 	globalPlatform = nil
 }
@@ -1331,24 +1327,38 @@ func (p *windowsPlatform) CloseWindow() {
 	procPostMessageW.Call(uintptr(p.primary.hwnd), wmClose, 0, 0)
 }
 
-func (w *win32Window) queueEvent(event Event) {
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
+// queueEvent pushes an event to the unified platform queue (ADR-017).
+// Called from wndProc for ALL windows. Per-WindowID resize coalescing.
+func (p *windowsPlatform) queueEvent(event Event) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
 
-	// Coalesce resize events to avoid swapchain recreation storm.
+	// Coalesce resize events per-window to avoid swapchain recreation storm.
 	// During drag resize, Windows sends hundreds of WM_SIZE messages.
-	// We only care about the final size.
-	if event.Type == EventResize && len(w.events) > 0 {
-		last := &w.events[len(w.events)-1]
-		if last.Type == EventResize {
-			// Update existing resize event with new dimensions
-			last.Width = event.Width
-			last.Height = event.Height
-			return
+	if event.Type == EventResize && len(p.events) > 0 {
+		for i := len(p.events) - 1; i >= 0; i-- {
+			if p.events[i].Type == EventResize && p.events[i].WindowID == event.WindowID {
+				p.events[i] = event
+				return
+			}
 		}
 	}
 
-	w.events = append(w.events, event)
+	p.events = append(p.events, event)
+}
+
+// dequeueEvent returns the next event from the unified queue.
+func (p *windowsPlatform) dequeueEvent() Event {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+
+	if len(p.events) > 0 {
+		event := p.events[0]
+		p.events = p.events[1:]
+		return event
+	}
+
+	return Event{Type: EventNone}
 }
 
 // extractMousePos extracts mouse position from lParam.
@@ -2040,7 +2050,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	switch message {
 	case wmClose:
 		w.shouldClose = true
-		w.queueEvent(Event{Type: EventClose, WindowID: w.id})
+		p.queueEvent(Event{Type: EventClose, WindowID: w.id})
 		return 0
 
 	case wmNCUAHDrawCaption, wmNCUAHDrawFrame:
@@ -2132,11 +2142,11 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 
 	case wmSetFocus:
-		w.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: true})
+		p.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: true})
 		return 0
 
 	case wmKillFocus:
-		w.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: false})
+		p.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: false})
 		return 0
 
 	case wmActivate:
@@ -2179,7 +2189,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Queue resize event with new DPI-adjusted dimensions.
 		physW, physH := w.PhysicalSize()
 		logW, logH := w.LogicalSize()
-		w.queueEvent(Event{
+		p.queueEvent(Event{
 			Type:           EventResize,
 			WindowID:       w.id,
 			Width:          logW,
@@ -2237,7 +2247,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 				logW = int(float64(newWidth) / scale)
 				logH = int(float64(newHeight) / scale)
 			}
-			w.queueEvent(Event{
+			p.queueEvent(Event{
 				Type:           EventResize,
 				WindowID:       w.id,
 				Width:          logW,
@@ -2296,7 +2306,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		w.updateSize()
 		physW, physH := w.PhysicalSize()
 		logW, logH := w.LogicalSize()
-		w.queueEvent(Event{
+		p.queueEvent(Event{
 			Type:           EventResize,
 			WindowID:       w.id,
 			Width:          logW,
@@ -2338,7 +2348,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// ESC to close (convenience)
 		if wParam == vkEscape {
 			w.shouldClose = true
-			w.queueEvent(Event{Type: EventClose, WindowID: w.id})
+			p.queueEvent(Event{Type: EventClose, WindowID: w.id})
 		}
 
 		// For WM_SYSKEYDOWN: let DefWindowProc handle Alt+F4, Alt+Tab

@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.30.0
+## Current State: v0.30.3
 
 ✅ **Production-ready** with full feature set:
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
@@ -56,6 +56,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.30.3** | 2026-04-30 | Multi-window deadlock + lost events fix (ADR-017), scroll accumulate+snapshot, particle sim example (@snakeru), wgpu v0.26.10 (45% validation) |
 | **v0.29.4** | 2026-04-26 | wgpu v0.26.6 — compute barriers (VAL-008/009/010) |
 | **v0.29.2** | 2026-04-25 | **Damage-aware presentation** + Vulkan validation fixes (uniform buffer CopyDst, PRESENT_SRC_KHR), wgpu v0.26.4 |
 | **v0.28.1** | 2026-04-23 | EventFocus on all platforms (Win32, X11, Wayland, macOS), WindowID on all events |

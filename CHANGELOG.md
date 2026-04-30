@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.3] - 2026-04-30
+
+### Fixed
+
+- **Multi-window: deadlock on Destroy** (BUG-MW-001, ADR-017) — `windowsPlatform.Destroy()` held write lock while calling `DestroyWindow()`, which synchronously sends WM_DESTROY to `wndProc` needing read lock. Fixed: collect+remove under lock, destroy outside lock (GLFW `RemovePropW` pattern). Researched Qt6, GTK4, SDL3, winit, Chromium, GLFW, Flutter.
+- **Multi-window: secondary window events lost** (BUG-MW-001, ADR-017) — `PollEvents()` dequeued events only from primary window. Secondary window close/resize/focus events were silently dropped. Fixed: unified platform event queue — all windows push to single queue, `PollEvents()` dequeues from it. Matches Qt6 (`WindowSystemEventList`), GTK4 (`GdkWin32EventSource`), SDL3 (`SDL_EventQ`), winit (`VecDeque<Event>`).
+- **Mouse scroll: zero in OnUpdate** ([#199](https://github.com/gogpu/gogpu/issues/199), [#200](https://github.com/gogpu/gogpu/pull/200), @k-chimi) — `UpdateFrame()` zeroed scroll before `OnUpdate` could read it. Fixed with Ebiten-style accumulate + snapshot: `SetScroll` accumulates (`+=`), `UpdateFrame` snapshots then zeros, `Scroll()` reads snapshot. Researched SDL3, winit, Qt6, GTK4, GLFW, Ebiten.
+
+### Added
+
+- **Multi-stage particle simulation example** ([#198](https://github.com/gogpu/gogpu/pull/198), @snakeru) — 3 compute shaders (interactor, bouncer, renderer) + 1 render shader. Verlet integration, mass-dependent coloring, 3200 particles @ 60 FPS. Multi-step compute pipeline showcase.
+
+### Changed
+
+- **deps:** wgpu v0.26.8 → v0.26.10 (Validation Phase A+B: 23 P0/P1 checks, coverage 22% → 45%), naga v0.17.6 → v0.17.8
+
 ## [0.30.2] - 2026-04-29
 
 ### Added
