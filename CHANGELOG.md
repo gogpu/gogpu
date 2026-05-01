@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-05-01
+
+### Added
+
+- **Runtime fullscreen toggle** (FEAT-FULLSCREEN-001, ADR-018) — `App.SetFullscreen(bool)`, `App.IsFullscreen()`, `App.ToggleFullscreen()`, `Config.WithFullscreen()`. Borderless fullscreen on Windows (Chromium/GLFW pattern with WINDOWPLACEMENT save/restore), native `toggleFullScreen:` on macOS (Cocoa animation + green button), `_NET_WM_STATE_FULLSCREEN` on X11, `xdg_toplevel.set_fullscreen` on Wayland. No swapchain handling needed — existing OnResize pipeline reconfigures automatically. Researched Qt6, SDL3, GLFW, Chromium, Electron, Ebiten. Resolves [ui#88](https://github.com/gogpu/ui/issues/88) (@AgentNemo00).
+
+### Changed
+
+- **deps:** wgpu v0.26.10 → v0.26.12 (test coverage boost, Metal entry point fix, naga v0.17.10), gpucontext v0.15.0 → v0.16.0 (WindowChrome.SetFullscreen/IsFullscreen)
+
 ## [0.30.3] - 2026-04-30
 
 ### Fixed

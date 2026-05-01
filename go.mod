@@ -5,10 +5,10 @@ go 1.25.0
 require (
 	github.com/go-webgpu/goffi v0.5.0
 	github.com/go-webgpu/webgpu v0.4.3
-	github.com/gogpu/gpucontext v0.15.0
+	github.com/gogpu/gpucontext v0.16.0
 	github.com/gogpu/gputypes v0.5.0
-	github.com/gogpu/wgpu v0.26.10
+	github.com/gogpu/wgpu v0.26.12
 	golang.org/x/sys v0.43.0
 )
 
-require github.com/gogpu/naga v0.17.8 // indirect
+require github.com/gogpu/naga v0.17.10 // indirect

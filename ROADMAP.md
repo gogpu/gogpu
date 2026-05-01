@@ -25,9 +25,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.30.3
+## Current State: v0.31.0
 
 ✅ **Production-ready** with full feature set:
+- **Runtime fullscreen** — `App.SetFullscreen(bool)`, `App.ToggleFullscreen()` on all platforms (ADR-018)
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
 - **EventFocus** — window focus/blur events on all platforms for multi-window VSync routing
 - **Damage-aware presentation** — `Context.SetDamageRects()` passes dirty regions to compositor (ADR-013)
@@ -56,6 +57,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.31.0** | 2026-05-01 | **Runtime fullscreen** (ADR-018) — all 4 platforms, wgpu v0.26.12, gpucontext v0.16.0 |
 | **v0.30.3** | 2026-04-30 | Multi-window deadlock + lost events fix (ADR-017), scroll accumulate+snapshot, particle sim example (@snakeru), wgpu v0.26.10 (45% validation) |
 | **v0.29.4** | 2026-04-26 | wgpu v0.26.6 — compute barriers (VAL-008/009/010) |
 | **v0.29.2** | 2026-04-25 | **Damage-aware presentation** + Vulkan validation fixes (uniform buffer CopyDst, PRESENT_SRC_KHR), wgpu v0.26.4 |
