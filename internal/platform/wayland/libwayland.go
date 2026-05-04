@@ -10,6 +10,9 @@ import (
 	"github.com/go-webgpu/goffi/types"
 )
 
+// wlMethodDestroy is the Wayland protocol method name for wl_proxy_destroy.
+const wlMethodDestroy = "destroy"
+
 // LibwaylandHandle holds C pointers from libwayland-client.so.0 for Vulkan surface creation.
 // Vulkan's VK_KHR_wayland_surface requires real wl_display* and wl_surface* from the C library.
 // Our pure Go Wayland speaks wire protocol directly and doesn't have C structs.
@@ -414,7 +417,7 @@ func (h *LibwaylandHandle) prepareCIFs() error {
 		// wl_proxy* wl_proxy_marshal_array_constructor_versioned(wl_proxy*, uint32_t opcode, union wl_argument*, const wl_interface*, uint32_t version)
 		{"marshal_v", &h.cifMarshalV, ptr, []*types.TypeDescriptor{ptr, types.UInt32TypeDescriptor, ptr, ptr, types.UInt32TypeDescriptor}},
 		// void wl_proxy_destroy(wl_proxy*)
-		{"destroy", &h.cifDestroy, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr}},
+		{wlMethodDestroy, &h.cifDestroy, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr}},
 		// int wl_proxy_add_listener(wl_proxy*, void(**)(void), void* data)
 		{"add_listener", &h.cifAddListener, i32, []*types.TypeDescriptor{ptr, ptr, ptr}},
 		// int wl_display_roundtrip(wl_display*)

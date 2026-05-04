@@ -8,6 +8,17 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
+const defaultTitle = "GoGPU Application"
+
+// Environment variable values for GOGPU_GRAPHICS_API.
+const (
+	envVulkan   = "vulkan"
+	envDX12     = "dx12"
+	envMetal    = "metal"
+	envGLES     = "gles"
+	envSoftware = "software"
+)
+
 // Config configures the application.
 type Config struct {
 	// Title is the window title.
@@ -77,7 +88,7 @@ type Config struct {
 // over the environment variables.
 func DefaultConfig() Config {
 	return Config{
-		Title:            "GoGPU Application",
+		Title:            defaultTitle,
 		Width:            800,
 		Height:           600,
 		Resizable:        true,
@@ -92,15 +103,15 @@ func DefaultConfig() Config {
 func graphicsAPIFromEnv() types.GraphicsAPI {
 	v := strings.ToLower(os.Getenv("GOGPU_GRAPHICS_API"))
 	switch v {
-	case "vulkan", "vk":
+	case envVulkan, "vk":
 		return types.GraphicsAPIVulkan
-	case "dx12", "d3d12", "directx":
+	case envDX12, "d3d12", "directx":
 		return types.GraphicsAPIDX12
-	case "metal":
+	case envMetal:
 		return types.GraphicsAPIMetal
-	case "gles", "gl", "opengl":
+	case envGLES, "gl", "opengl":
 		return types.GraphicsAPIGLES
-	case "software", "sw", "cpu":
+	case envSoftware, "sw", "cpu":
 		return types.GraphicsAPISoftware
 	default:
 		return types.GraphicsAPIAuto

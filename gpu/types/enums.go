@@ -21,15 +21,22 @@ const (
 	BackendGo = BackendNative
 )
 
+// Backend display names.
+const (
+	backendNameAuto   = "Auto"
+	backendNameNative = "Native (Pure Go)"
+	backendNameRust   = "Rust (wgpu-gpu)"
+)
+
 // String returns the backend name.
 func (b BackendType) String() string {
 	switch b {
 	case BackendRust:
-		return "Rust (wgpu-gpu)"
+		return backendNameRust
 	case BackendNative:
-		return "Native (Pure Go)"
+		return backendNameNative
 	default:
-		return "Auto"
+		return backendNameAuto
 	}
 }
 
@@ -74,6 +81,6 @@ func (g GraphicsAPI) String() string {
 	case GraphicsAPISoftware:
 		return "Software"
 	default:
-		return "Auto"
+		return backendNameAuto
 	}
 }
