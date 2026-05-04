@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **X11: remote display authentication failure** ([#203](https://github.com/gogpu/gogpu/issues/203), ADR-019, @sverrehu) — `.Xauthority` stores `FamilyInternet` (IPv4) addresses as raw 4 bytes, but DISPLAY parser produced ASCII string. Binary comparison always failed for remote X11 connections (`DISPLAY=192.168.0.1:0`). Fixed with libxcb `getpeername()` pattern: extract binary IP from connected socket via `net.Conn.RemoteAddr()`, match against `.Xauthority` entries using `bytes.Equal`. Added `FamilyInternet6` (IPv6) support. First Pure Go X11 library to handle `FamilyInternet` correctly — all others (jezek/xgb, BurntSushi/xgb) have the same bug.
+
 ## [0.31.0] - 2026-05-01
 
 ### Added

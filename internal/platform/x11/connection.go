@@ -112,7 +112,7 @@ func ConnectTo(display string) (*Connection, error) {
 	}
 
 	// Perform connection setup
-	if err := c.performSetup(host, strconv.Itoa(displayNum)); err != nil {
+	if err := c.performSetup(strconv.Itoa(displayNum)); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -159,11 +159,13 @@ func parseDisplay(display string) (host string, displayNum int, screenNum int, e
 }
 
 // performSetup performs the X11 connection setup handshake.
-func (c *Connection) performSetup(hostname, displayNum string) error {
+func (c *Connection) performSetup(displayNum string) error {
+	// Extract binary address from connected socket (libxcb getpeername pattern)
+	family, address := connAddress(c.conn)
+
 	// Get authentication data
-	authName, authData, err := getAuth(hostname, displayNum)
+	authName, authData, err := getAuth(family, address, displayNum)
 	if err != nil {
-		// Try without auth
 		authName = ""
 		authData = nil
 	}

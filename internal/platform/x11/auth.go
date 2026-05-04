@@ -3,10 +3,12 @@
 package x11
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 )
@@ -16,11 +18,12 @@ const (
 	AuthMITMagicCookie = "MIT-MAGIC-COOKIE-1"
 )
 
-// Authority family values (from Xauth).
+// Authority family values (from Xauth/libXau).
 const (
 	FamilyInternet  uint16 = 0
 	FamilyDECnet    uint16 = 1
 	FamilyChaos     uint16 = 2
+	FamilyInternet6 uint16 = 6
 	FamilyLocal     uint16 = 256
 	FamilyWild      uint16 = 65535
 	FamilyNetname   uint16 = 254
@@ -36,9 +39,11 @@ var (
 )
 
 // AuthEntry represents an entry in the .Xauthority file.
+// Address is raw bytes: 4-byte IPv4 for FamilyInternet, 16-byte IPv6 for
+// FamilyInternet6, hostname string bytes for FamilyLocal.
 type AuthEntry struct {
 	Family  uint16
-	Address string
+	Address []byte
 	Number  string
 	Name    string
 	Data    []byte
@@ -114,8 +119,9 @@ func readAuthEntry(r io.Reader) (AuthEntry, error) {
 	}
 	entry.Family = binary.BigEndian.Uint16(familyBuf[:])
 
-	// Read address
-	address, err := readAuthString(r)
+	// Read address as raw bytes (binary IPv4/IPv6 for FamilyInternet/6,
+	// hostname string for FamilyLocal).
+	address, err := readAuthBytes(r)
 	if err != nil {
 		return entry, err
 	}
@@ -170,6 +176,31 @@ func readAuthString(r io.Reader) (string, error) {
 	return string(data), nil
 }
 
+// readAuthBytes reads length-prefixed binary data (big-endian length).
+// Used for address field which stores raw bytes (not necessarily valid UTF-8).
+func readAuthBytes(r io.Reader) ([]byte, error) {
+	var lenBuf [2]byte
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+		return nil, err
+	}
+	length := binary.BigEndian.Uint16(lenBuf[:])
+
+	if length == 0 {
+		return nil, nil
+	}
+
+	if length > 1024 {
+		return nil, ErrInvalidAuthFile
+	}
+
+	data := make([]byte, length)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
 // readAuthData reads length-prefixed auth data (big-endian length).
 func readAuthData(r io.Reader) ([]byte, error) {
 	var lenBuf [2]byte
@@ -195,64 +226,65 @@ func readAuthData(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-// getAuth returns the authentication data for the given display.
-// hostname should be empty for local connections.
+// getAuth returns the authentication data for the given connection.
+// family and address come from connAddress() (getpeername pattern, like libxcb).
 // displayNum is the display number (e.g., "0" for :0).
 // If no matching auth is found, returns empty values (some servers allow unauthenticated connections).
-func getAuth(hostname, displayNum string) (name string, data []byte, err error) {
+func getAuth(family uint16, address []byte, displayNum string) (name string, data []byte, err error) {
 	entries, readErr := readAuthFile()
 	if readErr == nil {
-		// Try to find a matching entry
 		for _, entry := range entries {
-			// Check if this entry matches our connection
-			if matchesAuthEntry(entry, hostname, displayNum) {
+			if matchesAuthEntry(entry, family, address, displayNum) {
 				return entry.Name, entry.Data, nil
 			}
 		}
 	}
-	// If no authority file exists, read failed, or no matching entry found,
-	// return empty auth - this is not an error as some servers allow
-	// unauthenticated connections.
 	return "", nil, nil
 }
 
 // matchesAuthEntry checks if an auth entry matches the connection parameters.
-func matchesAuthEntry(entry AuthEntry, hostname, displayNum string) bool {
-	// Check display number
+// Uses binary address comparison (like libXau's XauGetBestAuthByAddr).
+func matchesAuthEntry(entry AuthEntry, family uint16, address []byte, displayNum string) bool {
 	if entry.Number != displayNum {
 		return false
 	}
 
-	// Check hostname/family
-	if hostname == "" || hostname == "localhost" {
-		// Local connection - match FamilyLocal or FamilyWild
-		if entry.Family == FamilyLocal || entry.Family == FamilyWild || entry.Family == FamilyLocalHost {
-			return true
-		}
-		// Also check if the address is our hostname
-		if ourHostname, err := os.Hostname(); err == nil {
-			if entry.Address == ourHostname {
-				return true
-			}
-		}
-	} else if entry.Address == hostname {
-		// Remote connection - check address
-		return true
-	}
-
-	// Check for wildcard
 	if entry.Family == FamilyWild {
 		return true
 	}
 
-	return false
+	if family == FamilyLocal {
+		if entry.Family == FamilyLocal || entry.Family == FamilyLocalHost {
+			if len(entry.Address) == 0 {
+				return true
+			}
+			if bytes.Equal(entry.Address, address) {
+				return true
+			}
+			if ourHostname, err := os.Hostname(); err == nil {
+				if bytes.Equal(entry.Address, []byte(ourHostname)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// TCP: binary match family + address (FamilyInternet or FamilyInternet6)
+	return entry.Family == family && bytes.Equal(entry.Address, address)
 }
 
-// localHostname returns the local hostname.
-func localHostname() string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return ""
+// connAddress extracts the binary address and family from a connected socket.
+// This follows the libxcb getpeername() pattern — no extra DNS lookups.
+func connAddress(conn net.Conn) (family uint16, address []byte) {
+	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		if v4 := tcpAddr.IP.To4(); v4 != nil {
+			return FamilyInternet, []byte(v4)
+		}
+		if v6 := tcpAddr.IP.To16(); v6 != nil {
+			return FamilyInternet6, []byte(v6)
+		}
 	}
-	return hostname
+	hostname, _ := os.Hostname()
+	return FamilyLocal, []byte(hostname)
 }
