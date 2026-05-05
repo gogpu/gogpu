@@ -223,10 +223,10 @@ func (c Config) WithPowerPreference(pref gputypes.PowerPreference) Config {
 //
 // Usage for terminal-style tabbing:
 //
-//   cfg := gogpu.DefaultConfig().
-//       WithTabbingMode(gogpu.TabbingPreferred).
-//       WithTabbingIdentifier("com.myapp.tabs")
-//   app := gogpu.NewApp(cfg)
+//	cfg := gogpu.DefaultConfig().
+//	    WithTabbingMode(gogpu.TabbingPreferred).
+//	    WithTabbingIdentifier("com.myapp.tabs")
+//	app := gogpu.NewApp(cfg)
 func (c Config) WithTabbingMode(mode TabbingMode) Config {
 	c.TabbingMode = mode
 	return c

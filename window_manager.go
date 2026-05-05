@@ -189,7 +189,7 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		Height:            config.Height,
 		Resizable:         config.Resizable,
 		Fullscreen:        config.Fullscreen,
-		Frameless:  	   config.Frameless,
+		Frameless:         config.Frameless,
 		TabbingMode:       int(config.TabbingMode),
 		TabbingIdentifier: config.TabbingIdentifier,
 	})
