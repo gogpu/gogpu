@@ -34,7 +34,7 @@
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
-| **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference |
+| **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference, native macOS window tabbing |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
 | **HiDPI** | Per-monitor DPI, WM_DPICHANGED, logical/physical coordinate split |
@@ -522,6 +522,8 @@ internal/platform/darwin/
 └── objc.go          # Objective-C runtime via goffi
 ```
 
+Native system window tabbing supported via `Config.WithTabbingMode(gogpu.TabbingPreferred)` — windows with the same `TabbingIdentifier` group into macOS system tabs automatically.
+
 **Note:** macOS Cocoa requires UI operations on the main thread. GoGPU handles this automatically.
 
 ---
@@ -589,6 +591,8 @@ go test ./...
 | Contributor | Contributions |
 |-------------|---------------|
 | [@ppoage](https://github.com/ppoage) | macOS ARM64 (Apple Silicon) support — 3 merged PRs across gogpu, wgpu, and naga with ~3,500 lines of code. Made Metal backend work on M1/M4 |
+| [@lkmavi](https://github.com/lkmavi) | macOS native window tabbing (`NSWindow.tabbingMode`) — Config API, selectors, multi-window propagation, example |
+| [@sverrehu](https://github.com/sverrehu) | X11 remote display auth fix — found `.Xauthority` binary address mismatch ([#203](https://github.com/gogpu/gogpu/issues/203)), confirmed fix. macOS key event fix ([#194](https://github.com/gogpu/gogpu/issues/194)) |
 | [@JanGordon](https://github.com/JanGordon) | Documentation fix (wgpu) |
 
 ### Community Champions

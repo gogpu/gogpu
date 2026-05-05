@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **macOS: native system window tabbing** ([#206](https://github.com/gogpu/gogpu/issues/206), [#207](https://github.com/gogpu/gogpu/pull/207), @lkmavi) — `Config.WithTabbingMode()` and `Config.WithTabbingIdentifier()` for native macOS window tab grouping. Values match `NSWindowTabbingMode` directly (0=Automatic, 1=Preferred, 2=Disallowed). Default: `TabbingDisallowed` (GLFW/SDL3/Qt6 enterprise pattern). Researched winit, GLFW, SDL3, Qt6. No-op on Windows/Linux.
+
 ## [0.31.1] - 2026-05-05
 
 ### Fixed
