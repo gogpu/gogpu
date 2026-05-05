@@ -350,3 +350,18 @@ func TestWithGraphicsAPIOverridesEnv(t *testing.T) {
 		t.Errorf("GraphicsAPI = %v, want GraphicsAPIMetal (WithGraphicsAPI should override env)", cfg.GraphicsAPI)
 	}
 }
+
+func TestConfigTabbing(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.TabbingMode != TabbingDisallowed {
+		t.Fatalf("expected default TabbingDisallowed, got %v", cfg.TabbingMode)
+	}
+
+	cfg = cfg.WithTabbingMode(TabbingPreferred).WithTabbingIdentifier("test.id")
+	if cfg.TabbingMode != TabbingPreferred {
+		t.Fatalf("expected Preferred, got %v", cfg.TabbingMode)
+	}
+	if cfg.TabbingIdentifier != "test.id" {
+		t.Fatalf("expected test.id, got %v", cfg.TabbingIdentifier)
+	}
+}

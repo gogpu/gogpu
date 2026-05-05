@@ -184,12 +184,14 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 
 	// Create platform window via PlatformManager.
 	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:      config.Title,
-		Width:      config.Width,
-		Height:     config.Height,
-		Resizable:  config.Resizable,
-		Fullscreen: config.Fullscreen,
-		Frameless:  config.Frameless,
+		Title:             config.Title,
+		Width:             config.Width,
+		Height:            config.Height,
+		Resizable:         config.Resizable,
+		Fullscreen:        config.Fullscreen,
+		Frameless:  	   config.Frameless,
+		TabbingMode:       int(config.TabbingMode),
+		TabbingIdentifier: config.TabbingIdentifier,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gogpu: create window: %w", err)

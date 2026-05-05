@@ -15,12 +15,14 @@ var (
 
 // WindowConfig holds configuration for creating a window.
 type WindowConfig struct {
-	Title      string
-	Width      int
-	Height     int
-	Resizable  bool
-	Fullscreen bool
-	Frameless  bool
+	Title             string
+	Width             int
+	Height            int
+	Resizable         bool
+	Fullscreen        bool
+	Frameless         bool
+	TabbingMode       int
+	TabbingIdentifier string
 }
 
 // Window represents an NSWindow with its content view.
@@ -104,6 +106,17 @@ func NewWindow(config WindowConfig) (*Window, error) {
 	} else {
 		nsWindow.SendPtr(selectors.setContentView, goGPUView.Ptr())
 		w.contentView = goGPUView
+	}
+
+	// Set tabbing mode (macOS 10.12+).
+	// Values match NSWindowTabbingMode directly (0=Auto, 1=Preferred, 2=Disallowed).
+	nsWindow.SendUint(selectors.setTabbingMode, uint64(config.TabbingMode))
+	if config.TabbingIdentifier != "" {
+		tabID := NewNSString(config.TabbingIdentifier)
+		if tabID != nil {
+			nsWindow.SendPtr(selectors.setTabbingIdentifier, tabID.ID().Ptr())
+			tabID.Release()
+		}
 	}
 
 	// Enable native fullscreen support (green button / toggleFullScreen:).

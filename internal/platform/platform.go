@@ -19,12 +19,14 @@ func NewWindowID() WindowID {
 
 // Config holds platform-agnostic window configuration.
 type Config struct {
-	Title      string
-	Width      int
-	Height     int
-	Resizable  bool
-	Fullscreen bool
-	Frameless  bool
+	Title             string
+	Width             int
+	Height            int
+	Resizable         bool
+	Fullscreen        bool
+	Frameless         bool
+	TabbingMode       int
+	TabbingIdentifier string
 }
 
 // Event represents a platform event.

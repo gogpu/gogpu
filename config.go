@@ -64,6 +64,18 @@ type Config struct {
 	// this controls which GPU is selected.
 	// PowerPreferenceNone (default) lets the driver decide.
 	PowerPreference gputypes.PowerPreference
+
+	// TabbingMode controls macOS system window tabbing.
+	// Default: TabbingDisallowed (set by DefaultConfig — GLFW/SDL3/Qt6 enterprise pattern).
+	// Set TabbingPreferred + TabbingIdentifier for terminal-style tabbing.
+	// No-op on Windows/Linux.
+	TabbingMode TabbingMode
+
+	// TabbingIdentifier groups windows into the same tab bar.
+	// Only effective when TabbingMode is TabbingPreferred or TabbingAutomatic.
+	// Windows with the same identifier will be grouped together.
+	// See: https://developer.apple.com/documentation/appkit/nswindow/1644704-tabbingidentifier
+	TabbingIdentifier string
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -96,6 +108,7 @@ func DefaultConfig() Config {
 		ContinuousRender: true,
 		GraphicsAPI:      graphicsAPIFromEnv(),
 		PowerPreference:  powerPreferenceFromEnv(),
+		TabbingMode:      TabbingDisallowed,
 	}
 }
 
@@ -206,6 +219,25 @@ func (c Config) WithPowerPreference(pref gputypes.PowerPreference) Config {
 	return c
 }
 
+// WithTabbingMode sets the macOS window tabbing mode.
+//
+// Usage for terminal-style tabbing:
+//
+//   cfg := gogpu.DefaultConfig().
+//       WithTabbingMode(gogpu.TabbingPreferred).
+//       WithTabbingIdentifier("com.myapp.tabs")
+//   app := gogpu.NewApp(cfg)
+func (c Config) WithTabbingMode(mode TabbingMode) Config {
+	c.TabbingMode = mode
+	return c
+}
+
+// WithTabbingIdentifier sets the tabbing identifier.
+func (c Config) WithTabbingIdentifier(id string) Config {
+	c.TabbingIdentifier = id
+	return c
+}
+
 // Re-export backend types for convenience.
 const (
 	BackendAuto   = types.BackendAuto
@@ -229,4 +261,17 @@ const (
 	PowerPreferenceNone            = gputypes.PowerPreferenceNone
 	PowerPreferenceLowPower        = gputypes.PowerPreferenceLowPower
 	PowerPreferenceHighPerformance = gputypes.PowerPreferenceHighPerformance
+)
+
+// TabbingMode controls macOS system window tabbing behavior.
+// No-op on non-macOS platforms.
+type TabbingMode int
+
+const (
+	// TabbingAutomatic lets the system decide whether to tab windows.
+	TabbingAutomatic TabbingMode = 0
+	// TabbingPreferred indicates the window prefers to open as a tab when possible.
+	TabbingPreferred TabbingMode = 1
+	// TabbingDisallowed explicitly prevents the window from being grouped into tabs.
+	TabbingDisallowed TabbingMode = 2
 )

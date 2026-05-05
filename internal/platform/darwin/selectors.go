@@ -168,6 +168,10 @@ var selectors struct {
 	sharedWorkspace                            SEL
 	accessibilityDisplayShouldReduceMotion     SEL
 	accessibilityDisplayShouldIncreaseContrast SEL
+
+	// TabbingMode
+	setTabbingMode       SEL
+	setTabbingIdentifier SEL
 }
 
 // classes holds cached class references.

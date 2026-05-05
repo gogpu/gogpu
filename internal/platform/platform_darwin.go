@@ -87,12 +87,14 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 
 	windowConfig := darwin.WindowConfig{
-		Title:      config.Title,
-		Width:      config.Width,
-		Height:     config.Height,
-		Resizable:  config.Resizable,
-		Fullscreen: config.Fullscreen,
-		Frameless:  config.Frameless,
+		Title:             config.Title,
+		Width:             config.Width,
+		Height:            config.Height,
+		Resizable:         config.Resizable,
+		Fullscreen:        config.Fullscreen,
+		Frameless:         config.Frameless,
+		TabbingMode:       config.TabbingMode,
+		TabbingIdentifier: config.TabbingIdentifier,
 	}
 
 	window, err := darwin.NewWindow(windowConfig)
