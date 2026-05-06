@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"os"
 	"testing"
 )
 
@@ -191,6 +192,49 @@ func TestMatchesAuthEntry(t *testing.T) {
 			displayNum: "0",
 			want:       false,
 		},
+		{
+			name:       "FamilyLocal hostname mismatch FAILS (FQDN vs short)",
+			entry:      AuthEntry{Family: FamilyLocal, Address: []byte("myhost.local"), Number: "0"},
+			family:     FamilyLocal,
+			address:    []byte("myhost"),
+			displayNum: "0",
+			want:       false,
+		},
+		{
+			name:       "FamilyLocal hostname mismatch FAILS (short vs FQDN)",
+			entry:      AuthEntry{Family: FamilyLocal, Address: []byte("myhost"), Number: "0"},
+			family:     FamilyLocal,
+			address:    []byte("myhost.local"),
+			displayNum: "0",
+			want:       false,
+		},
+		{
+			name:       "FamilyLocal empty entry address matches any local",
+			entry:      AuthEntry{Family: FamilyLocal, Address: nil, Number: "0"},
+			family:     FamilyLocal,
+			address:    []byte("anyhost"),
+			displayNum: "0",
+			want:       true,
+		},
+	}
+
+	// Add os.Hostname() fallback test dynamically (hostname varies per machine).
+	if hostname, err := os.Hostname(); err == nil {
+		tests = append(tests, struct {
+			name       string
+			entry      AuthEntry
+			family     uint16
+			address    []byte
+			displayNum string
+			want       bool
+		}{
+			name:       "FamilyLocal os.Hostname() fallback matches even with different address",
+			entry:      AuthEntry{Family: FamilyLocal, Address: []byte(hostname), Number: "0"},
+			family:     FamilyLocal,
+			address:    []byte("wrong-address-but-entry-matches-hostname"),
+			displayNum: "0",
+			want:       true,
+		})
 	}
 
 	for _, tt := range tests {
@@ -244,8 +288,13 @@ func TestConnAddress_Unix(t *testing.T) {
 	if family != FamilyLocal {
 		t.Errorf("family: got %d, want %d (FamilyLocal)", family, FamilyLocal)
 	}
-	if len(address) == 0 {
-		t.Errorf("address should be hostname, got empty")
+
+	expectedHostname, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("os.Hostname: %v", err)
+	}
+	if !bytes.Equal(address, []byte(expectedHostname)) {
+		t.Errorf("address: got %q, want %q (os.Hostname)", string(address), expectedHostname)
 	}
 }
 
@@ -300,6 +349,30 @@ func TestGetAuth_EndToEnd(t *testing.T) {
 			family:     FamilyInternet,
 			address:    []byte{192, 168, 0, 1},
 			displayNum: "1",
+			wantCookie: nil,
+			wantName:   "",
+		},
+		{
+			name:       "FamilyLocal exact hostname match returns cookie",
+			family:     FamilyLocal,
+			address:    []byte("myhost"),
+			displayNum: "0",
+			wantCookie: cookie2,
+			wantName:   "MIT-MAGIC-COOKIE-1",
+		},
+		{
+			name:       "FamilyLocal hostname mismatch returns nothing",
+			family:     FamilyLocal,
+			address:    []byte("otherhost"),
+			displayNum: "0",
+			wantCookie: nil,
+			wantName:   "",
+		},
+		{
+			name:       "FamilyLocal FQDN vs short hostname returns nothing",
+			family:     FamilyLocal,
+			address:    []byte("myhost.localdomain"),
+			displayNum: "0",
 			wantCookie: nil,
 			wantName:   "",
 		},
