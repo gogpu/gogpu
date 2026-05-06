@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **macOS: native system window tabbing** ([#206](https://github.com/gogpu/gogpu/issues/206), [#207](https://github.com/gogpu/gogpu/pull/207), @lkmavi) — `Config.WithTabbingMode()` and `Config.WithTabbingIdentifier()` for native macOS window tab grouping. Values match `NSWindowTabbingMode` directly (0=Automatic, 1=Preferred, 2=Disallowed). Default: `TabbingDisallowed` (GLFW/SDL3/Qt6 enterprise pattern). Researched winit, GLFW, SDL3, Qt6. No-op on Windows/Linux.
+- **`GOGPU_RENDER_MODE=auto|cpu|gpu`** (ADR-020) — adapter-aware 2D render mode. `auto`: CPU rasterizer on software adapter (60 FPS vs 0.65 FPS with SPIR-V interpreter), GPU on real hardware. `cpu`: force CPU rasterizer. `gpu`: force GPU path (for shader testing). `Config.WithRenderMode()` builder.
+- **`AdapterInfo()`** on gpuContextAdapter — maps wgpu `DeviceType` to gpucontext `AdapterType` (Discrete/Integrated/Software/Unknown).
+
+### Changed
+
+- **deps:** wgpu v0.27.0 (SPIR-V interpreter + blit fix), naga v0.17.11, gpucontext v0.17.0 (AdapterInfo)
 
 ## [0.31.1] - 2026-05-05
 
