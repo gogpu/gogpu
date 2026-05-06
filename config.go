@@ -10,13 +10,15 @@ import (
 
 const defaultTitle = "GoGPU Application"
 
-// Environment variable values for GOGPU_GRAPHICS_API.
+// Environment variable values for GOGPU_GRAPHICS_API and GOGPU_RENDER_MODE.
 const (
 	envVulkan   = "vulkan"
 	envDX12     = "dx12"
 	envMetal    = "metal"
 	envGLES     = "gles"
 	envSoftware = "software"
+	envCPU      = "cpu"
+	envGPU      = "gpu"
 )
 
 // RenderMode controls the 2D rendering path selection (ADR-020).
@@ -150,7 +152,7 @@ func graphicsAPIFromEnv() types.GraphicsAPI {
 		return types.GraphicsAPIMetal
 	case envGLES, "gl", "opengl":
 		return types.GraphicsAPIGLES
-	case envSoftware, "sw", "cpu":
+	case envSoftware, "sw", envCPU:
 		return types.GraphicsAPISoftware
 	default:
 		return types.GraphicsAPIAuto
@@ -172,9 +174,9 @@ func powerPreferenceFromEnv() gputypes.PowerPreference {
 // renderModeFromEnv reads GOGPU_RENDER_MODE environment variable.
 func renderModeFromEnv() RenderMode {
 	switch strings.ToLower(os.Getenv("GOGPU_RENDER_MODE")) {
-	case "cpu":
+	case envCPU:
 		return RenderModeCPU
-	case "gpu":
+	case envGPU:
 		return RenderModeGPU
 	default:
 		return RenderModeAuto
@@ -265,6 +267,7 @@ func (c Config) WithPowerPreference(pref gputypes.PowerPreference) Config {
 //	    WithTabbingMode(gogpu.TabbingPreferred).
 //	    WithTabbingIdentifier("com.myapp.tabs")
 //	app := gogpu.NewApp(cfg)
+//
 // WithRenderMode sets the 2D rendering path (ADR-020).
 // RenderModeAuto: CPU on software adapter, GPU on real hardware.
 // RenderModeCPU: force CPU rasterizer. RenderModeGPU: force GPU path.

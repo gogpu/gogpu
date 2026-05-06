@@ -156,6 +156,27 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 | **GLES** | Windows, Linux | `gogpu.GraphicsAPIGLES` |
 | **Software** | All (no GPU needed) | `gogpu.GraphicsAPISoftware` |
 
+### Environment Variables
+
+All settings can be overridden via environment variables (no code changes needed):
+
+| Variable | Values | Default | Purpose |
+|----------|--------|---------|---------|
+| `GOGPU_GRAPHICS_API` | `vulkan`, `dx12`, `metal`, `gles`, `software` | auto | GPU backend selection |
+| `GOGPU_POWER_PREFERENCE` | `low`, `high` | none | GPU power/performance trade-off |
+| `GOGPU_RENDER_MODE` | `auto`, `cpu`, `gpu` | auto | 2D rendering path (ADR-020) |
+| `GOGPU_DEBUG_DAMAGE` | `1` | off | Show damage region overlay (ADR-021) |
+
+```bash
+# Examples:
+GOGPU_GRAPHICS_API=vulkan ./myapp        # Force Vulkan
+GOGPU_GRAPHICS_API=software ./myapp      # Force software renderer
+GOGPU_RENDER_MODE=cpu ./myapp            # Force CPU rasterizer (benchmarking)
+GOGPU_DEBUG_DAMAGE=1 ./myapp             # Show green overlay on dirty regions
+```
+
+`Config.With*()` methods in code take precedence over environment variables.
+
 ---
 
 ## Resource Management
