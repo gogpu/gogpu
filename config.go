@@ -259,15 +259,6 @@ func (c Config) WithPowerPreference(pref gputypes.PowerPreference) Config {
 	return c
 }
 
-// WithTabbingMode sets the macOS window tabbing mode.
-//
-// Usage for terminal-style tabbing:
-//
-//	cfg := gogpu.DefaultConfig().
-//	    WithTabbingMode(gogpu.TabbingPreferred).
-//	    WithTabbingIdentifier("com.myapp.tabs")
-//	app := gogpu.NewApp(cfg)
-//
 // WithRenderMode sets the 2D rendering path (ADR-020).
 // RenderModeAuto: CPU on software adapter, GPU on real hardware.
 // RenderModeCPU: force CPU rasterizer. RenderModeGPU: force GPU path.
@@ -276,6 +267,14 @@ func (c Config) WithRenderMode(mode RenderMode) Config {
 	return c
 }
 
+// WithTabbingMode sets the macOS window tabbing mode.
+//
+// Usage for terminal-style tabbing:
+//
+//	cfg := gogpu.DefaultConfig().
+//	    WithTabbingMode(gogpu.TabbingPreferred).
+//	    WithTabbingIdentifier("com.myapp.tabs")
+//	app := gogpu.NewApp(cfg)
 func (c Config) WithTabbingMode(mode TabbingMode) Config {
 	c.TabbingMode = mode
 	return c

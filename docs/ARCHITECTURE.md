@@ -160,7 +160,35 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 app := gogpu.NewApp(gogpu.DefaultConfig().
     WithBackend(gogpu.BackendNative).
     WithGraphicsAPI(gogpu.GraphicsAPIDX12))
+
+// 2D render mode: CPU rasterizer vs GPU accelerator (ADR-020)
+app := gogpu.NewApp(gogpu.DefaultConfig().
+    WithRenderMode(gogpu.RenderModeCPU))  // force CPU rasterizer
 ```
+
+### Environment Variables
+
+All Config options can be overridden via environment variables:
+
+| Variable | Values | Default | Purpose |
+|----------|--------|---------|---------|
+| `GOGPU_GRAPHICS_API` | `vulkan`, `dx12`, `metal`, `gles`, `software` | auto | GPU backend |
+| `GOGPU_POWER_PREFERENCE` | `low`, `high` | none | GPU selection |
+| `GOGPU_RENDER_MODE` | `auto`, `cpu`, `gpu` | auto | 2D render path (ADR-020) |
+| `GOGPU_DEBUG_DAMAGE` | `1` | off | Damage region overlay (ADR-021) |
+
+### AdapterInfo
+
+`gpucontext.DeviceProvider.AdapterInfo()` exposes GPU adapter metadata:
+
+```go
+info := provider.AdapterInfo()
+// info.Type: AdapterTypeDiscrete, AdapterTypeIntegrated, AdapterTypeSoftware, AdapterTypeUnknown
+// info.Name: "NVIDIA GeForce RTX 4090", "Software Renderer", etc.
+```
+
+Used by gg for render mode auto-selection: software adapter → CPU rasterizer (60 FPS),
+real GPU → GPU accelerator. See ADR-020.
 
 ### gg
 

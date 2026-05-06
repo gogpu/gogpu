@@ -25,9 +25,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.31.0
+## Current State: v0.32.0
 
 ✅ **Production-ready** with full feature set:
+- **Adapter-aware render mode** — `GOGPU_RENDER_MODE=auto|cpu|gpu` (ADR-020). CPU rasterizer on software adapter (60 FPS), GPU on real hardware
+- **macOS native window tabbing** — `Config.WithTabbingMode()` + `WithTabbingIdentifier()` (GLFW/SDL3/Qt6 pattern, @lkmavi)
+- **AdapterInfo** — `gpucontext.DeviceProvider.AdapterInfo()` exposes adapter type for render mode decisions
 - **Runtime fullscreen** — `App.SetFullscreen(bool)`, `App.ToggleFullscreen()` on all platforms (ADR-018)
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
 - **EventFocus** — window focus/blur events on all platforms for multi-window VSync routing
@@ -57,6 +60,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.32.0** | 2026-05-06 | **Render mode** (ADR-020), **macOS tabbing** (@lkmavi), AdapterInfo, wgpu v0.27.0 |
+| **v0.31.1** | 2026-05-05 | X11 remote display auth fix (#203, @sverrehu), lint cleanup |
 | **v0.31.0** | 2026-05-01 | **Runtime fullscreen** (ADR-018) — all 4 platforms, wgpu v0.26.12, gpucontext v0.16.0 |
 | **v0.30.3** | 2026-04-30 | Multi-window deadlock + lost events fix (ADR-017), scroll accumulate+snapshot, particle sim example (@snakeru), wgpu v0.26.10 (45% validation) |
 | **v0.29.4** | 2026-04-26 | wgpu v0.26.6 — compute barriers (VAL-008/009/010) |
