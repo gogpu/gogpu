@@ -58,6 +58,31 @@ func (a *gpuContextAdapter) Adapter() gpucontext.Adapter {
 	return a.renderer.adapter
 }
 
+// AdapterInfo returns GPU adapter metadata for render mode decisions.
+func (a *gpuContextAdapter) AdapterInfo() gpucontext.AdapterInfo {
+	if a.renderer == nil || a.renderer.adapter == nil {
+		return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
+	}
+	info := a.renderer.adapter.Info()
+	return gpucontext.AdapterInfo{
+		Name: info.Name,
+		Type: mapAdapterType(info.DeviceType),
+	}
+}
+
+func mapAdapterType(dt gputypes.DeviceType) gpucontext.AdapterType {
+	switch dt {
+	case gputypes.DeviceTypeDiscreteGPU:
+		return gpucontext.AdapterTypeDiscrete
+	case gputypes.DeviceTypeIntegratedGPU:
+		return gpucontext.AdapterTypeIntegrated
+	case gputypes.DeviceTypeCPU:
+		return gpucontext.AdapterTypeSoftware
+	default:
+		return gpucontext.AdapterTypeUnknown
+	}
+}
+
 // Size returns the current window size in logical points (DIP).
 // Implements gpucontext.WindowProvider.
 func (a *gpuContextAdapter) Size() (width, height int) {
