@@ -183,13 +183,12 @@ func (a *App) Run() error {
 	// Store the primary platform window for per-window operations.
 	a.platWindow = platWindow
 
-	// Initialize input state BEFORE setting up event callbacks.
-	// This ensures keyboard/mouse state is captured from the first event.
-	// (Follows Ebitengine/GLFW/SDL pattern - state must exist before callbacks)
-	a.inputState = input.New()
-
-	// Initialize eventSourceAdapter for input event dispatch.
-	a.eventSource = &eventSourceAdapter{app: a}
+	// Ensure input subsystems exist. Both EventSource() and Input() use
+	// lazy init so callers can register callbacks before Run(). We must
+	// NOT overwrite instances that were already created — UI frameworks
+	// register callbacks on the EventSource obtained before Run().
+	_ = a.Input()       // ensures a.inputState is initialized
+	_ = a.EventSource() // ensures a.eventSource is initialized
 
 	// Enable rendering during Win32 modal drag/resize loop.
 	//

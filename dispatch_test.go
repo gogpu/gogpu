@@ -28,6 +28,44 @@ func addTestWindow(app *App, id platform.WindowID) *Window {
 
 // --- Key event dispatch tests ---
 
+// Regression test: EventSource() called before Run() must preserve callbacks.
+// Bug: Run() unconditionally overwrote a.eventSource with a new instance,
+// discarding callbacks registered by UI frameworks before Run().
+func TestEventSource_CallbacksSurviveInit(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	var received bool
+	es := app.EventSource()
+	es.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		received = true
+	})
+
+	// Simulate what Run() does — ensure subsystems exist without overwriting.
+	_ = app.Input()
+	_ = app.EventSource()
+
+	if app.eventSource == nil {
+		t.Fatal("eventSource is nil after init")
+	}
+	app.eventSource.dispatchKeyPress(gpucontext.KeyA, 0)
+
+	if !received {
+		t.Error("callback registered before init was lost — eventSource was overwritten")
+	}
+}
+
+func TestInput_StateSurvivesInit(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	state1 := app.Input()
+	_ = app.EventSource() // triggers init path
+	state2 := app.Input()
+
+	if state1 != state2 {
+		t.Error("Input() returned different instance after init — inputState was overwritten")
+	}
+}
+
 func TestDispatchKeyEvent_RoutesToCorrectWindow(t *testing.T) {
 	app := newTestApp()
 	id := platform.NewWindowID()

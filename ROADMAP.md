@@ -60,6 +60,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.32.2** | 2026-05-07 | Fix EventSource callback loss on Run() — lazy init for pre-Run() registrations |
 | **v0.32.1** | 2026-05-07 | **Centralized input dispatch** (ADR-021, #210, @lkmavi) — multi-window input fix, per-window callbacks, 54 tests |
 | **v0.32.0** | 2026-05-06 | **Render mode** (ADR-020), **macOS tabbing** (@lkmavi), AdapterInfo, wgpu v0.27.0 |
 | **v0.31.1** | 2026-05-05 | X11 remote display auth fix (#203, @sverrehu), lint cleanup |
