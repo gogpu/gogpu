@@ -38,6 +38,19 @@ type Event struct {
 	PhysicalWidth  int  // for resize events: physical pixels (GPU framebuffer)
 	PhysicalHeight int  // for resize events: physical pixels (GPU framebuffer)
 	Focused        bool // for focus events: true = gained focus, false = lost focus
+
+	// Keyboard (EventKeyDown, EventKeyUp)
+	Key  gpucontext.Key
+	Mods gpucontext.Modifiers
+
+	// Character input (EventChar)
+	Char rune
+
+	// Pointer (EventPointer*)
+	Pointer gpucontext.PointerEvent
+
+	// Scroll (EventScroll)
+	Scroll gpucontext.ScrollEvent
 }
 
 // EventType represents the type of platform event.
@@ -48,6 +61,15 @@ const (
 	EventClose
 	EventResize
 	EventFocus
+	EventKeyDown
+	EventKeyUp
+	EventChar
+	EventPointerDown
+	EventPointerUp
+	EventPointerMove
+	EventPointerEnter
+	EventPointerLeave
+	EventScroll
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.
@@ -188,18 +210,6 @@ type PlatformWindow interface {
 
 	// CursorMode returns the current cursor mode.
 	CursorMode() int
-
-	// SetPointerCallback registers a callback for pointer events.
-	SetPointerCallback(fn func(gpucontext.PointerEvent))
-
-	// SetScrollCallback registers a callback for scroll events.
-	SetScrollCallback(fn func(gpucontext.ScrollEvent))
-
-	// SetKeyCallback registers a callback for keyboard events.
-	SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool))
-
-	// SetCharCallback registers a callback for Unicode character input.
-	SetCharCallback(fn func(char rune))
 
 	// SetModalFrameCallback registers a callback for platform modal operations.
 	SetModalFrameCallback(fn func())

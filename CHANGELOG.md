@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.1] - 2026-05-07
+
+### Fixed
+
+- **Multi-window: secondary windows receive no input events** ([#210](https://github.com/gogpu/gogpu/issues/210), ADR-021, @lkmavi) — `setupInputEvents()` wired keyboard/pointer/scroll/char callbacks only on the primary window. Secondary windows created via `NewWindow()` were deaf to all input. Refactored to centralized event dispatch: all input events now flow through `PollEvents()` with `WindowID` tagging (same path as close/resize/focus). Removed per-window callback registration from `PlatformWindow` interface. Matches winit, SDL3, Qt6 enterprise pattern. Researched 6 frameworks (winit, SDL3, Qt6, GTK4, GLFW, Wails 3).
+
+### Added
+
+- **Per-window input callbacks** — `Window.SetOnKeyPress()`, `SetOnKeyRelease()`, `SetOnTextInput()`, `SetOnPointer()`, `SetOnScroll()`. Each window can have its own input handlers. `App.EventSource()` receives events from whichever window is focused.
+- **54 new tests** — centralized dispatch routing, multi-window event isolation, per-window callback setters, WindowManager operations.
+
 ## [0.32.0] - 2026-05-06
 
 ### Added

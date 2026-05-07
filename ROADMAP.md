@@ -60,6 +60,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.32.1** | 2026-05-07 | **Centralized input dispatch** (ADR-021, #210, @lkmavi) — multi-window input fix, per-window callbacks, 54 tests |
 | **v0.32.0** | 2026-05-06 | **Render mode** (ADR-020), **macOS tabbing** (@lkmavi), AdapterInfo, wgpu v0.27.0 |
 | **v0.31.1** | 2026-05-05 | X11 remote display auth fix (#203, @sverrehu), lint cleanup |
 | **v0.31.0** | 2026-05-01 | **Runtime fullscreen** (ADR-018) — all 4 platforms, wgpu v0.26.12, gpucontext v0.16.0 |
@@ -109,6 +110,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - [x] App.NewWindow() + real window creation + GPU surface (v0.28.0)
 - [x] EventFocus on all platforms — Win32, X11, Wayland, macOS (v0.28.1)
 - [x] WindowID on all events for multi-window routing (v0.28.1)
+- [x] Centralized input dispatch — all input through PollEvents() with WindowID (ADR-021, v0.32.1)
+- [x] Per-window input callbacks — SetOnKeyPress, SetOnPointer, SetOnScroll, etc. (v0.32.1)
 - [ ] VSync mode switching on focus change (surface reconfigure)
 - [ ] Window types: Normal, Dialog, Tool, Popup with parent-child
 - [ ] Close-as-request (OnClose returns bool to reject)

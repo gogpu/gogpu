@@ -36,6 +36,15 @@ const (
 	EventTypeClose
 	EventTypeResize
 	EventTypeFocus
+	EventTypeKeyDown
+	EventTypeKeyUp
+	EventTypeChar
+	EventTypePointerDown
+	EventTypePointerUp
+	EventTypePointerMove
+	EventTypePointerEnter
+	EventTypePointerLeave
+	EventTypeScroll
 )
 
 // PlatformEvent represents a platform event.
@@ -45,6 +54,19 @@ type PlatformEvent struct {
 	Width   int
 	Height  int
 	Focused bool // for focus events: true = gained, false = lost
+
+	// Keyboard (EventTypeKeyDown, EventTypeKeyUp)
+	Key  gpucontext.Key
+	Mods gpucontext.Modifiers
+
+	// Character input (EventTypeChar)
+	Char rune
+
+	// Pointer (EventTypePointer*)
+	Pointer gpucontext.PointerEvent
+
+	// Scroll (EventTypeScroll)
+	Scroll gpucontext.ScrollEvent
 }
 
 // xlibHandle holds the Xlib Display* pointer required for Vulkan surface creation.
@@ -93,12 +115,7 @@ type x11Window struct {
 	fullscreen      bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 
-	// Callbacks for pointer, scroll, and keyboard events
-	pointerCallback  func(gpucontext.PointerEvent)
-	scrollCallback   func(gpucontext.ScrollEvent)
-	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
-	charCallback     func(rune)
-	callbackMu       sync.RWMutex
+	callbackMu sync.RWMutex
 
 	// Graphics context for BlitPixels (software backend presentation).
 	// Lazily created on first BlitPixels call. Bound to this window's drawable.
@@ -1011,70 +1028,38 @@ func (p *Platform) Destroy() {
 	p.keymap = nil
 }
 
-// SetPointerCallback registers a callback for pointer events.
-func (p *Platform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.pointerCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// SetScrollCallback registers a callback for scroll events.
-func (p *Platform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.scrollCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// SetKeyCallback registers a callback for keyboard events.
-func (p *Platform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.keyboardCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// SetCharCallback registers a callback for Unicode character input.
-// TODO: Implement via libxkbcommon xkb_state_key_get_utf8 for full Unicode support.
-func (p *Platform) SetCharCallback(fn func(rune)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.charCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// dispatchPointerEvent dispatches a pointer event to the registered callback.
+// dispatchPointerEvent pushes a pointer event to the event queue.
 func (w *x11Window) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	w.callbackMu.RLock()
-	callback := w.pointerCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(ev)
+	var evType EventType
+	switch ev.Type {
+	case gpucontext.PointerDown:
+		evType = EventTypePointerDown
+	case gpucontext.PointerUp:
+		evType = EventTypePointerUp
+	case gpucontext.PointerMove:
+		evType = EventTypePointerMove
+	case gpucontext.PointerEnter:
+		evType = EventTypePointerEnter
+	case gpucontext.PointerLeave:
+		evType = EventTypePointerLeave
+	default:
+		evType = EventTypePointerMove
 	}
+	w.queueEvent(PlatformEvent{Type: evType, Pointer: ev})
 }
 
-// dispatchScrollEvent dispatches a scroll event to the registered callback.
+// dispatchScrollEvent pushes a scroll event to the event queue.
 func (w *x11Window) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	w.callbackMu.RLock()
-	callback := w.scrollCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(ev)
-	}
+	w.queueEvent(PlatformEvent{Type: EventTypeScroll, Scroll: ev})
 }
 
-// dispatchKeyEvent dispatches a keyboard event to the registered callback.
+// dispatchKeyEvent pushes a keyboard event to the event queue.
 func (w *x11Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	w.callbackMu.RLock()
-	callback := w.keyboardCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(key, mods, pressed)
+	evType := EventTypeKeyDown
+	if !pressed {
+		evType = EventTypeKeyUp
 	}
+	w.queueEvent(PlatformEvent{Type: evType, Key: key, Mods: mods})
 }
 
 // handleKeyEvent processes a key press or release event.
@@ -1107,14 +1092,9 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 		keysym := keymap.KeycodeToKeysym(keycode, shift, capsLock)
 		str := KeysymToString(keysym)
 		if str != "" {
-			w.callbackMu.RLock()
-			cb := w.charCallback
-			w.callbackMu.RUnlock()
-			if cb != nil {
-				for _, r := range str {
-					if r >= 32 && r != 127 {
-						cb(r)
-					}
+			for _, r := range str {
+				if r >= 32 && r != 127 {
+					w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
 				}
 			}
 		}

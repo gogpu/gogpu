@@ -34,12 +34,7 @@ type darwinWindow struct {
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 
-	// Callbacks for pointer, scroll, keyboard, and character input events
-	pointerCallback  func(gpucontext.PointerEvent)
-	scrollCallback   func(gpucontext.ScrollEvent)
-	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
-	charCallback     func(rune)
-	callbackMu       sync.RWMutex
+	callbackMu sync.RWMutex
 
 	// Timestamp reference for event timing
 	startTime time.Time
@@ -353,34 +348,6 @@ func (dw *darwinPlatformWindow) IsFullscreen() bool {
 	return false
 }
 
-func (dw *darwinPlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w := dw.platform.primary
-	w.callbackMu.Lock()
-	w.pointerCallback = fn
-	w.callbackMu.Unlock()
-}
-
-func (dw *darwinPlatformWindow) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w := dw.platform.primary
-	w.callbackMu.Lock()
-	w.scrollCallback = fn
-	w.callbackMu.Unlock()
-}
-
-func (dw *darwinPlatformWindow) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w := dw.platform.primary
-	w.callbackMu.Lock()
-	w.keyboardCallback = fn
-	w.callbackMu.Unlock()
-}
-
-func (dw *darwinPlatformWindow) SetCharCallback(fn func(rune)) {
-	w := dw.platform.primary
-	w.callbackMu.Lock()
-	w.charCallback = fn
-	w.callbackMu.Unlock()
-}
-
 func (dw *darwinPlatformWindow) SetModalFrameCallback(_ func()) {}
 
 func (dw *darwinPlatformWindow) BlitPixels(pixels []byte, width, height int) error {
@@ -652,60 +619,46 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	return true
 }
 
-// dispatchPointerEvent dispatches a pointer event to the registered callback.
-// Called from handleEvent with w.eventMu held. Releases eventMu during callback
-// to avoid deadlocks if the callback calls back into platform methods.
+// dispatchPointerEvent pushes a pointer event to the event queue.
+// Called from handleEvent with w.eventMu held.
 func (w *darwinWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	w.callbackMu.RLock()
-	callback := w.pointerCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		w.eventMu.Unlock()
-		callback(ev)
-		w.eventMu.Lock()
+	var evType EventType
+	switch ev.Type {
+	case gpucontext.PointerDown:
+		evType = EventPointerDown
+	case gpucontext.PointerUp:
+		evType = EventPointerUp
+	case gpucontext.PointerMove:
+		evType = EventPointerMove
+	case gpucontext.PointerEnter:
+		evType = EventPointerEnter
+	case gpucontext.PointerLeave:
+		evType = EventPointerLeave
+	default:
+		evType = EventPointerMove
 	}
+	w.events = append(w.events, Event{Type: evType, Pointer: ev})
 }
 
-// dispatchScrollEvent dispatches a scroll event to the registered callback.
+// dispatchScrollEvent pushes a scroll event to the event queue.
 // Called from handleEvent with w.eventMu held.
 func (w *darwinWindow) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	w.callbackMu.RLock()
-	callback := w.scrollCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		w.eventMu.Unlock()
-		callback(ev)
-		w.eventMu.Lock()
-	}
+	w.events = append(w.events, Event{Type: EventScroll, Scroll: ev})
 }
 
-// dispatchKeyEvent dispatches a keyboard event to the registered callback.
+// dispatchKeyEvent pushes a keyboard event to the event queue.
 // Called from handleEvent with w.eventMu held.
 func (w *darwinWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	w.callbackMu.RLock()
-	callback := w.keyboardCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		w.eventMu.Unlock()
-		callback(key, mods, pressed)
-		w.eventMu.Lock()
+	evType := EventKeyDown
+	if !pressed {
+		evType = EventKeyUp
 	}
+	w.events = append(w.events, Event{Type: evType, Key: key, Mods: mods})
 }
 
 // dispatchCharFromEvent extracts characters from an NSEvent and dispatches them.
 // Called from handleEvent with w.eventMu held.
 func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
-	w.callbackMu.RLock()
-	callback := w.charCallback
-	w.callbackMu.RUnlock()
-
-	if callback == nil {
-		return
-	}
-
 	// Get [NSEvent characters] → NSString
 	nsstr := darwin.GetCharacters(event)
 	if nsstr.IsNil() {
@@ -727,22 +680,17 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
 	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
-	// Release lock before calling user callback to avoid deadlocks
-	w.eventMu.Unlock()
-
-	// Decode UTF-8 runes and dispatch each non-control character
+	// Decode UTF-8 runes and push each non-control character to event queue
 	for i := 0; i < len(data); {
 		r, size := utf8.DecodeRune(data[i:])
 		if r == utf8.RuneError && size <= 1 {
 			break // end of valid UTF-8
 		}
 		if r >= 32 && r != 127 {
-			callback(r)
+			w.events = append(w.events, Event{Type: EventChar, Char: r})
 		}
 		i += size
 	}
-
-	w.eventMu.Lock()
 }
 
 // setCursorImpl changes the mouse cursor shape using NSCursor.

@@ -52,12 +52,7 @@ type waylandWindow struct {
 	// Keyboard focus tracking
 	keyboardFocused bool
 
-	// Callbacks for pointer, scroll, and keyboard events
-	pointerCallback  func(gpucontext.PointerEvent)
-	scrollCallback   func(gpucontext.ScrollEvent)
-	keyboardCallback func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
-	charCallback     func(rune)
-	callbackMu       sync.RWMutex
+	callbackMu sync.RWMutex
 }
 
 // waylandPlatform implements the Platform interface using Wayland.
@@ -163,6 +158,24 @@ func (p *x11Platform) PollEvents() Event {
 		}
 	case x11.EventTypeFocus:
 		return Event{Type: EventFocus, Focused: event.Focused}
+	case x11.EventTypeKeyDown:
+		return Event{Type: EventKeyDown, Key: event.Key, Mods: event.Mods}
+	case x11.EventTypeKeyUp:
+		return Event{Type: EventKeyUp, Key: event.Key, Mods: event.Mods}
+	case x11.EventTypeChar:
+		return Event{Type: EventChar, Char: event.Char}
+	case x11.EventTypePointerDown:
+		return Event{Type: EventPointerDown, Pointer: event.Pointer}
+	case x11.EventTypePointerUp:
+		return Event{Type: EventPointerUp, Pointer: event.Pointer}
+	case x11.EventTypePointerMove:
+		return Event{Type: EventPointerMove, Pointer: event.Pointer}
+	case x11.EventTypePointerEnter:
+		return Event{Type: EventPointerEnter, Pointer: event.Pointer}
+	case x11.EventTypePointerLeave:
+		return Event{Type: EventPointerLeave, Pointer: event.Pointer}
+	case x11.EventTypeScroll:
+		return Event{Type: EventScroll, Scroll: event.Scroll}
 	default:
 		return Event{Type: EventNone}
 	}
@@ -284,22 +297,6 @@ func (w *x11PlatformWindow) IsFullscreen() bool {
 
 func (w *x11PlatformWindow) Close() { w.platform.inner.CloseWindow() }
 
-func (w *x11PlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w.platform.inner.SetPointerCallback(fn)
-}
-
-func (w *x11PlatformWindow) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w.platform.inner.SetScrollCallback(fn)
-}
-
-func (w *x11PlatformWindow) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w.platform.inner.SetKeyCallback(fn)
-}
-
-func (w *x11PlatformWindow) SetCharCallback(fn func(rune)) {
-	w.platform.inner.SetCharCallback(fn)
-}
-
 // BlitPixels copies RGBA pixel data to the window using X11 PutImage.
 func (w *x11PlatformWindow) BlitPixels(pixels []byte, width, height int) error {
 	return w.platform.inner.BlitPixels(pixels, width, height)
@@ -401,22 +398,6 @@ func (w *waylandPlatformWindow) IsFullscreen() bool {
 }
 
 func (w *waylandPlatformWindow) Close() { w.platform.CloseWindow() }
-
-func (w *waylandPlatformWindow) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w.platform.SetPointerCallback(fn)
-}
-
-func (w *waylandPlatformWindow) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w.platform.SetScrollCallback(fn)
-}
-
-func (w *waylandPlatformWindow) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w.platform.SetKeyCallback(fn)
-}
-
-func (w *waylandPlatformWindow) SetCharCallback(fn func(rune)) {
-	w.platform.SetCharCallback(fn)
-}
 
 func (w *waylandPlatformWindow) SetModalFrameCallback(_ func()) {}
 
@@ -841,12 +822,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				shift := mods&gpucontext.ModShift != 0
 				capsLock := mods&gpucontext.ModCapsLock != 0
 				if r := evdevKeycodeToRune(key, shift, capsLock); r != 0 {
-					w.callbackMu.RLock()
-					cb := w.charCallback
-					w.callbackMu.RUnlock()
-					if cb != nil {
-						cb(r)
-					}
+					w.queueEvent(Event{Type: EventChar, Char: r})
 				}
 			}
 		},
@@ -1092,37 +1068,38 @@ func (w *waylandWindow) eventTimestamp() time.Duration {
 	return time.Since(w.startTime)
 }
 
-// dispatchPointerEvent dispatches a pointer event to the registered callback.
+// dispatchPointerEvent pushes a pointer event to the event queue.
 func (w *waylandWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	w.callbackMu.RLock()
-	callback := w.pointerCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(ev)
+	var evType EventType
+	switch ev.Type {
+	case gpucontext.PointerDown:
+		evType = EventPointerDown
+	case gpucontext.PointerUp:
+		evType = EventPointerUp
+	case gpucontext.PointerMove:
+		evType = EventPointerMove
+	case gpucontext.PointerEnter:
+		evType = EventPointerEnter
+	case gpucontext.PointerLeave:
+		evType = EventPointerLeave
+	default:
+		evType = EventPointerMove
 	}
+	w.queueEvent(Event{Type: evType, Pointer: ev})
 }
 
-// dispatchScrollEvent dispatches a scroll event to the registered callback.
+// dispatchScrollEvent pushes a scroll event to the event queue.
 func (w *waylandWindow) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	w.callbackMu.RLock()
-	callback := w.scrollCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(ev)
-	}
+	w.queueEvent(Event{Type: EventScroll, Scroll: ev})
 }
 
-// dispatchKeyEvent dispatches a keyboard event to the registered callback.
+// dispatchKeyEvent pushes a keyboard event to the event queue.
 func (w *waylandWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	w.callbackMu.RLock()
-	callback := w.keyboardCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(key, mods, pressed)
+	evType := EventKeyDown
+	if !pressed {
+		evType = EventKeyUp
 	}
+	w.queueEvent(Event{Type: evType, Key: key, Mods: mods})
 }
 
 // queueEvent appends a platform event to the window's event queue.
@@ -1887,39 +1864,6 @@ func (p *waylandPlatform) Destroy() {
 // Wayland uses async configure events, so resize is never blocking.
 func (p *waylandPlatform) InSizeMove() bool {
 	return false
-}
-
-// SetPointerCallback registers a callback for pointer events.
-func (p *waylandPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.pointerCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// SetScrollCallback registers a callback for scroll events.
-func (p *waylandPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.scrollCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// SetKeyCallback registers a callback for keyboard events.
-func (p *waylandPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.keyboardCallback = fn
-	w.callbackMu.Unlock()
-}
-
-// SetCharCallback registers a callback for Unicode character input.
-// TODO: Implement via libxkbcommon xkb_state_key_get_utf8 for full Unicode support.
-func (p *waylandPlatform) SetCharCallback(fn func(rune)) {
-	w := p.primary
-	w.callbackMu.Lock()
-	w.charCallback = fn
-	w.callbackMu.Unlock()
 }
 
 // SetModalFrameCallback is a no-op on Wayland.

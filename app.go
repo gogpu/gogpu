@@ -188,8 +188,8 @@ func (a *App) Run() error {
 	// (Follows Ebitengine/GLFW/SDL pattern - state must exist before callbacks)
 	a.inputState = input.New()
 
-	// Wire platform callbacks to eventSourceAdapter for input events
-	a.setupInputEvents()
+	// Initialize eventSourceAdapter for input event dispatch.
+	a.eventSource = &eventSourceAdapter{app: a}
 
 	// Enable rendering during Win32 modal drag/resize loop.
 	//
@@ -368,8 +368,8 @@ func (a *App) processEventsMultiThread() {
 	}
 
 	// Handle secondary window resize events.
-	for _, ev := range secondaryResizes {
-		a.handleSecondaryResize(ev)
+	for i := range secondaryResizes {
+		a.handleSecondaryResize(secondaryResizes[i])
 	}
 
 	// Dispatch end-of-frame events (gestures computed from pointer events)
@@ -423,8 +423,98 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 			a.windowManager.setFocus(event.WindowID)
 		}
 		a.RequestRedraw()
+
+	case platform.EventKeyDown:
+		a.dispatchKeyEvent(event, true)
+	case platform.EventKeyUp:
+		a.dispatchKeyEvent(event, false)
+	case platform.EventChar:
+		a.dispatchCharEvent(event)
+	case platform.EventPointerDown, platform.EventPointerUp, platform.EventPointerMove,
+		platform.EventPointerEnter, platform.EventPointerLeave:
+		a.dispatchPointerEvent(event)
+	case platform.EventScroll:
+		a.dispatchScrollEvent(event)
 	}
 	return lastResize, secondaryResizes
+}
+
+// dispatchKeyEvent handles EventKeyDown and EventKeyUp from the platform.
+func (a *App) dispatchKeyEvent(event *platform.Event, pressed bool) {
+	w := a.windowManager.get(event.WindowID)
+	a.dispatchKeyToWindow(w, event.Key, event.Mods, pressed)
+	a.dispatchKeyToEventSource(event.Key, event.Mods, pressed)
+	a.dispatchKeyToInputState(event.Key, pressed)
+}
+
+func (a *App) dispatchKeyToWindow(w *Window, key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	if w == nil {
+		return
+	}
+	if pressed && w.onKeyPress != nil {
+		w.onKeyPress(key, mods)
+	}
+	if !pressed && w.onKeyRelease != nil {
+		w.onKeyRelease(key, mods)
+	}
+}
+
+func (a *App) dispatchKeyToEventSource(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
+	if a.eventSource == nil {
+		return
+	}
+	if pressed {
+		a.eventSource.dispatchKeyPress(key, mods)
+	} else {
+		a.eventSource.dispatchKeyRelease(key, mods)
+	}
+}
+
+func (a *App) dispatchKeyToInputState(key gpucontext.Key, pressed bool) {
+	if a.inputState == nil {
+		return
+	}
+	inputKey := gpucontextKeyToInputKey(key)
+	if inputKey != input.KeyUnknown {
+		a.inputState.Keyboard().SetKey(inputKey, pressed)
+	}
+}
+
+// dispatchCharEvent handles EventChar from the platform.
+func (a *App) dispatchCharEvent(event *platform.Event) {
+	w := a.windowManager.get(event.WindowID)
+	if w != nil && w.onTextInput != nil {
+		w.onTextInput(string(event.Char))
+	}
+	if a.eventSource != nil {
+		a.eventSource.dispatchTextInput(string(event.Char))
+	}
+}
+
+// dispatchPointerEvent handles pointer events (down/up/move/enter/leave) from the platform.
+func (a *App) dispatchPointerEvent(event *platform.Event) {
+	w := a.windowManager.get(event.WindowID)
+	if w != nil && w.onPointer != nil {
+		w.onPointer(event.Pointer)
+	}
+	if a.eventSource != nil {
+		a.eventSource.dispatchPointerEvent(event.Pointer)
+	}
+	a.updateMouseStateFromPointer(event.Pointer)
+}
+
+// dispatchScrollEvent handles EventScroll from the platform.
+func (a *App) dispatchScrollEvent(event *platform.Event) {
+	w := a.windowManager.get(event.WindowID)
+	if w != nil && w.onScroll != nil {
+		w.onScroll(event.Scroll)
+	}
+	if a.eventSource != nil {
+		a.eventSource.dispatchScrollEventDetailed(event.Scroll)
+	}
+	if a.inputState != nil {
+		a.inputState.Mouse().SetScroll(float32(event.Scroll.DeltaX), float32(event.Scroll.DeltaY))
+	}
 }
 
 type windowFrame struct {
@@ -852,55 +942,6 @@ func (a *App) updateMouseStateFromPointer(ev gpucontext.PointerEvent) {
 	case gpucontext.PointerUp:
 		a.inputState.Mouse().SetButton(button, false)
 	}
-}
-
-// setupInputEvents wires platform callbacks to eventSourceAdapter.
-// This enables W3C Pointer Events, detailed scroll events, and keyboard events
-// to flow from the platform layer to the gpucontext event system.
-func (a *App) setupInputEvents() {
-	// Ensure eventSource exists
-	if a.eventSource == nil {
-		a.eventSource = &eventSourceAdapter{app: a}
-	}
-
-	// Wire pointer events from platform to eventSource
-	a.platWindow.SetPointerCallback(func(ev gpucontext.PointerEvent) {
-		a.eventSource.dispatchPointerEvent(ev)
-		a.updateMouseStateFromPointer(ev)
-	})
-
-	// Wire scroll events from platform to eventSource
-	a.platWindow.SetScrollCallback(func(ev gpucontext.ScrollEvent) {
-		a.eventSource.dispatchScrollEventDetailed(ev)
-
-		// Update input state for Ebiten-style polling
-		if a.inputState != nil {
-			a.inputState.Mouse().SetScroll(float32(ev.DeltaX), float32(ev.DeltaY))
-		}
-	})
-
-	// Wire keyboard events from platform to eventSource
-	a.platWindow.SetKeyCallback(func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-		// Dispatch to callbacks (gpucontext.EventSource interface)
-		if pressed {
-			a.eventSource.dispatchKeyPress(key, mods)
-		} else {
-			a.eventSource.dispatchKeyRelease(key, mods)
-		}
-
-		// Update input state for Ebiten-style polling
-		if a.inputState != nil {
-			inputKey := gpucontextKeyToInputKey(key)
-			if inputKey != input.KeyUnknown {
-				a.inputState.Keyboard().SetKey(inputKey, pressed)
-			}
-		}
-	})
-
-	// Wire character input from platform to eventSource
-	a.platWindow.SetCharCallback(func(char rune) {
-		a.eventSource.dispatchTextInput(string(char))
-	})
 }
 
 // gpucontextKeyToInputKey converts gpucontext.Key to input.Key.

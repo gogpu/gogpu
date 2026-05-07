@@ -465,11 +465,6 @@ type win32Window struct {
 	savedPlacement windowPlacement
 	savedStyle     uint32
 
-	// Callbacks for pointer, scroll, keyboard, and character input events
-	pointerCallback    func(gpucontext.PointerEvent)
-	scrollCallback     func(gpucontext.ScrollEvent)
-	keyboardCallback   func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)
-	charCallback       func(rune)
 	highSurrogate      uint16 // UTF-16 high surrogate for emoji/CJK supplementary chars
 	modalFrameCallback func() // Called on WM_TIMER during modal drag/resize
 	callbackMu         sync.RWMutex
@@ -800,22 +795,6 @@ func (w *win32Window) CursorMode() int {
 	return w.cursorMode
 }
 
-func (w *win32Window) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w.setPointerCallback(fn)
-}
-
-func (w *win32Window) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w.setScrollCallback(fn)
-}
-
-func (w *win32Window) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w.setKeyCallback(fn)
-}
-
-func (w *win32Window) SetCharCallback(fn func(char rune)) {
-	w.setCharCallback(fn)
-}
-
 func (w *win32Window) SetModalFrameCallback(fn func()) {
 	w.setModalFrameCallback(fn)
 }
@@ -925,46 +904,6 @@ func (w *win32Window) InSizeMove() bool {
 
 func (p *windowsPlatform) GetHandle() (instance, window uintptr) {
 	return uintptr(p.hinstance), uintptr(p.primary.hwnd)
-}
-
-func (p *windowsPlatform) SetPointerCallback(fn func(gpucontext.PointerEvent)) {
-	p.primary.setPointerCallback(fn)
-}
-
-func (w *win32Window) setPointerCallback(fn func(gpucontext.PointerEvent)) {
-	w.callbackMu.Lock()
-	w.pointerCallback = fn
-	w.callbackMu.Unlock()
-}
-
-func (p *windowsPlatform) SetScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	p.primary.setScrollCallback(fn)
-}
-
-func (w *win32Window) setScrollCallback(fn func(gpucontext.ScrollEvent)) {
-	w.callbackMu.Lock()
-	w.scrollCallback = fn
-	w.callbackMu.Unlock()
-}
-
-func (p *windowsPlatform) SetKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	p.primary.setKeyCallback(fn)
-}
-
-func (w *win32Window) setKeyCallback(fn func(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool)) {
-	w.callbackMu.Lock()
-	w.keyboardCallback = fn
-	w.callbackMu.Unlock()
-}
-
-func (p *windowsPlatform) SetCharCallback(fn func(rune)) {
-	p.primary.setCharCallback(fn)
-}
-
-func (w *win32Window) setCharCallback(fn func(rune)) {
-	w.callbackMu.Lock()
-	w.charCallback = fn
-	w.callbackMu.Unlock()
 }
 
 // SetModalFrameCallback registers a callback invoked via WM_TIMER during
@@ -1506,33 +1445,34 @@ func extractXButton(wParam uintptr) gpucontext.Button {
 }
 
 func (w *win32Window) dispatchPointerEvent(ev gpucontext.PointerEvent) {
-	w.callbackMu.RLock()
-	callback := w.pointerCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(ev)
+	var evType EventType
+	switch ev.Type {
+	case gpucontext.PointerDown:
+		evType = EventPointerDown
+	case gpucontext.PointerUp:
+		evType = EventPointerUp
+	case gpucontext.PointerMove:
+		evType = EventPointerMove
+	case gpucontext.PointerEnter:
+		evType = EventPointerEnter
+	case gpucontext.PointerLeave:
+		evType = EventPointerLeave
+	default:
+		evType = EventPointerMove
 	}
+	w.platform.queueEvent(Event{WindowID: w.id, Type: evType, Pointer: ev})
 }
 
 func (w *win32Window) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	w.callbackMu.RLock()
-	callback := w.scrollCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(ev)
-	}
+	w.platform.queueEvent(Event{WindowID: w.id, Type: EventScroll, Scroll: ev})
 }
 
 func (w *win32Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifiers, pressed bool) {
-	w.callbackMu.RLock()
-	callback := w.keyboardCallback
-	w.callbackMu.RUnlock()
-
-	if callback != nil {
-		callback(key, mods, pressed)
+	evType := EventKeyDown
+	if !pressed {
+		evType = EventKeyUp
 	}
+	w.platform.queueEvent(Event{WindowID: w.id, Type: evType, Key: key, Mods: mods})
 }
 
 // Virtual key code constants for keyboard handling.
@@ -2483,12 +2423,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		w.highSurrogate = 0
 		// Filter control characters (Ctrl+A..Z = 0x01..0x1A, DEL = 0x7F)
 		if char >= 32 && char != 127 {
-			w.callbackMu.RLock()
-			callback := w.charCallback
-			w.callbackMu.RUnlock()
-			if callback != nil {
-				callback(char)
-			}
+			p.queueEvent(Event{WindowID: w.id, Type: EventChar, Char: char})
 		}
 		return 0
 
@@ -2499,12 +2434,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 		char := rune(wParam)
 		if char >= 32 && char != 127 {
-			w.callbackMu.RLock()
-			callback := w.charCallback
-			w.callbackMu.RUnlock()
-			if callback != nil {
-				callback(char)
-			}
+			p.queueEvent(Event{WindowID: w.id, Type: EventChar, Char: char})
 		}
 		return 0
 

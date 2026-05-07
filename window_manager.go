@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/wgpu"
 )
 
@@ -26,10 +27,15 @@ type Window struct {
 	platWindow platform.PlatformWindow // underlying platform window
 
 	// Per-window callbacks
-	onDraw   func(*Context)
-	onResize func(int, int)
-	onClose  func() bool // return false to reject close
-	visible  bool
+	onDraw       func(*Context)
+	onResize     func(int, int)
+	onClose      func() bool // return false to reject close
+	onKeyPress   func(gpucontext.Key, gpucontext.Modifiers)
+	onKeyRelease func(gpucontext.Key, gpucontext.Modifiers)
+	onTextInput  func(string)
+	onPointer    func(gpucontext.PointerEvent)
+	onScroll     func(gpucontext.ScrollEvent)
+	visible      bool
 }
 
 // ID returns the unique identifier for this window.
@@ -53,6 +59,31 @@ func (w *Window) SetOnResize(fn func(int, int)) {
 // Return false from the callback to reject the close request.
 func (w *Window) SetOnClose(fn func() bool) {
 	w.onClose = fn
+}
+
+// SetOnKeyPress sets the per-window key press callback.
+func (w *Window) SetOnKeyPress(fn func(gpucontext.Key, gpucontext.Modifiers)) {
+	w.onKeyPress = fn
+}
+
+// SetOnKeyRelease sets the per-window key release callback.
+func (w *Window) SetOnKeyRelease(fn func(gpucontext.Key, gpucontext.Modifiers)) {
+	w.onKeyRelease = fn
+}
+
+// SetOnTextInput sets the per-window text input callback.
+func (w *Window) SetOnTextInput(fn func(string)) {
+	w.onTextInput = fn
+}
+
+// SetOnPointer sets the per-window pointer event callback.
+func (w *Window) SetOnPointer(fn func(gpucontext.PointerEvent)) {
+	w.onPointer = fn
+}
+
+// SetOnScroll sets the per-window scroll event callback.
+func (w *Window) SetOnScroll(fn func(gpucontext.ScrollEvent)) {
+	w.onScroll = fn
 }
 
 // Close requests this window to close.

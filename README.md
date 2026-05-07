@@ -342,6 +342,32 @@ app.OnUpdate(func(dt float64) {
 
 All input methods are thread-safe and work with the frame-based update loop.
 
+### Multi-Window Input
+
+Each window can have its own input handlers. `App.EventSource()` receives events from whichever window is focused:
+
+```go
+// Create secondary window
+w2, _ := app.NewWindow(gogpu.DefaultConfig().WithTitle("Inspector"))
+
+// Per-window input
+w2.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+    // fires only when w2 is focused
+})
+w2.SetOnPointer(func(ev gpucontext.PointerEvent) {
+    // pointer events for this window
+})
+
+// App-level: receives from ANY focused window
+app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+    if key == gpucontext.KeyN && mods.HasControl() {
+        // Ctrl+N works regardless of which window is focused
+    }
+})
+```
+
+All input events flow through centralized dispatch with `WindowID` routing (winit/SDL3/Qt6 pattern).
+
 ### Event-Driven Rendering
 
 GoGPU uses a three-state rendering model for optimal power efficiency:
@@ -468,8 +494,10 @@ Log levels: `Debug` (texture creation, pipeline state), `Info` (backend selected
 ## Architecture
 
 GoGPU uses **multi-thread architecture** (Ebiten/Gio pattern) for professional responsiveness:
-- **Main thread:** Window events only (Win32/Cocoa/X11 message pump)
+- **Main thread:** Window events only (Win32/Cocoa/X11 message pump), centralized input dispatch
 - **Render thread:** All GPU operations (device, swapchain, commands)
+
+All input events (keyboard, pointer, scroll, text) flow through a single centralized event queue with `WindowID` tagging — the same pattern used by winit, SDL3, and Qt6.
 
 This ensures windows never show "Not Responding" during heavy GPU operations.
 

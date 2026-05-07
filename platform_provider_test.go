@@ -36,16 +36,12 @@ func (m *mockWindow) PhysicalSize() (int, int) {
 	}
 	return int(float64(m.width) * s), int(float64(m.height) * s)
 }
-func (m *mockWindow) GetHandle() (uintptr, uintptr)                                   { return 0, 0 }
-func (m *mockWindow) InSizeMove() bool                                                { return false }
-func (m *mockWindow) SetTitle(_ string)                                               {}
-func (m *mockWindow) SetPointerCallback(func(gpucontext.PointerEvent))                {}
-func (m *mockWindow) SetScrollCallback(func(gpucontext.ScrollEvent))                  {}
-func (m *mockWindow) SetKeyCallback(func(gpucontext.Key, gpucontext.Modifiers, bool)) {}
-func (m *mockWindow) SetCharCallback(func(rune))                                      {}
-func (m *mockWindow) SetModalFrameCallback(func())                                    {}
-func (m *mockWindow) Destroy()                                                        {}
-func (m *mockWindow) ScaleFactor() float64                                            { return m.scaleFactor }
+func (m *mockWindow) GetHandle() (uintptr, uintptr) { return 0, 0 }
+func (m *mockWindow) InSizeMove() bool              { return false }
+func (m *mockWindow) SetTitle(_ string)             {}
+func (m *mockWindow) SetModalFrameCallback(func())  {}
+func (m *mockWindow) Destroy()                      {}
+func (m *mockWindow) ScaleFactor() float64          { return m.scaleFactor }
 func (m *mockWindow) PrepareFrame() platform.PrepareFrameResult {
 	w, h := m.PhysicalSize()
 	return platform.PrepareFrameResult{
