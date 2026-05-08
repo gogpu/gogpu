@@ -60,6 +60,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.32.3** | 2026-05-08 | **Three-mode render loop** (ADR-023) — IDLE/ANIMATING/CONTINUOUS, lazy acquire, 10%→<1% GPU for UI |
 | **v0.32.2** | 2026-05-07 | Fix EventSource callback loss on Run() — lazy init for pre-Run() registrations |
 | **v0.32.1** | 2026-05-07 | **Centralized input dispatch** (ADR-021, #210, @lkmavi) — multi-window input fix, per-window callbacks, 54 tests |
 | **v0.32.0** | 2026-05-06 | **Render mode** (ADR-020), **macOS tabbing** (@lkmavi), AdapterInfo, wgpu v0.27.0 |

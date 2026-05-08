@@ -257,10 +257,11 @@ func (a *App) Run() error {
 	}
 	a.windowManager.add(a.primaryWindow)
 
-	// Main loop with three-state event-driven model:
+	// Main loop with three rendering modes (ADR-023):
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
-	//   2. ANIMATING: Active animations — render at VSync (smooth 60fps)
-	//   3. CONTINUOUS: ContinuousRender=true — always render (game loop)
+	//   2. ANIMATING: StartAnimation() — loop active, onUpdate every tick,
+	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
+	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
 	a.running = true
 	a.lastFrame = time.Now()
 	a.invalidator = newInvalidator(a.manager.WakeUp)
@@ -268,12 +269,13 @@ func (a *App) Run() error {
 	a.invalidator.Invalidate() // Request initial frame
 
 	for a.running && !a.platWindow.ShouldClose() {
-		// Determine rendering state
-		continuous := a.config.ContinuousRender || a.animations.IsAnimating()
+		// Three-mode state detection (ADR-023)
+		continuousRender := a.config.ContinuousRender
+		animating := a.animations.IsAnimating()
 		invalidated := a.invalidator.Consume()
 
-		if !continuous && !invalidated {
-			// IDLE STATE: Block on OS events (0% CPU, <1ms response)
+		if !continuousRender && !animating && !invalidated {
+			// IDLE: block on OS events (0% CPU, <1ms response)
 			a.manager.WaitEvents()
 		}
 
@@ -305,16 +307,22 @@ func (a *App) Run() error {
 			a.inputState.Update()
 		}
 
-		// Call update callback (main thread - logic updates)
+		// onUpdate: ALWAYS when loop is active (ANIMATING + CONTINUOUS).
+		// UI frameworks tick animations, process signals, run layout here.
+		// If something changed, they call RequestRedraw() → invalidated = true.
 		if a.onUpdate != nil {
 			a.onUpdate(deltaTime)
 		}
 
-		// Render frame if needed.
-		// Render only when explicitly requested (invalidated) or in continuous mode.
-		// Platform events (mouse move, etc.) only trigger a render when the UI
-		// framework calls RequestRedraw() in response — not on every event.
-		if continuous || invalidated {
+		// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
+		if a.invalidator.Consume() {
+			invalidated = true
+		}
+
+		// OnDraw: CONTINUOUS = every VSync (games), otherwise only when dirty.
+		// ANIMATING mode: onUpdate runs every tick, OnDraw only on RequestRedraw.
+		// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
+		if continuousRender || invalidated {
 			a.renderFrameMultiThread()
 		}
 	}
@@ -573,13 +581,11 @@ func (a *App) renderFrameMultiThread() {
 				continue
 			}
 
-			// Determine which platform window to use for PrepareFrame.
+			// Lazy acquire: store state for deferred beginFrame.
+			// beginFrame is called on first draw call, not upfront.
+			// If OnDraw produces no GPU work → no acquire, no present.
 			platWin := frame.window.platWindow
-
-			// Begin frame for this window's surface.
-			if !ws.beginFrame(platWin, a.renderer.device, a.renderer.adapter) {
-				continue
-			}
+			ws.prepareLazyAcquire(platWin, a.renderer.device, a.renderer.adapter)
 
 			// Set renderer's currentSurface so draw methods target this window.
 			a.renderer.currentSurface = ws
@@ -588,8 +594,11 @@ func (a *App) renderFrameMultiThread() {
 			ctx := newContextForSurface(a.renderer, ws, frame.scale)
 			frame.onDraw(ctx)
 
-			// End frame: flush clear, present, release view.
-			a.renderer.endFrameForSurface(ws)
+			// End frame only if beginFrame was actually called (lazy acquire fired).
+			if ws.frameStarted {
+				a.renderer.endFrameForSurface(ws)
+			}
+			ws.resetLazyState()
 			a.renderer.currentSurface = nil
 		}
 

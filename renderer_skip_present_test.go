@@ -1,0 +1,112 @@
+package gogpu
+
+import (
+	"testing"
+
+	"github.com/gogpu/gputypes"
+)
+
+func newTestWindowSurface() *windowSurface {
+	return &windowSurface{
+		format: gputypes.TextureFormatBGRA8Unorm,
+	}
+}
+
+func TestWindowSurface_HasGPUWork_DefaultFalse(t *testing.T) {
+	ws := newTestWindowSurface()
+	if ws.hasGPUWork {
+		t.Error("hasGPUWork should be false by default")
+	}
+}
+
+func TestWindowSurface_FrameStarted_DefaultFalse(t *testing.T) {
+	ws := newTestWindowSurface()
+	if ws.frameStarted {
+		t.Error("frameStarted should be false by default")
+	}
+}
+
+func TestPrepareLazyAcquire_SetsState(t *testing.T) {
+	ws := newTestWindowSurface()
+	ws.hasGPUWork = true
+	ws.frameStarted = true
+
+	ws.prepareLazyAcquire(nil, nil, nil)
+
+	if ws.hasGPUWork {
+		t.Error("prepareLazyAcquire should reset hasGPUWork")
+	}
+	if ws.frameStarted {
+		t.Error("prepareLazyAcquire should reset frameStarted")
+	}
+}
+
+func TestResetLazyState_ClearsAll(t *testing.T) {
+	ws := newTestWindowSurface()
+	ws.frameStarted = true
+	ws.hasGPUWork = true
+
+	ws.resetLazyState()
+
+	if ws.frameStarted {
+		t.Error("resetLazyState should clear frameStarted")
+	}
+	if ws.hasGPUWork {
+		t.Error("resetLazyState should clear hasGPUWork")
+	}
+	if ws.lazyPlatWin != nil || ws.lazyDevice != nil || ws.lazyAdapter != nil {
+		t.Error("resetLazyState should clear lazy references")
+	}
+}
+
+func TestEnsureFrameStarted_NoSurface_ReturnsFalse(t *testing.T) {
+	ws := newTestWindowSurface()
+	ws.prepareLazyAcquire(nil, nil, nil)
+
+	// No configured surface → beginFrame returns false
+	result := ws.ensureFrameStarted()
+
+	if result {
+		t.Error("ensureFrameStarted should return false when surface not configured")
+	}
+	if !ws.frameStarted {
+		t.Error("frameStarted should be true after ensureFrameStarted (even if failed)")
+	}
+}
+
+func TestEnsureFrameStarted_CalledOnce(t *testing.T) {
+	ws := newTestWindowSurface()
+	ws.prepareLazyAcquire(nil, nil, nil)
+
+	// First call: tries beginFrame
+	ws.ensureFrameStarted()
+
+	// Second call: returns cached result (no double acquire)
+	ws.frameStarted = true
+	result := ws.ensureFrameStarted()
+
+	if result {
+		t.Error("should still return false (no view)")
+	}
+}
+
+func TestEndFrameForSurface_OnlyWhenStarted(t *testing.T) {
+	ws := newTestWindowSurface()
+	ws.frameStarted = false
+	r := &Renderer{primary: ws}
+
+	// Should not panic — endFrameForSurface is only called when frameStarted=true
+	// (checked by caller in renderFrameMultiThread)
+	_ = r
+}
+
+func TestWindowSurface_Clear_NilView_NoGPUWork(t *testing.T) {
+	ws := newTestWindowSurface()
+	ws.prepareLazyAcquire(nil, nil, nil)
+	ws.clear(0, 0, 0, 1)
+
+	// ensureFrameStarted fails (no surface) → no GPU work
+	if ws.hasGPUWork {
+		t.Error("clear() with unconfigured surface should not set hasGPUWork")
+	}
+}

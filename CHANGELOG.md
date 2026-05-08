@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.3] - 2026-05-08
+
+### Added
+
+- **Three-mode render loop** (ADR-023) — `StartAnimation()` no longer forces OnDraw every VSync. Three modes: IDLE (WaitEvents blocks, 0% CPU), ANIMATING (loop active, onUpdate every tick, OnDraw only on `RequestRedraw()`), CONTINUOUS (`WithContinuousRender(true)`, OnDraw every VSync for games). UI spinner: 10% GPU → <1%. Games unchanged. Researched 7 enterprise frameworks (winit, Qt6, Flutter, Gio, Ebiten, SDL3, Chrome).
+- **Lazy swapchain acquire** (FEAT-SKIP-PRESENT-001) — `beginFrame` (swapchain acquire) deferred until first draw call via `ensureFrameStarted()`. If `OnDraw` produces no GPU work, no swapchain acquire or present. Defense in depth safety net for three-mode loop. 8 tests.
+
+### Changed
+
+- **deps:** wgpu v0.27.0 → v0.27.1 (ARCH-001, coverage, panic→error), naga v0.17.11 → v0.17.13 (transitive), golang.org/x/sys v0.43.0 → v0.44.0
+
 ## [0.32.2] - 2026-05-07
 
 ### Fixed

@@ -175,7 +175,12 @@ func (c *Context) Renderer() *Renderer {
 // Use this with ggcanvas.RenderDirect for zero-copy GPU rendering,
 // bypassing the GPU→CPU→GPU readback path.
 func (c *Context) SurfaceView() *wgpu.TextureView {
-	return c.activeSurface().currentView
+	ws := c.activeSurface()
+	if !ws.ensureFrameStarted() {
+		return nil
+	}
+	ws.hasGPUWork = true
+	return ws.currentView
 }
 
 // PresentTexture draws a texture filling the entire surface.

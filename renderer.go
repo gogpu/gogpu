@@ -58,6 +58,22 @@ type windowSurface struct {
 	// compositor (Vulkan VK_KHR_incremental_present, DX12 Present1, GLES
 	// eglSwapBuffersWithDamageKHR, Software partial BitBlt/XPutImage).
 	damageRects []image.Rectangle
+
+	// hasGPUWork tracks whether any draw calls were issued this frame.
+	// When false after OnDraw, no swapchain acquire/present happened
+	// (lazy acquire pattern). Reset at frame boundary.
+	hasGPUWork bool
+
+	// frameStarted tracks whether beginFrame was called this frame cycle.
+	// With lazy acquire, beginFrame is deferred until the first draw call.
+	// If OnDraw produces no GPU work, beginFrame is never called → no
+	// swapchain acquire/present → zero GPU overhead.
+	frameStarted bool
+
+	// Lazy acquire state — stored by prepareForDraw, consumed by ensureFrameStarted.
+	lazyPlatWin platform.PlatformWindow
+	lazyDevice  *wgpu.Device
+	lazyAdapter *wgpu.Adapter
 }
 
 // Renderer manages the GPU rendering pipeline.
@@ -520,12 +536,18 @@ func (ws *windowSurface) beginFrame(platWin platform.PlatformWindow, device *wgp
 	// Reset frame state for new frame
 	ws.frameCleared = false
 	ws.hasPendingClear = false
+	ws.hasGPUWork = false
 
 	return true
 }
 
 // EndFrame presents the rendered frame on the primary window.
 func (r *Renderer) EndFrame() {
+	if !r.primary.frameStarted {
+		r.pollSubmissions()
+		return
+	}
+
 	// Flush any pending clear that wasn't consumed by a draw call.
 	// This handles the case where user calls ClearColor without drawing.
 	r.primary.flushClear(r.device, r)
@@ -568,6 +590,35 @@ func (ws *windowSurface) present() {
 	}
 }
 
+// prepareLazyAcquire stores state for deferred beginFrame.
+// The actual swapchain acquire happens on first draw call via ensureFrameStarted.
+func (ws *windowSurface) prepareLazyAcquire(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) {
+	ws.frameStarted = false
+	ws.hasGPUWork = false
+	ws.lazyPlatWin = platWin
+	ws.lazyDevice = device
+	ws.lazyAdapter = adapter
+}
+
+// ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
+// Returns true if frame is ready for rendering.
+func (ws *windowSurface) ensureFrameStarted() bool {
+	if ws.frameStarted {
+		return ws.currentView != nil
+	}
+	ws.frameStarted = true
+	return ws.beginFrame(ws.lazyPlatWin, ws.lazyDevice, ws.lazyAdapter)
+}
+
+// resetLazyState clears lazy acquire references after frame cycle.
+func (ws *windowSurface) resetLazyState() {
+	ws.lazyPlatWin = nil
+	ws.lazyDevice = nil
+	ws.lazyAdapter = nil
+	ws.frameStarted = false
+	ws.hasGPUWork = false
+}
+
 // releaseFrame releases per-frame resources after presentation.
 func (ws *windowSurface) releaseFrame() {
 	if ws.currentView != nil {
@@ -588,11 +639,12 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 
 // clear defers a clear command on this window's surface.
 func (ws *windowSurface) clear(red, green, blue, alpha float64) {
-	if ws.currentView == nil {
+	if !ws.ensureFrameStarted() {
 		return
 	}
 	ws.pendingClearColor = gputypes.Color{R: red, G: green, B: blue, A: alpha}
 	ws.hasPendingClear = true
+	ws.hasGPUWork = true
 }
 
 // flushClear applies any pending clear immediately as a standalone render pass.
@@ -721,9 +773,10 @@ func (r *Renderer) initTrianglePipeline() error {
 // DrawTriangle draws the built-in colored triangle.
 func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	ws := r.activeSurface()
-	if ws.currentView == nil {
+	if !ws.ensureFrameStarted() {
 		return nil
 	}
+	ws.hasGPUWork = true
 
 	// Initialize pipeline on first use
 	if r.trianglePipeline == nil {
@@ -960,9 +1013,10 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 // This is an internal method called by Context.DrawTextureEx.
 func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
 	ws := r.activeSurface()
-	if ws.currentView == nil {
+	if !ws.ensureFrameStarted() {
 		return nil // No frame in progress
 	}
+	ws.hasGPUWork = true
 
 	// Ensure pipeline is initialized (lazy init on first draw)
 	if !r.texQuadPipelineInited {
