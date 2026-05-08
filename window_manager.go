@@ -22,6 +22,7 @@ type WindowID = platform.WindowID
 // implement PlatformManager.
 type Window struct {
 	id         WindowID
+	platformID platform.WindowID // platform-native ID for event routing
 	config     Config
 	surface    *windowSurface
 	platWindow platform.PlatformWindow // underlying platform window
@@ -121,12 +122,16 @@ type WindowManager struct {
 	windows map[WindowID]*Window
 	order   []WindowID // insertion order for deterministic render iteration
 	focused WindowID   // currently focused window, zero if none
+	// ID pool
+	freeIDs []WindowID // available IDs for reuse
+	nextID  WindowID   // 1, 2, 3... (monotonically increasing when pool is empty)
 }
 
 // newWindowManager creates a new empty WindowManager.
 func newWindowManager() *WindowManager {
 	return &WindowManager{
 		windows: make(map[WindowID]*Window, 8),
+		nextID:  1,
 	}
 }
 
@@ -199,6 +204,45 @@ func (wm *WindowManager) setFocus(id WindowID) {
 	}
 }
 
+// allocate returns a fresh WindowID, reusing freed IDs when possible.
+// Must be called under mu.Lock.
+func (wm *WindowManager) allocate() WindowID {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+
+	if len(wm.freeIDs) > 0 {
+		// pop from pool
+		id := wm.freeIDs[len(wm.freeIDs)-1]
+		wm.freeIDs = wm.freeIDs[:len(wm.freeIDs)-1]
+		return id
+	}
+	id := wm.nextID
+	wm.nextID++
+	return id
+}
+
+// release returns a WindowID back to the pool for future reuse.
+// Must be called under mu.Lock.
+func (wm *WindowManager) release(id WindowID) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+
+	wm.freeIDs = append(wm.freeIDs, id)
+}
+
+// getByPlatformID returns the window with the given platform ID, or nil.
+// Used for routing platform events (where the event carries the platform's window ID).
+func (wm *WindowManager) getByPlatformID(pid platform.WindowID) *Window {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	for _, w := range wm.windows {
+		if w.platformID == pid {
+			return w
+		}
+	}
+	return nil
+}
+
 // NewWindow creates a new secondary window with its own rendering surface.
 // The window is registered in the WindowManager and participates in the
 // multi-window frame loop. Set OnDraw via Window.SetOnDraw() to render content.
@@ -263,9 +307,13 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		}
 	})
 
+	// Allocate internal ID
+	internalID := a.windowManager.allocate()
+
 	// Create Window and register in WindowManager.
 	w := &Window{
-		id:         platWindow.ID(),
+		id:         internalID,
+		platformID: platWindow.ID(),
 		config:     config,
 		surface:    ws,
 		platWindow: platWindow,
@@ -313,6 +361,7 @@ func (a *App) closeSecondaryWindow(id WindowID) {
 	}
 
 	a.windowManager.remove(id)
+	a.windowManager.release(id)
 
 	// Release GPU surface on the render thread.
 	if w.surface != nil {
@@ -327,4 +376,8 @@ func (a *App) closeSecondaryWindow(id WindowID) {
 	}
 
 	w.visible = false
+
+	if a.onAnyWindowClosed != nil {
+		a.onAnyWindowClosed(id)
+	}
 }

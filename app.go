@@ -11,6 +11,13 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
+type appRenderLoop interface {
+	RunOnRenderThreadVoid(fn func())
+	Stop()
+	RequestResize(w, h uint32)
+	ConsumePendingResize() (uint32, uint32, bool)
+}
+
 // App is the main application type.
 // It manages the window, rendering, and application lifecycle.
 //
@@ -27,13 +34,14 @@ type App struct {
 	renderer   *Renderer
 
 	// Multi-thread rendering
-	renderLoop *thread.RenderLoop
+	renderLoop appRenderLoop
 
 	// User callbacks
-	onDraw   func(*Context)
-	onUpdate func(float64) // delta time in seconds
-	onResize func(int, int)
-	onClose  func() // called before renderer destruction
+	onDraw            func(*Context)
+	onUpdate          func(float64) // delta time in seconds
+	onResize          func(int, int)
+	onClose           func() // called before renderer destruction
+	onAnyWindowClosed func(WindowID)
 
 	// State
 	running   bool
@@ -105,6 +113,15 @@ func (a *App) OnResize(fn func(width, height int)) *App {
 // The callback runs on the render thread.
 func (a *App) OnClose(fn func()) *App {
 	a.onClose = fn
+	return a
+}
+
+// OnAnyWindowClosed registers a callback invoked after a window has been
+// destroyed (secondary) or when the primary window closes.
+// The callback receives the internal window ID.
+// Use it for app‑level observations like updating a tab count.
+func (a *App) OnAnyWindowClosed(fn func(WindowID)) *App {
+	a.onAnyWindowClosed = fn
 	return a
 }
 
@@ -246,8 +263,12 @@ func (a *App) Run() error {
 	// a.renderer (proven path); WindowManager tracks the window for
 	// future multi-window iteration.
 	a.windowManager = newWindowManager()
+
+	// Allocate internal ID from pool
+	internalID := a.windowManager.allocate()
 	a.primaryWindow = &Window{
-		id:         platWindow.ID(),
+		id:         internalID,
+		platformID: platWindow.ID(),
 		config:     a.config,
 		surface:    a.renderer.primary,
 		platWindow: a.platWindow,
@@ -387,7 +408,7 @@ func (a *App) processEventsMultiThread() {
 
 // handleSecondaryResize resizes a secondary window's surface on the render thread.
 func (a *App) handleSecondaryResize(ev platform.Event) {
-	w := a.windowManager.get(ev.WindowID)
+	w := a.windowManager.getByPlatformID(ev.WindowID)
 	if w == nil || w.surface == nil {
 		return
 	}
@@ -410,7 +431,7 @@ func (a *App) handleSecondaryResize(ev platform.Event) {
 // classifyEvent routes a single platform event to the appropriate handler.
 func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, secondaryResizes []platform.Event) (*platform.Event, []platform.Event) {
 	isPrimary := event.WindowID == 0 ||
-		(a.primaryWindow != nil && event.WindowID == a.primaryWindow.id)
+		(a.primaryWindow != nil && event.WindowID == a.primaryWindow.platformID)
 
 	switch event.Type {
 	case platform.EventResize:
@@ -420,14 +441,12 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 			secondaryResizes = append(secondaryResizes, *event)
 		}
 	case platform.EventClose:
-		if isPrimary {
-			a.running = false
-		} else {
-			a.closeSecondaryWindow(event.WindowID)
-		}
+		a.windowCloseEvent(event)
 	case platform.EventFocus:
 		if event.Focused {
-			a.windowManager.setFocus(event.WindowID)
+			if w := a.windowManager.getByPlatformID(event.WindowID); w != nil {
+				a.windowManager.setFocus(w.id)
+			}
 		}
 		a.RequestRedraw()
 
@@ -448,7 +467,7 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 
 // dispatchKeyEvent handles EventKeyDown and EventKeyUp from the platform.
 func (a *App) dispatchKeyEvent(event *platform.Event, pressed bool) {
-	w := a.windowManager.get(event.WindowID)
+	w := a.windowManager.getByPlatformID(event.WindowID)
 	a.dispatchKeyToWindow(w, event.Key, event.Mods, pressed)
 	a.dispatchKeyToEventSource(event.Key, event.Mods, pressed)
 	a.dispatchKeyToInputState(event.Key, pressed)
@@ -489,7 +508,7 @@ func (a *App) dispatchKeyToInputState(key gpucontext.Key, pressed bool) {
 
 // dispatchCharEvent handles EventChar from the platform.
 func (a *App) dispatchCharEvent(event *platform.Event) {
-	w := a.windowManager.get(event.WindowID)
+	w := a.windowManager.getByPlatformID(event.WindowID)
 	if w != nil && w.onTextInput != nil {
 		w.onTextInput(string(event.Char))
 	}
@@ -500,7 +519,7 @@ func (a *App) dispatchCharEvent(event *platform.Event) {
 
 // dispatchPointerEvent handles pointer events (down/up/move/enter/leave) from the platform.
 func (a *App) dispatchPointerEvent(event *platform.Event) {
-	w := a.windowManager.get(event.WindowID)
+	w := a.windowManager.getByPlatformID(event.WindowID)
 	if w != nil && w.onPointer != nil {
 		w.onPointer(event.Pointer)
 	}
@@ -512,7 +531,7 @@ func (a *App) dispatchPointerEvent(event *platform.Event) {
 
 // dispatchScrollEvent handles EventScroll from the platform.
 func (a *App) dispatchScrollEvent(event *platform.Event) {
-	w := a.windowManager.get(event.WindowID)
+	w := a.windowManager.getByPlatformID(event.WindowID)
 	if w != nil && w.onScroll != nil {
 		w.onScroll(event.Scroll)
 	}
@@ -521,6 +540,33 @@ func (a *App) dispatchScrollEvent(event *platform.Event) {
 	}
 	if a.inputState != nil {
 		a.inputState.Mouse().SetScroll(float32(event.Scroll.DeltaX), float32(event.Scroll.DeltaY))
+	}
+}
+
+// windowCloseEvent handles CloseEvent from the platform.
+func (a *App) windowCloseEvent(event *platform.Event) {
+	isPrimary := event.WindowID == 0 ||
+		(a.primaryWindow != nil && event.WindowID == a.primaryWindow.platformID)
+
+	if isPrimary {
+		if a.primaryWindow != nil && a.primaryWindow.onClose != nil && !a.primaryWindow.onClose() {
+			return
+		}
+		a.running = false
+		a.windowManager.release(a.primaryWindow.id)
+		if a.onAnyWindowClosed != nil {
+			a.onAnyWindowClosed(a.primaryWindow.id)
+		}
+		return
+	}
+
+	// Secondary window
+	w := a.windowManager.getByPlatformID(event.WindowID)
+	if w != nil && w.onClose != nil && !w.onClose() {
+		return
+	}
+	if w != nil {
+		a.closeSecondaryWindow(w.id)
 	}
 }
 

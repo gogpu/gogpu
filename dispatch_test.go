@@ -20,8 +20,11 @@ func newTestApp() *App {
 
 // addTestWindow creates a Window with the given ID, registers it in the manager,
 // and returns it for callback registration.
-func addTestWindow(app *App, id platform.WindowID) *Window {
-	w := &Window{id: id}
+func addTestWindow(app *App, platformID platform.WindowID) *Window {
+	w := &Window{
+		id:         app.windowManager.allocate(),
+		platformID: platformID,
+	}
 	app.windowManager.add(w)
 	return w
 }

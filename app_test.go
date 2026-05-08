@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gogpu/input"
+	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -530,5 +531,165 @@ func TestAppUpdateMouseStatePointerMove(t *testing.T) {
 	mx, my := app.inputState.Mouse().Position()
 	if mx != 300 || my != 400 {
 		t.Errorf("Mouse position = (%f, %f), want (300, 400)", mx, my)
+	}
+}
+
+type mockRenderLoop struct{}
+
+func (m *mockRenderLoop) RunOnRenderThreadVoid(fn func())              { fn() }
+func (m *mockRenderLoop) Stop()                                        {}
+func (m *mockRenderLoop) RequestResize(w, h uint32)                    {}
+func (m *mockRenderLoop) ConsumePendingResize() (uint32, uint32, bool) { return 0, 0, false }
+
+func TestApp_CloseSecondaryWindowRecyclesID(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		primaryWindow: nil,
+		renderLoop:    &mockRenderLoop{},
+	}
+	secID := app.windowManager.allocate()
+	sec := &Window{
+		id:         secID,
+		platformID: platform.NewWindowID(),
+		visible:    true,
+	}
+	app.windowManager.add(sec)
+
+	app.closeSecondaryWindow(secID)
+
+	if app.windowManager.get(secID) != nil {
+		t.Fatal("secondary window should be removed from manager")
+	}
+	reusedID := app.windowManager.allocate()
+	if reusedID != secID {
+		t.Errorf("expected recycled ID %d, got %d", secID, reusedID)
+	}
+}
+
+func TestApp_OnAnyWindowClosed_Chaining(t *testing.T) {
+	app := NewApp(DefaultConfig())
+	if app.OnAnyWindowClosed(func(id WindowID) {}) != app {
+		t.Error("should return *App for chaining")
+	}
+	if app.onAnyWindowClosed == nil {
+		t.Error("callback not set")
+	}
+}
+
+func TestApp_OnAnyWindowClosed_Primary(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+	}
+	pid := platform.NewWindowID()
+	app.primaryWindow = &Window{
+		id:         app.windowManager.allocate(),
+		platformID: pid,
+		visible:    true,
+	}
+	app.windowManager.add(app.primaryWindow)
+
+	var closedID WindowID
+	app.OnAnyWindowClosed(func(id WindowID) { closedID = id })
+
+	app.classifyEvent(&platform.Event{
+		Type:     platform.EventClose,
+		WindowID: pid,
+	}, nil, nil)
+
+	if app.running {
+		t.Error("app should be stopped after primary close")
+	}
+	if closedID != app.primaryWindow.id {
+		t.Errorf("got ID %d, want %d", closedID, app.primaryWindow.id)
+	}
+}
+
+func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+		running:       true,
+	}
+	pid := platform.NewWindowID()
+	app.primaryWindow = &Window{
+		id:         app.windowManager.allocate(),
+		platformID: pid,
+		visible:    true,
+	}
+	app.primaryWindow.SetOnClose(func() bool { return false })
+	app.windowManager.add(app.primaryWindow)
+
+	called := false
+	app.OnAnyWindowClosed(func(id WindowID) { called = true })
+
+	app.classifyEvent(&platform.Event{
+		Type:     platform.EventClose,
+		WindowID: pid,
+	}, nil, nil)
+
+	if called {
+		t.Error("should not be called when onClose rejects")
+	}
+	if !app.running {
+		t.Error("app should still be running")
+	}
+}
+
+func TestApp_OnAnyWindowClosed_Secondary(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		primaryWindow: nil, // важно: не мешает проверке secondary
+		renderLoop:    &mockRenderLoop{},
+	}
+	id := app.windowManager.allocate()
+	w := &Window{
+		id:         id,
+		platformID: platform.NewWindowID(),
+		visible:    true,
+	}
+	app.windowManager.add(w)
+
+	var closedID WindowID
+	app.OnAnyWindowClosed(func(id WindowID) { closedID = id })
+
+	app.closeSecondaryWindow(id)
+
+	if closedID != id {
+		t.Errorf("got ID %d, want %d", closedID, id)
+	}
+	if app.windowManager.get(id) != nil {
+		t.Error("window should be removed")
+	}
+}
+
+func TestApp_OnAnyWindowClosed_SecondaryRejected(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		primaryWindow: nil,
+		renderLoop:    &mockRenderLoop{},
+	}
+	id := app.windowManager.allocate()
+	w := &Window{
+		id:         id,
+		platformID: platform.NewWindowID(),
+		visible:    true,
+	}
+	w.SetOnClose(func() bool { return false })
+	app.windowManager.add(w)
+
+	called := false
+	app.OnAnyWindowClosed(func(id WindowID) { called = true })
+
+	app.classifyEvent(&platform.Event{
+		Type:     platform.EventClose,
+		WindowID: w.platformID,
+	}, nil, nil)
+
+	if called {
+		t.Error("should not be called when onClose rejects")
+	}
+	if app.windowManager.get(id) == nil {
+		t.Error("window should still be present")
 	}
 }
