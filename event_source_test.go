@@ -455,3 +455,34 @@ func TestButtonToMouseButton(t *testing.T) {
 		}
 	}
 }
+
+// TestOnWindowCloseCallback ensures OnWindowClose registration and dispatch work.
+func TestOnWindowCloseCallback(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	// Ensure EventSource exists and is the concrete adapter
+	es := app.EventSource()
+	adapter, ok := es.(*eventSourceAdapter)
+	if !ok {
+		t.Fatalf("EventSource() did not return *eventSourceAdapter, got %T", es)
+	}
+
+	called := false
+	var received *Window
+
+	adapter.OnWindowClose(func(w *Window) {
+		called = true
+		received = w
+	})
+
+	w := &Window{}
+
+	adapter.dispatchWindowClose(w)
+
+	if !called {
+		t.Fatal("OnWindowClose callback was not called by dispatchWindowClose")
+	}
+	if received != w {
+		t.Fatalf("OnWindowClose received wrong window pointer: got %p want %p", received, w)
+	}
+}

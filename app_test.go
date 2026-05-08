@@ -532,3 +532,27 @@ func TestAppUpdateMouseStatePointerMove(t *testing.T) {
 		t.Errorf("Mouse position = (%f, %f), want (300, 400)", mx, my)
 	}
 }
+
+func TestWindowManagerCreateAndClose(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	if app.windowManager == nil {
+		app.windowManager = newWindowManager()
+	}
+
+	w1 := &Window{id: 1}
+	w2 := &Window{id: 2}
+
+	app.windowManager.add(w1)
+	app.windowManager.add(w2)
+
+	if got := app.WindowCount(); got != 2 {
+		t.Fatalf("expected 2 windows, got %d", got)
+	}
+
+	app.closeSecondaryWindow(w2.id)
+
+	if got := app.WindowCount(); got != 1 {
+		t.Fatalf("expected 1 window after close, got %d", got)
+	}
+}

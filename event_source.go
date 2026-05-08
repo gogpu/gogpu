@@ -37,6 +37,9 @@ type eventSourceAdapter struct {
 	// Registered callbacks for GestureEventSource
 	onGesture func(gpucontext.GestureEvent)
 
+	// Registered callbacks for onWindowClose
+	onWindowClose func(*Window)
+
 	// Gesture recognizer for computing gesture deltas from pointer events
 	gestureRecognizer *GestureRecognizer
 }
@@ -147,6 +150,33 @@ func (e *eventSourceAdapter) OnGesture(fn func(gpucontext.GestureEvent)) {
 	// Initialize gesture recognizer on first registration
 	if e.gestureRecognizer == nil {
 		e.gestureRecognizer = NewGestureRecognizer()
+	}
+}
+
+// OnWindowClose registers a callback that will be invoked when a gogpu Window
+// is about to be closed. The callback receives the *Window that is closing.
+// Registering this allows the application to perform synchronous cleanup
+// (e.g., return a tab number to a pool, persist state, release resources).
+//
+// Note: the callback is invoked on the event loop / render thread context
+// where platform close events are processed. The callback should be fast
+// and non-blocking; if heavy work is required, spawn a goroutine from the
+// callback and protect shared state with mutexes.
+func (e *eventSourceAdapter) OnWindowClose(fn func(*Window)) {
+	e.onWindowClose = fn
+}
+
+// dispatchWindowClose invokes the registered OnWindowClose callback for the
+// provided window. This should be called by the App's event loop when a
+// platform EventClose is received, and it must be called *before* the
+// platform/window resources are destroyed (e.g., before calling Destroy or
+// closeSecondaryWindow). Calling it early ensures the callback can safely
+// read window properties (ID, size, etc.) and perform synchronous cleanup.
+//
+// This method is internal to the adapter and is a no-op if no callback is set.
+func (e *eventSourceAdapter) dispatchWindowClose(w *Window) {
+	if e.onWindowClose != nil {
+		e.onWindowClose(w)
 	}
 }
 

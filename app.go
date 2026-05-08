@@ -413,10 +413,24 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		}
 	case platform.EventClose:
 		if isPrimary {
+			if a.eventSource != nil {
+				a.eventSource.dispatchWindowClose(a.primaryWindow)
+			}
 			a.running = false
-		} else {
-			a.closeSecondaryWindow(event.WindowID)
+			break
 		}
+
+		// secondary
+		w := a.windowManager.get(event.WindowID)
+		if w == nil {
+			a.closeSecondaryWindow(event.WindowID)
+			break
+		}
+
+		if a.eventSource != nil {
+			a.eventSource.dispatchWindowClose(w)
+		}
+		a.closeSecondaryWindow(event.WindowID)
 	case platform.EventFocus:
 		if event.Focused {
 			a.windowManager.setFocus(event.WindowID)
