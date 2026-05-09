@@ -35,6 +35,7 @@
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
 | **Graphics** | Windowing, input handling, texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference, native macOS window tabbing |
+| **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
 | **HiDPI** | Per-monitor DPI, WM_DPICHANGED, logical/physical coordinate split |
@@ -541,6 +542,7 @@ Vulkan     DX12  Metal  GLES   Software
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
 | `window/` | Window configuration |
 | `input/` | Keyboard and mouse input |
+| `sound/` | Platform system sounds (Click, Alert, Error, Warning, Success) |
 | `internal/platform/` | Platform-specific windowing |
 | `internal/thread/` | Multi-thread rendering (RenderLoop) |
 

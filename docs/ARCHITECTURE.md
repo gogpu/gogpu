@@ -279,6 +279,7 @@ gogpu/
 ├── resource_tracker.go  # ResourceTracker: automatic GPU resource cleanup (LIFO)
 ├── gpucontext_adapter.go # gpucontext.DeviceProvider adapter
 ├── gesture.go          # GestureRecognizer (Vello-style)
+├── sound/              # Platform system sounds (winmm/NSSound/canberra)
 ├── gpu/
 │   ├── types/          # Backend type enum (BackendType)
 │   └── backend/

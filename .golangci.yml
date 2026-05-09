@@ -149,6 +149,12 @@ linters:
           - funlen       # Win32 code is verbose
           - gosec        # Platform syscalls are intentional
           - errcheck     # Win32 syscall returns are often ignored
+
+      # Sound package - platform FFI for system sounds
+      - path: sound/sound_.*\.go
+        linters:
+          - gosec        # Platform syscalls (winmm, NSSound, exec) are intentional
+          - errcheck     # Win32 PlaySoundW return is best-effort
           - unused       # dispatch methods will be used by event loop
           - unparam      # dispatch methods follow consistent signature pattern
           - dupl         # Platform event parsers have similar structure

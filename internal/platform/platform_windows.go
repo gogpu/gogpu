@@ -242,10 +242,6 @@ var (
 	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
 	procShowWindow         = user32.NewProc("ShowWindow")
 	procUpdateWindow       = user32.NewProc("UpdateWindow")
-	procSetForegroundWnd   = user32.NewProc("SetForegroundWindow")
-	procGetForegroundWnd   = user32.NewProc("GetForegroundWindow")
-	procGetWindowThreadPID = user32.NewProc("GetWindowThreadProcessId")
-	procAttachThreadInput  = user32.NewProc("AttachThreadInput")
 	procPeekMessageW       = user32.NewProc("PeekMessageW")
 	procTranslateMessage   = user32.NewProc("TranslateMessage")
 	procDispatchMessageW   = user32.NewProc("DispatchMessageW")
@@ -254,7 +250,6 @@ var (
 	procLoadCursorW        = user32.NewProc("LoadCursorW")
 	procSetCursor          = user32.NewProc("SetCursor")
 	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
-	procGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 	procDestroyWindow      = user32.NewProc("DestroyWindow")
 	procGetClientRect      = user32.NewProc("GetClientRect")
 	procClientToScreen     = user32.NewProc("ClientToScreen")
@@ -310,7 +305,6 @@ var (
 	procGetCursorPos = user32.NewProc("GetCursorPos")
 
 	// Pointer input (WM_POINTER*, Windows 8+)
-	procGetPointerType    = user32.NewProc("GetPointerType")
 	procGetPointerInfo    = user32.NewProc("GetPointerInfo")
 	procGetPointerPenInfo = user32.NewProc("GetPointerPenInfo")
 
@@ -464,7 +458,6 @@ type win32Window struct {
 	// Frameless window state
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
-	maximized       bool
 
 	// Fullscreen state (borderless fullscreen, Chromium/GLFW pattern)
 	fullscreen     bool
@@ -2251,20 +2244,15 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	case wmActivate:
 		// Release cursor grab on focus loss, re-grab on focus gain.
 		activationState := wParam & 0xFFFF
-		if activationState == waInactive {
-			// Window lost focus -- temporarily release cursor constraints
-			if w.cursorMode != 0 {
-				procClipCursor.Call(0)
-				if w.cursorHidden {
-					procShowCursorW.Call(1)
-					w.cursorHidden = false
-				}
+		if activationState == waInactive && w.cursorMode != 0 {
+			procClipCursor.Call(0)
+			if w.cursorHidden {
+				procShowCursorW.Call(1)
+				w.cursorHidden = false
 			}
-		} else {
-			// Window gained focus -- re-apply cursor mode
-			if w.cursorMode != 0 {
-				w.setCursorMode(w.cursorMode)
-			}
+		}
+		if activationState != waInactive && w.cursorMode != 0 {
+			w.setCursorMode(w.cursorMode)
 		}
 
 	case wmWakeUp:

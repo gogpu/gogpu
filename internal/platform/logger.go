@@ -21,8 +21,6 @@ func init() {
 	loggerPtr.Store(l)
 }
 
-func logger() *slog.Logger { return loggerPtr.Load() }
-
 // SetLogger sets the logger for the platform package.
 // Pass nil to restore default silent behavior.
 func SetLogger(l *slog.Logger) {

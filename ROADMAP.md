@@ -60,6 +60,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.34.0** | 2026-05-09 | **System sounds** (ADR-025) — `sound/` subpackage, winmm/NSSound/canberra, zero CGO |
 | **v0.33.0** | 2026-05-09 | **SubpixelLayout detection** (ADR-024) — LCD/ClearType auto-detect, all platforms, gpucontext v0.18.0 |
 | **v0.32.3** | 2026-05-08 | **Three-mode render loop** (ADR-023) — IDLE/ANIMATING/CONTINUOUS, lazy acquire, 10%→<1% GPU for UI |
 | **v0.32.2** | 2026-05-07 | Fix EventSource callback loss on Run() — lazy init for pre-Run() registrations |

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-05-09
+
+### Added
+
+- **`sound/` subpackage** (ADR-025) — platform system sounds for UI feedback. `sound.Play(sound.Click)` plays OS-native sounds asynchronously. Windows: winmm.dll `PlaySoundW` with registry sound scheme. macOS: NSSound via goffi. Linux: canberra-gtk-play with paplay/pw-play/aplay fallback. Zero CGO. Debounce (50ms per sound type). Disabled by default (`SetEnabled(true)` to activate). 5 system sounds (Click, Alert, Error, Warning, Success). 9 tests.
+- **`examples/sound_demo`** — demonstrates all 5 system sounds.
+
 ## [0.33.0] - 2026-05-09
 
 ### Added
