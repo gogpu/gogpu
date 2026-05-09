@@ -134,6 +134,9 @@ type PlatformManager interface {
 	// FontScale returns font size preference multiplier.
 	FontScale() float32
 
+	// SubpixelLayout returns the display's subpixel arrangement for LCD text.
+	SubpixelLayout() gpucontext.SubpixelLayout
+
 	// Destroy releases all platform resources.
 	Destroy()
 }

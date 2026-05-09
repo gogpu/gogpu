@@ -4,6 +4,8 @@ package x11
 
 import (
 	"testing"
+
+	"github.com/gogpu/gpucontext"
 )
 
 func TestParseXftDPI(t *testing.T) {
@@ -84,6 +86,94 @@ func TestParseXftDPI(t *testing.T) {
 			got := parseXftDPI(tt.resources)
 			if got != tt.want {
 				t.Errorf("parseXftDPI() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseXftRGBA(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources string
+		want      gpucontext.SubpixelLayout
+	}{
+		{
+			name:      "rgb layout",
+			resources: "Xft.rgba:\trgb\n",
+			want:      gpucontext.SubpixelRGB,
+		},
+		{
+			name:      "bgr layout",
+			resources: "Xft.rgba:\tbgr\n",
+			want:      gpucontext.SubpixelBGR,
+		},
+		{
+			name:      "vrgb layout",
+			resources: "Xft.rgba:\tvrgb\n",
+			want:      gpucontext.SubpixelVRGB,
+		},
+		{
+			name:      "vbgr layout",
+			resources: "Xft.rgba:\tvbgr\n",
+			want:      gpucontext.SubpixelVBGR,
+		},
+		{
+			name:      "none layout",
+			resources: "Xft.rgba:\tnone\n",
+			want:      gpucontext.SubpixelNone,
+		},
+		{
+			name:      "space separator",
+			resources: "Xft.rgba: rgb\n",
+			want:      gpucontext.SubpixelRGB,
+		},
+		{
+			name:      "among other resources",
+			resources: "Xft.antialias:\t1\nXft.hinting:\t1\nXft.dpi:\t168\nXft.rgba:\tbgr\n",
+			want:      gpucontext.SubpixelBGR,
+		},
+		{
+			name:      "no Xft.rgba present",
+			resources: "Xft.antialias:\t1\nXft.hinting:\t1\n",
+			want:      gpucontext.SubpixelRGB, // default
+		},
+		{
+			name:      "empty string",
+			resources: "",
+			want:      gpucontext.SubpixelRGB, // default
+		},
+		{
+			name:      "uppercase RGB",
+			resources: "Xft.rgba:\tRGB\n",
+			want:      gpucontext.SubpixelRGB,
+		},
+		{
+			name:      "mixed case",
+			resources: "Xft.rgba:\tBgr\n",
+			want:      gpucontext.SubpixelBGR,
+		},
+		{
+			name:      "unknown value defaults to RGB",
+			resources: "Xft.rgba:\tunknown\n",
+			want:      gpucontext.SubpixelRGB,
+		},
+		{
+			name:      "no trailing newline",
+			resources: "Xft.rgba:\trgb",
+			want:      gpucontext.SubpixelRGB,
+		},
+		{
+			name:      "whitespace around value",
+			resources: "Xft.rgba:  bgr  \n",
+			want:      gpucontext.SubpixelBGR,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseXftRGBA(tt.resources)
+			if got != tt.want {
+				t.Errorf("parseXftRGBA() = %v, want %v", got, tt.want)
 			}
 		})
 	}

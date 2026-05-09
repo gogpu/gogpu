@@ -251,6 +251,16 @@ naga (shader)              wgpu              go-webgpu/webgpu
 - gg GPU accelerator uses `*wgpu.Device`/`*wgpu.Queue` for render pipeline dispatch
 - All projects use compatible `gputypes.TextureFormat` etc.
 
+**gpucontext interfaces:**
+
+| Interface | Purpose | Implementor |
+|-----------|---------|-------------|
+| `DeviceProvider` | GPU device/queue/format sharing | gogpu.App |
+| `PlatformProvider` | OS capabilities (DarkMode, FontScale, SubpixelLayout) | gogpu.App |
+| `EventSource` | Input events (keyboard, mouse, scroll, IME) | gogpu.App |
+| `WindowProvider` | Window size, scale factor | gogpu.App |
+| `WindowChrome` | Frameless windows, fullscreen | gogpu.App |
+
 ## Package Structure
 
 ### gogpu

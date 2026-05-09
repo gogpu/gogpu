@@ -1240,6 +1240,13 @@ func (p *darwinPlatform) HighContrast() bool {
 // Individual apps control their own text sizing. Returns 1.0 (no scaling).
 func (p *darwinPlatform) FontScale() float32 { return 1.0 }
 
+// SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
+// macOS disabled subpixel antialiasing system-wide starting with Mojave (10.14, 2018).
+// All modern macOS versions use grayscale AA only.
+func (p *darwinPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
+	return gpucontext.SubpixelNone
+}
+
 // detectModifierKeyChange detects which modifier key was pressed/released.
 // macOS sends NSEventTypeFlagsChanged for modifier keys instead of keyDown/keyUp.
 func detectModifierKeyChange(keyCode uint16, flags darwin.NSEventModifierFlags) (gpucontext.Key, bool) {

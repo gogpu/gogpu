@@ -7,6 +7,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/gogpu/gpucontext"
+)
+
+// Linux desktop environment variable names used for display scale detection.
+const (
+	envGDKScale      = "GDK_SCALE"
+	envQTScaleFactor = "QT_SCALE_FACTOR"
 )
 
 // detectDarkMode checks environment variables and desktop settings to determine
@@ -77,6 +85,111 @@ func detectReduceMotion() bool {
 	// No reliable environment-only detection without D-Bus.
 	// D-Bus portal (org.freedesktop.portal.Settings) would be the proper solution.
 	return false
+}
+
+// detectSubpixelLayout determines the subpixel layout from environment
+// variables and fontconfig settings. Used as a fallback for Wayland
+// (which cannot read X resources) and when X11 RESOURCE_MANAGER is unavailable.
+//
+// Detection order:
+//  1. GDK_SCALE / QT_SCALE_FACTOR >= 2 → SubpixelNone (HiDPI, subpixels too small)
+//  2. Fontconfig config files (~/.config/fontconfig/fonts.conf or /etc/fonts/local.conf)
+//     <match><edit name="rgba"><const>rgb</const></edit></match>
+//  3. Default to SubpixelRGB (most common LCD arrangement)
+func detectSubpixelLayout() gpucontext.SubpixelLayout {
+	// HiDPI displays should use grayscale AA — subpixels are too small to matter.
+	if isHiDPI() {
+		return gpucontext.SubpixelNone
+	}
+
+	// Check fontconfig user config (~/.config/fontconfig/fonts.conf)
+	if layout, ok := parseFontconfigRGBA(userFontconfigPath()); ok {
+		return layout
+	}
+
+	// Check fontconfig system config
+	if layout, ok := parseFontconfigRGBA("/etc/fonts/local.conf"); ok {
+		return layout
+	}
+
+	// Default: RGB is the most common subpixel arrangement for LCDs.
+	return gpucontext.SubpixelRGB
+}
+
+// isHiDPI returns true if environment variables indicate HiDPI (scale >= 2.0).
+func isHiDPI() bool {
+	for _, envVar := range []string{envGDKScale, envQTScaleFactor} {
+		if s := os.Getenv(envVar); s != "" {
+			if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 2.0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// userFontconfigPath returns the path to the user's fontconfig configuration file.
+func userFontconfigPath() string {
+	configDir := os.Getenv("XDG_CONFIG_HOME")
+	if configDir == "" {
+		home := os.Getenv("HOME")
+		if home == "" {
+			return ""
+		}
+		configDir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(configDir, "fontconfig", "fonts.conf")
+}
+
+// parseFontconfigRGBA reads a fontconfig XML file and looks for an rgba setting.
+// Fontconfig uses XML like: <edit name="rgba"><const>rgb</const></edit>
+// Returns the layout and true if found, false otherwise.
+func parseFontconfigRGBA(path string) (gpucontext.SubpixelLayout, bool) {
+	if path == "" {
+		return gpucontext.SubpixelNone, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return gpucontext.SubpixelNone, false
+	}
+
+	content := string(data)
+
+	// Simple text search for the rgba const value in fontconfig XML.
+	// We look for patterns like: name="rgba"...<const>rgb</const>
+	// This avoids pulling in an XML parser for a single config value.
+	idx := strings.Index(content, `name="rgba"`)
+	if idx < 0 {
+		return gpucontext.SubpixelNone, false
+	}
+
+	// Find the <const> value after the rgba attribute.
+	rest := content[idx:]
+	constStart := strings.Index(rest, "<const>")
+	if constStart < 0 {
+		return gpucontext.SubpixelNone, false
+	}
+	rest = rest[constStart+len("<const>"):]
+	constEnd := strings.Index(rest, "</const>")
+	if constEnd < 0 {
+		return gpucontext.SubpixelNone, false
+	}
+
+	value := strings.TrimSpace(rest[:constEnd])
+	switch strings.ToLower(value) {
+	case "rgb":
+		return gpucontext.SubpixelRGB, true
+	case "bgr":
+		return gpucontext.SubpixelBGR, true
+	case "vrgb":
+		return gpucontext.SubpixelVRGB, true
+	case "vbgr":
+		return gpucontext.SubpixelVBGR, true
+	case "none":
+		return gpucontext.SubpixelNone, true
+	default:
+		return gpucontext.SubpixelNone, false
+	}
 }
 
 // isKDE returns true if the current desktop environment is KDE Plasma.

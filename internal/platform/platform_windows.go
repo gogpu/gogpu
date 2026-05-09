@@ -146,9 +146,15 @@ const (
 	gmemMoveable  = 0x0002
 
 	// SystemParametersInfo constants
-	spiGetClientAreaAnimation = 0x1042
-	spiGetHighContrast        = 0x0042
-	hcfHighContrastOn         = 0x00000001
+	spiGetClientAreaAnimation  = 0x1042
+	spiGetHighContrast         = 0x0042
+	spiGetFontSmoothing        = 0x004A
+	spiGetFontSmoothingType    = 0x200A
+	fontSmoothingTypeClearType = 2
+	hcfHighContrastOn          = 0x00000001
+
+	// Registry: HKEY_LOCAL_MACHINE for subpixel layout
+	hkeyLocalMachine uintptr = 0x80000002
 
 	// Frameless window constants
 	wsPopup            = 0x80000000 // WS_POPUP
@@ -1177,6 +1183,79 @@ func (p *windowsPlatform) HighContrast() bool {
 // On Windows, font scale is derived from the DPI scale factor.
 func (p *windowsPlatform) FontScale() float32 {
 	return float32(p.ScaleFactor())
+}
+
+// SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
+// Detection follows Qt6's pattern (qwindowsscreen.cpp):
+//  1. Check if font smoothing is enabled (SPI_GETFONTSMOOTHING)
+//  2. Check if ClearType is the smoothing type (SPI_GETFONTSMOOTHINGTYPE)
+//  3. Read PixelStructure from registry (Avalon.Graphics\DISPLAY1)
+//     0=flat/grayscale, 1=RGB, 2=BGR. Default RGB if ClearType is on.
+func (p *windowsPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
+	// Step 1: Check if font smoothing is enabled at all.
+	var enabled uint32
+	ret, _, _ := procSystemParametersInfoW.Call(
+		spiGetFontSmoothing, 0,
+		uintptr(unsafe.Pointer(&enabled)), 0,
+	)
+	if ret == 0 || enabled == 0 {
+		return gpucontext.SubpixelNone
+	}
+
+	// Step 2: Check if ClearType (subpixel) smoothing is active, not Standard (grayscale).
+	var smoothingType uint32
+	ret, _, _ = procSystemParametersInfoW.Call(
+		spiGetFontSmoothingType, 0,
+		uintptr(unsafe.Pointer(&smoothingType)), 0,
+	)
+	if ret == 0 || smoothingType != fontSmoothingTypeClearType {
+		return gpucontext.SubpixelNone
+	}
+
+	// Step 3: Read pixel structure from registry.
+	// HKLM\SOFTWARE\Microsoft\Avalon.Graphics\DISPLAY1\PixelStructure
+	// Values: 0=flat(grayscale), 1=RGB, 2=BGR.
+	keyPath, _ := windows.UTF16PtrFromString(`SOFTWARE\Microsoft\Avalon.Graphics\DISPLAY1`)
+	valueName, _ := windows.UTF16PtrFromString("PixelStructure")
+
+	var key uintptr
+	ret, _, _ = procRegOpenKeyExW.Call(
+		hkeyLocalMachine,
+		uintptr(unsafe.Pointer(keyPath)),
+		0, keyRead,
+		uintptr(unsafe.Pointer(&key)),
+	)
+	if ret != 0 {
+		// Registry key not found — ClearType is on but no pixel structure set.
+		// Default to RGB (most common LCD arrangement).
+		return gpucontext.SubpixelRGB
+	}
+	defer procRegCloseKey.Call(key) // RegCloseKey error is non-actionable
+
+	var pixelStructure uint32
+	var valueSize uint32 = 4
+	var valueType uint32
+	ret, _, _ = procRegQueryValueExW.Call(
+		key,
+		uintptr(unsafe.Pointer(valueName)),
+		0,
+		uintptr(unsafe.Pointer(&valueType)),
+		uintptr(unsafe.Pointer(&pixelStructure)),
+		uintptr(unsafe.Pointer(&valueSize)),
+	)
+	if ret != 0 {
+		return gpucontext.SubpixelRGB // default when ClearType is on
+	}
+
+	switch pixelStructure {
+	case 1:
+		return gpucontext.SubpixelRGB
+	case 2:
+		return gpucontext.SubpixelBGR
+	default:
+		// 0 = flat/grayscale. Unusual with ClearType on, but respect it.
+		return gpucontext.SubpixelNone
+	}
 }
 
 func (p *windowsPlatform) SetCursorMode(mode int) {

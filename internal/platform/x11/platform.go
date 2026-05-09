@@ -477,6 +477,64 @@ func parseXftDPI(resources string) float64 {
 	return 0
 }
 
+// SubpixelLayout returns the display's subpixel arrangement by reading
+// Xft.rgba from the X RESOURCE_MANAGER property on the root window.
+// Returns SubpixelNone if the X connection is not available, Xft.rgba
+// is not set, or the scale factor indicates HiDPI (>= 2.0).
+func (p *Platform) SubpixelLayout() gpucontext.SubpixelLayout {
+	// HiDPI displays use grayscale AA (subpixels too small to matter).
+	if p.scaleFactor >= 2.0 {
+		return gpucontext.SubpixelNone
+	}
+
+	if p.conn == nil {
+		return gpucontext.SubpixelNone
+	}
+
+	rootWindow := p.conn.RootWindow()
+	if rootWindow == 0 {
+		return gpucontext.SubpixelRGB
+	}
+
+	data, _, _, err := p.conn.GetProperty(rootWindow, AtomResourceManager, Atom(0), 0, 8192, false)
+	if err != nil || len(data) == 0 {
+		return gpucontext.SubpixelRGB
+	}
+
+	return parseXftRGBA(string(data))
+}
+
+// parseXftRGBA parses the Xft.rgba value from an X RESOURCE_MANAGER string.
+// The string contains lines like "Xft.rgba:\trgb" or "Xft.rgba: bgr".
+// Valid values: "rgb", "bgr", "vrgb", "vbgr", "none".
+// Returns SubpixelRGB if Xft.rgba is not found (most common LCD default).
+func parseXftRGBA(resources string) gpucontext.SubpixelLayout {
+	for _, line := range strings.Split(resources, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Xft.rgba:") {
+			continue
+		}
+		value := strings.TrimSpace(line[len("Xft.rgba:"):])
+		value = strings.ToLower(value)
+		switch value {
+		case "rgb":
+			return gpucontext.SubpixelRGB
+		case "bgr":
+			return gpucontext.SubpixelBGR
+		case "vrgb":
+			return gpucontext.SubpixelVRGB
+		case "vbgr":
+			return gpucontext.SubpixelVBGR
+		case "none":
+			return gpucontext.SubpixelNone
+		default:
+			return gpucontext.SubpixelRGB
+		}
+	}
+	// Xft.rgba not set — default to RGB (most common LCD layout).
+	return gpucontext.SubpixelRGB
+}
+
 // PollEvents processes pending X11 events.
 func (p *Platform) PollEvents() PlatformEvent {
 	w := p.primary

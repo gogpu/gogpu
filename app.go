@@ -802,6 +802,16 @@ func (a *App) FontScale() float32 {
 	return 1.0
 }
 
+// SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
+// Returns SubpixelNone when the manager is not initialized or on HiDPI displays.
+// Implements gpucontext.PlatformProvider.
+func (a *App) SubpixelLayout() gpucontext.SubpixelLayout {
+	if a.manager != nil {
+		return a.manager.SubpixelLayout()
+	}
+	return gpucontext.SubpixelNone
+}
+
 // SetFrameless enables or disables frameless window mode.
 // Implements gpucontext.WindowChrome.
 func (a *App) SetFrameless(frameless bool) {

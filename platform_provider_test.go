@@ -68,27 +68,29 @@ func (m *mockWindow) Close()               { m.closed = true }
 
 // mockManager implements platform.PlatformManager for testing.
 type mockManager struct {
-	clipboardText string
-	darkMode      bool
-	reduceMotion  bool
-	highContrast  bool
-	fontScale     float32
+	clipboardText  string
+	darkMode       bool
+	reduceMotion   bool
+	highContrast   bool
+	fontScale      float32
+	subpixelLayout gpucontext.SubpixelLayout
 }
 
 func (m *mockManager) Init() error { return nil }
 func (m *mockManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) {
 	return &mockWindow{}, nil
 }
-func (m *mockManager) PollEvents() platform.Event       { return platform.Event{} }
-func (m *mockManager) WaitEvents()                      {}
-func (m *mockManager) WakeUp()                          {}
-func (m *mockManager) ClipboardRead() (string, error)   { return m.clipboardText, nil }
-func (m *mockManager) ClipboardWrite(text string) error { m.clipboardText = text; return nil }
-func (m *mockManager) DarkMode() bool                   { return m.darkMode }
-func (m *mockManager) ReduceMotion() bool               { return m.reduceMotion }
-func (m *mockManager) HighContrast() bool               { return m.highContrast }
-func (m *mockManager) FontScale() float32               { return m.fontScale }
-func (m *mockManager) Destroy()                         {}
+func (m *mockManager) PollEvents() platform.Event                { return platform.Event{} }
+func (m *mockManager) WaitEvents()                               {}
+func (m *mockManager) WakeUp()                                   {}
+func (m *mockManager) ClipboardRead() (string, error)            { return m.clipboardText, nil }
+func (m *mockManager) ClipboardWrite(text string) error          { m.clipboardText = text; return nil }
+func (m *mockManager) DarkMode() bool                            { return m.darkMode }
+func (m *mockManager) ReduceMotion() bool                        { return m.reduceMotion }
+func (m *mockManager) HighContrast() bool                        { return m.highContrast }
+func (m *mockManager) FontScale() float32                        { return m.fontScale }
+func (m *mockManager) SubpixelLayout() gpucontext.SubpixelLayout { return m.subpixelLayout }
+func (m *mockManager) Destroy()                                  {}
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {
@@ -169,6 +171,13 @@ func TestPlatformProviderNilPlatform(t *testing.T) {
 			t.Errorf("FontScale() = %f, want 1.0", fs)
 		}
 	})
+
+	t.Run("SubpixelLayout", func(t *testing.T) {
+		sl := app.SubpixelLayout()
+		if sl != gpucontext.SubpixelNone {
+			t.Errorf("SubpixelLayout() = %v, want SubpixelNone", sl)
+		}
+	})
 }
 
 // TestWindowProviderDelegation verifies App delegates to platform correctly.
@@ -198,11 +207,12 @@ func TestWindowProviderDelegation(t *testing.T) {
 // TestPlatformProviderDelegation verifies App delegates PlatformProvider to platform.
 func TestPlatformProviderDelegation(t *testing.T) {
 	mockMgr := &mockManager{
-		clipboardText: "hello from clipboard",
-		darkMode:      true,
-		reduceMotion:  true,
-		highContrast:  true,
-		fontScale:     1.5,
+		clipboardText:  "hello from clipboard",
+		darkMode:       true,
+		reduceMotion:   true,
+		highContrast:   true,
+		fontScale:      1.5,
+		subpixelLayout: gpucontext.SubpixelBGR,
 	}
 	mockWin := &mockWindow{
 		width:       800,
@@ -295,6 +305,13 @@ func TestPlatformProviderDelegation(t *testing.T) {
 			t.Errorf("FontScale() = %f, want 1.5", fs)
 		}
 	})
+
+	t.Run("SubpixelLayout", func(t *testing.T) {
+		sl := app.SubpixelLayout()
+		if sl != gpucontext.SubpixelBGR {
+			t.Errorf("SubpixelLayout() = %v, want SubpixelBGR", sl)
+		}
+	})
 }
 
 // TestPlatformProviderFalseValues verifies delegation when platform returns false/default values.
@@ -315,5 +332,10 @@ func TestPlatformProviderFalseValues(t *testing.T) {
 	text, _ := app.ClipboardRead()
 	if text != "" {
 		t.Errorf("ClipboardRead() = %q, want empty", text)
+	}
+
+	sl := app.SubpixelLayout()
+	if sl != gpucontext.SubpixelNone {
+		t.Errorf("SubpixelLayout() = %v, want SubpixelNone (default)", sl)
 	}
 }

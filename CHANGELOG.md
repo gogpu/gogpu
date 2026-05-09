@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-05-09
+
+### Added
+
+- **SubpixelLayout detection** (ADR-024) — auto-detect display subpixel arrangement for LCD/ClearType font rendering. Windows: SystemParametersInfo + Avalon.Graphics registry (Qt6 pattern). macOS: SubpixelNone (dead since Mojave). Linux X11: Xft.rgba from X resources + HiDPI check. Linux Wayland: fontconfig XML + HiDPI env vars. 27+ tests across all platforms. Zero CGO.
+
+### Changed
+
+- **deps:** gpucontext v0.17.0 → v0.18.0 (SubpixelLayout on PlatformProvider)
+
 ## [0.32.3] - 2026-05-08
 
 ### Added

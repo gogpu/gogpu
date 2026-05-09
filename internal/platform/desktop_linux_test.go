@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gogpu/gpucontext"
 )
 
 func TestDetectDarkMode(t *testing.T) {
@@ -241,5 +243,184 @@ func TestIsDarkKDEColorScheme(t *testing.T) {
 	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, "nonexistent"))
 	if isDarkKDEColorScheme() {
 		t.Error("isDarkKDEColorScheme() = true with no config file")
+	}
+}
+
+func TestIsHiDPI(t *testing.T) {
+	tests := []struct {
+		name    string
+		envVars map[string]string
+		want    bool
+	}{
+		{"no env vars", map[string]string{}, false},
+		{"GDK_SCALE=1", map[string]string{"GDK_SCALE": "1"}, false},
+		{"GDK_SCALE=2", map[string]string{"GDK_SCALE": "2"}, true},
+		{"GDK_SCALE=3", map[string]string{"GDK_SCALE": "3"}, true},
+		{"QT_SCALE_FACTOR=1.5", map[string]string{"QT_SCALE_FACTOR": "1.5"}, false},
+		{"QT_SCALE_FACTOR=2", map[string]string{"QT_SCALE_FACTOR": "2"}, true},
+		{"invalid value", map[string]string{"GDK_SCALE": "abc"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			savedGDK := os.Getenv("GDK_SCALE")
+			savedQT := os.Getenv("QT_SCALE_FACTOR")
+			defer func() {
+				os.Setenv("GDK_SCALE", savedGDK)
+				os.Setenv("QT_SCALE_FACTOR", savedQT)
+			}()
+
+			os.Unsetenv("GDK_SCALE")
+			os.Unsetenv("QT_SCALE_FACTOR")
+			for k, v := range tt.envVars {
+				os.Setenv(k, v)
+			}
+
+			got := isHiDPI()
+			if got != tt.want {
+				t.Errorf("isHiDPI() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseFontconfigRGBA(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		wantOK     bool
+		wantLayout gpucontext.SubpixelLayout
+	}{
+		{
+			name:       "rgb",
+			content:    `<match><edit name="rgba" mode="assign"><const>rgb</const></edit></match>`,
+			wantOK:     true,
+			wantLayout: gpucontext.SubpixelRGB,
+		},
+		{
+			name:       "bgr",
+			content:    `<match><edit name="rgba" mode="assign"><const>bgr</const></edit></match>`,
+			wantOK:     true,
+			wantLayout: gpucontext.SubpixelBGR,
+		},
+		{
+			name:       "vrgb",
+			content:    `<match><edit name="rgba" mode="assign"><const>vrgb</const></edit></match>`,
+			wantOK:     true,
+			wantLayout: gpucontext.SubpixelVRGB,
+		},
+		{
+			name:       "vbgr",
+			content:    `<match><edit name="rgba" mode="assign"><const>vbgr</const></edit></match>`,
+			wantOK:     true,
+			wantLayout: gpucontext.SubpixelVBGR,
+		},
+		{
+			name:       "none",
+			content:    `<match><edit name="rgba" mode="assign"><const>none</const></edit></match>`,
+			wantOK:     true,
+			wantLayout: gpucontext.SubpixelNone,
+		},
+		{
+			name:       "no rgba setting",
+			content:    `<match><edit name="antialias"><bool>true</bool></edit></match>`,
+			wantOK:     false,
+			wantLayout: gpucontext.SubpixelNone,
+		},
+		{
+			name:       "empty file",
+			content:    "",
+			wantOK:     false,
+			wantLayout: gpucontext.SubpixelNone,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, "fonts.conf")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			layout, ok := parseFontconfigRGBA(path)
+			if ok != tt.wantOK {
+				t.Errorf("parseFontconfigRGBA() ok = %v, want %v", ok, tt.wantOK)
+			}
+			if layout != tt.wantLayout {
+				t.Errorf("parseFontconfigRGBA() layout = %v, want %v", layout, tt.wantLayout)
+			}
+		})
+	}
+}
+
+func TestParseFontconfigRGBA_NonexistentFile(t *testing.T) {
+	layout, ok := parseFontconfigRGBA("/nonexistent/path/fonts.conf")
+	if ok {
+		t.Error("parseFontconfigRGBA() ok = true for nonexistent file")
+	}
+	if layout != gpucontext.SubpixelNone {
+		t.Errorf("parseFontconfigRGBA() = %v, want SubpixelNone", layout)
+	}
+}
+
+func TestParseFontconfigRGBA_EmptyPath(t *testing.T) {
+	layout, ok := parseFontconfigRGBA("")
+	if ok {
+		t.Error("parseFontconfigRGBA() ok = true for empty path")
+	}
+	if layout != gpucontext.SubpixelNone {
+		t.Errorf("parseFontconfigRGBA() = %v, want SubpixelNone", layout)
+	}
+}
+
+func TestDetectSubpixelLayout(t *testing.T) {
+	// Save and restore env vars
+	savedGDK := os.Getenv("GDK_SCALE")
+	savedQT := os.Getenv("QT_SCALE_FACTOR")
+	savedConfig := os.Getenv("XDG_CONFIG_HOME")
+	savedHome := os.Getenv("HOME")
+	defer func() {
+		os.Setenv("GDK_SCALE", savedGDK)
+		os.Setenv("QT_SCALE_FACTOR", savedQT)
+		os.Setenv("XDG_CONFIG_HOME", savedConfig)
+		os.Setenv("HOME", savedHome)
+	}()
+
+	// Test 1: HiDPI returns SubpixelNone
+	os.Setenv("GDK_SCALE", "2")
+	os.Setenv("XDG_CONFIG_HOME", "/nonexistent")
+	os.Unsetenv("HOME")
+	got := detectSubpixelLayout()
+	if got != gpucontext.SubpixelNone {
+		t.Errorf("detectSubpixelLayout() with HiDPI = %v, want SubpixelNone", got)
+	}
+
+	// Test 2: Non-HiDPI with fontconfig
+	os.Unsetenv("GDK_SCALE")
+	os.Unsetenv("QT_SCALE_FACTOR")
+	tmpDir := t.TempDir()
+	fontconfigDir := filepath.Join(tmpDir, "fontconfig")
+	if err := os.MkdirAll(fontconfigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	fontconfigFile := filepath.Join(fontconfigDir, "fonts.conf")
+	if err := os.WriteFile(fontconfigFile, []byte(
+		`<match><edit name="rgba" mode="assign"><const>bgr</const></edit></match>`,
+	), 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	got = detectSubpixelLayout()
+	if got != gpucontext.SubpixelBGR {
+		t.Errorf("detectSubpixelLayout() with fontconfig bgr = %v, want SubpixelBGR", got)
+	}
+
+	// Test 3: No fontconfig, no HiDPI → default RGB
+	os.Setenv("XDG_CONFIG_HOME", "/nonexistent")
+	os.Setenv("HOME", "/nonexistent")
+	got = detectSubpixelLayout()
+	if got != gpucontext.SubpixelRGB {
+		t.Errorf("detectSubpixelLayout() default = %v, want SubpixelRGB", got)
 	}
 }

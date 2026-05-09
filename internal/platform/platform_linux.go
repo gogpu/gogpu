@@ -223,6 +223,15 @@ func (p *x11Platform) ClipboardRead() (string, error) { return "", nil }
 // TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
 func (p *x11Platform) ClipboardWrite(string) error { return nil }
 
+// SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
+// Delegates to the X11 platform which reads Xft.rgba from RESOURCE_MANAGER.
+func (p *x11Platform) SubpixelLayout() gpucontext.SubpixelLayout {
+	if p.inner != nil {
+		return p.inner.SubpixelLayout()
+	}
+	return gpucontext.SubpixelRGB
+}
+
 // DarkMode returns true if the system dark mode is active.
 func (p *x11Platform) DarkMode() bool { return detectDarkMode() }
 
@@ -1822,6 +1831,12 @@ func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
 // ClipboardWrite writes text to the system clipboard.
 // TODO(PLAT-008): Implement using wl_data_device and wl_data_source.
 func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
+
+// SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
+// Wayland does not expose X resources, so this falls back to fontconfig detection.
+func (p *waylandPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
+	return detectSubpixelLayout()
+}
 
 // DarkMode returns true if the system dark mode is active.
 func (p *waylandPlatform) DarkMode() bool { return detectDarkMode() }
