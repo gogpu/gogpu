@@ -121,8 +121,9 @@ func TestDebounceExpired(t *testing.T) {
 	SetEnabled(true)
 
 	// Set lastPlay to well in the past so debounce does not apply.
+	past := time.Now().Add(-time.Second)
 	state.mu.Lock()
-	state.lastPlay[int(Alert)] = time.Now().Add(-time.Second)
+	state.lastPlay[int(Alert)] = past
 	state.mu.Unlock()
 
 	Play(Alert)
@@ -131,8 +132,8 @@ func TestDebounceExpired(t *testing.T) {
 	after := state.lastPlay[int(Alert)]
 	state.mu.Unlock()
 
-	// lastPlay should have been updated because debounce expired.
-	if time.Since(after) > 100*time.Millisecond {
+	// lastPlay should have been updated (moved forward from the past value).
+	if !after.After(past) {
 		t.Error("expected lastPlay to be updated after debounce expired")
 	}
 }

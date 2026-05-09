@@ -141,7 +141,7 @@ linters:
           - funlen       # Backend wrappers have many methods
           - dupl         # Backend methods are similar by design
 
-      # Platform abstraction - platform-specific code
+      # Platform abstraction - platform-specific code (Win32/Cocoa/X11/Wayland FFI)
       - path: internal/platform/.*\.go
         linters:
           - gocyclo      # Platform code can be complex
@@ -149,6 +149,10 @@ linters:
           - funlen       # Win32 code is verbose
           - gosec        # Platform syscalls are intentional
           - errcheck     # Win32 syscall returns are often ignored
+          - dupl         # FFI wrappers intentionally similar per type (SendRect/SendSize, Lock/Confine)
+          - nestif       # Protocol handling (X11 auth, Wayland CSD) inherently nested
+          - unparam      # FFI signatures match C APIs, params may be unused on some paths
+          - unused       # Platform-specific helpers used only under certain build tags
 
       # Sound package - platform FFI for system sounds
       - path: sound/sound_.*\.go
