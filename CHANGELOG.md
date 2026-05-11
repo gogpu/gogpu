@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.2] - 2026-05-11
+
+### Fixed
+
+- **Window close lifecycle** (#213, ADR-022, @lkmavi) — `SetOnClose(func() bool)` now wired into `classifyEvent` for close rejection (e.g. "Save changes?" dialog). ID pool in `windowManager` for reuse of freed window IDs in long-running tabbed apps. `OnAnyWindowClosed(func(WindowID))` app-level observer. `InternalWindowID` type for compile-time safety between internal and platform IDs.
+
 ## [0.34.1] - 2026-05-10
 
 ### Changed
