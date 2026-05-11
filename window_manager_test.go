@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gogpu/gogpu/internal/platform"
@@ -452,5 +453,26 @@ func TestWindowManager_RemoveUnknownID(t *testing.T) {
 	wm.remove(InternalWindowID(999))
 	if wm.count() != 0 {
 		t.Error("count should remain 0 after removing unknown ID")
+	}
+}
+
+type errPlatformManager struct {
+	platform.PlatformManager
+}
+
+func (e *errPlatformManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) {
+	return nil, fmt.Errorf("simulated error")
+}
+
+func TestNewWindow_CreateWindowError(t *testing.T) {
+	app := &App{
+		manager:       &errPlatformManager{},
+		renderer:      &Renderer{},
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+	}
+	_, err := app.NewWindow(Config{})
+	if err == nil {
+		t.Error("expected error from CreateWindow")
 	}
 }
