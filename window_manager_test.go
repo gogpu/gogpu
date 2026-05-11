@@ -9,8 +9,7 @@ import (
 
 func TestWindowManager_AddGet(t *testing.T) {
 	wm := newWindowManager()
-
-	w := &Window{id: platform.NewWindowID()}
+	w := &Window{id: wm.allocate()}
 	wm.add(w)
 
 	got := wm.get(w.id)
@@ -21,8 +20,11 @@ func TestWindowManager_AddGet(t *testing.T) {
 
 func TestWindowManager_GetUnknownID(t *testing.T) {
 	wm := newWindowManager()
+	w := &Window{id: wm.allocate()}
+	wm.add(w)
 
-	got := wm.get(platform.NewWindowID())
+	unknownID := wm.allocate()
+	got := wm.get(unknownID)
 	if got != nil {
 		t.Error("get() should return nil for unknown ID")
 	}
@@ -31,7 +33,7 @@ func TestWindowManager_GetUnknownID(t *testing.T) {
 func TestWindowManager_Remove(t *testing.T) {
 	wm := newWindowManager()
 
-	w := &Window{id: platform.NewWindowID()}
+	w := &Window{id: wm.allocate()}
 	wm.add(w)
 	wm.remove(w.id)
 
@@ -50,8 +52,8 @@ func TestWindowManager_Count(t *testing.T) {
 		t.Errorf("count() = %d, want 0 for empty manager", wm.count())
 	}
 
-	w1 := &Window{id: platform.NewWindowID()}
-	w2 := &Window{id: platform.NewWindowID()}
+	w1 := &Window{id: wm.allocate()}
+	w2 := &Window{id: wm.allocate()}
 	wm.add(w1)
 	wm.add(w2)
 
@@ -63,7 +65,7 @@ func TestWindowManager_Count(t *testing.T) {
 func TestWindowManager_FocusAutoAssign(t *testing.T) {
 	wm := newWindowManager()
 
-	w1 := &Window{id: platform.NewWindowID()}
+	w1 := &Window{id: wm.allocate()}
 	wm.add(w1)
 
 	if wm.focused != w1.id {
@@ -74,8 +76,8 @@ func TestWindowManager_FocusAutoAssign(t *testing.T) {
 func TestWindowManager_FocusAfterRemove(t *testing.T) {
 	wm := newWindowManager()
 
-	w1 := &Window{id: platform.NewWindowID()}
-	w2 := &Window{id: platform.NewWindowID()}
+	w1 := &Window{id: wm.allocate()}
+	w2 := &Window{id: wm.allocate()}
 	wm.add(w1)
 	wm.add(w2)
 
@@ -90,10 +92,10 @@ func TestWindowManager_FocusAfterRemove(t *testing.T) {
 func TestWindowManager_SetFocusInvalidID(t *testing.T) {
 	wm := newWindowManager()
 
-	w := &Window{id: platform.NewWindowID()}
+	w := &Window{id: wm.allocate()}
 	wm.add(w)
 
-	wm.setFocus(platform.NewWindowID())
+	wm.setFocus(wm.allocate())
 
 	if wm.focused != w.id {
 		t.Error("setFocus with unknown ID should not change focus")
@@ -101,150 +103,186 @@ func TestWindowManager_SetFocusInvalidID(t *testing.T) {
 }
 
 func TestWindow_SetOnKeyPress(t *testing.T) {
-	t.Run("fires when set", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		var receivedKey gpucontext.Key
-		var receivedMods gpucontext.Modifiers
-		w.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-			receivedKey = key
-			receivedMods = mods
-		})
+	t.Run(
+		"fires when set", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			var receivedKey gpucontext.Key
+			var receivedMods gpucontext.Modifiers
+			w.SetOnKeyPress(
+				func(key gpucontext.Key, mods gpucontext.Modifiers) {
+					receivedKey = key
+					receivedMods = mods
+				},
+			)
 
-		w.onKeyPress(gpucontext.KeyA, gpucontext.ModShift)
+			w.onKeyPress(gpucontext.KeyA, gpucontext.ModShift)
 
-		if receivedKey != gpucontext.KeyA {
-			t.Errorf("key = %v, want KeyA", receivedKey)
-		}
-		if receivedMods != gpucontext.ModShift {
-			t.Errorf("mods = %v, want ModShift", receivedMods)
-		}
-	})
+			if receivedKey != gpucontext.KeyA {
+				t.Errorf("key = %v, want KeyA", receivedKey)
+			}
+			if receivedMods != gpucontext.ModShift {
+				t.Errorf("mods = %v, want ModShift", receivedMods)
+			}
+		},
+	)
 
-	t.Run("nil callback safe", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		if w.onKeyPress != nil {
-			t.Error("onKeyPress should be nil by default")
-		}
-	})
+	t.Run(
+		"nil callback safe", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			if w.onKeyPress != nil {
+				t.Error("onKeyPress should be nil by default")
+			}
+		},
+	)
 
-	t.Run("replacement", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		callCount := 0
-		w.SetOnKeyPress(func(gpucontext.Key, gpucontext.Modifiers) {
-			callCount = 1
-		})
-		w.SetOnKeyPress(func(gpucontext.Key, gpucontext.Modifiers) {
-			callCount = 2
-		})
+	t.Run(
+		"replacement", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			callCount := 0
+			w.SetOnKeyPress(
+				func(gpucontext.Key, gpucontext.Modifiers) {
+					callCount = 1
+				},
+			)
+			w.SetOnKeyPress(
+				func(gpucontext.Key, gpucontext.Modifiers) {
+					callCount = 2
+				},
+			)
 
-		w.onKeyPress(gpucontext.KeyB, 0)
+			w.onKeyPress(gpucontext.KeyB, 0)
 
-		if callCount != 2 {
-			t.Errorf("callCount = %d, want 2 (replaced callback should fire)", callCount)
-		}
-	})
+			if callCount != 2 {
+				t.Errorf("callCount = %d, want 2 (replaced callback should fire)", callCount)
+			}
+		},
+	)
 }
 
 func TestWindow_SetOnKeyRelease(t *testing.T) {
-	t.Run("fires when set", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		var receivedKey gpucontext.Key
-		w.SetOnKeyRelease(func(key gpucontext.Key, mods gpucontext.Modifiers) {
-			receivedKey = key
-		})
+	t.Run(
+		"fires when set", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			var receivedKey gpucontext.Key
+			w.SetOnKeyRelease(
+				func(key gpucontext.Key, mods gpucontext.Modifiers) {
+					receivedKey = key
+				},
+			)
 
-		w.onKeyRelease(gpucontext.KeyEscape, 0)
+			w.onKeyRelease(gpucontext.KeyEscape, 0)
 
-		if receivedKey != gpucontext.KeyEscape {
-			t.Errorf("key = %v, want KeyEscape", receivedKey)
-		}
-	})
+			if receivedKey != gpucontext.KeyEscape {
+				t.Errorf("key = %v, want KeyEscape", receivedKey)
+			}
+		},
+	)
 
-	t.Run("nil callback safe", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		if w.onKeyRelease != nil {
-			t.Error("onKeyRelease should be nil by default")
-		}
-	})
+	t.Run(
+		"nil callback safe", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			if w.onKeyRelease != nil {
+				t.Error("onKeyRelease should be nil by default")
+			}
+		},
+	)
 }
 
 func TestWindow_SetOnTextInput(t *testing.T) {
-	t.Run("fires when set", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		var received string
-		w.SetOnTextInput(func(text string) {
-			received = text
-		})
+	t.Run(
+		"fires when set", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			var received string
+			w.SetOnTextInput(
+				func(text string) {
+					received = text
+				},
+			)
 
-		w.onTextInput("hello")
+			w.onTextInput("hello")
 
-		if received != "hello" {
-			t.Errorf("text = %q, want %q", received, "hello")
-		}
-	})
+			if received != "hello" {
+				t.Errorf("text = %q, want %q", received, "hello")
+			}
+		},
+	)
 
-	t.Run("nil callback safe", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		if w.onTextInput != nil {
-			t.Error("onTextInput should be nil by default")
-		}
-	})
+	t.Run(
+		"nil callback safe", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			if w.onTextInput != nil {
+				t.Error("onTextInput should be nil by default")
+			}
+		},
+	)
 }
 
 func TestWindow_SetOnPointer(t *testing.T) {
-	t.Run("fires when set", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		var received gpucontext.PointerEvent
-		w.SetOnPointer(func(ev gpucontext.PointerEvent) {
-			received = ev
-		})
+	t.Run(
+		"fires when set", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			var received gpucontext.PointerEvent
+			w.SetOnPointer(
+				func(ev gpucontext.PointerEvent) {
+					received = ev
+				},
+			)
 
-		ev := gpucontext.PointerEvent{
-			Type: gpucontext.PointerMove,
-			X:    42,
-			Y:    84,
-		}
-		w.onPointer(ev)
+			ev := gpucontext.PointerEvent{
+				Type: gpucontext.PointerMove,
+				X:    42,
+				Y:    84,
+			}
+			w.onPointer(ev)
 
-		if received.X != 42 || received.Y != 84 {
-			t.Errorf("pointer = (%f, %f), want (42, 84)", received.X, received.Y)
-		}
-	})
+			if received.X != 42 || received.Y != 84 {
+				t.Errorf("pointer = (%f, %f), want (42, 84)", received.X, received.Y)
+			}
+		},
+	)
 
-	t.Run("nil callback safe", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		if w.onPointer != nil {
-			t.Error("onPointer should be nil by default")
-		}
-	})
+	t.Run(
+		"nil callback safe", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			if w.onPointer != nil {
+				t.Error("onPointer should be nil by default")
+			}
+		},
+	)
 }
 
 func TestWindow_SetOnScroll(t *testing.T) {
-	t.Run("fires when set", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		var received gpucontext.ScrollEvent
-		w.SetOnScroll(func(ev gpucontext.ScrollEvent) {
-			received = ev
-		})
+	t.Run(
+		"fires when set", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			var received gpucontext.ScrollEvent
+			w.SetOnScroll(
+				func(ev gpucontext.ScrollEvent) {
+					received = ev
+				},
+			)
 
-		ev := gpucontext.ScrollEvent{DeltaX: 5.5, DeltaY: -10.0}
-		w.onScroll(ev)
+			ev := gpucontext.ScrollEvent{DeltaX: 5.5, DeltaY: -10.0}
+			w.onScroll(ev)
 
-		if received.DeltaX != 5.5 || received.DeltaY != -10.0 {
-			t.Errorf("scroll = (%f, %f), want (5.5, -10.0)", received.DeltaX, received.DeltaY)
-		}
-	})
+			if received.DeltaX != 5.5 || received.DeltaY != -10.0 {
+				t.Errorf("scroll = (%f, %f), want (5.5, -10.0)", received.DeltaX, received.DeltaY)
+			}
+		},
+	)
 
-	t.Run("nil callback safe", func(t *testing.T) {
-		w := &Window{id: platform.NewWindowID()}
-		if w.onScroll != nil {
-			t.Error("onScroll should be nil by default")
-		}
-	})
+	t.Run(
+		"nil callback safe", func(t *testing.T) {
+			w := &Window{id: InternalWindowID(1)}
+			if w.onScroll != nil {
+				t.Error("onScroll should be nil by default")
+			}
+		},
+	)
 }
 
 func TestWindow_ID(t *testing.T) {
-	id := platform.NewWindowID()
+	id := InternalWindowID(1)
 	w := &Window{id: id}
 
 	if w.ID() != id {
@@ -394,5 +432,17 @@ func TestWindowManager_AddWithPlatformID(t *testing.T) {
 	}
 	if got := wm.getByPlatformID(pid); got != w {
 		t.Error("getByPlatformID(platformID) should return the window")
+	}
+}
+
+func TestWindowManager_GetByPlatformID_AfterRemove(t *testing.T) {
+	wm := newWindowManager()
+	pid := platform.NewWindowID()
+	w := &Window{id: wm.allocate(), platformID: pid}
+	wm.add(w)
+	wm.remove(w.id)
+
+	if got := wm.getByPlatformID(pid); got != nil {
+		t.Error("getByPlatformID should return nil after window removed")
 	}
 }

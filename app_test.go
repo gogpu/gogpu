@@ -338,12 +338,14 @@ func TestGpucontextKeyToInputKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := gpucontextKeyToInputKey(tt.input)
-			if got != tt.output {
-				t.Errorf("gpucontextKeyToInputKey(%v) = %v, want %v", tt.input, got, tt.output)
-			}
-		})
+		t.Run(
+			tt.name, func(t *testing.T) {
+				got := gpucontextKeyToInputKey(tt.input)
+				if got != tt.output {
+					t.Errorf("gpucontextKeyToInputKey(%v) = %v, want %v", tt.input, got, tt.output)
+				}
+			},
+		)
 	}
 }
 
@@ -362,12 +364,14 @@ func TestGpucontextButtonToInputButton(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := gpucontextButtonToInputButton(tt.input)
-			if got != tt.output {
-				t.Errorf("gpucontextButtonToInputButton(%v) = %v, want %v", tt.input, got, tt.output)
-			}
-		})
+		t.Run(
+			tt.name, func(t *testing.T) {
+				got := gpucontextButtonToInputButton(tt.input)
+				if got != tt.output {
+					t.Errorf("gpucontextButtonToInputButton(%v) = %v, want %v", tt.input, got, tt.output)
+				}
+			},
+		)
 	}
 }
 
@@ -443,13 +447,15 @@ func TestAppUpdateMouseStateFromPointer(t *testing.T) {
 	app.inputState = input.New()
 
 	// Mouse press
-	app.updateMouseStateFromPointer(gpucontext.PointerEvent{
-		Type:        gpucontext.PointerDown,
-		PointerType: gpucontext.PointerTypeMouse,
-		Button:      gpucontext.ButtonLeft,
-		X:           100,
-		Y:           200,
-	})
+	app.updateMouseStateFromPointer(
+		gpucontext.PointerEvent{
+			Type:        gpucontext.PointerDown,
+			PointerType: gpucontext.PointerTypeMouse,
+			Button:      gpucontext.ButtonLeft,
+			X:           100,
+			Y:           200,
+		},
+	)
 
 	mx, my := app.inputState.Mouse().Position()
 	if mx != 100 || my != 200 {
@@ -457,13 +463,15 @@ func TestAppUpdateMouseStateFromPointer(t *testing.T) {
 	}
 
 	// Mouse release
-	app.updateMouseStateFromPointer(gpucontext.PointerEvent{
-		Type:        gpucontext.PointerUp,
-		PointerType: gpucontext.PointerTypeMouse,
-		Button:      gpucontext.ButtonLeft,
-		X:           110,
-		Y:           210,
-	})
+	app.updateMouseStateFromPointer(
+		gpucontext.PointerEvent{
+			Type:        gpucontext.PointerUp,
+			PointerType: gpucontext.PointerTypeMouse,
+			Button:      gpucontext.ButtonLeft,
+			X:           110,
+			Y:           210,
+		},
+	)
 
 	mx, my = app.inputState.Mouse().Position()
 	if mx != 110 || my != 210 {
@@ -476,11 +484,13 @@ func TestAppUpdateMouseStateNilInputState(t *testing.T) {
 	app.inputState = nil
 
 	// Should not panic
-	app.updateMouseStateFromPointer(gpucontext.PointerEvent{
-		Type:        gpucontext.PointerDown,
-		PointerType: gpucontext.PointerTypeMouse,
-		Button:      gpucontext.ButtonLeft,
-	})
+	app.updateMouseStateFromPointer(
+		gpucontext.PointerEvent{
+			Type:        gpucontext.PointerDown,
+			PointerType: gpucontext.PointerTypeMouse,
+			Button:      gpucontext.ButtonLeft,
+		},
+	)
 }
 
 func TestAppUpdateMouseStateNonMouse(t *testing.T) {
@@ -488,13 +498,15 @@ func TestAppUpdateMouseStateNonMouse(t *testing.T) {
 	app.inputState = input.New()
 
 	// Touch events should update position but not button state
-	app.updateMouseStateFromPointer(gpucontext.PointerEvent{
-		Type:        gpucontext.PointerDown,
-		PointerType: gpucontext.PointerTypeTouch,
-		Button:      gpucontext.ButtonLeft,
-		X:           50,
-		Y:           60,
-	})
+	app.updateMouseStateFromPointer(
+		gpucontext.PointerEvent{
+			Type:        gpucontext.PointerDown,
+			PointerType: gpucontext.PointerTypeTouch,
+			Button:      gpucontext.ButtonLeft,
+			X:           50,
+			Y:           60,
+		},
+	)
 
 	mx, my := app.inputState.Mouse().Position()
 	if mx != 50 || my != 60 {
@@ -507,13 +519,15 @@ func TestAppUpdateMouseStateInvalidButton(t *testing.T) {
 	app.inputState = input.New()
 
 	// Invalid button should not panic
-	app.updateMouseStateFromPointer(gpucontext.PointerEvent{
-		Type:        gpucontext.PointerDown,
-		PointerType: gpucontext.PointerTypeMouse,
-		Button:      gpucontext.Button(99),
-		X:           10,
-		Y:           20,
-	})
+	app.updateMouseStateFromPointer(
+		gpucontext.PointerEvent{
+			Type:        gpucontext.PointerDown,
+			PointerType: gpucontext.PointerTypeMouse,
+			Button:      gpucontext.Button(99),
+			X:           10,
+			Y:           20,
+		},
+	)
 }
 
 func TestAppUpdateMouseStatePointerMove(t *testing.T) {
@@ -521,12 +535,14 @@ func TestAppUpdateMouseStatePointerMove(t *testing.T) {
 	app.inputState = input.New()
 
 	// Pointer move should update position
-	app.updateMouseStateFromPointer(gpucontext.PointerEvent{
-		Type:        gpucontext.PointerMove,
-		PointerType: gpucontext.PointerTypeMouse,
-		X:           300,
-		Y:           400,
-	})
+	app.updateMouseStateFromPointer(
+		gpucontext.PointerEvent{
+			Type:        gpucontext.PointerMove,
+			PointerType: gpucontext.PointerTypeMouse,
+			X:           300,
+			Y:           400,
+		},
+	)
 
 	mx, my := app.inputState.Mouse().Position()
 	if mx != 300 || my != 400 {
@@ -592,10 +608,12 @@ func TestApp_OnAnyWindowClosed_Primary(t *testing.T) {
 	var closedID WindowID
 	app.OnAnyWindowClosed(func(id WindowID) { closedID = id })
 
-	app.classifyEvent(&platform.Event{
-		Type:     platform.EventClose,
-		WindowID: pid,
-	}, nil, nil)
+	app.classifyEvent(
+		&platform.Event{
+			Type:     platform.EventClose,
+			WindowID: pid,
+		}, nil, nil,
+	)
 
 	if app.running {
 		t.Error("app should be stopped after primary close")
@@ -623,10 +641,12 @@ func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
 	called := false
 	app.OnAnyWindowClosed(func(id WindowID) { called = true })
 
-	app.classifyEvent(&platform.Event{
-		Type:     platform.EventClose,
-		WindowID: pid,
-	}, nil, nil)
+	app.classifyEvent(
+		&platform.Event{
+			Type:     platform.EventClose,
+			WindowID: pid,
+		}, nil, nil,
+	)
 
 	if called {
 		t.Error("should not be called when onClose rejects")
@@ -639,7 +659,7 @@ func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
 func TestApp_OnAnyWindowClosed_Secondary(t *testing.T) {
 	app := &App{
 		windowManager: newWindowManager(),
-		primaryWindow: nil, // важно: не мешает проверке secondary
+		primaryWindow: nil,
 		renderLoop:    &mockRenderLoop{},
 	}
 	id := app.windowManager.allocate()
@@ -681,10 +701,12 @@ func TestApp_OnAnyWindowClosed_SecondaryRejected(t *testing.T) {
 	called := false
 	app.OnAnyWindowClosed(func(id WindowID) { called = true })
 
-	app.classifyEvent(&platform.Event{
-		Type:     platform.EventClose,
-		WindowID: w.platformID,
-	}, nil, nil)
+	app.classifyEvent(
+		&platform.Event{
+			Type:     platform.EventClose,
+			WindowID: w.platformID,
+		}, nil, nil,
+	)
 
 	if called {
 		t.Error("should not be called when onClose rejects")

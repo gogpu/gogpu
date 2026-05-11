@@ -10,8 +10,11 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
+// InternalWindowID is an internal identifier for windows, used for tracking and management.
+type InternalWindowID uint32
+
 // WindowID uniquely identifies a window. Zero is invalid.
-type WindowID = platform.WindowID
+type WindowID = InternalWindowID
 
 // Window represents an application window with its own rendering surface.
 // Each Window tracks per-window callbacks and maintains a reference to the
@@ -21,7 +24,7 @@ type WindowID = platform.WindowID
 // is supported. Multi-window rendering will be enabled when platforms
 // implement PlatformManager.
 type Window struct {
-	id         WindowID
+	id         InternalWindowID
 	platformID platform.WindowID // platform-native ID for event routing
 	config     Config
 	surface    *windowSurface
@@ -119,19 +122,21 @@ func (w *Window) Visible() bool {
 // Thread-safe: all methods are protected by a read-write mutex.
 type WindowManager struct {
 	mu      sync.RWMutex
-	windows map[WindowID]*Window
-	order   []WindowID // insertion order for deterministic render iteration
-	focused WindowID   // currently focused window, zero if none
+	windows map[InternalWindowID]*Window
+	order   []InternalWindowID // insertion order for deterministic render iteration
+	focused InternalWindowID   // currently focused window, zero if none
 	// ID pool
-	freeIDs []WindowID // available IDs for reuse
-	nextID  WindowID   // 1, 2, 3... (monotonically increasing when pool is empty)
+	freeIDs       []InternalWindowID            // available IDs for reuse
+	nextID        InternalWindowID              // 1, 2, 3... (monotonically increasing when pool is empty)
+	platformIndex map[platform.WindowID]*Window // for routing platform events by platform ID
 }
 
 // newWindowManager creates a new empty WindowManager.
 func newWindowManager() *WindowManager {
 	return &WindowManager{
-		windows: make(map[WindowID]*Window, 8),
-		nextID:  1,
+		windows:       make(map[InternalWindowID]*Window, 8),
+		platformIndex: make(map[platform.WindowID]*Window, 8),
+		nextID:        1,
 	}
 }
 
@@ -140,8 +145,14 @@ func newWindowManager() *WindowManager {
 func (wm *WindowManager) add(w *Window) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
+
 	wm.windows[w.id] = w
 	wm.order = append(wm.order, w.id)
+
+	if w.platformID != 0 {
+		wm.platformIndex[w.platformID] = w
+	}
+
 	if wm.focused == 0 {
 		wm.focused = w.id
 	}
@@ -149,9 +160,19 @@ func (wm *WindowManager) add(w *Window) {
 
 // remove unregisters a window from the manager.
 // If the removed window had focus, focus moves to the first remaining window.
-func (wm *WindowManager) remove(id WindowID) {
+func (wm *WindowManager) remove(id InternalWindowID) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
+
+	w, ok := wm.windows[id]
+	if !ok {
+		return
+	}
+
+	if w.platformID != 0 {
+		delete(wm.platformIndex, w.platformID)
+	}
+
 	delete(wm.windows, id)
 	for i, wid := range wm.order {
 		if wid == id {
@@ -159,7 +180,6 @@ func (wm *WindowManager) remove(id WindowID) {
 			break
 		}
 	}
-	// If focused window was removed, refocus to the first remaining window.
 	if wm.focused == id {
 		wm.focused = 0
 		if len(wm.order) > 0 {
@@ -169,7 +189,7 @@ func (wm *WindowManager) remove(id WindowID) {
 }
 
 // get returns the window with the given ID, or nil if not found.
-func (wm *WindowManager) get(id WindowID) *Window {
+func (wm *WindowManager) get(id InternalWindowID) *Window {
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
 	return wm.windows[id]
@@ -196,7 +216,7 @@ func (wm *WindowManager) focusedWindow() *Window { //nolint:unused // VSync swit
 
 // setFocus changes the focused window and adjusts VSync strategy.
 // Called when platform sends focus events (EventFocus).
-func (wm *WindowManager) setFocus(id WindowID) {
+func (wm *WindowManager) setFocus(id InternalWindowID) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 	if _, ok := wm.windows[id]; ok {
@@ -205,8 +225,8 @@ func (wm *WindowManager) setFocus(id WindowID) {
 }
 
 // allocate returns a fresh WindowID, reusing freed IDs when possible.
-// Must be called under mu.Lock.
-func (wm *WindowManager) allocate() WindowID {
+// Thread-safe.
+func (wm *WindowManager) allocate() InternalWindowID {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
@@ -222,8 +242,8 @@ func (wm *WindowManager) allocate() WindowID {
 }
 
 // release returns a WindowID back to the pool for future reuse.
-// Must be called under mu.Lock.
-func (wm *WindowManager) release(id WindowID) {
+// Thread-safe.
+func (wm *WindowManager) release(id InternalWindowID) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
@@ -235,12 +255,7 @@ func (wm *WindowManager) release(id WindowID) {
 func (wm *WindowManager) getByPlatformID(pid platform.WindowID) *Window {
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
-	for _, w := range wm.windows {
-		if w.platformID == pid {
-			return w
-		}
-	}
-	return nil
+	return wm.platformIndex[pid]
 }
 
 // NewWindow creates a new secondary window with its own rendering surface.
@@ -258,16 +273,18 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	}
 
 	// Create platform window via PlatformManager.
-	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:             config.Title,
-		Width:             config.Width,
-		Height:            config.Height,
-		Resizable:         config.Resizable,
-		Fullscreen:        config.Fullscreen,
-		Frameless:         config.Frameless,
-		TabbingMode:       int(config.TabbingMode),
-		TabbingIdentifier: config.TabbingIdentifier,
-	})
+	platWindow, err := a.manager.CreateWindow(
+		platform.Config{
+			Title:             config.Title,
+			Width:             config.Width,
+			Height:            config.Height,
+			Resizable:         config.Resizable,
+			Fullscreen:        config.Fullscreen,
+			Frameless:         config.Frameless,
+			TabbingMode:       int(config.TabbingMode),
+			TabbingIdentifier: config.TabbingIdentifier,
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("gogpu: create window: %w", err)
 	}
@@ -276,10 +293,12 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	// GPU operations are thread-bound; surface creation must happen there.
 	var surface *wgpu.Surface
 	var surfaceErr error
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		displayHandle, windowHandle := platWindow.GetHandle()
-		surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
-	})
+	a.renderLoop.RunOnRenderThreadVoid(
+		func() {
+			displayHandle, windowHandle := platWindow.GetHandle()
+			surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
+		},
+	)
 	if surfaceErr != nil {
 		platWindow.Destroy()
 		return nil, fmt.Errorf("gogpu: create surface: %w", surfaceErr)
@@ -294,18 +313,20 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	}
 
 	// Configure surface with initial dimensions on the render thread.
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		pw, ph := platWindow.PhysicalSize()
-		if pw > 0 && ph > 0 {
-			ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
-			ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
-			if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
-				slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
-			} else {
-				ws.configured = true
+	a.renderLoop.RunOnRenderThreadVoid(
+		func() {
+			pw, ph := platWindow.PhysicalSize()
+			if pw > 0 && ph > 0 {
+				ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
+				ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
+				if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
+					slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
+				} else {
+					ws.configured = true
+				}
 			}
-		}
-	})
+		},
+	)
 
 	// Allocate internal ID
 	internalID := a.windowManager.allocate()
@@ -350,7 +371,7 @@ func (a *App) WindowCount() int {
 // closeSecondaryWindow removes a secondary window and releases its GPU and
 // platform resources. The GPU surface is released on the render thread.
 // Does nothing if the window is the primary window (use Quit() instead).
-func (a *App) closeSecondaryWindow(id WindowID) {
+func (a *App) closeSecondaryWindow(id InternalWindowID) {
 	if a.primaryWindow != nil && id == a.primaryWindow.id {
 		return // Primary window closes via a.running = false
 	}
@@ -365,9 +386,11 @@ func (a *App) closeSecondaryWindow(id WindowID) {
 
 	// Release GPU surface on the render thread.
 	if w.surface != nil {
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			w.surface.destroy()
-		})
+		a.renderLoop.RunOnRenderThreadVoid(
+			func() {
+				w.surface.destroy()
+			},
+		)
 	}
 
 	// Destroy the platform window.
