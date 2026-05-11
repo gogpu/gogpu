@@ -715,3 +715,155 @@ func TestApp_OnAnyWindowClosed_SecondaryRejected(t *testing.T) {
 		t.Error("window should still be present")
 	}
 }
+
+func TestApp_FocusEvent_SetsFocusedWindow(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+	}
+
+	platformID := platform.NewWindowID()
+	internalID := app.windowManager.allocate()
+	w := &Window{id: internalID, platformID: platformID, visible: true}
+	app.windowManager.add(w)
+
+	app.classifyEvent(
+		&platform.Event{
+			Type:     platform.EventFocus,
+			WindowID: platformID,
+			Focused:  true,
+		}, nil, nil,
+	)
+
+	if app.windowManager.focused != internalID {
+		t.Errorf("focused = %d, want %d", app.windowManager.focused, internalID)
+	}
+}
+
+func TestApp_HandleSecondaryResize_NilWindow(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+		invalidator:   newInvalidator(nil),
+	}
+
+	app.handleSecondaryResize(
+		platform.Event{
+			Type:     platform.EventResize,
+			WindowID: platform.NewWindowID(),
+			Width:    100, Height: 200,
+		},
+	)
+}
+
+func TestApp_HandleSecondaryResize_NoPhysicalResize(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+		invalidator:   newInvalidator(nil),
+	}
+	platformID := platform.NewWindowID()
+	internalID := app.windowManager.allocate()
+	surface := &windowSurface{width: 10, height: 10}
+	w := &Window{id: internalID, platformID: platformID, surface: surface, visible: true}
+	app.windowManager.add(w)
+
+	var resizeCalled bool
+	var newW, newH int
+	w.SetOnResize(func(w, h int) { resizeCalled = true; newW, newH = w, h })
+
+	app.handleSecondaryResize(platform.Event{
+		Type:     platform.EventResize,
+		WindowID: platformID,
+		Width:    320, Height: 240,
+		PhysicalWidth:  0,
+		PhysicalHeight: 0,
+	})
+
+	if !resizeCalled {
+		t.Error("onResize callback should have been called")
+	}
+	if newW != 320 || newH != 240 {
+		t.Errorf("resize dimensions = (%d,%d), want (320,240)", newW, newH)
+	}
+	if !app.invalidator.Consume() {
+		t.Error("expected redraw request after secondary resize")
+	}
+}
+
+func TestApp_PrimaryWindow_IDs(t *testing.T) {
+	app := &App{windowManager: newWindowManager()}
+
+	internalID := app.windowManager.allocate()
+	platformID := platform.NewWindowID()
+	app.primaryWindow = &Window{
+		id:         internalID,
+		platformID: platformID,
+		visible:    true,
+	}
+	app.windowManager.add(app.primaryWindow)
+
+	if app.primaryWindow.id != internalID {
+		t.Error("primaryWindow.id should be internalID")
+	}
+	if app.primaryWindow.platformID != platformID {
+		t.Error("primaryWindow.platformID should be platformID")
+	}
+	if app.PrimaryWindow() != app.primaryWindow {
+		t.Error("PrimaryWindow() should return primaryWindow")
+	}
+}
+
+func TestApp_ProcessEvents_SecondaryResizeCycle(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+		invalidator:   newInvalidator(nil),
+	}
+
+	platformID := platform.NewWindowID()
+	internalID := app.windowManager.allocate()
+	surface := &windowSurface{width: 10, height: 10}
+	w := &Window{
+		id:         internalID,
+		platformID: platformID,
+		surface:    surface,
+		visible:    true,
+	}
+	app.windowManager.add(w)
+
+	var resizeCalled bool
+	var resizeW, resizeH int
+	w.SetOnResize(func(w, h int) {
+		resizeCalled = true
+		resizeW, resizeH = w, h
+	})
+
+	primaryEv := platform.Event{Type: platform.EventResize, WindowID: 0, Width: 1024, Height: 768}
+	secondaryEv := platform.Event{
+		Type:           platform.EventResize,
+		WindowID:       platformID,
+		Width:          400,
+		Height:         300,
+		PhysicalWidth:  0,
+		PhysicalHeight: 0,
+	}
+
+	var secResizes []platform.Event
+	_, secResizes = app.classifyEvent(&primaryEv, nil, secResizes)
+	_, secResizes = app.classifyEvent(&secondaryEv, nil, secResizes)
+
+	for i := range secResizes {
+		app.handleSecondaryResize(secResizes[i])
+	}
+
+	if !resizeCalled {
+		t.Error("secondary window onResize should have been called")
+	}
+	if resizeW != 400 || resizeH != 300 {
+		t.Errorf("resize dimensions = (%d,%d), want (400,300)", resizeW, resizeH)
+	}
+	if !app.invalidator.Consume() {
+		t.Error("expected redraw request after secondary resize")
+	}
+}

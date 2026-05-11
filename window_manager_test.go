@@ -446,3 +446,11 @@ func TestWindowManager_GetByPlatformID_AfterRemove(t *testing.T) {
 		t.Error("getByPlatformID should return nil after window removed")
 	}
 }
+
+func TestWindowManager_RemoveUnknownID(t *testing.T) {
+	wm := newWindowManager()
+	wm.remove(InternalWindowID(999))
+	if wm.count() != 0 {
+		t.Error("count should remain 0 after removing unknown ID")
+	}
+}
