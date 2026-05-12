@@ -74,6 +74,26 @@ func (w *Window) SetOnClose(fn func() bool) {
 	}
 }
 
+// safeOnClose calls the window's onClose callback, recovering from panics.
+// Returns true if the window should close, false otherwise.
+func (w *Window) safeOnClose() bool {
+	if w == nil || w.onClose == nil {
+		return true
+	}
+	ok := true
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Warn("gogpu: panic in window close callback",
+					"windowID", w.id, "panic", r)
+				ok = false
+			}
+		}()
+		ok = w.onClose()
+	}()
+	return ok
+}
+
 // SetOnKeyPress sets the per-window key press callback.
 func (w *Window) SetOnKeyPress(fn func(gpucontext.Key, gpucontext.Modifiers)) {
 	w.onKeyPress = fn

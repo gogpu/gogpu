@@ -881,3 +881,34 @@ func TestApp_ProcessEvents_SecondaryResizeCycle(t *testing.T) {
 		t.Error("expected redraw request after secondary resize")
 	}
 }
+
+func TestApp_WindowCloseEvent_OnClosePanic(t *testing.T) {
+	app := &App{
+		windowManager: newWindowManager(),
+		renderLoop:    &mockRenderLoop{},
+		running:       true,
+	}
+	pid := platform.NewWindowID()
+	app.primaryWindow = &Window{
+		id:         app.windowManager.allocate(),
+		platformID: pid,
+		visible:    true,
+		platWindow: &mockWindow{},
+		surface:    &windowSurface{},
+	}
+	app.primaryPlatformID = pid
+	app.windowManager.add(app.primaryWindow)
+
+	app.primaryWindow.SetOnClose(func() bool {
+		panic("unexpected error")
+	})
+
+	app.windowCloseEvent(&platform.Event{
+		Type:     platform.EventClose,
+		WindowID: pid,
+	})
+
+	if !app.running {
+		t.Error("app should still be running after panicking onClose")
+	}
+}

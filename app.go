@@ -555,7 +555,7 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 	if !isPrimary {
 		// Secondary window
 		w := a.windowManager.getByPlatformID(event.WindowID)
-		if w != nil && w.onClose != nil && !w.onClose() {
+		if !w.safeOnClose() {
 			return
 		}
 		if w != nil {
@@ -565,7 +565,7 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 	}
 
 	// Primary window — terminate app
-	if a.primaryWindow != nil && a.primaryWindow.onClose != nil && !a.primaryWindow.onClose() {
+	if !a.primaryWindow.safeOnClose() {
 		return
 	}
 	a.running = false

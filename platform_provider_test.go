@@ -24,6 +24,7 @@ type mockWindow struct {
 	minimized       bool
 	closed          bool
 	hitTestCallback func(float64, float64) gpucontext.HitTestResult
+	closeFn         func() bool
 }
 
 func (m *mockWindow) ID() platform.WindowID   { return m.windowID }
@@ -91,7 +92,7 @@ func (m *mockManager) HighContrast() bool                        { return m.high
 func (m *mockManager) FontScale() float32                        { return m.fontScale }
 func (m *mockManager) SubpixelLayout() gpucontext.SubpixelLayout { return m.subpixelLayout }
 func (m *mockManager) Destroy()                                  {}
-func (m *mockWindow) SetOnClose(fn func() bool)                  {}
+func (m *mockWindow) SetOnClose(fn func() bool)                  { m.closeFn = fn }
 func (m *mockWindow) Show()                                      {}
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.

@@ -115,3 +115,109 @@ func TestNewWindowID_Unique(t *testing.T) {
 		ids[id] = true
 	}
 }
+
+// mockPlatformWindow is a mock implementation of a platform window used for testing or simulation purposes.
+// frameless indicates whether the window is displayed without system decorations such as borders or title bars.
+// hitTestCallback is a function used for hit testing, determining interactions based on x and y coordinates.
+type mockPlatformWindow struct {
+	frameless       bool
+	hitTestCallback func(x, y float64) gpucontext.HitTestResult
+}
+
+func (m *mockPlatformWindow) ID() WindowID                     { return 0 }
+func (m *mockPlatformWindow) GetHandle() (uintptr, uintptr)    { return 0, 0 }
+func (m *mockPlatformWindow) LogicalSize() (int, int)          { return 0, 0 }
+func (m *mockPlatformWindow) PhysicalSize() (int, int)         { return 0, 0 }
+func (m *mockPlatformWindow) ScaleFactor() float64             { return 1.0 }
+func (m *mockPlatformWindow) ShouldClose() bool                { return false }
+func (m *mockPlatformWindow) InSizeMove() bool                 { return false }
+func (m *mockPlatformWindow) SetTitle(string)                  {}
+func (m *mockPlatformWindow) PrepareFrame() PrepareFrameResult { return PrepareFrameResult{} }
+func (m *mockPlatformWindow) SetCursor(int)                    {}
+func (m *mockPlatformWindow) SetCursorMode(int)                {}
+func (m *mockPlatformWindow) CursorMode() int                  { return 0 }
+func (m *mockPlatformWindow) SyncFrame()                       {}
+func (m *mockPlatformWindow) Minimize()                        {}
+func (m *mockPlatformWindow) Maximize()                        {}
+func (m *mockPlatformWindow) IsMaximized() bool                { return false }
+func (m *mockPlatformWindow) Close()                           {}
+func (m *mockPlatformWindow) SetFullscreen(bool)               {}
+func (m *mockPlatformWindow) IsFullscreen() bool               { return false }
+func (m *mockPlatformWindow) SetModalFrameCallback(func())     {}
+func (m *mockPlatformWindow) Destroy()                         {}
+func (m *mockPlatformWindow) Show()                            {}
+func (m *mockPlatformWindow) SetOnClose(func() bool)           {}
+
+func (m *mockPlatformWindow) SetFrameless(v bool) { m.frameless = v }
+func (m *mockPlatformWindow) IsFrameless() bool   { return m.frameless }
+func (m *mockPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
+	m.hitTestCallback = fn
+}
+
+// Ensure mockPlatformWindow satisfies PlatformWindow at compile time.
+var _ PlatformWindow = (*mockPlatformWindow)(nil)
+
+// TestPlatformWindow_Frameless verifies that SetFrameless correctly sets and retrieves the frameless state
+func TestPlatformWindow_Frameless(t *testing.T) {
+	var pw PlatformWindow = &mockPlatformWindow{}
+
+	if pw.IsFrameless() {
+		t.Error("IsFrameless should be false by default")
+	}
+
+	pw.SetFrameless(true)
+	if !pw.IsFrameless() {
+		t.Error("IsFrameless should be true after SetFrameless(true)")
+	}
+
+	pw.SetFrameless(false)
+	if pw.IsFrameless() {
+		t.Error("IsFrameless should be false after SetFrameless(false)")
+	}
+}
+
+// TestPlatformWindow_HitTestCallback verifies that SetHitTestCallback correctly stores the callback
+func TestPlatformWindow_HitTestCallback(t *testing.T) {
+	var pw PlatformWindow = &mockPlatformWindow{}
+
+	called := false
+	cb := func(x, y float64) gpucontext.HitTestResult {
+		called = true
+		if x == 10.0 && y == 20.0 {
+			return gpucontext.HitTestClient
+		}
+		return gpucontext.HitTestCaption
+	}
+
+	pw.SetHitTestCallback(cb)
+
+	mock, ok := pw.(*mockPlatformWindow)
+	if !ok {
+		t.Fatal("cannot type-assert to *mockPlatformWindow")
+	}
+	if mock.hitTestCallback == nil {
+		t.Fatal("hitTestCallback should be non-nil after SetHitTestCallback")
+	}
+
+	result := mock.hitTestCallback(10.0, 20.0)
+	if !called {
+		t.Error("hitTestCallback was not called")
+	}
+	if result != gpucontext.HitTestClient {
+		t.Errorf("unexpected HitTestResult: got %v, want %v", result, gpucontext.HitTestClient)
+	}
+
+	called2 := false
+	cb2 := func(x, y float64) gpucontext.HitTestResult {
+		called2 = true
+		return gpucontext.HitTestCaption
+	}
+	pw.SetHitTestCallback(cb2)
+	if mock.hitTestCallback == nil {
+		t.Fatal("hitTestCallback should be non-nil after second SetHitTestCallback")
+	}
+	mock.hitTestCallback(0, 0)
+	if !called2 {
+		t.Error("second callback should have been called")
+	}
+}

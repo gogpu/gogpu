@@ -476,3 +476,23 @@ func TestNewWindow_CreateWindowError(t *testing.T) {
 		t.Error("expected error from CreateWindow")
 	}
 }
+
+func TestWindow_SetOnClose_PropagatesToPlatform(t *testing.T) {
+	mw := &mockWindow{}
+	w := &Window{
+		platWindow: mw,
+	}
+	called := false
+	cb := func() bool { called = true; return true }
+	w.SetOnClose(cb)
+	if mw.closeFn == nil {
+		t.Fatal("SetOnClose was not propagated to platform window")
+	}
+
+	if !mw.closeFn() {
+		t.Error("callback returned false")
+	}
+	if !called {
+		t.Error("original callback was not called")
+	}
+}
