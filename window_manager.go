@@ -63,6 +63,9 @@ func (w *Window) SetOnResize(fn func(int, int)) {
 // Return false from the callback to reject the close request.
 func (w *Window) SetOnClose(fn func() bool) {
 	w.onClose = fn
+	if w.platWindow != nil {
+		w.platWindow.SetOnClose(fn)
+	}
 }
 
 // SetOnKeyPress sets the per-window key press callback.
@@ -341,6 +344,11 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		visible:    true,
 	}
 	a.windowManager.add(w)
+
+	// Show the window on screen.
+	if w.platWindow != nil {
+		w.platWindow.Show()
+	}
 
 	// Request a redraw so the new window gets its first frame.
 	if a.invalidator != nil {

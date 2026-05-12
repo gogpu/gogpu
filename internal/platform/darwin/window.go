@@ -5,6 +5,7 @@ package darwin
 import (
 	"errors"
 	"sync"
+	"unsafe"
 )
 
 // Errors returned by Window operations.
@@ -35,6 +36,8 @@ type Window struct {
 	height      int
 	shouldClose bool
 	visible     bool
+	delegate    ID
+	onClose     func() bool
 }
 
 // NewWindow creates a new window with the given configuration.
@@ -121,8 +124,10 @@ func NewWindow(config WindowConfig) (*Window, error) {
 
 	// Enable native fullscreen support (green button / toggleFullScreen:).
 	// Must be set before makeKeyAndOrderFront.
-	nsWindow.SendUint(selectors.setCollectionBehavior,
-		uint64(NSWindowCollectionBehaviorFullScreenPrimary))
+	nsWindow.SendUint(
+		selectors.setCollectionBehavior,
+		uint64(NSWindowCollectionBehaviorFullScreenPrimary),
+	)
 
 	// Enable mouse events
 	nsWindow.SendBool(selectors.setAcceptsMouseMovedEvents, true)
@@ -132,6 +137,13 @@ func NewWindow(config WindowConfig) (*Window, error) {
 
 	// Center window on screen
 	nsWindow.Send(selectors.center)
+
+	delegate, err := CreateWindowDelegate(w)
+	if err == nil {
+		delegate.Send(selectors.retain)
+		nsWindow.SendPtr(selectors.setDelegate, delegate.Ptr())
+		w.delegate = delegate
+	}
 
 	return w, nil
 }
@@ -292,6 +304,13 @@ func (w *Window) Destroy() {
 	if w.metalLayer != 0 {
 		// Surface owns the layer; window only keeps a weak reference.
 		w.metalLayer = 0
+	}
+
+	// Remove delegate association and release.
+	if w.delegate != 0 {
+		SetAssociatedObject(w.delegate, unsafe.Pointer(&delegateAssociatedKey), nil, 0)
+		w.delegate.Send(selectors.release)
+		w.delegate = 0
 	}
 
 	if w.nsWindow != 0 {
@@ -549,4 +568,10 @@ func (w *Window) IsFullScreen() bool {
 
 	mask := uintptr(w.nsWindow.Send(selectors.styleMask))
 	return mask&uintptr(NSWindowStyleMaskFullScreen) != 0
+}
+
+func (w *Window) SetOnClose(fn func() bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.onClose = fn
 }

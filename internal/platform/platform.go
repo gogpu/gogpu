@@ -205,6 +205,10 @@ type PlatformWindow interface {
 	// Close requests the window to close.
 	Close()
 
+	SetOnClose(func() bool)
+
+	Show()
+
 	// SyncFrame synchronizes the rendered frame with the compositor.
 	SyncFrame()
 

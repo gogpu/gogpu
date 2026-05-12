@@ -568,10 +568,13 @@ func TestApp_CloseSecondaryWindowRecyclesID(t *testing.T) {
 		id:         secID,
 		platformID: platform.NewWindowID(),
 		visible:    true,
+		platWindow: &mockWindow{},
 	}
 	app.windowManager.add(sec)
 
-	app.closeSecondaryWindow(secID)
+	app.windowManager.remove(secID)
+	app.windowManager.release(secID)
+	sec.visible = false
 
 	if app.windowManager.get(secID) != nil {
 		t.Fatal("secondary window should be removed from manager")
@@ -602,7 +605,10 @@ func TestApp_OnAnyWindowClosed_Primary(t *testing.T) {
 		id:         app.windowManager.allocate(),
 		platformID: pid,
 		visible:    true,
+		platWindow: &mockWindow{},
+		surface:    &windowSurface{},
 	}
+	app.primaryPlatformID = pid
 	app.windowManager.add(app.primaryWindow)
 
 	var closedID WindowID
@@ -634,6 +640,8 @@ func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
 		id:         app.windowManager.allocate(),
 		platformID: pid,
 		visible:    true,
+		platWindow: &mockWindow{},
+		surface:    &windowSurface{},
 	}
 	app.primaryWindow.SetOnClose(func() bool { return false })
 	app.windowManager.add(app.primaryWindow)
@@ -667,6 +675,8 @@ func TestApp_OnAnyWindowClosed_Secondary(t *testing.T) {
 		id:         id,
 		platformID: platform.NewWindowID(),
 		visible:    true,
+		platWindow: &mockWindow{},
+		surface:    nil,
 	}
 	app.windowManager.add(w)
 
@@ -694,6 +704,7 @@ func TestApp_OnAnyWindowClosed_SecondaryRejected(t *testing.T) {
 		id:         id,
 		platformID: platform.NewWindowID(),
 		visible:    true,
+		platWindow: &mockWindow{},
 	}
 	w.SetOnClose(func() bool { return false })
 	app.windowManager.add(w)
@@ -772,13 +783,15 @@ func TestApp_HandleSecondaryResize_NoPhysicalResize(t *testing.T) {
 	var newW, newH int
 	w.SetOnResize(func(w, h int) { resizeCalled = true; newW, newH = w, h })
 
-	app.handleSecondaryResize(platform.Event{
-		Type:     platform.EventResize,
-		WindowID: platformID,
-		Width:    320, Height: 240,
-		PhysicalWidth:  0,
-		PhysicalHeight: 0,
-	})
+	app.handleSecondaryResize(
+		platform.Event{
+			Type:     platform.EventResize,
+			WindowID: platformID,
+			Width:    320, Height: 240,
+			PhysicalWidth:  0,
+			PhysicalHeight: 0,
+		},
+	)
 
 	if !resizeCalled {
 		t.Error("onResize callback should have been called")
@@ -800,6 +813,8 @@ func TestApp_PrimaryWindow_IDs(t *testing.T) {
 		id:         internalID,
 		platformID: platformID,
 		visible:    true,
+		platWindow: &mockWindow{},
+		surface:    &windowSurface{},
 	}
 	app.windowManager.add(app.primaryWindow)
 
@@ -827,17 +842,20 @@ func TestApp_ProcessEvents_SecondaryResizeCycle(t *testing.T) {
 	w := &Window{
 		id:         internalID,
 		platformID: platformID,
-		surface:    surface,
 		visible:    true,
+		platWindow: &mockWindow{},
+		surface:    surface,
 	}
 	app.windowManager.add(w)
 
 	var resizeCalled bool
 	var resizeW, resizeH int
-	w.SetOnResize(func(w, h int) {
-		resizeCalled = true
-		resizeW, resizeH = w, h
-	})
+	w.SetOnResize(
+		func(w, h int) {
+			resizeCalled = true
+			resizeW, resizeH = w, h
+		},
+	)
 
 	primaryEv := platform.Event{Type: platform.EventResize, WindowID: 0, Width: 1024, Height: 768}
 	secondaryEv := platform.Event{

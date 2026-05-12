@@ -43,14 +43,16 @@ type objcRuntime struct {
 	coreFoundation unsafe.Pointer
 
 	// Function pointers
-	objcGetClass          unsafe.Pointer
-	objcMsgSend           unsafe.Pointer
-	objcMsgSendFpret      unsafe.Pointer
-	objcMsgSendStret      unsafe.Pointer
-	selRegisterName       unsafe.Pointer
-	objcAllocateClassPair unsafe.Pointer
-	classAddMethod        unsafe.Pointer
-	objcRegisterClassPair unsafe.Pointer
+	objcGetClass              unsafe.Pointer
+	objcMsgSend               unsafe.Pointer
+	objcMsgSendFpret          unsafe.Pointer
+	objcMsgSendStret          unsafe.Pointer
+	selRegisterName           unsafe.Pointer
+	objcAllocateClassPair     unsafe.Pointer
+	classAddMethod            unsafe.Pointer
+	objcRegisterClassPair     unsafe.Pointer
+	objcSetAssociatedObjectFn unsafe.Pointer
+	objcGetAssociatedObjectFn unsafe.Pointer
 
 	// Call interfaces (reusable)
 	cifVoidPtr  *types.CallInterface // Returns void*, takes variadic args
@@ -103,9 +105,11 @@ var (
 // initRuntime initializes the Objective-C runtime by loading required libraries
 // and resolving function symbols. This is called once on first use.
 func initRuntime() error {
-	objcRT.once.Do(func() {
-		objcRT.err = loadRuntime()
-	})
+	objcRT.once.Do(
+		func() {
+			objcRT.err = loadRuntime()
+		},
+	)
 	return objcRT.err
 }
 
@@ -121,28 +125,32 @@ func loadRuntime() error {
 
 	// Load Foundation framework
 	objcRT.foundation, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/Foundation.framework/Foundation")
+		"/System/Library/Frameworks/Foundation.framework/Foundation",
+	)
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load AppKit framework
 	objcRT.appKit, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/AppKit.framework/AppKit")
+		"/System/Library/Frameworks/AppKit.framework/AppKit",
+	)
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load QuartzCore framework (for CAMetalLayer)
 	objcRT.quartzCore, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore")
+		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
+	)
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load CoreFoundation framework
 	objcRT.coreFoundation, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+	)
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
@@ -175,6 +183,16 @@ func loadRuntime() error {
 
 	// Resolve sel_registerName
 	objcRT.selRegisterName, err = ffi.GetSymbol(objcRT.libobjc, "sel_registerName")
+	if err != nil {
+		return errors.Join(ErrSymbolNotFound, err)
+	}
+
+	// Resolve associated object functions (for storing Go state in ObjC objects)
+	objcRT.objcSetAssociatedObjectFn, err = ffi.GetSymbol(objcRT.libobjc, "objc_setAssociatedObject")
+	if err != nil {
+		return errors.Join(ErrSymbolNotFound, err)
+	}
+	objcRT.objcGetAssociatedObjectFn, err = ffi.GetSymbol(objcRT.libobjc, "objc_getAssociatedObject")
 	if err != nil {
 		return errors.Join(ErrSymbolNotFound, err)
 	}
@@ -1145,7 +1163,8 @@ func AllocateClassPair(superclass Class, name string) Class {
 	nameBytes := append([]byte(name), 0)
 
 	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
+	if err := ffi.PrepareCallInterface(
+		cif, types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor,
@@ -1161,7 +1180,8 @@ func AllocateClassPair(superclass Class, name string) Class {
 	var extraBytes uintptr
 
 	var result uintptr
-	if err := ffi.CallFunction(cif,
+	if err := ffi.CallFunction(
+		cif,
 		objcRT.objcAllocateClassPair,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
@@ -1186,7 +1206,8 @@ func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
 	typeBytes := append([]byte(typeEncoding), 0)
 
 	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
+	if err := ffi.PrepareCallInterface(
+		cif, types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor,
@@ -1203,7 +1224,8 @@ func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
 	typePtr := uintptr(unsafe.Pointer(&typeBytes[0]))
 
 	var result uintptr
-	if err := ffi.CallFunction(cif,
+	if err := ffi.CallFunction(
+		cif,
 		objcRT.classAddMethod,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
@@ -1225,7 +1247,8 @@ func RegisterClassPair(cls Class) {
 	}
 
 	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
+	if err := ffi.PrepareCallInterface(
+		cif, types.DefaultCall,
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor,
@@ -1235,11 +1258,91 @@ func RegisterClassPair(cls Class) {
 	}
 
 	clsPtr := uintptr(cls)
-	_ = ffi.CallFunction(cif,
+	_ = ffi.CallFunction(
+		cif,
 		objcRT.objcRegisterClassPair,
 		nil,
 		[]unsafe.Pointer{
 			unsafe.Pointer(&clsPtr),
 		},
 	)
+}
+
+// SetAssociatedObject sets an associated object on the given ObjC object.
+func SetAssociatedObject(object ID, key unsafe.Pointer, value unsafe.Pointer, policy uintptr) {
+	if object == 0 {
+		return
+	}
+	if err := initRuntime(); err != nil {
+		return
+	}
+
+	objVal := uintptr(object)
+	keyVal := uintptr(key) // unsafe.Pointer -> uintptr
+	valVal := uintptr(value)
+	polVal := uint64(policy)
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // object (id)
+		types.PointerTypeDescriptor, // key (void*)
+		types.PointerTypeDescriptor, // value (id)
+		types.UInt64TypeDescriptor,  // policy (objc_AssociationPolicy)
+	}
+
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.VoidTypeDescriptor,
+		argTypes,
+	); err != nil {
+		return
+	}
+
+	args := []unsafe.Pointer{
+		unsafe.Pointer(&objVal),
+		unsafe.Pointer(&keyVal),
+		unsafe.Pointer(&valVal),
+		unsafe.Pointer(&polVal),
+	}
+
+	_ = ffi.CallFunction(cif, objcRT.objcSetAssociatedObjectFn, nil, args)
+}
+
+// GetAssociatedObject retrieves the associated object for the given key.
+//
+//nolint:govet // intentional use of unsafe.Pointer
+func GetAssociatedObject(object ID, key unsafe.Pointer) unsafe.Pointer {
+	if object == 0 {
+		return nil
+	}
+	if err := initRuntime(); err != nil {
+		return nil
+	}
+
+	objVal := uintptr(object)
+	keyVal := uintptr(key)
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // object
+		types.PointerTypeDescriptor, // key
+	}
+
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	); err != nil {
+		return nil
+	}
+
+	var ret uintptr
+	args := []unsafe.Pointer{
+		unsafe.Pointer(&objVal),
+		unsafe.Pointer(&keyVal),
+	}
+	_ = ffi.CallFunction(cif, objcRT.objcGetAssociatedObjectFn, unsafe.Pointer(&ret), args)
+	return unsafe.Pointer(ret)
 }

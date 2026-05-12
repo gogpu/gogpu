@@ -19,6 +19,7 @@ type darwinWindow struct {
 	window      *darwin.Window
 	surface     *darwin.Surface
 	config      Config
+	id          WindowID
 	shouldClose bool
 	events      []Event
 	eventMu     sync.Mutex
@@ -75,10 +76,16 @@ func (p *darwinPlatform) Init() error {
 
 // CreateWindow creates a macOS window with the given configuration.
 func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	id := NewWindowID()
 	w := &darwinWindow{
 		config:    config,
 		frameless: config.Frameless,
 		startTime: time.Now(),
+		id:        id,
+	}
+	// Set as primary if this is the first window
+	if p.primary == nil {
+		p.primary = w
 	}
 
 	windowConfig := darwin.WindowConfig{
@@ -120,8 +127,12 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		w.surface.UpdateSize()
 	}
 
-	p.primary = w
-	return &darwinPlatformWindow{platform: p, id: NewWindowID()}, nil
+	p.mu.Lock()
+	if p.primary == nil {
+		p.primary = w
+	}
+	p.mu.Unlock()
+	return &darwinPlatformWindow{platform: p, id: id, window: w.window}, nil
 }
 
 // PollEvents processes pending macOS events.
@@ -182,73 +193,66 @@ func (p *darwinPlatform) Destroy() {
 
 // darwinPlatformWindow wraps darwinPlatform to implement PlatformWindow.
 type darwinPlatformWindow struct {
-	platform *darwinPlatform
-	id       WindowID
+	platform  *darwinPlatform
+	id        WindowID
+	window    *darwin.Window
+	lastScale float64
 }
 
 func (dw *darwinPlatformWindow) ID() WindowID { return dw.id }
 
-func (dw *darwinPlatformWindow) GetHandle() (instance, window uintptr) {
-	w := dw.platform.primary
-	if w.surface != nil {
-		return 0, w.surface.LayerPtr()
+func (dw *darwinPlatformWindow) GetHandle() (instance uintptr, window uintptr) {
+	if dw.window == nil {
+		return 0, 0
 	}
-	if w.window != nil {
-		return 0, w.window.ViewHandle()
+	metalLayer := dw.window.MetalLayer()
+	if metalLayer != 0 {
+		return 0, metalLayer.Ptr()
+	}
+	return 0, dw.window.ViewHandle()
+}
+
+func (dw *darwinPlatformWindow) LogicalSize() (int, int) {
+	if dw.window != nil {
+		return dw.window.Size()
+	}
+	return dw.platform.primary.config.Width, dw.platform.primary.config.Height
+}
+
+func (dw *darwinPlatformWindow) PhysicalSize() (int, int) {
+	if dw.window != nil {
+		return dw.window.FramebufferSize()
 	}
 	return 0, 0
 }
 
-func (dw *darwinPlatformWindow) LogicalSize() (int, int) {
-	w := dw.platform.primary
-	if w.window != nil {
-		return w.window.Size()
-	}
-	return w.config.Width, w.config.Height
-}
-
-func (dw *darwinPlatformWindow) PhysicalSize() (int, int) {
-	w := dw.platform.primary
-	if w.window != nil {
-		return w.window.FramebufferSize()
-	}
-	return w.config.Width, w.config.Height
-}
-
 func (dw *darwinPlatformWindow) ScaleFactor() float64 {
-	w := dw.platform.primary
-	if w.window == nil {
+	if dw.window == nil {
 		return 1.0
 	}
-	return w.window.BackingScaleFactor()
+	return dw.window.BackingScaleFactor()
 }
 
 func (dw *darwinPlatformWindow) ShouldClose() bool {
-	w := dw.platform.primary
-	if w.window != nil {
-		return w.window.ShouldClose() || w.shouldClose
+	if dw.window != nil {
+		return dw.window.ShouldClose()
 	}
-	return w.shouldClose
+	return false
 }
 
 func (dw *darwinPlatformWindow) InSizeMove() bool  { return false }
 func (dw *darwinPlatformWindow) SetTitle(_ string) {}
 
 func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
-	w := dw.platform.primary
-	if w.window == nil {
+	if dw.window == nil {
 		return PrepareFrameResult{ScaleFactor: 1.0}
 	}
 
-	scale := w.window.BackingScaleFactor()
-	physW, physH := w.window.FramebufferSize()
+	scale := dw.window.BackingScaleFactor()
+	physW, physH := dw.window.FramebufferSize()
 
-	scaleChanged := w.lastScale != 0 && w.lastScale != scale
-	w.lastScale = scale
-
-	if w.surface != nil && scale > 0 {
-		w.surface.Layer().SetContentsScale(scale)
-	}
+	scaleChanged := dw.lastScale != 0 && dw.lastScale != scale
+	dw.lastScale = scale
 
 	return PrepareFrameResult{
 		ScaleChanged:   scaleChanged,
@@ -267,83 +271,80 @@ func (dw *darwinPlatformWindow) CursorMode() int   { return 0 }
 func (dw *darwinPlatformWindow) SyncFrame()        {}
 
 func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {
-	w := dw.platform.primary
-	w.callbackMu.Lock()
-	w.frameless = frameless
-	w.callbackMu.Unlock()
-
-	if w.window != nil {
-		if frameless {
-			w.window.SetStyleMask(darwin.NSWindowStyleMaskBorderless | darwin.NSWindowStyleMaskResizable)
-		} else {
-			w.window.SetStyleMask(
-				darwin.NSWindowStyleMaskTitled | darwin.NSWindowStyleMaskClosable |
-					darwin.NSWindowStyleMaskMiniaturizable | darwin.NSWindowStyleMaskResizable)
-		}
+	if dw.window == nil {
+		return
+	}
+	if frameless {
+		dw.window.SetStyleMask(darwin.NSWindowStyleMaskBorderless | darwin.NSWindowStyleMaskResizable)
+	} else {
+		dw.window.SetStyleMask(
+			darwin.NSWindowStyleMaskTitled | darwin.NSWindowStyleMaskClosable |
+				darwin.NSWindowStyleMaskMiniaturizable | darwin.NSWindowStyleMaskResizable,
+		)
 	}
 }
 
 func (dw *darwinPlatformWindow) IsFrameless() bool {
-	w := dw.platform.primary
-	w.callbackMu.RLock()
-	defer w.callbackMu.RUnlock()
-	return w.frameless
+	return false
 }
 
 func (dw *darwinPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
-	w := dw.platform.primary
-	w.callbackMu.Lock()
-	defer w.callbackMu.Unlock()
-	w.hitTestCallback = fn
+	// no-op
 }
 
 func (dw *darwinPlatformWindow) Minimize() {
-	w := dw.platform.primary
-	if w.window != nil {
-		w.window.Miniaturize()
+	if dw.window != nil {
+		dw.window.Miniaturize()
 	}
 }
 
 func (dw *darwinPlatformWindow) Maximize() {
-	w := dw.platform.primary
-	if w.window != nil {
-		w.window.Zoom()
+	if dw.window != nil {
+		dw.window.Zoom()
 	}
 }
 
 func (dw *darwinPlatformWindow) IsMaximized() bool {
-	w := dw.platform.primary
-	if w.window != nil {
-		return w.window.IsZoomed()
+	if dw.window != nil {
+		return dw.window.IsZoomed()
 	}
 	return false
 }
 
 func (dw *darwinPlatformWindow) Close() {
-	w := dw.platform.primary
+	if dw.window != nil {
+		dw.window.Close()
+	}
+}
+
+func (w *darwinPlatformWindow) SetOnClose(fn func() bool) {
 	if w.window != nil {
-		w.window.Close()
+		w.window.SetOnClose(fn)
+	}
+}
+
+func (w *darwinPlatformWindow) Show() {
+	if w.window != nil {
+		w.window.Show()
 	}
 }
 
 // SetFullscreen enters or exits native macOS fullscreen mode.
 // Uses NSWindow toggleFullScreen: which provides the standard animation.
 func (dw *darwinPlatformWindow) SetFullscreen(fullscreen bool) {
-	w := dw.platform.primary
-	if w.window == nil {
+	if dw.window == nil {
 		return
 	}
 	// Only toggle if current state differs from desired state.
-	if fullscreen != w.window.IsFullScreen() {
-		w.window.ToggleFullScreen()
+	if fullscreen != dw.window.IsFullScreen() {
+		dw.window.ToggleFullScreen()
 	}
 }
 
 // IsFullscreen returns true if the window is in native macOS fullscreen mode.
 func (dw *darwinPlatformWindow) IsFullscreen() bool {
-	w := dw.platform.primary
-	if w.window != nil {
-		return w.window.IsFullScreen()
+	if dw.window != nil {
+		return dw.window.IsFullScreen()
 	}
 	return false
 }
@@ -351,8 +352,7 @@ func (dw *darwinPlatformWindow) IsFullscreen() bool {
 func (dw *darwinPlatformWindow) SetModalFrameCallback(_ func()) {}
 
 func (dw *darwinPlatformWindow) BlitPixels(pixels []byte, width, height int) error {
-	w := dw.platform.primary
-	if w.window == nil {
+	if dw.window == nil {
 		return fmt.Errorf("gogpu: darwin BlitPixels: no window")
 	}
 
@@ -362,7 +362,7 @@ func (dw *darwinPlatformWindow) BlitPixels(pixels []byte, width, height int) err
 	}
 	defer darwin.ReleaseCGImage(cgImage)
 
-	contentView := w.window.ContentView()
+	contentView := dw.window.ContentView()
 	if contentView.IsNil() {
 		return fmt.Errorf("gogpu: darwin BlitPixels: no content view")
 	}
@@ -404,7 +404,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 	// Check if window should close — queue once, not every call.
 	if !w.shouldClose && w.window != nil && w.window.ShouldClose() {
 		w.shouldClose = true
-		w.events = append(w.events, Event{Type: EventClose})
+		w.events = append(w.events, Event{WindowID: w.id, Type: EventClose})
 	}
 
 	// Check for resize — queue if size changed.
@@ -420,13 +420,15 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.config.Width = newWidth
 			w.config.Height = newHeight
 			physW, physH := w.window.FramebufferSize()
-			w.events = append(w.events, Event{
-				Type:           EventResize,
-				Width:          newWidth,
-				Height:         newHeight,
-				PhysicalWidth:  physW,
-				PhysicalHeight: physH,
-			})
+			w.events = append(
+				w.events, Event{
+					Type:           EventResize,
+					Width:          newWidth,
+					Height:         newHeight,
+					PhysicalWidth:  physW,
+					PhysicalHeight: physH,
+				},
+			)
 		}
 	}
 
@@ -678,7 +680,9 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 	}
 
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice(
+		(*byte)(unsafe.Pointer(utf8Ptr)), length*4,
+	) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Decode UTF-8 runes and push each non-control character to event queue
 	for i := 0; i < len(data); {
@@ -761,13 +765,15 @@ func (w *darwinWindow) checkResize() {
 
 		physW, physH := w.window.FramebufferSize()
 
-		w.queueEvent(Event{
-			Type:           EventResize,
-			Width:          newWidth,
-			Height:         newHeight,
-			PhysicalWidth:  physW,
-			PhysicalHeight: physH,
-		})
+		w.queueEvent(
+			Event{
+				Type:           EventResize,
+				Width:          newWidth,
+				Height:         newHeight,
+				PhysicalWidth:  physW,
+				PhysicalHeight: physH,
+			},
+		)
 	}
 }
 
@@ -1128,7 +1134,9 @@ func (p *darwinPlatform) ClipboardRead() (string, error) {
 	}
 
 	// Read UTF-8 bytes (length is character count; UTF-8 may use up to 4 bytes per char)
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice(
+		(*byte)(unsafe.Pointer(utf8Ptr)), length*4,
+	) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual end of the C string
 	end := 0
@@ -1202,7 +1210,9 @@ func (p *darwinPlatform) DarkMode() bool {
 		return false
 	}
 
-	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice(
+		(*byte)(unsafe.Pointer(utf8Ptr)), length*4,
+	) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual string end
 	end := 0

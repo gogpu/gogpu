@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"io"
+	"log"
 	"runtime"
 	"time"
 
@@ -28,10 +29,11 @@ type appRenderLoop interface {
 // This separation ensures the window stays responsive during heavy GPU
 // operations like swapchain recreation.
 type App struct {
-	config     Config
-	manager    platform.PlatformManager // process-level (multi-window)
-	platWindow platform.PlatformWindow  // primary window (per-window ops)
-	renderer   *Renderer
+	config            Config
+	manager           platform.PlatformManager // process-level (multi-window)
+	platWindow        platform.PlatformWindow  // primary window (per-window ops)
+	renderer          *Renderer
+	primaryPlatformID platform.WindowID
 
 	// Multi-thread rendering
 	renderLoop appRenderLoop
@@ -85,6 +87,7 @@ func (a *App) OnDraw(fn func(*Context)) *App {
 	if a.primaryWindow != nil {
 		a.primaryWindow.onDraw = fn
 	}
+
 	return a
 }
 
@@ -184,14 +187,16 @@ func (a *App) Run() error {
 	defer a.manager.Destroy()
 
 	// Create primary platform window.
-	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:      a.config.Title,
-		Width:      a.config.Width,
-		Height:     a.config.Height,
-		Resizable:  a.config.Resizable,
-		Fullscreen: a.config.Fullscreen,
-		Frameless:  a.config.Frameless,
-	})
+	platWindow, err := a.manager.CreateWindow(
+		platform.Config{
+			Title:      a.config.Title,
+			Width:      a.config.Width,
+			Height:     a.config.Height,
+			Resizable:  a.config.Resizable,
+			Fullscreen: a.config.Fullscreen,
+			Frameless:  a.config.Frameless,
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -229,9 +234,13 @@ func (a *App) Run() error {
 
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(a.platWindow, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference)
-	})
+	a.renderLoop.RunOnRenderThreadVoid(
+		func() {
+			a.renderer, initErr = newRenderer(
+				a.platWindow, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
+			)
+		},
+	)
 	if initErr != nil {
 		return initErr
 	}
@@ -242,19 +251,23 @@ func (a *App) Run() error {
 		// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
 		// 4. onClose callback — manual cleanup (legacy pattern)
 		// 5. Renderer.Destroy() — release GPU device
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.WaitForGPU()
-			a.renderer.DrainDeferredDestroys()
-			if a.tracker != nil {
-				_ = a.tracker.CloseAll()
-			}
-			if a.onClose != nil {
-				a.onClose()
-			}
-		})
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.Destroy()
-		})
+		a.renderLoop.RunOnRenderThreadVoid(
+			func() {
+				a.renderer.WaitForGPU()
+				a.renderer.DrainDeferredDestroys()
+				if a.tracker != nil {
+					_ = a.tracker.CloseAll()
+				}
+				if a.onClose != nil {
+					a.onClose()
+				}
+			},
+		)
+		a.renderLoop.RunOnRenderThreadVoid(
+			func() {
+				a.renderer.Destroy()
+			},
+		)
 	}()
 
 	// Register the primary window in the WindowManager.
@@ -276,6 +289,7 @@ func (a *App) Run() error {
 		onResize:   a.onResize,
 		visible:    true,
 	}
+	a.primaryPlatformID = platWindow.ID()
 	a.windowManager.add(a.primaryWindow)
 
 	// Main loop with three rendering modes (ADR-023):
@@ -290,6 +304,7 @@ func (a *App) Run() error {
 	a.invalidator.Invalidate() // Request initial frame
 
 	for a.running && !a.platWindow.ShouldClose() {
+		//log.Printf("[LOOP] running=%v, primaryShouldClose=%v", a.running, a.platWindow.ShouldClose())
 		// Three-mode state detection (ADR-023)
 		continuousRender := a.config.ContinuousRender
 		animating := a.animations.IsAnimating()
@@ -347,6 +362,8 @@ func (a *App) Run() error {
 			a.renderFrameMultiThread()
 		}
 	}
+
+	log.Printf("[EXIT] loop finished. running=%v, primaryShouldClose=%v", a.running, a.platWindow.ShouldClose())
 
 	return nil
 }
@@ -415,9 +432,11 @@ func (a *App) handleSecondaryResize(ev platform.Event) {
 	physW, physH := ev.PhysicalWidth, ev.PhysicalHeight
 	if physW > 0 && physH > 0 {
 		ws := w.surface
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
-		})
+		a.renderLoop.RunOnRenderThreadVoid(
+			func() {
+				ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
+			},
+		)
 	}
 	if w.onResize != nil {
 		w.onResize(ev.Width, ev.Height)
@@ -544,14 +563,31 @@ func (a *App) dispatchScrollEvent(event *platform.Event) {
 }
 
 // windowCloseEvent handles CloseEvent from the platform.
+// windowCloseEvent handles CloseEvent from the platform.
 func (a *App) windowCloseEvent(event *platform.Event) {
-	isPrimary := event.WindowID == 0 ||
-		(a.primaryWindow != nil && event.WindowID == a.primaryWindow.platformID)
+	isPrimary := a.primaryWindow != nil && event.WindowID == a.primaryPlatformID
 
-	if isPrimary {
-		if a.primaryWindow != nil && a.primaryWindow.onClose != nil && !a.primaryWindow.onClose() {
+	if !isPrimary {
+		// Secondary window
+		w := a.windowManager.getByPlatformID(event.WindowID)
+		if w != nil && w.onClose != nil && !w.onClose() {
 			return
 		}
+		if w != nil {
+			a.closeSecondaryWindow(w.id)
+		}
+		return
+	}
+
+	// Primary window
+	if a.primaryWindow != nil && a.primaryWindow.onClose != nil && !a.primaryWindow.onClose() {
+		return
+	}
+
+	// Check if there are other windows open
+	newPrimaryID := a.findNewPrimaryWindowID()
+	if newPrimaryID == 0 {
+		// No other windows — terminate the application
 		a.running = false
 		a.windowManager.release(a.primaryWindow.id)
 		if a.onAnyWindowClosed != nil {
@@ -560,14 +596,34 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 		return
 	}
 
-	// Secondary window
-	w := a.windowManager.getByPlatformID(event.WindowID)
-	if w != nil && w.onClose != nil && !w.onClose() {
-		return
+	// Close old primary and promote new window
+	oldPrimaryID := a.primaryWindow.id
+	newPrimary := a.windowManager.get(newPrimaryID)
+	a.closeSecondaryWindow(oldPrimaryID)
+
+	if newPrimary != nil {
+		a.primaryWindow = newPrimary
+		a.primaryPlatformID = newPrimary.platformID
+		a.platWindow = newPrimary.platWindow
 	}
-	if w != nil {
-		a.closeSecondaryWindow(w.id)
+}
+
+// findNewPrimaryWindowID returns the ID of the first window that is not the current primary,
+// or 0 if no other windows exist.
+func (a *App) findNewPrimaryWindowID() InternalWindowID {
+	a.windowManager.mu.RLock()
+	defer a.windowManager.mu.RUnlock()
+
+	if a.windowManager.count() <= 1 {
+		return 0
 	}
+
+	for _, id := range a.windowManager.order {
+		if a.primaryWindow != nil && id != a.primaryWindow.id {
+			return id
+		}
+	}
+	return 0
 }
 
 type windowFrame struct {
@@ -597,13 +653,15 @@ func (a *App) renderFrameMultiThread() {
 		if pw <= 0 || ph <= 0 {
 			continue // Minimized
 		}
-		frames = append(frames, windowFrame{
-			window: w,
-			onDraw: w.onDraw,
-			scale:  w.platWindow.ScaleFactor(),
-			physW:  pw,
-			physH:  ph,
-		})
+		frames = append(
+			frames, windowFrame{
+				window: w,
+				onDraw: w.onDraw,
+				scale:  w.platWindow.ScaleFactor(),
+				physW:  pw,
+				physH:  ph,
+			},
+		)
 	}
 	a.windowManager.mu.RUnlock()
 
@@ -612,45 +670,47 @@ func (a *App) renderFrameMultiThread() {
 	}
 
 	// Execute GPU operations on render thread.
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		// Apply pending resize for the primary window.
-		if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
-			a.renderer.Resize(int(w), int(h))
-		}
-
-		// Drain deferred destroys once per frame, not per window.
-		a.renderer.DrainDeferredDestroys()
-
-		for _, frame := range frames {
-			ws := frame.window.surface
-			if ws == nil {
-				continue
+	a.renderLoop.RunOnRenderThreadVoid(
+		func() {
+			// Apply pending resize for the primary window.
+			if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
+				a.renderer.Resize(int(w), int(h))
 			}
 
-			// Lazy acquire: store state for deferred beginFrame.
-			// beginFrame is called on first draw call, not upfront.
-			// If OnDraw produces no GPU work → no acquire, no present.
-			platWin := frame.window.platWindow
-			ws.prepareLazyAcquire(platWin, a.renderer.device, a.renderer.adapter)
+			// Drain deferred destroys once per frame, not per window.
+			a.renderer.DrainDeferredDestroys()
 
-			// Set renderer's currentSurface so draw methods target this window.
-			a.renderer.currentSurface = ws
+			for _, frame := range frames {
+				ws := frame.window.surface
+				if ws == nil {
+					continue
+				}
 
-			// Call per-window draw callback.
-			ctx := newContextForSurface(a.renderer, ws, frame.scale)
-			frame.onDraw(ctx)
+				// Lazy acquire: store state for deferred beginFrame.
+				// beginFrame is called on first draw call, not upfront.
+				// If OnDraw produces no GPU work → no acquire, no present.
+				platWin := frame.window.platWindow
+				ws.prepareLazyAcquire(platWin, a.renderer.device, a.renderer.adapter)
 
-			// End frame only if beginFrame was actually called (lazy acquire fired).
-			if ws.frameStarted {
-				a.renderer.endFrameForSurface(ws)
+				// Set renderer's currentSurface so draw methods target this window.
+				a.renderer.currentSurface = ws
+
+				// Call per-window draw callback.
+				ctx := newContextForSurface(a.renderer, ws, frame.scale)
+				frame.onDraw(ctx)
+
+				// End frame only if beginFrame was actually called (lazy acquire fired).
+				if ws.frameStarted {
+					a.renderer.endFrameForSurface(ws)
+				}
+				ws.resetLazyState()
+				a.renderer.currentSurface = nil
 			}
-			ws.resetLazyState()
-			a.renderer.currentSurface = nil
-		}
 
-		// Poll submissions once after all windows are presented.
-		a.renderer.pollSubmissions()
-	})
+			// Poll submissions once after all windows are presented.
+			a.renderer.pollSubmissions()
+		},
+	)
 }
 
 // modalFrameTick executes one update+render cycle during the Win32 modal
@@ -879,12 +939,14 @@ func (a *App) IsFrameless() bool {
 // Implements gpucontext.WindowChrome.
 func (a *App) SetHitTestCallback(callback gpucontext.HitTestCallback) {
 	if a.platWindow != nil {
-		a.platWindow.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
-			if callback != nil {
-				return callback(x, y)
-			}
-			return gpucontext.HitTestClient
-		})
+		a.platWindow.SetHitTestCallback(
+			func(x, y float64) gpucontext.HitTestResult {
+				if callback != nil {
+					return callback(x, y)
+				}
+				return gpucontext.HitTestClient
+			},
+		)
 	}
 }
 
