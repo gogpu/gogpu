@@ -572,9 +572,7 @@ func TestApp_CloseSecondaryWindowRecyclesID(t *testing.T) {
 	}
 	app.windowManager.add(sec)
 
-	app.windowManager.remove(secID)
-	app.windowManager.release(secID)
-	sec.visible = false
+	app.closeSecondaryWindow(secID)
 
 	if app.windowManager.get(secID) != nil {
 		t.Fatal("secondary window should be removed from manager")
@@ -850,12 +848,10 @@ func TestApp_ProcessEvents_SecondaryResizeCycle(t *testing.T) {
 
 	var resizeCalled bool
 	var resizeW, resizeH int
-	w.SetOnResize(
-		func(w, h int) {
-			resizeCalled = true
-			resizeW, resizeH = w, h
-		},
-	)
+	w.SetOnResize(func(w, h int) {
+		resizeCalled = true
+		resizeW, resizeH = w, h
+	})
 
 	primaryEv := platform.Event{Type: platform.EventResize, WindowID: 0, Width: 1024, Height: 768}
 	secondaryEv := platform.Event{

@@ -105,11 +105,9 @@ var (
 // initRuntime initializes the Objective-C runtime by loading required libraries
 // and resolving function symbols. This is called once on first use.
 func initRuntime() error {
-	objcRT.once.Do(
-		func() {
-			objcRT.err = loadRuntime()
-		},
-	)
+	objcRT.once.Do(func() {
+		objcRT.err = loadRuntime()
+	})
 	return objcRT.err
 }
 
@@ -125,32 +123,27 @@ func loadRuntime() error {
 
 	// Load Foundation framework
 	objcRT.foundation, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/Foundation.framework/Foundation",
-	)
+		"/System/Library/Frameworks/Foundation.framework/Foundation")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load AppKit framework
-	objcRT.appKit, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/AppKit.framework/AppKit",
-	)
+	objcRT.appKit, err = ffi.LoadLibrary("/System/Library/Frameworks/AppKit.framework/AppKit")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load QuartzCore framework (for CAMetalLayer)
 	objcRT.quartzCore, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
-	)
+		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
 
 	// Load CoreFoundation framework
 	objcRT.coreFoundation, err = ffi.LoadLibrary(
-		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
-	)
+		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
 	if err != nil {
 		return errors.Join(ErrLibraryNotLoaded, err)
 	}
@@ -1163,8 +1156,7 @@ func AllocateClassPair(superclass Class, name string) Class {
 	nameBytes := append([]byte(name), 0)
 
 	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(
-		cif, types.DefaultCall,
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor,
@@ -1180,8 +1172,7 @@ func AllocateClassPair(superclass Class, name string) Class {
 	var extraBytes uintptr
 
 	var result uintptr
-	if err := ffi.CallFunction(
-		cif,
+	if err := ffi.CallFunction(cif,
 		objcRT.objcAllocateClassPair,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
@@ -1206,8 +1197,7 @@ func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
 	typeBytes := append([]byte(typeEncoding), 0)
 
 	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(
-		cif, types.DefaultCall,
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
 		types.PointerTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor,
@@ -1224,8 +1214,7 @@ func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
 	typePtr := uintptr(unsafe.Pointer(&typeBytes[0]))
 
 	var result uintptr
-	if err := ffi.CallFunction(
-		cif,
+	if err := ffi.CallFunction(cif,
 		objcRT.classAddMethod,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
@@ -1247,8 +1236,7 @@ func RegisterClassPair(cls Class) {
 	}
 
 	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(
-		cif, types.DefaultCall,
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
 		types.VoidTypeDescriptor,
 		[]*types.TypeDescriptor{
 			types.PointerTypeDescriptor,
@@ -1258,8 +1246,7 @@ func RegisterClassPair(cls Class) {
 	}
 
 	clsPtr := uintptr(cls)
-	_ = ffi.CallFunction(
-		cif,
+	_ = ffi.CallFunction(cif,
 		objcRT.objcRegisterClassPair,
 		nil,
 		[]unsafe.Pointer{

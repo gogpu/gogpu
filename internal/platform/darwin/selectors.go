@@ -199,206 +199,196 @@ var classes struct {
 
 // initSelectors registers all selectors used by the darwin package.
 func initSelectors() {
-	selectors.once.Do(
-		func() {
-			// NSObject
-			selectors.alloc = RegisterSelector("alloc")
-			selectors.init = RegisterSelector("init")
-			selectors.new = RegisterSelector("new")
-			selectors.release = RegisterSelector("release")
-			selectors.retain = RegisterSelector("retain")
+	selectors.once.Do(func() {
+		// NSObject
+		selectors.alloc = RegisterSelector("alloc")
+		selectors.init = RegisterSelector("init")
+		selectors.new = RegisterSelector("new")
+		selectors.release = RegisterSelector("release")
+		selectors.retain = RegisterSelector("retain")
 
-			// NSApplication
-			selectors.sharedApplication = RegisterSelector("sharedApplication")
-			selectors.setActivationPolicy = RegisterSelector("setActivationPolicy:")
-			selectors.activateIgnoringOtherApps = RegisterSelector("activateIgnoringOtherApps:")
-			selectors.run = RegisterSelector("run")
-			selectors.stop = RegisterSelector("stop:")
-			selectors.terminate = RegisterSelector("terminate:")
-			selectors.nextEventMatchingMaskUntilDateInModeDequeue = RegisterSelector(
-				"nextEventMatchingMask:untilDate:inMode:dequeue:",
-			)
-			selectors.sendEvent = RegisterSelector("sendEvent:")
-			selectors.finishLaunching = RegisterSelector("finishLaunching")
+		// NSApplication
+		selectors.sharedApplication = RegisterSelector("sharedApplication")
+		selectors.setActivationPolicy = RegisterSelector("setActivationPolicy:")
+		selectors.activateIgnoringOtherApps = RegisterSelector("activateIgnoringOtherApps:")
+		selectors.run = RegisterSelector("run")
+		selectors.stop = RegisterSelector("stop:")
+		selectors.terminate = RegisterSelector("terminate:")
+		selectors.nextEventMatchingMaskUntilDateInModeDequeue = RegisterSelector(
+			"nextEventMatchingMask:untilDate:inMode:dequeue:")
+		selectors.sendEvent = RegisterSelector("sendEvent:")
+		selectors.finishLaunching = RegisterSelector("finishLaunching")
 
-			// NSApplication delegate
-			selectors.setDelegate = RegisterSelector("setDelegate:")
+		// NSApplication delegate
+		selectors.setDelegate = RegisterSelector("setDelegate:")
 
-			// NSWindow
-			selectors.initWithContentRectStyleMaskBackingDefer = RegisterSelector(
-				"initWithContentRect:styleMask:backing:defer:",
-			)
-			selectors.setTitle = RegisterSelector("setTitle:")
-			selectors.title = RegisterSelector("title")
-			selectors.setContentView = RegisterSelector("setContentView:")
-			selectors.contentView = RegisterSelector("contentView")
-			selectors.makeKeyAndOrderFront = RegisterSelector("makeKeyAndOrderFront:")
-			selectors.orderOut = RegisterSelector("orderOut:")
-			selectors.close = RegisterSelector("close")
-			selectors.miniaturize = RegisterSelector("miniaturize:")
-			selectors.deminiaturize = RegisterSelector("deminiaturize:")
-			selectors.zoom = RegisterSelector("zoom:")
-			selectors.setFrame = RegisterSelector("setFrame:display:")
-			selectors.frame = RegisterSelector("frame")
-			selectors.contentRectForFrameRect = RegisterSelector("contentRectForFrameRect:")
-			selectors.frameRectForContentRect = RegisterSelector("frameRectForContentRect:")
-			selectors.styleMask = RegisterSelector("styleMask")
-			selectors.setStyleMask = RegisterSelector("setStyleMask:")
-			selectors.setAcceptsMouseMovedEvents = RegisterSelector("setAcceptsMouseMovedEvents:")
-			selectors.backingScaleFactor = RegisterSelector("backingScaleFactor")
-			selectors.makeFirstResponder = RegisterSelector("makeFirstResponder:")
-			selectors.isKeyWindow = RegisterSelector("isKeyWindow")
-			selectors.isVisible = RegisterSelector("isVisible")
-			selectors.isMiniaturized = RegisterSelector("isMiniaturized")
-			selectors.isZoomed = RegisterSelector("isZoomed")
-			selectors.setReleasedWhenClosed = RegisterSelector("setReleasedWhenClosed:")
-			selectors.center = RegisterSelector("center")
-			selectors.toggleFullScreen = RegisterSelector("toggleFullScreen:")
-			selectors.setCollectionBehavior = RegisterSelector("setCollectionBehavior:")
-			selectors.windowShouldClose = RegisterSelector("windowShouldClose:")
+		// NSWindow
+		selectors.initWithContentRectStyleMaskBackingDefer = RegisterSelector(
+			"initWithContentRect:styleMask:backing:defer:")
+		selectors.setTitle = RegisterSelector("setTitle:")
+		selectors.title = RegisterSelector("title")
+		selectors.setContentView = RegisterSelector("setContentView:")
+		selectors.contentView = RegisterSelector("contentView")
+		selectors.makeKeyAndOrderFront = RegisterSelector("makeKeyAndOrderFront:")
+		selectors.orderOut = RegisterSelector("orderOut:")
+		selectors.close = RegisterSelector("close")
+		selectors.miniaturize = RegisterSelector("miniaturize:")
+		selectors.deminiaturize = RegisterSelector("deminiaturize:")
+		selectors.zoom = RegisterSelector("zoom:")
+		selectors.setFrame = RegisterSelector("setFrame:display:")
+		selectors.frame = RegisterSelector("frame")
+		selectors.contentRectForFrameRect = RegisterSelector("contentRectForFrameRect:")
+		selectors.frameRectForContentRect = RegisterSelector("frameRectForContentRect:")
+		selectors.styleMask = RegisterSelector("styleMask")
+		selectors.setStyleMask = RegisterSelector("setStyleMask:")
+		selectors.setAcceptsMouseMovedEvents = RegisterSelector("setAcceptsMouseMovedEvents:")
+		selectors.backingScaleFactor = RegisterSelector("backingScaleFactor")
+		selectors.makeFirstResponder = RegisterSelector("makeFirstResponder:")
+		selectors.isKeyWindow = RegisterSelector("isKeyWindow")
+		selectors.isVisible = RegisterSelector("isVisible")
+		selectors.isMiniaturized = RegisterSelector("isMiniaturized")
+		selectors.isZoomed = RegisterSelector("isZoomed")
+		selectors.setReleasedWhenClosed = RegisterSelector("setReleasedWhenClosed:")
+		selectors.center = RegisterSelector("center")
+		selectors.toggleFullScreen = RegisterSelector("toggleFullScreen:")
+		selectors.setCollectionBehavior = RegisterSelector("setCollectionBehavior:")
+		selectors.windowShouldClose = RegisterSelector("windowShouldClose:")
 
-			// NSView
-			selectors.setWantsLayer = RegisterSelector("setWantsLayer:")
-			selectors.wantsLayer = RegisterSelector("wantsLayer")
-			selectors.setLayer = RegisterSelector("setLayer:")
-			selectors.layer = RegisterSelector("layer")
-			selectors.bounds = RegisterSelector("bounds")
-			selectors.setBounds = RegisterSelector("setBounds:")
-			selectors.setNeedsDisplay = RegisterSelector("setNeedsDisplay:")
+		// NSView
+		selectors.setWantsLayer = RegisterSelector("setWantsLayer:")
+		selectors.wantsLayer = RegisterSelector("wantsLayer")
+		selectors.setLayer = RegisterSelector("setLayer:")
+		selectors.layer = RegisterSelector("layer")
+		selectors.bounds = RegisterSelector("bounds")
+		selectors.setBounds = RegisterSelector("setBounds:")
+		selectors.setNeedsDisplay = RegisterSelector("setNeedsDisplay:")
 
-			// CALayer - Contents
-			selectors.setContents = RegisterSelector("setContents:")
+		// CALayer - Contents
+		selectors.setContents = RegisterSelector("setContents:")
 
-			// NSScreen
-			selectors.mainScreen = RegisterSelector("mainScreen")
-			selectors.screens = RegisterSelector("screens")
-			selectors.visibleFrame = RegisterSelector("visibleFrame")
+		// NSScreen
+		selectors.mainScreen = RegisterSelector("mainScreen")
+		selectors.screens = RegisterSelector("screens")
+		selectors.visibleFrame = RegisterSelector("visibleFrame")
 
-			// NSDate
-			selectors.distantPast = RegisterSelector("distantPast")
-			selectors.distantFuture = RegisterSelector("distantFuture")
+		// NSDate
+		selectors.distantPast = RegisterSelector("distantPast")
+		selectors.distantFuture = RegisterSelector("distantFuture")
 
-			// NSString
-			selectors.initWithUTF8String = RegisterSelector("initWithUTF8String:")
-			selectors.UTF8String = RegisterSelector("UTF8String")
-			selectors.length = RegisterSelector("length")
+		// NSString
+		selectors.initWithUTF8String = RegisterSelector("initWithUTF8String:")
+		selectors.UTF8String = RegisterSelector("UTF8String")
+		selectors.length = RegisterSelector("length")
 
-			// NSAutoreleasePool
-			selectors.drain = RegisterSelector("drain")
+		// NSAutoreleasePool
+		selectors.drain = RegisterSelector("drain")
 
-			// CALayer / CAMetalLayer
-			selectors.setLayerFrame = RegisterSelector("setFrame:")
-			selectors.setAutoresizingMask = RegisterSelector("setAutoresizingMask:")
-			selectors.setContentsGravity = RegisterSelector("setContentsGravity:")
-			selectors.setContentsScale = RegisterSelector("setContentsScale:")
-			selectors.contentsScale = RegisterSelector("contentsScale")
-			selectors.setDrawableSize = RegisterSelector("setDrawableSize:")
-			selectors.drawableSize = RegisterSelector("drawableSize")
-			selectors.setDevice = RegisterSelector("setDevice:")
-			selectors.device = RegisterSelector("device")
-			selectors.setPixelFormat = RegisterSelector("setPixelFormat:")
-			selectors.pixelFormat = RegisterSelector("pixelFormat")
-			selectors.nextDrawable = RegisterSelector("nextDrawable")
-			selectors.setFramebufferOnly = RegisterSelector("setFramebufferOnly:")
-			selectors.setMaximumDrawableCount = RegisterSelector("setMaximumDrawableCount:")
-			selectors.setDisplaySyncEnabled = RegisterSelector("setDisplaySyncEnabled:")
+		// CALayer / CAMetalLayer
+		selectors.setLayerFrame = RegisterSelector("setFrame:")
+		selectors.setAutoresizingMask = RegisterSelector("setAutoresizingMask:")
+		selectors.setContentsGravity = RegisterSelector("setContentsGravity:")
+		selectors.setContentsScale = RegisterSelector("setContentsScale:")
+		selectors.contentsScale = RegisterSelector("contentsScale")
+		selectors.setDrawableSize = RegisterSelector("setDrawableSize:")
+		selectors.drawableSize = RegisterSelector("drawableSize")
+		selectors.setDevice = RegisterSelector("setDevice:")
+		selectors.device = RegisterSelector("device")
+		selectors.setPixelFormat = RegisterSelector("setPixelFormat:")
+		selectors.pixelFormat = RegisterSelector("pixelFormat")
+		selectors.nextDrawable = RegisterSelector("nextDrawable")
+		selectors.setFramebufferOnly = RegisterSelector("setFramebufferOnly:")
+		selectors.setMaximumDrawableCount = RegisterSelector("setMaximumDrawableCount:")
+		selectors.setDisplaySyncEnabled = RegisterSelector("setDisplaySyncEnabled:")
 
-			// NSEvent
-			selectors.eventType = RegisterSelector("type")
-			selectors.locationInWindow = RegisterSelector("locationInWindow")
-			selectors.modifierFlags = RegisterSelector("modifierFlags")
-			selectors.keyCode = RegisterSelector("keyCode")
-			selectors.characters = RegisterSelector("characters")
-			selectors.charactersIgnoringModifiers = RegisterSelector("charactersIgnoringModifiers")
-			selectors.isARepeat = RegisterSelector("isARepeat")
-			selectors.buttonNumber = RegisterSelector("buttonNumber")
-			selectors.scrollingDeltaX = RegisterSelector("scrollingDeltaX")
-			selectors.scrollingDeltaY = RegisterSelector("scrollingDeltaY")
-			selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
-			selectors.deltaX = RegisterSelector("deltaX")
-			selectors.deltaY = RegisterSelector("deltaY")
+		// NSEvent
+		selectors.eventType = RegisterSelector("type")
+		selectors.locationInWindow = RegisterSelector("locationInWindow")
+		selectors.modifierFlags = RegisterSelector("modifierFlags")
+		selectors.keyCode = RegisterSelector("keyCode")
+		selectors.characters = RegisterSelector("characters")
+		selectors.charactersIgnoringModifiers = RegisterSelector("charactersIgnoringModifiers")
+		selectors.isARepeat = RegisterSelector("isARepeat")
+		selectors.buttonNumber = RegisterSelector("buttonNumber")
+		selectors.scrollingDeltaX = RegisterSelector("scrollingDeltaX")
+		selectors.scrollingDeltaY = RegisterSelector("scrollingDeltaY")
+		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
+		selectors.deltaX = RegisterSelector("deltaX")
+		selectors.deltaY = RegisterSelector("deltaY")
 
-			// NSEvent - tablet/pen properties
-			selectors.pressure = RegisterSelector("pressure")
-			selectors.tilt = RegisterSelector("tilt")
-			selectors.rotation = RegisterSelector("rotation")
-			selectors.subtype = RegisterSelector("subtype")
-			selectors.pointingDeviceType = RegisterSelector("pointingDeviceType")
+		// NSEvent - tablet/pen properties
+		selectors.pressure = RegisterSelector("pressure")
+		selectors.tilt = RegisterSelector("tilt")
+		selectors.rotation = RegisterSelector("rotation")
+		selectors.subtype = RegisterSelector("subtype")
+		selectors.pointingDeviceType = RegisterSelector("pointingDeviceType")
 
-			// NSEvent - creation and posting
-			selectors.otherEventWithType = RegisterSelector(
-				"otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:",
-			)
-			selectors.postEventAtStart = RegisterSelector("postEvent:atStart:")
+		// NSEvent - creation and posting
+		selectors.otherEventWithType = RegisterSelector(
+			"otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:")
+		selectors.postEventAtStart = RegisterSelector("postEvent:atStart:")
 
-			// NSNotificationCenter
-			selectors.defaultCenter = RegisterSelector("defaultCenter")
-			selectors.addObserverSelectorNameObject = RegisterSelector(
-				"addObserver:selector:name:object:",
-			)
-			selectors.removeObserver = RegisterSelector("removeObserver:")
+		// NSNotificationCenter
+		selectors.defaultCenter = RegisterSelector("defaultCenter")
+		selectors.addObserverSelectorNameObject = RegisterSelector(
+			"addObserver:selector:name:object:")
+		selectors.removeObserver = RegisterSelector("removeObserver:")
 
-			// NSRunLoop
-			selectors.currentRunLoop = RegisterSelector("currentRunLoop")
-			selectors.runMode = RegisterSelector("runMode:beforeDate:")
+		// NSRunLoop
+		selectors.currentRunLoop = RegisterSelector("currentRunLoop")
+		selectors.runMode = RegisterSelector("runMode:beforeDate:")
 
-			// NSPasteboard
-			selectors.generalPasteboard = RegisterSelector("generalPasteboard")
-			selectors.stringForType = RegisterSelector("stringForType:")
-			selectors.clearContents = RegisterSelector("clearContents")
-			selectors.setStringForType = RegisterSelector("setString:forType:")
+		// NSPasteboard
+		selectors.generalPasteboard = RegisterSelector("generalPasteboard")
+		selectors.stringForType = RegisterSelector("stringForType:")
+		selectors.clearContents = RegisterSelector("clearContents")
+		selectors.setStringForType = RegisterSelector("setString:forType:")
 
-			// NSCursor
-			selectors.arrowCursor = RegisterSelector("arrowCursor")
-			selectors.pointingHandCursor = RegisterSelector("pointingHandCursor")
-			selectors.IBeamCursor = RegisterSelector("IBeamCursor")
-			selectors.crosshairCursor = RegisterSelector("crosshairCursor")
-			selectors.openHandCursor = RegisterSelector("openHandCursor")
-			selectors.resizeUpDownCursor = RegisterSelector("resizeUpDownCursor")
-			selectors.resizeLeftRightCursor = RegisterSelector("resizeLeftRightCursor")
-			selectors.operationNotAllowedCursor = RegisterSelector("operationNotAllowedCursor")
-			selectors.setCursor = RegisterSelector("set")
-			selectors.hideCursor = RegisterSelector("hide")
-			selectors.unhideCursor = RegisterSelector("unhide")
+		// NSCursor
+		selectors.arrowCursor = RegisterSelector("arrowCursor")
+		selectors.pointingHandCursor = RegisterSelector("pointingHandCursor")
+		selectors.IBeamCursor = RegisterSelector("IBeamCursor")
+		selectors.crosshairCursor = RegisterSelector("crosshairCursor")
+		selectors.openHandCursor = RegisterSelector("openHandCursor")
+		selectors.resizeUpDownCursor = RegisterSelector("resizeUpDownCursor")
+		selectors.resizeLeftRightCursor = RegisterSelector("resizeLeftRightCursor")
+		selectors.operationNotAllowedCursor = RegisterSelector("operationNotAllowedCursor")
+		selectors.setCursor = RegisterSelector("set")
+		selectors.hideCursor = RegisterSelector("hide")
+		selectors.unhideCursor = RegisterSelector("unhide")
 
-			// NSAppearance
-			selectors.effectiveAppearance = RegisterSelector("effectiveAppearance")
-			selectors.name = RegisterSelector("name")
+		// NSAppearance
+		selectors.effectiveAppearance = RegisterSelector("effectiveAppearance")
+		selectors.name = RegisterSelector("name")
 
-			// NSWorkspace
-			selectors.sharedWorkspace = RegisterSelector("sharedWorkspace")
-			selectors.accessibilityDisplayShouldReduceMotion = RegisterSelector(
-				"accessibilityDisplayShouldReduceMotion",
-			)
-			selectors.accessibilityDisplayShouldIncreaseContrast = RegisterSelector(
-				"accessibilityDisplayShouldIncreaseContrast",
-			)
-		},
-	)
+		// NSWorkspace
+		selectors.sharedWorkspace = RegisterSelector("sharedWorkspace")
+		selectors.accessibilityDisplayShouldReduceMotion = RegisterSelector(
+			"accessibilityDisplayShouldReduceMotion")
+		selectors.accessibilityDisplayShouldIncreaseContrast = RegisterSelector(
+			"accessibilityDisplayShouldIncreaseContrast")
+	})
 }
 
 // initClasses loads all class references used by the darwin package.
 func initClasses() {
-	classes.once.Do(
-		func() {
-			classes.NSObject = GetClass("NSObject")
-			classes.NSApplication = GetClass("NSApplication")
-			classes.NSWindow = GetClass("NSWindow")
-			classes.NSView = GetClass("NSView")
-			classes.NSScreen = GetClass("NSScreen")
-			classes.NSDate = GetClass("NSDate")
-			classes.NSString = GetClass("NSString")
-			classes.NSAutoreleasePool = GetClass("NSAutoreleasePool")
-			classes.NSEvent = GetClass("NSEvent")
-			classes.NSNotificationCenter = GetClass("NSNotificationCenter")
-			classes.NSRunLoop = GetClass("NSRunLoop")
-			classes.CALayer = GetClass("CALayer")
-			classes.CAMetalLayer = GetClass("CAMetalLayer")
-			classes.NSPasteboard = GetClass("NSPasteboard")
-			classes.NSCursor = GetClass("NSCursor")
-			classes.NSWorkspace = GetClass("NSWorkspace")
-		},
-	)
+	classes.once.Do(func() {
+		classes.NSObject = GetClass("NSObject")
+		classes.NSApplication = GetClass("NSApplication")
+		classes.NSWindow = GetClass("NSWindow")
+		classes.NSView = GetClass("NSView")
+		classes.NSScreen = GetClass("NSScreen")
+		classes.NSDate = GetClass("NSDate")
+		classes.NSString = GetClass("NSString")
+		classes.NSAutoreleasePool = GetClass("NSAutoreleasePool")
+		classes.NSEvent = GetClass("NSEvent")
+		classes.NSNotificationCenter = GetClass("NSNotificationCenter")
+		classes.NSRunLoop = GetClass("NSRunLoop")
+		classes.CALayer = GetClass("CALayer")
+		classes.CAMetalLayer = GetClass("CAMetalLayer")
+		classes.NSPasteboard = GetClass("NSPasteboard")
+		classes.NSCursor = GetClass("NSCursor")
+		classes.NSWorkspace = GetClass("NSWorkspace")
+	})
 }
 
 // Sel returns the cached selector for common operations.

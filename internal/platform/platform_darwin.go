@@ -56,6 +56,8 @@ type darwinPlatform struct {
 
 	// Primary window for backward-compatible single-window API.
 	primary *darwinWindow
+
+	windows []*darwinWindow
 }
 
 // newPlatformManager returns a PlatformManager for macOS.
@@ -82,10 +84,6 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		frameless: config.Frameless,
 		startTime: time.Now(),
 		id:        id,
-	}
-	// Set as primary if this is the first window
-	if p.primary == nil {
-		p.primary = w
 	}
 
 	windowConfig := darwin.WindowConfig{
@@ -128,16 +126,32 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 
 	p.mu.Lock()
+	p.windows = append(p.windows, w)
 	if p.primary == nil {
 		p.primary = w
 	}
 	p.mu.Unlock()
-	return &darwinPlatformWindow{platform: p, id: id, window: w.window}, nil
+
+	return &darwinPlatformWindow{
+		platform:  p,
+		id:        id,
+		window:    w.window,
+		frameless: config.Frameless,
+	}, nil
 }
 
 // PollEvents processes pending macOS events.
 func (p *darwinPlatform) PollEvents() Event {
-	return p.primary.pollEvents(p.app)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for _, w := range p.windows {
+		e := w.pollEvents(p.app)
+		if e.Type != EventNone {
+			return e
+		}
+	}
+	return Event{Type: EventNone}
 }
 
 // WaitEvents blocks until at least one OS event is available, then processes
@@ -193,10 +207,13 @@ func (p *darwinPlatform) Destroy() {
 
 // darwinPlatformWindow wraps darwinPlatform to implement PlatformWindow.
 type darwinPlatformWindow struct {
-	platform  *darwinPlatform
-	id        WindowID
-	window    *darwin.Window
-	lastScale float64
+	platform        *darwinPlatform
+	id              WindowID
+	window          *darwin.Window
+	lastScale       float64
+	frameless       bool
+	hitTestCallback func(x, y float64) gpucontext.HitTestResult
+	callbackMu      sync.RWMutex
 }
 
 func (dw *darwinPlatformWindow) ID() WindowID { return dw.id }
@@ -271,9 +288,12 @@ func (dw *darwinPlatformWindow) CursorMode() int   { return 0 }
 func (dw *darwinPlatformWindow) SyncFrame()        {}
 
 func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {
+	dw.frameless = frameless
+
 	if dw.window == nil {
 		return
 	}
+
 	if frameless {
 		dw.window.SetStyleMask(darwin.NSWindowStyleMaskBorderless | darwin.NSWindowStyleMaskResizable)
 	} else {
@@ -285,11 +305,16 @@ func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {
 }
 
 func (dw *darwinPlatformWindow) IsFrameless() bool {
-	return false
+	w := dw.platform.primary
+	w.callbackMu.RLock()
+	defer w.callbackMu.RUnlock()
+	return w.frameless
 }
 
 func (dw *darwinPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
-	// no-op
+	dw.callbackMu.Lock()
+	defer dw.callbackMu.Unlock()
+	dw.hitTestCallback = fn
 }
 
 func (dw *darwinPlatformWindow) Minimize() {
@@ -420,15 +445,13 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.config.Width = newWidth
 			w.config.Height = newHeight
 			physW, physH := w.window.FramebufferSize()
-			w.events = append(
-				w.events, Event{
-					Type:           EventResize,
-					Width:          newWidth,
-					Height:         newHeight,
-					PhysicalWidth:  physW,
-					PhysicalHeight: physH,
-				},
-			)
+			w.events = append(w.events, Event{
+				Type:           EventResize,
+				Width:          newWidth,
+				Height:         newHeight,
+				PhysicalWidth:  physW,
+				PhysicalHeight: physH,
+			})
 		}
 	}
 
@@ -680,9 +703,7 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 	}
 
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
-	data := unsafe.Slice(
-		(*byte)(unsafe.Pointer(utf8Ptr)), length*4,
-	) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Decode UTF-8 runes and push each non-control character to event queue
 	for i := 0; i < len(data); {
@@ -765,15 +786,13 @@ func (w *darwinWindow) checkResize() {
 
 		physW, physH := w.window.FramebufferSize()
 
-		w.queueEvent(
-			Event{
-				Type:           EventResize,
-				Width:          newWidth,
-				Height:         newHeight,
-				PhysicalWidth:  physW,
-				PhysicalHeight: physH,
-			},
-		)
+		w.queueEvent(Event{
+			Type:           EventResize,
+			Width:          newWidth,
+			Height:         newHeight,
+			PhysicalWidth:  physW,
+			PhysicalHeight: physH,
+		})
 	}
 }
 
@@ -1134,9 +1153,7 @@ func (p *darwinPlatform) ClipboardRead() (string, error) {
 	}
 
 	// Read UTF-8 bytes (length is character count; UTF-8 may use up to 4 bytes per char)
-	data := unsafe.Slice(
-		(*byte)(unsafe.Pointer(utf8Ptr)), length*4,
-	) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual end of the C string
 	end := 0
@@ -1210,9 +1227,7 @@ func (p *darwinPlatform) DarkMode() bool {
 		return false
 	}
 
-	data := unsafe.Slice(
-		(*byte)(unsafe.Pointer(utf8Ptr)), length*4,
-	) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual string end
 	end := 0

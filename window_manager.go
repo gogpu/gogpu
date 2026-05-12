@@ -16,6 +16,12 @@ type InternalWindowID uint32
 // WindowID uniquely identifies a window. Zero is invalid.
 type WindowID = InternalWindowID
 
+// PlatformWindowCloser is an optional interface for platforms that support
+// per-window close callbacks (macOS delegate pattern).
+type PlatformWindowCloser interface {
+	SetOnClose(func() bool)
+}
+
 // Window represents an application window with its own rendering surface.
 // Each Window tracks per-window callbacks and maintains a reference to the
 // underlying platform window and GPU surface state.
@@ -63,8 +69,8 @@ func (w *Window) SetOnResize(fn func(int, int)) {
 // Return false from the callback to reject the close request.
 func (w *Window) SetOnClose(fn func() bool) {
 	w.onClose = fn
-	if w.platWindow != nil {
-		w.platWindow.SetOnClose(fn)
+	if closer, ok := w.platWindow.(PlatformWindowCloser); ok {
+		closer.SetOnClose(fn)
 	}
 }
 
@@ -276,18 +282,16 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	}
 
 	// Create platform window via PlatformManager.
-	platWindow, err := a.manager.CreateWindow(
-		platform.Config{
-			Title:             config.Title,
-			Width:             config.Width,
-			Height:            config.Height,
-			Resizable:         config.Resizable,
-			Fullscreen:        config.Fullscreen,
-			Frameless:         config.Frameless,
-			TabbingMode:       int(config.TabbingMode),
-			TabbingIdentifier: config.TabbingIdentifier,
-		},
-	)
+	platWindow, err := a.manager.CreateWindow(platform.Config{
+		Title:             config.Title,
+		Width:             config.Width,
+		Height:            config.Height,
+		Resizable:         config.Resizable,
+		Fullscreen:        config.Fullscreen,
+		Frameless:         config.Frameless,
+		TabbingMode:       int(config.TabbingMode),
+		TabbingIdentifier: config.TabbingIdentifier,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gogpu: create window: %w", err)
 	}
@@ -296,12 +300,10 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	// GPU operations are thread-bound; surface creation must happen there.
 	var surface *wgpu.Surface
 	var surfaceErr error
-	a.renderLoop.RunOnRenderThreadVoid(
-		func() {
-			displayHandle, windowHandle := platWindow.GetHandle()
-			surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
-		},
-	)
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		displayHandle, windowHandle := platWindow.GetHandle()
+		surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
+	})
 	if surfaceErr != nil {
 		platWindow.Destroy()
 		return nil, fmt.Errorf("gogpu: create surface: %w", surfaceErr)
@@ -316,20 +318,18 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	}
 
 	// Configure surface with initial dimensions on the render thread.
-	a.renderLoop.RunOnRenderThreadVoid(
-		func() {
-			pw, ph := platWindow.PhysicalSize()
-			if pw > 0 && ph > 0 {
-				ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
-				ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
-				if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
-					slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
-				} else {
-					ws.configured = true
-				}
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		pw, ph := platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
+			ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
+			if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
+				slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
+			} else {
+				ws.configured = true
 			}
-		},
-	)
+		}
+	})
 
 	// Allocate internal ID
 	internalID := a.windowManager.allocate()
@@ -344,11 +344,6 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		visible:    true,
 	}
 	a.windowManager.add(w)
-
-	// Show the window on screen.
-	if w.platWindow != nil {
-		w.platWindow.Show()
-	}
 
 	// Request a redraw so the new window gets its first frame.
 	if a.invalidator != nil {
@@ -394,11 +389,9 @@ func (a *App) closeSecondaryWindow(id InternalWindowID) {
 
 	// Release GPU surface on the render thread.
 	if w.surface != nil {
-		a.renderLoop.RunOnRenderThreadVoid(
-			func() {
-				w.surface.destroy()
-			},
-		)
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			w.surface.destroy()
+		})
 	}
 
 	// Destroy the platform window.

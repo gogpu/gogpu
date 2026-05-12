@@ -302,12 +302,12 @@ func (w *Window) Destroy() {
 	defer w.mu.Unlock()
 
 	if w.metalLayer != 0 {
-		// Surface owns the layer; window only keeps a weak reference.
 		w.metalLayer = 0
 	}
 
-	// Remove delegate association and release.
+	// Remove delegate properly
 	if w.delegate != 0 {
+		w.nsWindow.SendPtr(selectors.setDelegate, 0) // setDelegate:nil
 		SetAssociatedObject(w.delegate, unsafe.Pointer(&delegateAssociatedKey), nil, 0)
 		w.delegate.Send(selectors.release)
 		w.delegate = 0
