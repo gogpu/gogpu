@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.4] - 2026-05-13
+
+### Added
+
+- **macOS window delegate** (#213, ADR-022 Phase 2, @lkmavi) — `GoGPUWindowDelegate` with `windowShouldClose:` for native close event detection. Per-window `darwinPlatformWindow` owns `*darwin.Window` directly. Multi-window `PollEvents` iterates all windows. `PlatformWindowCloser` optional interface (type assertion, no interface expansion). `safeOnClose` panic recovery. `setDelegate:nil` cleanup in `Destroy()`. 13 tests.
+
+### Fixed
+
+- **macOS TextField text corruption** (ui#101 Thread H, @AnyCPU) — `dispatchCharFromEvent` now stops at null terminator and filters macOS PUA function-key sentinels (U+F700-U+F8FF). Previously, arrow keys, F-keys, and Delete were passed as text characters. Same pattern as SDL/GLFW/winit.
+- **Linux EventClose missing WindowID** — X11 and Wayland `EventClose` events now include `WindowID`. Previously all close events had `WindowID=0`, which broke `windowCloseEvent` routing after PR #222 removed the zero-ID fallback. Pre-existing bug, now fixed on both X11 (1 location) and Wayland (4 locations).
+
+### Changed
+
+- **deps:** wgpu v0.27.3 → v0.27.4 (goffi v0.5.1 — struct ABI fix for macOS Intel, XMM return registers)
+
 ## [0.34.3] - 2026-05-11
 
 ### Changed

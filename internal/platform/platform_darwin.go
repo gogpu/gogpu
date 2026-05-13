@@ -697,11 +697,21 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
 	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
-	// Decode UTF-8 runes and push each non-control character to event queue
+	// Decode UTF-8 runes and push each non-control character to event queue.
+	// Stop at null terminator (UTF8String is a C string).
+	// Skip macOS Private Use Area function-key sentinels (U+F700-U+F8FF):
+	// arrows, F-keys, Delete, Home, End, etc. SDL/GLFW/winit all filter this range.
 	for i := 0; i < len(data); {
 		r, size := utf8.DecodeRune(data[i:])
 		if r == utf8.RuneError && size <= 1 {
-			break // end of valid UTF-8
+			break
+		}
+		if r == 0 {
+			break
+		}
+		if r >= 0xF700 && r <= 0xF8FF {
+			i += size
+			continue
 		}
 		if r >= 32 && r != 127 {
 			w.events = append(w.events, Event{Type: EventChar, Char: r})

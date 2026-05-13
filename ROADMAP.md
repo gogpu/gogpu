@@ -25,15 +25,19 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.32.0
+## Current State: v0.34.3
 
 ✅ **Production-ready** with full feature set:
-- **Adapter-aware render mode** — `GOGPU_RENDER_MODE=auto|cpu|gpu` (ADR-020). CPU rasterizer on software adapter (60 FPS), GPU on real hardware
-- **macOS native window tabbing** — `Config.WithTabbingMode()` + `WithTabbingIdentifier()` (GLFW/SDL3/Qt6 pattern, @lkmavi)
-- **AdapterInfo** — `gpucontext.DeviceProvider.AdapterInfo()` exposes adapter type for render mode decisions
+- **Three-mode render loop** — IDLE/ANIMATING/CONTINUOUS modes with lazy swapchain acquire (ADR-023)
+- **SubpixelLayout detection** — LCD/ClearType auto-detect on all platforms (ADR-024)
+- **Platform system sounds** — `sound.Play(sound.Click)` on Windows/macOS/Linux, zero CGO (ADR-025)
+- **Window close lifecycle** — `SetOnClose(func() bool)` rejection, ID pool, `OnAnyWindowClosed` (ADR-022, @lkmavi)
+- **macOS window delegate** — `GoGPUWindowDelegate` with `windowShouldClose:`, per-window routing (ADR-022 Phase 2, @lkmavi)
+- **Centralized input dispatch** — all input events through `PollEvents()` with `WindowID` (ADR-021, @lkmavi)
+- **Adapter-aware render mode** — `GOGPU_RENDER_MODE=auto|cpu|gpu` (ADR-020)
+- **macOS native window tabbing** — `Config.WithTabbingMode()` + `WithTabbingIdentifier()` (@lkmavi)
 - **Runtime fullscreen** — `App.SetFullscreen(bool)`, `App.ToggleFullscreen()` on all platforms (ADR-018)
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
-- **EventFocus** — window focus/blur events on all platforms for multi-window VSync routing
 - **Damage-aware presentation** — `Context.SetDamageRects()` passes dirty regions to compositor (ADR-013)
 - Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
@@ -60,6 +64,9 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.34.3** | 2026-05-11 | deps: wgpu v0.27.3 |
+| **v0.34.2** | 2026-05-11 | **Window close lifecycle** (#213, ADR-022, @lkmavi) — close rejection, ID pool, OnAnyWindowClosed |
+| **v0.34.1** | 2026-05-10 | deps: wgpu v0.27.2 |
 | **v0.34.0** | 2026-05-09 | **System sounds** (ADR-025) — `sound/` subpackage, winmm/NSSound/canberra, zero CGO |
 | **v0.33.0** | 2026-05-09 | **SubpixelLayout detection** (ADR-024) — LCD/ClearType auto-detect, all platforms, gpucontext v0.18.0 |
 | **v0.32.3** | 2026-05-08 | **Three-mode render loop** (ADR-023) — IDLE/ANIMATING/CONTINUOUS, lazy acquire, 10%→<1% GPU for UI |
@@ -116,10 +123,19 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - [x] WindowID on all events for multi-window routing (v0.28.1)
 - [x] Centralized input dispatch — all input through PollEvents() with WindowID (ADR-021, v0.32.1)
 - [x] Per-window input callbacks — SetOnKeyPress, SetOnPointer, SetOnScroll, etc. (v0.32.1)
+- [x] Close-as-request — `SetOnClose(func() bool)` rejection, ID pool, `OnAnyWindowClosed` (ADR-022, v0.34.2, @lkmavi)
+- [x] macOS window delegate — `GoGPUWindowDelegate` with `windowShouldClose:`, per-window event routing (ADR-022 Phase 2, @lkmavi)
 - [ ] VSync mode switching on focus change (surface reconfigure)
 - [ ] Window types: Normal, Dialog, Tool, Popup with parent-child
-- [ ] Close-as-request (OnClose returns bool to reject)
 - [ ] Unified platform package structure (REFACTOR-PLATFORM-001)
+
+### Universal App Lifecycle (ADR-026)
+
+Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary window" concept. GPU Device decoupled from any window. Research: 15 enterprise frameworks (Flutter, SDL3, Qt6, winit, Bevy).
+
+- [ ] **Phase 2** — Renderer decoupling: RenderTarget with nilable surface, Device/Queue independent (@kolkov)
+- [ ] **Phase 3** — Lifecycle API: `AppLifecycle` states, `QuitOnLastSurfaceClosed` (@kolkov)
+- [ ] **Phase 4** — Mobile platforms: Android ANativeWindow, iOS CAMetalLayer, Web canvas (community)
 
 ### v1.0.0 — Production Release
 
@@ -140,7 +156,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 | **Android** | Android platform support | Backlog (ANDROID-001) |
 | **iOS** | iOS platform support | Planned |
 | **Ecosystem Logging** | Unified slog-based logging across all repos | Backlog (TASK-LOG-001) |
-| **System Tray** | OS-level tray icon (Win32 Notification Area, macOS Menu Bar Extra, Linux AppIndicator/SNI) | Planned — [Research](docs/dev/research/UI_FRAMEWORK_CONCERNS.md), low retrofit cost |
+| **System Tray** | OS-level tray icon (Win32/macOS/Linux) | ✅ Shipped — [gogpu/systray](https://github.com/gogpu/systray) v0.1.0 |
 | **Native Dialogs** | File open/save, color picker, message box | Planned |
 | **Drag & Drop** | OS-level and inter-window drag and drop | Planned |
 | **Clipboard** | Rich clipboard (images, HTML, custom types) | Planned |

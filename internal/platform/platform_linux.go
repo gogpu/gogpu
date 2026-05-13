@@ -80,7 +80,8 @@ type waylandPlatform struct {
 	envScaleFactor float64
 
 	// Primary window for backward-compatible single-window API.
-	primary *waylandWindow
+	primary         *waylandWindow
+	primaryWindowID WindowID
 }
 
 // x11Platform wraps x11.Platform to implement the Platform interface.
@@ -90,7 +91,8 @@ type x11Platform struct {
 	// Channel-based wakeup for cross-goroutine WakeUp → WaitEvents unblocking.
 	// Replaces the wakePipe+unix.Poll pattern to avoid dual-poller race with
 	// net.Conn (Go runtime netpoller vs kernel poll on dup'd fd).
-	wakeCh chan struct{}
+	wakeCh          chan struct{}
+	primaryWindowID WindowID
 }
 
 // newPlatformManager returns a PlatformManager for Linux.
@@ -138,7 +140,9 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 	if err := p.inner.Init(x11Config); err != nil {
 		return nil, err
 	}
-	return &x11PlatformWindow{platform: p, id: NewWindowID()}, nil
+	id := NewWindowID()
+	p.primaryWindowID = id
+	return &x11PlatformWindow{platform: p, id: id}, nil
 }
 
 // PollEvents processes pending X11 events.
@@ -146,7 +150,7 @@ func (p *x11Platform) PollEvents() Event {
 	event := p.inner.PollEvents()
 	switch event.Type {
 	case x11.EventTypeClose:
-		return Event{Type: EventClose}
+		return Event{Type: EventClose, WindowID: p.primaryWindowID}
 	case x11.EventTypeResize:
 		// X11: scale=1.0 baseline, logical == physical
 		return Event{
@@ -438,7 +442,9 @@ func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	if err := p.initSingleConnection(config); err != nil {
 		return nil, err
 	}
-	return &waylandPlatformWindow{platform: p, id: NewWindowID()}, nil
+	id := NewWindowID()
+	p.primaryWindowID = id
+	return &waylandPlatformWindow{platform: p, id: id}, nil
 }
 
 // initSingleConnection initializes using a single C libwayland connection.
@@ -618,7 +624,7 @@ func (p *waylandPlatform) initCSD(config Config) error {
 			w.eventMu.Lock()
 			w.shouldClose = true
 			w.eventMu.Unlock()
-			w.queueEvent(Event{Type: EventClose})
+			w.queueEvent(Event{Type: EventClose, WindowID: p.primaryWindowID})
 			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
 		},
 	); err != nil {
@@ -953,7 +959,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.eventMu.Lock()
 			w.shouldClose = true
 			w.eventMu.Unlock()
-			w.queueEvent(Event{Type: EventClose})
+			w.queueEvent(Event{Type: EventClose, WindowID: p.primaryWindowID})
 			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
 		},
 		OnConfigure: func(width, height int32) {
@@ -1802,7 +1808,7 @@ func (p *waylandPlatform) PollEvents() Event {
 			w.eventMu.Lock()
 			w.shouldClose = true
 			w.eventMu.Unlock()
-			w.queueEvent(Event{Type: EventClose})
+			w.queueEvent(Event{Type: EventClose, WindowID: p.primaryWindowID})
 		}
 
 		// Dispatch CSD events (separate queue, read by DispatchDefaultQueue above)
@@ -2165,5 +2171,5 @@ func (p *waylandPlatform) CloseWindow() {
 	w.eventMu.Lock()
 	w.shouldClose = true
 	w.eventMu.Unlock()
-	w.queueEvent(Event{Type: EventClose})
+	w.queueEvent(Event{Type: EventClose, WindowID: p.primaryWindowID})
 }
