@@ -199,6 +199,44 @@ func TestConfigWithFrameless(t *testing.T) {
 	})
 }
 
+// TestHitTestCallbackDeferredUntilRun verifies that SetHitTestCallback
+// works when called before platWindow exists (deferred application).
+func TestHitTestCallbackDeferredUntilRun(t *testing.T) {
+	app := NewApp(DefaultConfig().WithFrameless(true))
+	mock := &mockWindow{width: 800, height: 600, scaleFactor: 1.0}
+
+	called := false
+	app.SetHitTestCallback(func(x, y float64) gpucontext.HitTestResult {
+		called = true
+		if y < 40 {
+			return gpucontext.HitTestCaption
+		}
+		return gpucontext.HitTestClient
+	})
+
+	if app.hitTestCallback == nil {
+		t.Fatal("hitTestCallback should be stored on App even without platWindow")
+	}
+	if mock.hitTestCallback != nil {
+		t.Fatal("platform callback should not be set yet")
+	}
+
+	app.platWindow = mock
+	app.applyHitTestCallback()
+
+	if mock.hitTestCallback == nil {
+		t.Fatal("platform callback should be set after applyHitTestCallback")
+	}
+
+	result := mock.hitTestCallback(100, 10)
+	if !called {
+		t.Error("deferred callback should have been called")
+	}
+	if result != gpucontext.HitTestCaption {
+		t.Errorf("callback(100, 10) = %v, want Caption", result)
+	}
+}
+
 // TestHitTestResultMapping verifies all HitTestResult values have correct String().
 func TestHitTestResultMapping(t *testing.T) {
 	tests := []struct {

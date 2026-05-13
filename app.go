@@ -43,6 +43,7 @@ type App struct {
 	onResize          func(int, int)
 	onClose           func() // called before renderer destruction
 	onAnyWindowClosed func(WindowID)
+	hitTestCallback   gpucontext.HitTestCallback // deferred until platWindow exists
 
 	// State
 	running   bool
@@ -202,6 +203,10 @@ func (a *App) Run() error {
 	// Store the primary platform window for per-window operations.
 	a.platWindow = platWindow
 
+	if a.hitTestCallback != nil {
+		a.applyHitTestCallback()
+	}
+
 	// Ensure input subsystems exist. Both EventSource() and Input() use
 	// lazy init so callers can register callbacks before Run(). We must
 	// NOT overwrite instances that were already created — UI frameworks
@@ -261,27 +266,7 @@ func (a *App) Run() error {
 		})
 	}()
 
-	// Register the primary window in the WindowManager.
-	// This validates the multi-window architecture end-to-end with the
-	// existing single-window case. The frame loop still renders via
-	// a.renderer (proven path); WindowManager tracks the window for
-	// future multi-window iteration.
-	a.windowManager = newWindowManager()
-
-	// Allocate internal ID from pool
-	internalID := a.windowManager.allocate()
-	a.primaryWindow = &Window{
-		id:         internalID,
-		platformID: platWindow.ID(),
-		config:     a.config,
-		surface:    a.renderer.primary,
-		platWindow: a.platWindow,
-		onDraw:     a.onDraw,
-		onResize:   a.onResize,
-		visible:    true,
-	}
-	a.primaryPlatformID = platWindow.ID()
-	a.windowManager.add(a.primaryWindow)
+	a.registerPrimaryWindow(platWindow)
 
 	// Main loop with three rendering modes (ADR-023):
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
@@ -594,7 +579,24 @@ type windowFrame struct {
 
 // renderFrameMultiThread renders a frame using the render thread.
 // All GPU operations happen on the render thread to keep main thread responsive.
-//
+func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow) {
+	a.windowManager = newWindowManager()
+	internalID := a.windowManager.allocate()
+	a.primaryWindow = &Window{
+		id:         internalID,
+		platformID: platWindow.ID(),
+		config:     a.config,
+		surface:    a.renderer.primary,
+		platWindow: a.platWindow,
+		onDraw:     a.onDraw,
+		onResize:   a.onResize,
+		visible:    true,
+	}
+	a.primaryPlatformID = platWindow.ID()
+	a.windowManager.add(a.primaryWindow)
+}
+
+// renderFrameMultiThread renders a frame using the render thread.
 // When multiple windows are open, each window with an onDraw callback gets
 // its own beginFrame/draw/endFrame cycle. GPU submission polling happens once
 // after all windows are presented.
@@ -892,16 +894,22 @@ func (a *App) IsFrameless() bool {
 // SetHitTestCallback sets the callback for custom hit testing in frameless mode.
 // Implements gpucontext.WindowChrome.
 func (a *App) SetHitTestCallback(callback gpucontext.HitTestCallback) {
+	a.hitTestCallback = callback
 	if a.platWindow != nil {
-		a.platWindow.SetHitTestCallback(
-			func(x, y float64) gpucontext.HitTestResult {
-				if callback != nil {
-					return callback(x, y)
-				}
-				return gpucontext.HitTestClient
-			},
-		)
+		a.applyHitTestCallback()
 	}
+}
+
+func (a *App) applyHitTestCallback() {
+	cb := a.hitTestCallback
+	a.platWindow.SetHitTestCallback(
+		func(x, y float64) gpucontext.HitTestResult {
+			if cb != nil {
+				return cb(x, y)
+			}
+			return gpucontext.HitTestClient
+		},
+	)
 }
 
 // Minimize minimizes the window.
