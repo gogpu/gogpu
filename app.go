@@ -550,26 +550,35 @@ func (a *App) dispatchScrollEvent(event *platform.Event) {
 
 // windowCloseEvent handles CloseEvent from the platform.
 func (a *App) windowCloseEvent(event *platform.Event) {
+	// Primary check
 	isPrimary := a.primaryWindow != nil && event.WindowID == a.primaryPlatformID
 
 	if !isPrimary {
-		// Secondary window
 		w := a.windowManager.getByPlatformID(event.WindowID)
+		if w == nil {
+			return
+		}
+
 		if !w.safeOnClose() {
 			return
 		}
-		if w != nil {
-			a.closeSecondaryWindow(w.id)
-		}
+
+		a.closeSecondaryWindow(w.id)
 		return
 	}
 
 	// Primary window — terminate app
+	if a.primaryWindow == nil {
+		return
+	}
+
 	if !a.primaryWindow.safeOnClose() {
 		return
 	}
+
 	a.running = false
 	a.windowManager.release(a.primaryWindow.id)
+
 	if a.onAnyWindowClosed != nil {
 		a.onAnyWindowClosed(a.primaryWindow.id)
 	}

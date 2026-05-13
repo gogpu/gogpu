@@ -60,6 +60,10 @@ func registerWindowDelegateClass() (Class, error) {
 }
 
 func CreateWindowDelegate(win *Window) (ID, error) {
+	if win == nil {
+		return 0, ErrWindowCreationFailed
+	}
+
 	cls, err := WindowDelegateClass()
 	if err != nil {
 		return 0, err

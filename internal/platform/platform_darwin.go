@@ -51,7 +51,7 @@ type darwinWindow struct {
 // darwinPlatform implements Platform for macOS using Cocoa/AppKit.
 // Holds process-level state and a primary window for single-window API.
 type darwinPlatform struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
 	app *darwin.Application
 
 	// Primary window for backward-compatible single-window API.
@@ -142,8 +142,8 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 
 // PollEvents processes pending macOS events.
 func (p *darwinPlatform) PollEvents() Event {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
 	for _, w := range p.windows {
 		e := w.pollEvents(p.app)
@@ -233,7 +233,8 @@ func (dw *darwinPlatformWindow) LogicalSize() (int, int) {
 	if dw.window != nil {
 		return dw.window.Size()
 	}
-	return dw.platform.primary.config.Width, dw.platform.primary.config.Height
+
+	return 0, 0
 }
 
 func (dw *darwinPlatformWindow) PhysicalSize() (int, int) {
@@ -305,10 +306,7 @@ func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {
 }
 
 func (dw *darwinPlatformWindow) IsFrameless() bool {
-	w := dw.platform.primary
-	w.callbackMu.RLock()
-	defer w.callbackMu.RUnlock()
-	return w.frameless
+	return dw.frameless
 }
 
 func (dw *darwinPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {
@@ -342,15 +340,9 @@ func (dw *darwinPlatformWindow) Close() {
 	}
 }
 
-func (w *darwinPlatformWindow) SetOnClose(fn func() bool) {
-	if w.window != nil {
-		w.window.SetOnClose(fn)
-	}
-}
-
-func (w *darwinPlatformWindow) Show() {
-	if w.window != nil {
-		w.window.Show()
+func (dw *darwinPlatformWindow) SetOnClose(fn func() bool) {
+	if dw.window != nil {
+		dw.window.SetOnClose(fn)
 	}
 }
 

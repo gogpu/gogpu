@@ -74,8 +74,9 @@ func (w *Window) SetOnClose(fn func() bool) {
 	}
 }
 
-// safeOnClose calls the window's onClose callback, recovering from panics.
 // Returns true if the window should close, false otherwise.
+// Policy: if the onClose callback panics, we treat it as a rejection of the close
+// to avoid losing state. Change this behavior if you prefer to allow close on panic.
 func (w *Window) safeOnClose() bool {
 	if w == nil || w.onClose == nil {
 		return true

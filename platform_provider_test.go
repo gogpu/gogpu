@@ -93,7 +93,6 @@ func (m *mockManager) FontScale() float32                        { return m.font
 func (m *mockManager) SubpixelLayout() gpucontext.SubpixelLayout { return m.subpixelLayout }
 func (m *mockManager) Destroy()                                  {}
 func (m *mockWindow) SetOnClose(fn func() bool)                  { m.closeFn = fn }
-func (m *mockWindow) Show()                                      {}
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {
