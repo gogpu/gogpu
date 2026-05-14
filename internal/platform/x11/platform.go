@@ -151,6 +151,12 @@ type Platform struct {
 	// XInput2 extension (nil if unavailable) — process-level
 	xi *XIExtension
 
+	// XKB extension (nil if unavailable) — process-level
+	xkb *XkbExtension
+
+	// Current keyboard group from XKB (0-3), 0 = first layout
+	xkbGroup int
+
 	// Keyboard mapping — process-level
 	keymap *KeyboardMapping
 
@@ -346,6 +352,18 @@ func (p *Platform) Init(config Config) error {
 	// Get keyboard mapping (non-fatal - keyboard input may not work correctly without it)
 	keymap, _ := conn.GetKeyboardMapping()
 	p.keymap = keymap
+
+	// Initialize XKB for keyboard layout/group support (non-fatal).
+	// When available, XKB tracks the active keyboard group (e.g., EN/RU)
+	// and delivers XkbStateNotify events on layout switches.
+	xkb, xkbErr := conn.InitXkb()
+	if xkbErr != nil {
+		logger().Info("XKB not available, using default keyboard layout", "error", xkbErr)
+	} else {
+		p.xkb = xkb
+		p.xkbGroup = xkb.Group
+		logger().Info("XKB enabled", "version", fmt.Sprintf("%d.%d", xkb.MajorVer, xkb.MinorVer), "group", xkb.Group)
+	}
 
 	// Initialize XInput2 for touch support (non-fatal)
 	xi, err := conn.InitXInput2()
@@ -699,6 +717,9 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 	case *GenericEvent:
 		p.handleGenericEvent(w, e)
+
+	case *UnknownEvent:
+		p.handleUnknownEvent(e)
 	}
 
 	return PlatformEvent{Type: EventTypeNone}
@@ -930,6 +951,45 @@ func (p *Platform) handleGenericEvent(w *x11Window, ge *GenericEvent) {
 	}
 }
 
+// handleUnknownEvent checks if an unrecognized X11 event is an XKB extension event.
+// XKB events arrive with a dynamic event type code (EventBase assigned by the server),
+// which parseEvent cannot recognize statically — they land in UnknownEvent.
+func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
+	if p.xkb == nil || e.Type != p.xkb.EventBase {
+		return
+	}
+
+	// XKB events share a single event type code (EventBase).
+	// The XKB sub-type is at byte 1 of the raw event (Data[0] in UnknownEvent).
+	xkbType := e.Data[0]
+	if xkbType != XkbStateNotify {
+		return
+	}
+
+	// XkbStateNotify event layout (32 bytes total):
+	//   byte 0: event type (= EventBase)
+	//   byte 1: xkb type (= XkbStateNotify = 2)
+	//   bytes 2-3: sequence
+	//   bytes 4-7: time
+	//   byte 8: device ID
+	//   byte 9: mods
+	//   byte 10: base mods
+	//   byte 11: latched mods
+	//   byte 12: locked mods
+	//   byte 13: group    <-- THIS is what we need
+	//   byte 14: base group
+	//   ...
+	// In UnknownEvent.Data, indices are shifted by 1 (byte 1 of raw = Data[0]).
+	// So group = Data[12] (raw byte 13).
+	if len(e.Data) > 12 {
+		newGroup := int(e.Data[12])
+		p.mu.Lock()
+		p.xkbGroup = newGroup
+		p.mu.Unlock()
+		logger().Debug("XKB group changed", "group", newGroup)
+	}
+}
+
 // handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.
 func (w *x11Window) handleXITouchEvent(e *XIDeviceEvent) {
 	var pointerType gpucontext.PointerEventType
@@ -1131,6 +1191,7 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 
 	p.mu.Lock()
 	keymap := p.keymap
+	xkbGroup := p.xkbGroup
 	p.mu.Unlock()
 
 	// X11 keycodes are evdev keycodes offset by 8
@@ -1147,14 +1208,11 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 		mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
 		shift := mods&gpucontext.ModShift != 0
 		capsLock := mods&gpucontext.ModCapsLock != 0
-		keysym := keymap.KeycodeToKeysym(keycode, shift, capsLock)
-		str := KeysymToString(keysym)
-		if str != "" {
-			for _, r := range str {
-				if r >= 32 && r != 127 {
-					w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
-				}
-			}
+		// Use group-aware keysym lookup (XKB group tracks active keyboard layout).
+		// Falls back to group 0 if XKB is not available (xkbGroup defaults to 0).
+		keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, xkbGroup)
+		if r, ok := KeysymToRune(keysym); ok && r >= 32 {
+			w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
 		}
 	}
 }

@@ -274,11 +274,14 @@ func buildDualLayoutMapping() *KeyboardMapping {
 // This is the core test for FEAT-INPUT-020.
 //
 // X11 keyboard model: KeysymsPerCode columns are laid out as:
-//   [group1_base, group1_shift, group2_base, group2_shift, ...]
+//
+//	[group1_base, group1_shift, group2_base, group2_shift, ...]
+//
 // Each group occupies 2 columns (base + shift).
 //
 // KeycodeToKeysymGroup signature:
-//   func (km *KeyboardMapping) KeycodeToKeysymGroup(keycode uint8, shift, capsLock bool, group int) Keysym
+//
+//	func (km *KeyboardMapping) KeycodeToKeysymGroup(keycode uint8, shift, capsLock bool, group int) Keysym
 func TestKeyboardMapping_KeycodeToKeysymGroup(t *testing.T) {
 	km := buildDualLayoutMapping()
 
@@ -461,9 +464,9 @@ func TestKeyboardMapping_KeycodeToKeysymGroup_ThreeLayouts(t *testing.T) {
 		MaxKeycode:     52,
 		KeysymsPerCode: 6,
 		Keysyms: []Keysym{
-			Keysymy, KeysymY,                                      // group 0: en
-			testKeysymCyrillicEn, 0x6ee,                            // group 1: ru (н/Н, 0x6ee = XK_Cyrillic_EN)
-			Keysymz, KeysymZ,                                      // group 2: de
+			Keysymy, KeysymY, // group 0: en
+			testKeysymCyrillicEn, 0x6ee, // group 1: ru (н/Н, 0x6ee = XK_Cyrillic_EN)
+			Keysymz, KeysymZ, // group 2: de
 		},
 	}
 
@@ -601,17 +604,17 @@ func TestKeysymToRune(t *testing.T) {
 		{"umlaut-u (0xfc)", 0x00fc, '\u00fc', true},
 
 		// Legacy Cyrillic (must be converted via lookup table)
-		{"Cyrillic а", testKeysymCyrillicA, 'а', true},     // U+0430
-		{"Cyrillic б", testKeysymCyrillicBe, 'б', true},    // U+0431
-		{"Cyrillic ф", testKeysymCyrillicEf, 'ф', true},    // U+0444
-		{"Cyrillic А", testKeysymCyrillicAUp, 'А', true},   // U+0410
-		{"Cyrillic Ф", testKeysymCyrillicEfUp, 'Ф', true},  // U+0424
-		{"Cyrillic ё", testKeysymCyrillicIoLo, 'ё', true},  // U+0451
-		{"Cyrillic Ё", testKeysymCyrillicIO, 'Ё', true},    // U+0401
-		{"Cyrillic ю", testKeysymCyrillicYu, 'ю', true},    // U+044E
-		{"Cyrillic Ю", testKeysymCyrillicYuUp, 'Ю', true},  // U+042E
-		{"Cyrillic я", testKeysymCyrillicYa, 'я', true},    // U+044F
-		{"Cyrillic Я", testKeysymCyrillicYaUp, 'Я', true},  // U+042F
+		{"Cyrillic а", testKeysymCyrillicA, 'а', true},    // U+0430
+		{"Cyrillic б", testKeysymCyrillicBe, 'б', true},   // U+0431
+		{"Cyrillic ф", testKeysymCyrillicEf, 'ф', true},   // U+0444
+		{"Cyrillic А", testKeysymCyrillicAUp, 'А', true},  // U+0410
+		{"Cyrillic Ф", testKeysymCyrillicEfUp, 'Ф', true}, // U+0424
+		{"Cyrillic ё", testKeysymCyrillicIoLo, 'ё', true}, // U+0451
+		{"Cyrillic Ё", testKeysymCyrillicIO, 'Ё', true},   // U+0401
+		{"Cyrillic ю", testKeysymCyrillicYu, 'ю', true},   // U+044E
+		{"Cyrillic Ю", testKeysymCyrillicYuUp, 'Ю', true}, // U+042E
+		{"Cyrillic я", testKeysymCyrillicYa, 'я', true},   // U+044F
+		{"Cyrillic Я", testKeysymCyrillicYaUp, 'Я', true}, // U+042F
 
 		// Unicode keysyms (0x01000000 + codepoint)
 		{"unicode а", 0x01000430, 'а', true},
@@ -631,7 +634,7 @@ func TestKeysymToRune(t *testing.T) {
 
 		// Edge cases
 		{"null keysym (0x0000)", 0, 0, false},
-		{"DEL (0x7f)", 0x7f, 0, false},              // DEL is not printable
+		{"DEL (0x7f)", 0x7f, 0, false},                        // DEL is not printable
 		{"gap between Latin-1 ranges (0x80)", 0x80, 0, false}, // 0x80-0x9f not printable in Latin-1
 		{"gap (0x9f)", 0x9f, 0, false},
 	}
