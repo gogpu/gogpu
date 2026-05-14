@@ -16,6 +16,16 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
+// xkbKeyHandler abstracts the keyboard layout handling provided by libxkbcommon.
+// The production implementation is *wayland.XKBHandle; tests use a mock.
+type xkbKeyHandler interface {
+	Ready() bool
+	KeyGetUtf8(keycode uint32) string
+	UpdateMask(modsDepressed, modsLatched, modsLocked, group uint32)
+	SetKeymapFromFD(fd int, size uint32) error
+	Close()
+}
+
 // waylandWindow holds all per-window state for a Wayland surface.
 type waylandWindow struct {
 	// Frameless window state
@@ -51,6 +61,10 @@ type waylandWindow struct {
 
 	// Keyboard focus tracking
 	keyboardFocused bool
+
+	// XKB keyboard layout support (libxkbcommon.so.0 via goffi).
+	// Non-nil when libxkbcommon is available; nil falls back to evdevKeycodeToRune.
+	xkb xkbKeyHandler
 
 	callbackMu sync.RWMutex
 }
@@ -548,6 +562,15 @@ func (p *waylandPlatform) initSingleConnection(config Config) error {
 	// Detect env-based scale factor as fallback
 	p.envScaleFactor = detectEnvScaleFactor()
 
+	// Load libxkbcommon for proper keyboard layout support.
+	// Non-fatal: falls back to evdevKeycodeToRune (English-only) if unavailable.
+	xkbHandle, xkbErr := wayland.LoadXKBCommon()
+	if xkbErr != nil {
+		logger().Info("xkbcommon not available, keyboard limited to US QWERTY", "err", xkbErr)
+	} else {
+		p.primary.xkb = xkbHandle
+	}
+
 	// Set up input devices (pointer, keyboard, touch) on C display
 	seatGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSeat)
 	if seatGlobal != nil {
@@ -803,8 +826,14 @@ func (p *waylandPlatform) setupInputCallbacks() {
 
 		// Keyboard events
 		OnKeyboardKeymap: func(format uint32, fd int, size uint32) {
-			// For now, ignore keymap (basic evdev keycode mapping used).
-			// Full libxkbcommon integration is a future task.
+			if format != wayland.KeyboardKeymapFormatXKBV1 {
+				return
+			}
+			if w.xkb != nil {
+				if err := w.xkb.SetKeymapFromFD(fd, size); err != nil {
+					logger().Warn("xkbcommon: failed to load keymap from compositor", "err", err)
+				}
+			}
 		},
 		OnKeyboardEnter: func(serial uint32, keys []uint32) {
 			w.pointerMu.Lock()
@@ -832,11 +861,9 @@ func (p *waylandPlatform) setupInputCallbacks() {
 
 			w.dispatchKeyEvent(gpuKey, mods, pressed)
 
-			// Dispatch character input on key press only.
+			// Dispatch character input on key press only (no char for shortcuts).
 			if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
-				shift := mods&gpucontext.ModShift != 0
-				capsLock := mods&gpucontext.ModCapsLock != 0
-				if r := evdevKeycodeToRune(key, shift, capsLock); r != 0 {
+				if r := w.keycodeToRune(key); r != 0 {
 					w.queueEvent(Event{Type: EventChar, Char: r})
 				}
 			}
@@ -845,6 +872,12 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.pointerMu.Lock()
 			w.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
 			w.pointerMu.Unlock()
+
+			// Update xkbcommon state (modifier + layout group tracking).
+			// This enables proper multi-layout keyboard support.
+			if w.xkb != nil {
+				w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, group)
+			}
 		},
 		OnKeyboardRepeat: func(rate, delay int32) {
 			// Stored for future key repeat implementation
@@ -1076,6 +1109,29 @@ func (w *waylandWindow) getModifiers() gpucontext.Modifiers {
 	w.pointerMu.RLock()
 	defer w.pointerMu.RUnlock()
 	return w.modifiers
+}
+
+// keycodeToRune converts an evdev keycode to a printable rune.
+// Uses xkbcommon (multi-layout aware) when available, falls back to evdevKeycodeToRune (US QWERTY).
+func (w *waylandWindow) keycodeToRune(keycode uint32) rune {
+	if w.xkb != nil && w.xkb.Ready() {
+		s := w.xkb.KeyGetUtf8(keycode)
+		if s != "" {
+			runes := []rune(s)
+			if len(runes) > 0 {
+				return runes[0]
+			}
+		}
+		return 0
+	}
+
+	// Fallback: hardcoded US QWERTY mapping
+	w.pointerMu.RLock()
+	mods := w.modifiers
+	w.pointerMu.RUnlock()
+	shift := mods&gpucontext.ModShift != 0
+	capsLock := mods&gpucontext.ModCapsLock != 0
+	return evdevKeycodeToRune(keycode, shift, capsLock)
 }
 
 // eventTimestamp returns the event timestamp as duration since start.
@@ -1860,6 +1916,12 @@ func (p *waylandPlatform) FontScale() float32 { return detectFontScale() }
 func (p *waylandPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	// Close xkbcommon state (libxkbcommon objects)
+	if p.primary != nil && p.primary.xkb != nil {
+		p.primary.xkb.Close()
+		p.primary.xkb = nil
+	}
 
 	// Close wakeup pipe (process-level)
 	if p.wakePipe[0] != 0 {
