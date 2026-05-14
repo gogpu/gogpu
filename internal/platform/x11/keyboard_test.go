@@ -621,7 +621,7 @@ func TestKeysymToRune(t *testing.T) {
 		{"unicode Ф", 0x01000424, 'Ф', true},
 		{"unicode Greek alpha", 0x010003B1, 'α', true},
 		{"unicode CJK", 0x01004E2D, '中', true},
-		{"unicode emoji", 0x01001F600, '😀', true},
+		{"unicode emoji", 0x0101F600, '😀', true},
 
 		// Non-printable keysyms → (0, false)
 		{"BackSpace", KeysymBackSpace, 0, false},
