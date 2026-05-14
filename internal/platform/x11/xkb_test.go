@@ -292,8 +292,8 @@ func TestGracefulFallback_XkbUnavailable(t *testing.T) {
 	km := buildDualLayoutMapping() // en+ru, KeysymsPerCode=4
 
 	p := &Platform{
-		xkb:      nil,   // XKB not available
-		xkbGroup: 0,     // default
+		xkb:      nil, // XKB not available
+		xkbGroup: 0,   // default
 		keymap:   km,
 	}
 
