@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.7] - 2026-05-14
+
+### Added
+
+- **Multi-keyboard layout support on X11** (#227, ADR-027, @unxed) — XKB extension protocol for keyboard group tracking. `KeycodeToKeysymGroup` with group-aware keysym lookup. `KeysymToRune` with full legacy Cyrillic keysym→Unicode table (70 entries: Russian, Ukrainian, Belarusian). `isLetter` extended for Cyrillic. Graceful fallback when XKB unavailable (group=0). 27 tests. Enables Russian, Ukrainian, and other non-Latin keyboard layouts on X11. Wayland support planned for Phase 2.
+
 ## [0.34.6] - 2026-05-14
 
 ### Fixed
