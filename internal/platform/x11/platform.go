@@ -720,6 +720,9 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 	case *UnknownEvent:
 		p.handleUnknownEvent(e)
+
+	case *MappingNotifyEvent:
+		p.handleMappingNotify()
 	}
 
 	return PlatformEvent{Type: EventTypeNone}
@@ -988,6 +991,27 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 		p.mu.Unlock()
 		logger().Debug("XKB group changed", "group", newGroup)
 	}
+}
+
+// handleMappingNotify re-reads XKB state when keyboard mapping changes.
+// Some X servers send MappingNotify instead of XkbStateNotify on layout switch.
+// SDL3 uses the same fallback pattern.
+func (p *Platform) handleMappingNotify() {
+	if p.xkb == nil {
+		return
+	}
+	group, err := p.conn.xkbGetState(p.xkb.MajorOpcode)
+	if err != nil {
+		return
+	}
+	p.mu.Lock()
+	if p.xkbGroup != group {
+		p.xkbGroup = group
+		p.mu.Unlock()
+		logger().Debug("XKB group changed via MappingNotify", "group", group)
+		return
+	}
+	p.mu.Unlock()
 }
 
 // handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.
