@@ -546,7 +546,8 @@ func TestIntegration_HandleKeyEventReadsXkbGroup(t *testing.T) {
 	// event dispatched to the event queue.
 
 	// Group 0: keycode 38 should produce 'a' char event.
-	p.handleKeyEvent(w, 38, 0, true) // keycode 38, no modifiers, pressed
+	// state=0x0000: bits 13-14 = group 0.
+	p.handleKeyEvent(w, 38, 0x0000, true) // keycode 38, group 0, pressed
 
 	// Drain events to find the char event.
 	var charEvents []rune
@@ -574,11 +575,12 @@ func TestIntegration_HandleKeyEventReadsXkbGroup(t *testing.T) {
 			"triggers character dispatch via the keymap")
 	}
 
-	// Now switch to group 1 via XKB event.
+	// Group 1: keycode 38 with group=1 in state bits 13-14 (0x2000).
+	// XkbStateNotify also updates p.xkbGroup for handleUnknownEvent tests.
 	p.handleUnknownEvent(buildXkbStateNotifyEvent(eventBase, 1))
 
-	// Group 1: keycode 38 should produce Cyrillic char event.
-	p.handleKeyEvent(w, 38, 0, true)
+	// state=0x2000: bits 13-14 = group 1.
+	p.handleKeyEvent(w, 38, 0x2000, true)
 
 	charEvents = nil
 	for {
