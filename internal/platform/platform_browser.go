@@ -344,8 +344,8 @@ func (w *browserWindow) PrepareFrame() PrepareFrameResult {
 	return PrepareFrameResult{
 		ScaleChanged:   changed,
 		ScaleFactor:    dpr,
-		PhysicalWidth:  uint32(physW), //nolint:gosec // G115: validated positive
-		PhysicalHeight: uint32(physH), //nolint:gosec // G115: validated positive
+		PhysicalWidth:  uint32(physW),
+		PhysicalHeight: uint32(physH),
 	}
 }
 
@@ -522,7 +522,7 @@ func cursorIDToCSS(id int) string {
 
 // jsCodeToKey maps JS KeyboardEvent.code to gpucontext.Key.
 //
-//nolint:cyclop,gocyclo,funlen,maintidx // key mapping tables are inherently large
+//nolint:maintidx // key mapping tables are inherently large
 func jsCodeToKey(code string) gpucontext.Key {
 	switch code {
 	// Letters
