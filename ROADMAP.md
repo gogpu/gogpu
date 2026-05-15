@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.34.8
+## Current State: v0.35.0
 
 ✅ **Production-ready** with full feature set:
 - **Three-mode render loop** — IDLE/ANIMATING/CONTINUOUS modes with lazy swapchain acquire (ADR-023)
@@ -39,7 +39,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Runtime fullscreen** — `App.SetFullscreen(bool)`, `App.ToggleFullscreen()` on all platforms (ADR-018)
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
 - **Damage-aware presentation** — `Context.SetDamageRects()` passes dirty regions to compositor (ADR-013)
-- Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux)
+- Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux, **Browser/WASM**)
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
@@ -65,6 +65,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.35.0** | 2026-05-15 | **Browser/WASM platform** + XKB constant fix (#70, #227) — `GOOS=js GOARCH=wasm`, wgpu v0.28.1, bits 13-14 group extraction |
 | **v0.34.8** | 2026-05-15 | **Wayland keyboard layout** + X11 runtime switch fix (#227, @paulie-g) — xkbcommon, MappingNotify fallback, 44 tests |
 | **v0.34.7** | 2026-05-14 | **Multi-keyboard layout X11** (#227, ADR-027, @unxed) — XKB group tracking, Cyrillic keysyms, 27 tests |
 | **v0.34.6** | 2026-05-14 | Deferred SetHitTestCallback — frameless drag fix |
@@ -158,7 +159,7 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 | Theme | Description | Status |
 |-------|-------------|--------|
 | **Multi-Window** | Multiple windows per App (IDE/tool pattern) | ✅ Shipped (v0.28.0) |
-| **WebAssembly** | WASM target for browser via WebGPU | Backlog (WASM-001) |
+| **WebAssembly** | WASM target for browser via WebGPU | ✅ Shipped — v0.35.0, `GOOS=js GOARCH=wasm` (#70) |
 | **Android** | Android platform support | Backlog (ANDROID-001) |
 | **iOS** | iOS platform support | Planned |
 | **Ecosystem Logging** | Unified slog-based logging across all repos | Backlog (TASK-LOG-001) |

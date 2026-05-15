@@ -32,7 +32,7 @@
 |----------|--------------|
 | **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
-| **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal) |
+| **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
 | **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference, native macOS window tabbing |
 | **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |

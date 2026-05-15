@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-05-15
+
+### Added
+
+- **Browser/WASM platform support** (#70) — `GOOS=js GOARCH=wasm go build`. Full browser PlatformManager/PlatformWindow backed by HTML `<canvas>`. DOM event listeners (keyboard, pointer, wheel, resize). CSS cursor mapping, DPI-aware PrepareFrame, DarkMode/ReduceMotion/HighContrast via `matchMedia`. Fullscreen API. Canvas auto-creation. Graceful audio no-op stubs.
+
+### Fixed
+
+- **X11 keyboard layout: XKB constant was wrong** (#227, @unxed) — `XkbStateMask` was `0x0001` (NewKeyboardNotifyMask) instead of `0x0004` (StateNotifyMask). X server never subscribed us to group changes. Also extract group from bits 13-14 of KeyEvent.state (winit pattern, zero cost).
+
+### Changed
+
+- **deps:** wgpu v0.27.5 → v0.28.1 (Browser WebGPU backend + API compatibility stubs)
+- **Renderer refactor:** `initRust()` moved to build-tagged `renderer_rust.go`, `wgpu/hal` import removed from shared `renderer.go`. Enables WASM builds.
+
 ## [0.34.8] - 2026-05-15
 
 ### Added

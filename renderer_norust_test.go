@@ -1,4 +1,4 @@
-//go:build !rust
+//go:build !rust && !(js && wasm)
 
 package gogpu
 
