@@ -19,8 +19,12 @@ const (
 	// XKB event sub-types (byte 1 of the XKB event).
 	XkbStateNotify = 2
 
-	// XKB event detail masks for SelectEvents.
-	XkbStateMask      = 0x0001 // state changes (group, modifiers)
+	// XKB event type masks for SelectEvents (affectWhich field).
+	XkbNewKeyboardNotifyMask = 0x0001 // bit 0: new keyboard attached
+	XkbMapNotifyMask         = 0x0002 // bit 1: keymap changed
+	XkbStateNotifyMask       = 0x0004 // bit 2: state changes (group, modifiers)
+
+	// XKB state detail masks for per-event details (affectState/stateDetails).
 	XkbGroupStateMask = 0x0010 // group changes specifically
 
 	// XKB device spec: use the core keyboard.
@@ -156,13 +160,13 @@ func (c *Connection) xkbSelectEvents(majorOpcode uint8) error {
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(majorOpcode)
 	e.PutUint8(XkbMinorOpcodeSelectEvents)
-	e.PutUint16(5)             // request length: 20 bytes / 4 = 5 units
-	e.PutUint16(XkbUseCoreKbd) // device spec
-	e.PutUint16(XkbStateMask)  // affectWhich: subscribe to state events
-	e.PutUint16(0)             // clear: don't clear any event types
-	e.PutUint16(0)             // selectAll: 0 — use per-event details below (not auto-select all)
-	e.PutUint16(0)             // affectMap
-	e.PutUint16(0)             // map
+	e.PutUint16(5)                  // request length: 20 bytes / 4 = 5 units
+	e.PutUint16(XkbUseCoreKbd)      // device spec
+	e.PutUint16(XkbStateNotifyMask) // affectWhich: subscribe to state change events
+	e.PutUint16(0)                  // clear: don't clear any event types
+	e.PutUint16(0)                  // selectAll: 0 — use per-event details below (not auto-select all)
+	e.PutUint16(0)                  // affectMap
+	e.PutUint16(0)                  // map
 	// Per-event details for StateNotify (included because StateNotify is in
 	// affectWhich but NOT in selectAll — XKB wire protocol requires detail pair):
 	e.PutUint16(XkbGroupStateMask) // affectState: we want group changes

@@ -1215,8 +1215,12 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 
 	p.mu.Lock()
 	keymap := p.keymap
-	xkbGroup := p.xkbGroup
 	p.mu.Unlock()
+
+	// Extract keyboard group from bits 13-14 of the X11 event state field.
+	// XKB spec: "An XKB state field encodes an explicit keyboard group in
+	// bits 13 and 14." Same pattern as winit. Zero cost, always accurate.
+	group := int((state >> 13) & 3)
 
 	// X11 keycodes are evdev keycodes offset by 8
 	key := x11KeycodeToKey(keycode)
@@ -1226,15 +1230,11 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 
 	w.dispatchKeyEvent(key, mods, pressed)
 
-	// Dispatch character input on key press only.
-	// Skip when Ctrl/Alt/Super are held — those are shortcuts, not text input.
 	if pressed && keymap != nil &&
 		mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
 		shift := mods&gpucontext.ModShift != 0
 		capsLock := mods&gpucontext.ModCapsLock != 0
-		// Use group-aware keysym lookup (XKB group tracks active keyboard layout).
-		// Falls back to group 0 if XKB is not available (xkbGroup defaults to 0).
-		keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, xkbGroup)
+		keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, group)
 		if r, ok := KeysymToRune(keysym); ok && r >= 32 {
 			w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
 		}
