@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.34.7
+## Current State: v0.34.8
 
 ✅ **Production-ready** with full feature set:
 - **Three-mode render loop** — IDLE/ANIMATING/CONTINUOUS modes with lazy swapchain acquire (ADR-023)
@@ -43,7 +43,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
-- **Multi-keyboard layout (X11)** — XKB extension, group-aware keysym lookup, Cyrillic/Ukrainian/Belarusian support (ADR-027, @unxed)
+- **Multi-keyboard layout (X11 + Wayland)** — XKB extension + xkbcommon, group-aware keysym lookup, Cyrillic/Ukrainian/Belarusian (ADR-027, @unxed)
 - **Unicode text input** — SetCharCallback on all platforms (Win32/macOS/X11/Wayland)
 - **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
@@ -65,6 +65,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.34.8** | 2026-05-15 | **Wayland keyboard layout** + X11 runtime switch fix (#227, @paulie-g) — xkbcommon, MappingNotify fallback, 44 tests |
 | **v0.34.7** | 2026-05-14 | **Multi-keyboard layout X11** (#227, ADR-027, @unxed) — XKB group tracking, Cyrillic keysyms, 27 tests |
 | **v0.34.6** | 2026-05-14 | Deferred SetHitTestCallback — frameless drag fix |
 | **v0.34.5** | 2026-05-14 | deps: wgpu v0.27.5 (NULL handle guards) |

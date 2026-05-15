@@ -5,11 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.8] - 2026-05-15
+
+### Added
+
+- **Wayland keyboard layout support** (#227, FEAT-INPUT-020 Phase 2) — `xkbcommon.so.0` loaded via goffi for keymap parsing and key-to-UTF8 conversion. `OnKeyboardKeymap` parses compositor keymap, `OnKeyboardModifiers` tracks layout group, `OnKeyboardKey` uses `xkb_state_key_get_utf8` for correct characters. Graceful fallback to English-only `evdevKeycodeToRune` if xkbcommon unavailable. 17 new tests.
+
+### Fixed
+
+- **X11 keyboard layout switching not detected at runtime** (#227, @paulie-g) — `XkbSelectEvents` wire format had `selectAll=XkbStateMask` which caused per-event detail pair to be misinterpreted by the server. Fix: `selectAll=0`, rely on explicit per-event details (GLFW/SDL3 pattern). Added `MappingNotify` → `XkbGetState` fallback for X servers that don't send `XkbStateNotify` on layout switch (SDL3 pattern).
+
 ## [0.34.7] - 2026-05-14
 
 ### Added
 
-- **Multi-keyboard layout support on X11** (#227, ADR-027, @unxed) — XKB extension protocol for keyboard group tracking. `KeycodeToKeysymGroup` with group-aware keysym lookup. `KeysymToRune` with full legacy Cyrillic keysym→Unicode table (70 entries: Russian, Ukrainian, Belarusian). `isLetter` extended for Cyrillic. Graceful fallback when XKB unavailable (group=0). 27 tests. Enables Russian, Ukrainian, and other non-Latin keyboard layouts on X11. Wayland support planned for Phase 2.
+- **Multi-keyboard layout support on X11** (#227, ADR-027, @unxed) — XKB extension protocol for keyboard group tracking. `KeycodeToKeysymGroup` with group-aware keysym lookup. `KeysymToRune` with full legacy Cyrillic keysym→Unicode table (70 entries: Russian, Ukrainian, Belarusian). `isLetter` extended for Cyrillic. Graceful fallback when XKB unavailable (group=0). 27 tests.
 
 ## [0.34.6] - 2026-05-14
 
