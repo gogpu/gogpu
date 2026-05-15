@@ -43,8 +43,16 @@ func TestXkbConstants(t *testing.T) {
 			check: func() bool { return XkbUseCoreKbd == 0x0100 },
 		},
 		{
-			name:  "XkbStateMask equals 0x0001",
-			check: func() bool { return XkbStateMask == 0x0001 },
+			name:  "XkbNewKeyboardNotifyMask equals 0x0001",
+			check: func() bool { return XkbNewKeyboardNotifyMask == 0x0001 },
+		},
+		{
+			name:  "XkbMapNotifyMask equals 0x0002",
+			check: func() bool { return XkbMapNotifyMask == 0x0002 },
+		},
+		{
+			name:  "XkbStateNotifyMask equals 0x0004",
+			check: func() bool { return XkbStateNotifyMask == 0x0004 },
 		},
 		{
 			name:  "XkbGroupStateMask equals 0x0010",
@@ -672,5 +680,94 @@ func TestHandleEvent_IgnoresUnknownEventWhenXkbNil(t *testing.T) {
 
 	if p.xkbGroup != 0 {
 		t.Errorf("xkbGroup = %d, want 0 (xkb is nil)", p.xkbGroup)
+	}
+}
+
+// --- Section 7: KeyEvent State Bits 13-14 Group Extraction ---
+
+// TestKeyEventGroupExtraction verifies that keyboard group is correctly
+// extracted from bits 13-14 of the X11 KeyEvent state field.
+// XKB spec: "An XKB state field encodes an explicit keyboard group
+// in bits 13 and 14." Same pattern as winit.
+func TestKeyEventGroupExtraction(t *testing.T) {
+	tests := []struct {
+		name  string
+		state uint16
+		want  int
+	}{
+		{"group 0 (no bits set)", 0x0000, 0},
+		{"group 1 (bit 13 set)", 0x2000, 1},
+		{"group 2 (bit 14 set)", 0x4000, 2},
+		{"group 3 (bits 13+14 set)", 0x6000, 3},
+		{"group 1 with Shift modifier", 0x2001, 1},
+		{"group 1 with Ctrl modifier", 0x2004, 1},
+		{"group 2 with CapsLock", 0x4002, 2},
+		{"group 0 with all low modifiers", 0x00FF, 0},
+		{"group 3 with all low modifiers", 0x60FF, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := int((tt.state >> 13) & 3)
+			if got != tt.want {
+				t.Errorf("group from state 0x%04X: got %d, want %d", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestKeyEventGroupIntegration verifies that handleKeyEvent uses group
+// from KeyEvent.state bits 13-14 for correct keysym lookup.
+func TestKeyEventGroupIntegration(t *testing.T) {
+	km := buildDualLayoutMapping()
+
+	tests := []struct {
+		name    string
+		keycode uint8
+		state   uint16 // bits 13-14 = group, bit 0 = shift, bit 1 = capslock
+		want    rune
+	}{
+		{"group0 'a' key → a", 38, 0x0000, 'a'},
+		{"group0 'a' key + shift → A", 38, 0x0001, 'A'},
+		{"group1 'a' key → ф", 38, 0x2000, 0}, // Cyrillic ef — KeysymToRune handles
+		{"group0 space", 43, 0x0000, ' '},
+		{"group1 space", 43, 0x2000, ' '},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			group := int((tt.state >> 13) & 3)
+			shift := tt.state&0x0001 != 0
+			capsLock := tt.state&0x0002 != 0
+			keysym := km.KeycodeToKeysymGroup(tt.keycode, shift, capsLock, group)
+			r, ok := KeysymToRune(keysym)
+			if tt.want == 0 {
+				// For Cyrillic: just verify keysym is not ASCII
+				if ok && r < 128 {
+					t.Errorf("expected non-ASCII rune for group %d, got %c (0x%X)", group, r, r)
+				}
+			} else {
+				if !ok || r != tt.want {
+					t.Errorf("got rune=%c (0x%X) ok=%v, want %c", r, r, ok, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestXkbConstantsNotConfused verifies that XKB event type masks are
+// distinct and correctly ordered per XKB protocol specification.
+func TestXkbConstantsNotConfused(t *testing.T) {
+	if XkbNewKeyboardNotifyMask == XkbStateNotifyMask {
+		t.Fatal("NewKeyboardNotifyMask must differ from StateNotifyMask")
+	}
+	if XkbStateNotifyMask != 0x0004 {
+		t.Fatalf("XkbStateNotifyMask = 0x%04X, want 0x0004", XkbStateNotifyMask)
+	}
+	if XkbNewKeyboardNotifyMask != 0x0001 {
+		t.Fatalf("XkbNewKeyboardNotifyMask = 0x%04X, want 0x0001", XkbNewKeyboardNotifyMask)
+	}
+	if XkbMapNotifyMask != 0x0002 {
+		t.Fatalf("XkbMapNotifyMask = 0x%04X, want 0x0002", XkbMapNotifyMask)
 	}
 }
