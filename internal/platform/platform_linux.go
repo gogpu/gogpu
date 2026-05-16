@@ -861,9 +861,12 @@ func (p *waylandPlatform) setupInputCallbacks() {
 
 			w.dispatchKeyEvent(gpuKey, mods, pressed)
 
-			// Dispatch character input on key press only (no char for shortcuts).
-			if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
-				if r := w.keycodeToRune(key); r != 0 {
+			// Dispatch character input on key press only.
+			// No modifier filtering: xkbcommon handles AltGr (Level3) correctly,
+			// and filtering out Alt blocks AltGr combos (e.g., AltGr+, -> <<).
+			// Control characters (r < 32) are filtered instead (GLFW pattern).
+			if pressed {
+				if r := w.keycodeToRune(key); r >= 32 {
 					w.queueEvent(Event{Type: EventChar, Char: r})
 				}
 			}

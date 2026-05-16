@@ -44,6 +44,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
 - **Multi-keyboard layout (X11 + Wayland)** — XKB extension + xkbcommon, group-aware keysym lookup, Cyrillic/Ukrainian/Belarusian (ADR-027, @unxed)
+- **Unified XKB text input** — shared xkbcommon for X11+Wayland, AltGr/Level3 on all international layouts, named modifier resolution, `KeyWithoutModifiers` for shortcuts (ADR-029, @unxed)
 - **Unicode text input** — SetCharCallback on all platforms (Win32/macOS/X11/Wayland)
 - **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
@@ -65,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.36.0** | 2026-05-16 | **Unified XKB text input** (#233, ADR-029, @unxed) — AltGr/Level3 on all layouts, shared xkbcommon for X11+Wayland, 15 FFI bindings, ModsIndices, KeyWithoutModifiers |
 | **v0.35.0** | 2026-05-15 | **Browser/WASM platform** + XKB constant fix (#70, #227) — `GOOS=js GOARCH=wasm`, wgpu v0.28.1, bits 13-14 group extraction |
 | **v0.34.8** | 2026-05-15 | **Wayland keyboard layout** + X11 runtime switch fix (#227, @paulie-g) — xkbcommon, MappingNotify fallback, 44 tests |
 | **v0.34.7** | 2026-05-14 | **Multi-keyboard layout X11** (#227, ADR-027, @unxed) — XKB group tracking, Cyrillic keysyms, 27 tests |

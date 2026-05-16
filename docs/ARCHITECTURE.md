@@ -536,9 +536,9 @@ Platform Layer          InputState               Game Loop
 
 | Platform | Pointer Events | Keyboard | Text Input | Scroll |
 |----------|---------------|----------|------------|--------|
-| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates) | WM_MOUSEWHEEL |
-| Linux (Wayland) | wl_pointer (libwayland goffi) | wl_keyboard (libwayland goffi) | evdevKeycodeToRune (US QWERTY) | wl_pointer.axis |
-| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | KeysymToString (server mapping) | Button 4-7 |
+| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates, AltGr via isAltGrSequence) | WM_MOUSEWHEEL |
+| Linux (Wayland) | wl_pointer (libwayland goffi) | wl_keyboard (libwayland goffi) | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts) | wl_pointer.axis |
+| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts), fallback: KeysymToRune | Button 4-7 |
 | macOS    | NSEvent mouse | NSEvent key | NSEvent characters (UTF-8) | NSEvent scroll |
 
 ## Renderer Pipeline

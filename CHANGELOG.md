@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-05-16
+
+### Added
+
+- **Unified XKB text input** (#233, ADR-029) — shared `internal/platform/xkb/` package used by both X11 and Wayland. 15 xkbcommon FFI bindings via goffi. AltGr/ISO_Level3_Shift produces correct characters on all European/international keyboard layouts (guillemets «», @, {, }, € etc). System default keymap via `xkb_keymap_new_from_names` on X11. `ModsIndices` for named modifier resolution (winit pattern). `KeyWithoutModifiers` for shortcut matching (level 0 keysym). Graceful fallback to manual keysym lookup if xkbcommon unavailable. 297 lines of tests.
+
+### Fixed
+
+- **AltGr key combos produced no text on Linux** (#233, @unxed) — naive modifier filter `mods&(Ctrl|Alt|Super)==0` blocked text when AltGr was detected (AltGr maps to Mod1/Alt on most XKB configurations). Filter replaced with `r >= 32` control character check (GLFW pattern). On X11, manual `KeycodeToKeysymGroup` only handled 2 levels (base+Shift), missing Level 3 (AltGr) and Level 4 (Shift+AltGr) entirely — now uses xkbcommon `xkb_state_key_get_utf8` which handles all 4 levels correctly.
+
+### Changed
+
+- **Refactored xkbcommon bindings** — moved from `wayland/xkbcommon.go` (Wayland-only, 366 lines) to shared `internal/platform/xkb/` package (779 lines). Wayland wrapper reduced to thin type alias + `LoadXKBCommon()` delegate. No behavioral change for existing Wayland keyboard support.
+
 ## [0.35.0] - 2026-05-15
 
 ### Added

@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	xkbcommon "github.com/gogpu/gogpu/internal/platform/xkb"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -159,6 +160,11 @@ type Platform struct {
 
 	// Keyboard mapping — process-level
 	keymap *KeyboardMapping
+
+	// Shared xkbcommon handle for proper text input (AltGr, dead keys, etc.).
+	// Uses xkb_keymap_new_from_names(NULL) for system default keymap.
+	// Nil if libxkbcommon is not available (falls back to manual KeycodeToKeysymGroup).
+	xkbState *xkbcommon.Handle
 
 	// DPI scale factor (from Xft.dpi or screen physical size) — process-level
 	scaleFactor float64
@@ -363,6 +369,22 @@ func (p *Platform) Init(config Config) error {
 		p.xkb = xkb
 		p.xkbGroup = xkb.Group
 		logger().Info("XKB enabled", "version", fmt.Sprintf("%d.%d", xkb.MajorVer, xkb.MinorVer), "group", xkb.Group)
+	}
+
+	// Load libxkbcommon for proper text input (AltGr, dead keys, multi-layout).
+	// Uses system default keymap via xkb_keymap_new_from_names(NULL).
+	// Non-fatal: falls back to manual KeycodeToKeysymGroup (no AltGr support).
+	xkbHandle, xkbcommonErr := xkbcommon.New()
+	if xkbcommonErr != nil {
+		logger().Info("xkbcommon not available for X11, AltGr may not work", "err", xkbcommonErr)
+	} else {
+		if namesErr := xkbHandle.SetKeymapFromNames(); namesErr != nil {
+			logger().Warn("xkbcommon: failed to load system keymap", "err", namesErr)
+			xkbHandle.Close()
+		} else {
+			p.xkbState = xkbHandle
+			logger().Info("xkbcommon enabled for X11 text input")
+		}
 	}
 
 	// Initialize XInput2 for touch support (non-fatal)
@@ -1123,6 +1145,12 @@ func (p *Platform) Destroy() {
 
 	w := p.primary
 
+	// Close xkbcommon handle
+	if p.xkbState != nil {
+		p.xkbState.Close()
+		p.xkbState = nil
+	}
+
 	// Close Xlib Display* (Vulkan surface handle)
 	if p.xlib != nil {
 		p.xlib.close()
@@ -1206,21 +1234,15 @@ func (w *x11Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifie
 
 // handleKeyEvent processes a key press or release event.
 // X11 keycodes = evdev keycodes + 8.
+//
+// Text input uses xkbcommon when available (handles AltGr/Level3 correctly).
+// Falls back to manual KeycodeToKeysymGroup (no AltGr support) if xkbcommon is unavailable.
 func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pressed bool) {
 	mods := extractModifiers(state)
 
 	w.eventMu.Lock()
 	w.modifiers = mods
 	w.eventMu.Unlock()
-
-	p.mu.Lock()
-	keymap := p.keymap
-	p.mu.Unlock()
-
-	// Extract keyboard group from bits 13-14 of the X11 event state field.
-	// XKB spec: "An XKB state field encodes an explicit keyboard group in
-	// bits 13 and 14." Same pattern as winit. Zero cost, always accurate.
-	group := int((state >> 13) & 3)
 
 	// X11 keycodes are evdev keycodes offset by 8
 	key := x11KeycodeToKey(keycode)
@@ -1230,8 +1252,35 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 
 	w.dispatchKeyEvent(key, mods, pressed)
 
-	if pressed && keymap != nil &&
-		mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
+	// Evdev keycode for xkbcommon: X11 keycode - 8
+	evdevKey := uint32(keycode) - 8
+
+	// Text input: use xkbcommon if available (handles AltGr/Level3 correctly).
+	// Fallback to manual KeycodeToKeysymGroup (no AltGr support).
+	p.mu.Lock()
+	xkbState := p.xkbState
+	keymap := p.keymap
+	p.mu.Unlock()
+
+	if xkbState != nil && xkbState.Ready() {
+		// xkb_state_update_key tracks modifier state (AltGr, Shift, etc.)
+		// Must be called for BOTH press and release to keep state consistent.
+		xkbState.UpdateKey(evdevKey, pressed)
+
+		if pressed {
+			s := xkbState.KeyGetUtf8(evdevKey)
+			if s != "" {
+				for _, r := range s {
+					if r >= 32 {
+						w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
+					}
+				}
+			}
+		}
+	} else if pressed && keymap != nil {
+		// Fallback: manual lookup (no AltGr support)
+		// Extract keyboard group from bits 13-14 of the X11 event state field.
+		group := int((state >> 13) & 3)
 		shift := mods&gpucontext.ModShift != 0
 		capsLock := mods&gpucontext.ModCapsLock != 0
 		keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, group)

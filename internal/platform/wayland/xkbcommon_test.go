@@ -4,19 +4,22 @@ package wayland
 
 import (
 	"testing"
+
+	"github.com/gogpu/gogpu/internal/platform/xkb"
 )
 
 // TestXKBConstants verifies xkbcommon constant values match the C header.
+// Constants are now defined in the shared xkb package.
 func TestXKBConstants(t *testing.T) {
 	tests := []struct {
 		name string
 		got  uint32
 		want uint32
 	}{
-		{"XKB_CONTEXT_NO_FLAGS", xkbContextNoFlags, 0},
-		{"XKB_KEYMAP_FORMAT_TEXT_V1", xkbKeymapFormatTextV1, 1},
-		{"XKB_KEYMAP_COMPILE_NO_FLAGS", xkbKeymapCompileNoFlags, 0},
-		{"evdev offset", xkbEvdevOffset, 8},
+		{"XKB_CONTEXT_NO_FLAGS", xkb.XKBContextNoFlags, 0},
+		{"XKB_KEYMAP_FORMAT_TEXT_V1", xkb.XKBKeymapFormatTextV1, 1},
+		{"XKB_KEYMAP_COMPILE_NO_FLAGS", xkb.XKBKeymapCompileNoFlags, 0},
+		{"evdev offset", xkb.XKBEvdevOffset, 8},
 	}
 
 	for _, tt := range tests {
@@ -97,7 +100,7 @@ func TestXKBEvdevOffset(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.evdev + xkbEvdevOffset
+			got := tt.evdev + xkb.XKBEvdevOffset
 			if got != tt.wantXKB {
 				t.Errorf("evdev %d + offset = %d, want %d", tt.evdev, got, tt.wantXKB)
 			}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogpu/gogpu/internal/platform/wayland"
+	"github.com/gogpu/gogpu/internal/platform/xkb"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -15,11 +15,11 @@ import (
 // KeyGetUtf8 is used for character dispatch instead of evdevKeycodeToRune.
 func TestWaylandXKBKeyDispatch(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{
+	xkbMock := &mockXKBHandle{
 		ready:  true,
 		result: "a",
 	}
-	w.xkb = xkb
+	w.xkb = xkbMock
 
 	// Simulate key press on key 30 (KEY_A) — should use xkb
 	w.keyboardFocused = true
@@ -44,11 +44,11 @@ func TestWaylandXKBKeyDispatch(t *testing.T) {
 // TestWaylandXKBMultiRuneDispatch verifies multi-byte UTF-8 characters.
 func TestWaylandXKBMultiRuneDispatch(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{
+	xkbMock := &mockXKBHandle{
 		ready:  true,
 		result: "\u0439", // Cyrillic "й" (U+0439)
 	}
-	w.xkb = xkb
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 
 	events := dispatchKeyWithXKB(w, 16, 0, true) // key Q → Cyrillic "й" in Russian layout
@@ -87,11 +87,11 @@ func TestWaylandXKBFallbackToEvdev(t *testing.T) {
 // TestWaylandXKBFallbackWhenNotReady verifies fallback when XKBHandle exists but state is 0.
 func TestWaylandXKBFallbackWhenNotReady(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{
+	xkbMock := &mockXKBHandle{
 		ready:  false, // no keymap loaded yet
 		result: "",
 	}
-	w.xkb = xkb
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 
 	events := dispatchKeyWithXKB(w, 30, 0, true) // KEY_A
@@ -107,11 +107,11 @@ func TestWaylandXKBFallbackWhenNotReady(t *testing.T) {
 // TestWaylandXKBNoCharOnRelease verifies no char event on key release.
 func TestWaylandXKBNoCharOnRelease(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{
+	xkbMock := &mockXKBHandle{
 		ready:  true,
 		result: "a",
 	}
-	w.xkb = xkb
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 
 	events := dispatchKeyWithXKB(w, 30, 0, false) // release
@@ -124,20 +124,23 @@ func TestWaylandXKBNoCharOnRelease(t *testing.T) {
 	}
 }
 
-// TestWaylandXKBNoCharWithCtrl verifies no char event when Ctrl is held.
+// TestWaylandXKBNoCharWithCtrl verifies no char event when Ctrl is held
+// and xkbcommon returns a control character (r < 32).
+// xkbcommon itself produces control characters for Ctrl+letter combos (e.g., Ctrl+A = 0x01).
+// The r >= 32 filter blocks these, so Ctrl+A does NOT produce text.
 func TestWaylandXKBNoCharWithCtrl(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{
+	xkbMock := &mockXKBHandle{
 		ready:  true,
-		result: "a",
+		result: "\x01", // xkbcommon returns control character for Ctrl+A
 	}
-	w.xkb = xkb
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 	w.modifiers = gpucontext.ModControl
 
 	events := dispatchKeyWithXKB(w, 30, gpucontext.ModControl, true)
 
-	// Only EventKeyDown, no EventChar (Ctrl+A is a shortcut, not text)
+	// Only EventKeyDown, no EventChar (Ctrl+A produces 0x01, filtered by r >= 32)
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event (KeyDown only), got %d", len(events))
 	}
@@ -149,11 +152,11 @@ func TestWaylandXKBNoCharWithCtrl(t *testing.T) {
 // TestWaylandXKBNoCharOnNonPrintable verifies no char event for non-printable keys.
 func TestWaylandXKBNoCharOnNonPrintable(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{
+	xkbMock := &mockXKBHandle{
 		ready:  true,
 		result: "", // Escape produces nothing
 	}
-	w.xkb = xkb
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 
 	events := dispatchKeyWithXKB(w, 1, 0, true) // KEY_ESC
@@ -167,29 +170,29 @@ func TestWaylandXKBNoCharOnNonPrintable(t *testing.T) {
 // TestWaylandXKBGroupSwitch verifies that UpdateMask is called with the group parameter.
 func TestWaylandXKBGroupSwitch(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{ready: true}
-	w.xkb = xkb
+	xkbMock := &mockXKBHandle{ready: true}
+	w.xkb = xkbMock
 
 	// Simulate wl_keyboard.modifiers with group=1 (second layout)
 	waylandModifiersCallback(w, 0, 0, 0, 1)
 
-	if xkb.lastGroup != 1 {
-		t.Errorf("xkb.lastGroup = %d, want 1", xkb.lastGroup)
+	if xkbMock.lastGroup != 1 {
+		t.Errorf("xkbMock.lastGroup = %d, want 1", xkbMock.lastGroup)
 	}
-	if xkb.updateMaskCalled != 1 {
-		t.Errorf("xkb.updateMaskCalled = %d, want 1", xkb.updateMaskCalled)
+	if xkbMock.updateMaskCalled != 1 {
+		t.Errorf("xkbMock.updateMaskCalled = %d, want 1", xkbMock.updateMaskCalled)
 	}
 }
 
 // TestWaylandXKBGroupSwitchAffectsKeyOutput verifies that switching group changes character output.
 func TestWaylandXKBGroupSwitchAffectsKeyOutput(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{ready: true}
-	w.xkb = xkb
+	xkbMock := &mockXKBHandle{ready: true}
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 
 	// Group 0 → English 'q'
-	xkb.result = "q"
+	xkbMock.result = "q"
 	events := dispatchKeyWithXKB(w, 16, 0, true)
 	if len(events) < 2 || events[1].Char != 'q' {
 		t.Errorf("group 0: expected 'q', got events: %+v", events)
@@ -197,7 +200,7 @@ func TestWaylandXKBGroupSwitchAffectsKeyOutput(t *testing.T) {
 
 	// Switch to group 1 (Russian layout)
 	waylandModifiersCallback(w, 0, 0, 0, 1)
-	xkb.result = "\u0439" // Cyrillic й
+	xkbMock.result = "\u0439" // Cyrillic й
 
 	events = dispatchKeyWithXKB(w, 16, 0, true)
 	if len(events) < 2 || events[1].Char != '\u0439' {
@@ -208,39 +211,39 @@ func TestWaylandXKBGroupSwitchAffectsKeyOutput(t *testing.T) {
 // TestWaylandXKBKeymapCallback verifies that OnKeyboardKeymap triggers SetKeymapFromFD.
 func TestWaylandXKBKeymapCallback(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{ready: false}
-	w.xkb = xkb
+	xkbMock := &mockXKBHandle{ready: false}
+	w.xkb = xkbMock
 
 	// Simulate keymap callback with XKB_KEYMAP_FORMAT_TEXT_V1 = 1
 	waylandKeymapCallback(w, 1, 42, 4096)
 
-	if xkb.setKeymapFD != 42 {
-		t.Errorf("xkb.setKeymapFD = %d, want 42", xkb.setKeymapFD)
+	if xkbMock.setKeymapFD != 42 {
+		t.Errorf("xkbMock.setKeymapFD = %d, want 42", xkbMock.setKeymapFD)
 	}
-	if xkb.setKeymapSize != 4096 {
-		t.Errorf("xkb.setKeymapSize = %d, want 4096", xkb.setKeymapSize)
+	if xkbMock.setKeymapSize != 4096 {
+		t.Errorf("xkbMock.setKeymapSize = %d, want 4096", xkbMock.setKeymapSize)
 	}
 }
 
 // TestWaylandXKBKeymapCallbackIgnoresNonXKB verifies non-XKB format is ignored.
 func TestWaylandXKBKeymapCallbackIgnoresNonXKB(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{ready: false}
-	w.xkb = xkb
+	xkbMock := &mockXKBHandle{ready: false}
+	w.xkb = xkbMock
 
 	// Format 0 = XKB_KEYMAP_FORMAT_NO_KEYMAP → should be ignored
 	waylandKeymapCallback(w, 0, 42, 4096)
 
-	if xkb.setKeymapFD != 0 {
-		t.Errorf("xkb.setKeymapFD = %d, want 0 (not called)", xkb.setKeymapFD)
+	if xkbMock.setKeymapFD != 0 {
+		t.Errorf("xkbMock.setKeymapFD = %d, want 0 (not called)", xkbMock.setKeymapFD)
 	}
 }
 
 // TestWaylandXKBThreadSafety verifies concurrent access to xkb handle is safe.
 func TestWaylandXKBThreadSafety(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now()}
-	xkb := &mockXKBHandle{ready: true, result: "x"}
-	w.xkb = xkb
+	xkbMock := &mockXKBHandle{ready: true, result: "x"}
+	w.xkb = xkbMock
 	w.keyboardFocused = true
 
 	var wg sync.WaitGroup
@@ -304,24 +307,29 @@ func (m *mockXKBHandle) Close() {}
 // Verify mockXKBHandle satisfies xkbKeyHandler at compile time.
 var _ xkbKeyHandler = (*mockXKBHandle)(nil)
 
-// Verify *wayland.XKBHandle satisfies xkbKeyHandler at compile time.
-var _ xkbKeyHandler = (*wayland.XKBHandle)(nil)
+// Verify *xkb.Handle satisfies xkbKeyHandler at compile time.
+var _ xkbKeyHandler = (*xkb.Handle)(nil)
 
 // --- Helper functions that exercise production code paths ---
 
 // dispatchKeyWithXKB simulates the OnKeyboardKey callback logic for testing.
 // Uses the production keycodeToRune method to verify the real code path.
+// Mirrors production: no modifier filtering, r >= 32 control char filter.
 func dispatchKeyWithXKB(w *waylandWindow, keycode uint32, mods gpucontext.Modifiers, pressed bool) []Event {
+	_ = mods // mods no longer used for text dispatch filtering
+
 	w.eventMu.Lock()
 	w.events = nil // Clear queue
 	w.eventMu.Unlock()
 
 	gpuKey := evdevToKey(keycode)
-	w.dispatchKeyEvent(gpuKey, mods, pressed)
+	w.dispatchKeyEvent(gpuKey, w.getModifiers(), pressed)
 
-	// Character dispatch on press only, no modifier keys — same logic as production callback
-	if pressed && mods&(gpucontext.ModControl|gpucontext.ModAlt|gpucontext.ModSuper) == 0 {
-		if r := w.keycodeToRune(keycode); r != 0 {
+	// Character dispatch on press only, no modifier filtering.
+	// xkbcommon handles AltGr (Level3) correctly.
+	// Control characters (r < 32) are filtered (GLFW pattern).
+	if pressed {
+		if r := w.keycodeToRune(keycode); r >= 32 {
 			w.queueEvent(Event{Type: EventChar, Char: r})
 		}
 	}
