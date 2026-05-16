@@ -800,32 +800,32 @@ func TestHandleUnknownEvent_FullFieldExtraction(t *testing.T) {
 		wantGroup    int
 	}{
 		{
-			name: "switch to Russian (group 1, locked)",
+			name:  "switch to Russian (group 1, locked)",
 			group: 1, lockedGroup: 1,
 			wantGroup: 1,
 		},
 		{
-			name: "switch back to English (group 0)",
+			name:  "switch back to English (group 0)",
 			group: 0, lockedGroup: 0,
 			wantGroup: 0,
 		},
 		{
-			name: "shift+group1 (baseMods=1, lockedGroup=1)",
+			name:     "shift+group1 (baseMods=1, lockedGroup=1)",
 			baseMods: 1, group: 1, lockedGroup: 1,
 			wantGroup: 1,
 		},
 		{
-			name: "ctrl+alt (baseMods=0x0C, no group change)",
+			name:     "ctrl+alt (baseMods=0x0C, no group change)",
 			baseMods: 0x0C, group: 0,
 			wantGroup: 0,
 		},
 		{
-			name: "capslock locked (lockedMods=2, group=0)",
+			name:       "capslock locked (lockedMods=2, group=0)",
 			lockedMods: 2, group: 0,
 			wantGroup: 0,
 		},
 		{
-			name: "group 2 via baseGroup",
+			name:  "group 2 via baseGroup",
 			group: 2, baseGroup: 2,
 			wantGroup: 2,
 		},
@@ -884,10 +884,10 @@ func TestHandleKeyEvent_FallbackWhenXkbStateNil(t *testing.T) {
 	}
 
 	km := &KeyboardMapping{
-		MinKeycode:    8,
-		MaxKeycode:    255,
+		MinKeycode:     8,
+		MaxKeycode:     255,
 		KeysymsPerCode: 4,
-		Keysyms:       make([]Keysym, 248*4),
+		Keysyms:        make([]Keysym, 248*4),
 	}
 	// Key 38 (evdev 30 = KEY_A) → group 0, level 0 = 'a' (keysym 0x61)
 	idx := (38 - 8) * 4
@@ -931,10 +931,10 @@ func TestHandleKeyEvent_FallbackUsesXkbGroup(t *testing.T) {
 	}
 
 	km := &KeyboardMapping{
-		MinKeycode:    8,
-		MaxKeycode:    255,
+		MinKeycode:     8,
+		MaxKeycode:     255,
 		KeysymsPerCode: 4,
-		Keysyms:       make([]Keysym, 248*4),
+		Keysyms:        make([]Keysym, 248*4),
 	}
 	// Key 38 (evdev 30): group 0 = 'a', group 1 = Cyrillic 'ф' (0x06C6)
 	idx := (38 - 8) * 4
