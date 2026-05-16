@@ -459,6 +459,14 @@ func (p *Platform) Init(config Config) error {
 		logger().Info("x11 DPI scale", "factor", p.scaleFactor)
 	}
 
+	// Enable detectable auto-repeat to suppress spurious KeyRelease events
+	// during key repeat. Without this, X11 sends KeyRelease+KeyPress pairs
+	// for each repeat, making it impossible to distinguish real release from repeat.
+	// ADR-033: Key Repeat.
+	if xlib != nil {
+		p.setDetectableAutoRepeat()
+	}
+
 	if xlib != nil {
 		logger().Info("x11 init complete", "window", fmt.Sprintf("%#x", w.window), "display", fmt.Sprintf("%#x", xlib.display))
 	} else {
@@ -1281,6 +1289,55 @@ func (p *Platform) Destroy() {
 	p.primary = nil
 	p.atoms = nil
 	p.keymap = nil
+}
+
+// setDetectableAutoRepeat calls XkbSetDetectableAutoRepeat to suppress
+// spurious KeyRelease events during key repeat (ADR-033).
+// Without this, X11 sends a KeyRelease immediately before each synthetic
+// KeyPress during repeat, making it impossible to distinguish a real
+// key release from a repeat-related one.
+func (p *Platform) setDetectableAutoRepeat() {
+	if p.xlib == nil || p.xlib.display == 0 {
+		return
+	}
+
+	// XkbSetDetectableAutoRepeat(Display*, Bool detectable, Bool* supported_rtrn) -> Bool
+	sym, err := ffi.GetSymbol(p.xlib.lib, "XkbSetDetectableAutoRepeat")
+	if err != nil || sym == nil {
+		logger().Debug("XkbSetDetectableAutoRepeat not available", "err", err)
+		return
+	}
+
+	// Prepare CIF: (Display*, Bool, Bool*) -> Bool
+	// In X11: Bool = int (4 bytes), Display* = ptr
+	var cif types.CallInterface
+	if err := ffi.PrepareCallInterface(&cif, types.DefaultCall,
+		types.SInt32TypeDescriptor, // return Bool
+		[]*types.TypeDescriptor{
+			types.PointerTypeDescriptor, // Display*
+			types.SInt32TypeDescriptor,  // Bool detectable
+			types.PointerTypeDescriptor, // Bool* supported_rtrn
+		}); err != nil {
+		logger().Debug("XkbSetDetectableAutoRepeat: failed to prepare CIF", "err", err)
+		return
+	}
+
+	detectable := int32(1) // True — enable detectable auto-repeat
+	var supported int32
+	var result int32
+	display := p.xlib.display
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&display),
+		unsafe.Pointer(&detectable),
+		unsafe.Pointer(&supported),
+	}
+	_ = ffi.CallFunction(&cif, sym, unsafe.Pointer(&result), args[:])
+
+	if supported != 0 {
+		logger().Info("XkbSetDetectableAutoRepeat enabled")
+	} else {
+		logger().Debug("XkbSetDetectableAutoRepeat: server does not support detectable auto-repeat")
+	}
 }
 
 // dispatchPointerEvent pushes a pointer event to the event queue.

@@ -534,12 +534,12 @@ Platform Layer          InputState               Game Loop
 
 ### Platform Implementation
 
-| Platform | Pointer Events | Keyboard | Text Input | Scroll |
-|----------|---------------|----------|------------|--------|
-| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates, AltGr via isAltGrSequence) | WM_MOUSEWHEEL |
-| Linux (Wayland) | wl_pointer (libwayland goffi) | wl_keyboard (libwayland goffi) | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts) | wl_pointer.axis |
-| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts), fallback: KeysymToRune | Button 4-7 |
-| macOS    | NSEvent mouse | NSEvent key | NSEvent characters (UTF-8) | NSEvent scroll |
+| Platform | Pointer Events | Keyboard | Text Input | Scroll | Key Repeat |
+|----------|---------------|----------|------------|--------|------------|
+| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates, AltGr via isAltGrSequence) | WM_MOUSEWHEEL | OS native (WM_KEYDOWN repeat) |
+| Linux (Wayland) | wl_pointer (libwayland goffi) | wl_keyboard (libwayland goffi) | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts) | wl_pointer.axis | Client-side timer (ADR-033, `xkb_keymap_key_repeats`) |
+| Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts), fallback: KeysymToRune | Button 4-7 | X server auto-repeat + `XkbSetDetectableAutoRepeat` |
+| macOS    | NSEvent mouse | NSEvent key | NSEvent characters (UTF-8) | NSEvent scroll (ScrollPhase + IsMomentum, ADR-032) | OS native (isARepeat) |
 
 ## Renderer Pipeline
 

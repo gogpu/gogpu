@@ -54,6 +54,21 @@ func (a *Application) PollEventsWithHandler(handler EventHandler) bool {
 	return processed
 }
 
+// NSEventPhase is a bitmask that describes the phase of a scroll gesture.
+// macOS uses power-of-two values (not sequential).
+type NSEventPhase uint64
+
+// NSEventPhase constants from AppKit/NSEvent.h.
+const (
+	NSEventPhaseNone       NSEventPhase = 0
+	NSEventPhaseBegan      NSEventPhase = 1 << 0 // 1
+	NSEventPhaseStationary NSEventPhase = 1 << 1 // 2
+	NSEventPhaseChanged    NSEventPhase = 1 << 2 // 4
+	NSEventPhaseEnded      NSEventPhase = 1 << 3 // 8
+	NSEventPhaseCancelled  NSEventPhase = 1 << 4 // 16
+	NSEventPhaseMayBegin   NSEventPhase = 1 << 5 // 32
+)
+
 // EventInfo contains extracted information from an NSEvent for pointer handling.
 type EventInfo struct {
 	Type          NSEventType
@@ -65,6 +80,9 @@ type EventInfo struct {
 	ScrollDeltaY  float64
 	IsPrecise     bool
 	KeyCode       uint16 // Virtual key code for keyboard events
+	// Scroll gesture phases (macOS trackpad)
+	Phase         NSEventPhase // Active gesture phase
+	MomentumPhase NSEventPhase // Momentum/inertia phase
 	// Tablet/pen properties
 	Subtype            NSUInteger
 	Pressure           float64 // 0.0-1.0 (pen pressure)
@@ -120,7 +138,7 @@ func GetEventInfo(event ID) EventInfo {
 		}
 	}
 
-	// Scroll deltas
+	// Scroll deltas and gesture phases
 	if info.Type == NSEventTypeScrollWheel {
 		info.IsPrecise = event.GetBool(selectors.hasPreciseScrollingDeltas)
 		if info.IsPrecise {
@@ -131,6 +149,10 @@ func GetEventInfo(event ID) EventInfo {
 			info.ScrollDeltaX = event.GetDouble(selectors.deltaX)
 			info.ScrollDeltaY = event.GetDouble(selectors.deltaY)
 		}
+		// Gesture phase tracking for trackpad scroll gestures.
+		// phase = active touch gesture, momentumPhase = inertial coast after lift.
+		info.Phase = NSEventPhase(event.GetUint64(selectors.phase))
+		info.MomentumPhase = NSEventPhase(event.GetUint64(selectors.momentumPhase))
 	}
 
 	// Key code for keyboard events

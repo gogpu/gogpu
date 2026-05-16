@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.37.0** | 2026-05-17 | **ScrollPhase/IsMomentum** (#239, ADR-032) + **Wayland key repeat** (#240, ADR-033) + **X11 detectable auto-repeat** — gpucontext v0.19.0 |
 | **v0.36.2** | 2026-05-16 | **HiDPI logical sizing** (#237, ADR-030) + **Ring buffer event queue** (#238, ADR-031) — WithSize=logical, EventQueue[T] all platforms |
 | **v0.36.1** | 2026-05-16 | **X11 keyboard regression fix** — XkbStateNotify 6-field sync (winit pattern), UpdateKey→UpdateMask, cascading fallback |
 | **v0.36.0** | 2026-05-16 | **Unified XKB text input** (#233, ADR-029, @unxed) — AltGr/Level3 on all layouts, shared xkbcommon for X11+Wayland, 15 FFI bindings, ModsIndices, KeyWithoutModifiers |

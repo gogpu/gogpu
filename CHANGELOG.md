@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-05-17
+
+### Added
+
+- **ScrollPhase + IsMomentum on ScrollEvent** (#239, ADR-032) -- `ScrollPhase` enum (None/Began/Changed/Ended/Canceled) and `IsMomentum bool` on `gpucontext.ScrollEvent`. macOS: maps NSEvent.phase and NSEvent.momentumPhase via new ObjC selectors. Enables apps to distinguish active scroll from trackpad momentum. Zero-value backward compatible. Requires gpucontext v0.19.0.
+
+### Fixed
+
+- **Wayland key repeat** (#240, ADR-033, @celer) -- client-side key repeat timer using `time.AfterFunc` + `time.Ticker` (winit pattern). Compositors send rate/delay via `wl_keyboard.repeat_info`, client generates repeat events. `xkb_keymap_key_repeats` check prevents modifier keys from repeating.
+- **X11 spurious KeyRelease during auto-repeat** (ADR-033) -- `XkbSetDetectableAutoRepeat` called during init via Xlib FFI. Eliminates fake KeyRelease events before each repeat KeyPress (GLFW/winit pattern).
+
+### Changed
+
+- **deps:** gpucontext v0.18.0 -> v0.19.0 (ScrollPhase API)
+
 ## [0.36.2] - 2026-05-16
 
 ### Fixed

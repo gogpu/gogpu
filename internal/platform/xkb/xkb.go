@@ -70,6 +70,9 @@ type Handle struct {
 	fnStateModNameIsActive    unsafe.Pointer // xkb_state_mod_name_is_active(state, name, type) -> int
 	fnStateKeyGetLayout       unsafe.Pointer // xkb_state_key_get_layout(state, key) -> layout_index
 
+	// Function pointers -- ADR-033: key repeat
+	fnKeymapKeyRepeats unsafe.Pointer // xkb_keymap_key_repeats(keymap, key) -> int
+
 	// Call interfaces (prepared once) -- existing
 	cifContextNew          types.CallInterface
 	cifContextUnref        types.CallInterface
@@ -90,6 +93,9 @@ type Handle struct {
 	cifKeymapModGetIndex       types.CallInterface
 	cifStateModNameIsActive    types.CallInterface
 	cifStateKeyGetLayout       types.CallInterface
+
+	// Call interfaces -- ADR-033: key repeat
+	cifKeymapKeyRepeats types.CallInterface
 }
 
 // xkbcommon constants.
@@ -398,6 +404,26 @@ func (h *Handle) ModNameIsActive(name string) bool {
 	return h.stateModNameIsActive(name) == 1
 }
 
+// KeyRepeats returns true if the given key should generate repeat events.
+// Most printable and editing keys repeat; modifiers and function keys do not.
+// keycode is the evdev keycode (NOT offset -- offset is applied internally).
+// Returns false when no keymap is loaded or xkb_keymap_key_repeats is unavailable.
+func (h *Handle) KeyRepeats(keycode uint32) bool {
+	if h == nil || h.keymap == 0 || h.fnKeymapKeyRepeats == nil {
+		return false
+	}
+
+	xkbKey := keycode + XKBEvdevOffset
+
+	var result int32
+	args := [2]unsafe.Pointer{
+		unsafe.Pointer(&h.keymap),
+		unsafe.Pointer(&xkbKey),
+	}
+	_ = ffi.CallFunction(&h.cifKeymapKeyRepeats, h.fnKeymapKeyRepeats, unsafe.Pointer(&result), args[:])
+	return result == 1
+}
+
 // GetModsIndices returns the cached modifier indices resolved at keymap creation.
 func (h *Handle) GetModsIndices() ModsIndices {
 	if h == nil {
@@ -497,6 +523,7 @@ func (h *Handle) resolveSymbols() error {
 		{"xkb_keymap_mod_get_index", &h.fnKeymapModGetIndex},
 		{"xkb_state_mod_name_is_active", &h.fnStateModNameIsActive},
 		{"xkb_state_key_get_layout", &h.fnStateKeyGetLayout},
+		{"xkb_keymap_key_repeats", &h.fnKeymapKeyRepeats},
 	}
 
 	for _, s := range phase2 {
@@ -599,6 +626,14 @@ func (h *Handle) prepareCIFs() error {
 		// xkb_layout_index_t xkb_state_key_get_layout(state, key) -> uint32
 		if err := ffi.PrepareCallInterface(&h.cifStateKeyGetLayout, types.DefaultCall, u32, []*types.TypeDescriptor{ptr, u32}); err != nil {
 			return fmt.Errorf("xkbcommon: failed to prepare CIF state_key_get_layout: %w", err)
+		}
+	}
+
+	// ADR-033: key repeat
+	if h.fnKeymapKeyRepeats != nil {
+		// int xkb_keymap_key_repeats(keymap, key) -> int32
+		if err := ffi.PrepareCallInterface(&h.cifKeymapKeyRepeats, types.DefaultCall, i32, []*types.TypeDescriptor{ptr, u32}); err != nil {
+			return fmt.Errorf("xkbcommon: failed to prepare CIF keymap_key_repeats: %w", err)
 		}
 	}
 

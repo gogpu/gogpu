@@ -594,14 +594,26 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 			// logical coordinate system. No scaling needed.
 		}
 
+		// Map macOS NSEventPhase to ScrollPhase.
+		// momentumPhase != None means this is an inertial scroll event.
+		isMomentum := info.MomentumPhase != darwin.NSEventPhaseNone
+		var phase gpucontext.ScrollPhase
+		if isMomentum {
+			phase = mapNSEventPhase(info.MomentumPhase)
+		} else {
+			phase = mapNSEventPhase(info.Phase)
+		}
+
 		ev := gpucontext.ScrollEvent{
-			X:         info.LocationX,
-			Y:         y,
-			DeltaX:    deltaX,
-			DeltaY:    deltaY,
-			DeltaMode: deltaMode,
-			Modifiers: w.modifiers,
-			Timestamp: w.eventTimestamp(),
+			X:          info.LocationX,
+			Y:          y,
+			DeltaX:     deltaX,
+			DeltaY:     deltaY,
+			DeltaMode:  deltaMode,
+			Modifiers:  w.modifiers,
+			Timestamp:  w.eventTimestamp(),
+			Phase:      phase,
+			IsMomentum: isMomentum,
 		}
 		w.dispatchScrollEvent(ev)
 
@@ -799,6 +811,23 @@ func (w *darwinWindow) checkResize() {
 // eventTimestamp returns the event timestamp as duration since start.
 func (w *darwinWindow) eventTimestamp() time.Duration {
 	return time.Since(w.startTime)
+}
+
+// mapNSEventPhase converts macOS NSEventPhase bitmask to gpucontext.ScrollPhase.
+// NSEventPhase uses power-of-two values; we collapse them to sequential enum.
+func mapNSEventPhase(phase darwin.NSEventPhase) gpucontext.ScrollPhase {
+	switch {
+	case phase&darwin.NSEventPhaseBegan != 0 || phase&darwin.NSEventPhaseMayBegin != 0:
+		return gpucontext.ScrollPhaseBegan
+	case phase&darwin.NSEventPhaseChanged != 0 || phase&darwin.NSEventPhaseStationary != 0:
+		return gpucontext.ScrollPhaseChanged
+	case phase&darwin.NSEventPhaseEnded != 0:
+		return gpucontext.ScrollPhaseEnded
+	case phase&darwin.NSEventPhaseCancelled != 0:
+		return gpucontext.ScrollPhaseCanceled
+	default:
+		return gpucontext.ScrollPhaseNone
+	}
 }
 
 // extractModifiers converts NSEventModifierFlags to gpucontext.Modifiers.

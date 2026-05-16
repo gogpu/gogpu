@@ -23,6 +23,7 @@ import (
 type xkbKeyHandler interface {
 	Ready() bool
 	KeyGetUtf8(keycode uint32) string
+	KeyRepeats(keycode uint32) bool
 	UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32)
 	SetKeymapFromFD(fd int, size uint32) error
 	Close()
@@ -71,6 +72,16 @@ type waylandWindow struct {
 	// XKB keyboard layout support (libxkbcommon.so.0 via goffi).
 	// Non-nil when libxkbcommon is available; nil falls back to evdevKeycodeToRune.
 	xkb xkbKeyHandler
+
+	// Key repeat state (Wayland client-side timer, ADR-033).
+	// Wayland compositors send rate/delay via wl_keyboard.repeat_info
+	// but do NOT send synthetic key events. Client must implement timer.
+	repeatMu    sync.Mutex
+	repeatKey   uint32        // evdev keycode of currently repeating key (0 = none)
+	repeatRate  int32         // keys per second (from compositor)
+	repeatDelay int32         // milliseconds before first repeat (from compositor)
+	repeatTimer *time.Timer   // initial delay timer
+	repeatStop  chan struct{} // signal to stop repeat goroutine
 
 	callbackMu sync.RWMutex
 }
@@ -880,6 +891,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.pointerMu.Lock()
 			w.keyboardFocused = false
 			w.pointerMu.Unlock()
+			// Cancel any active key repeat on focus lost (ADR-033)
+			w.cancelAllKeyRepeat()
 			w.queueEvent(Event{Type: EventFocus, Focused: false})
 		},
 		OnKeyboardKey: func(serial, timeMs, key, state uint32) {
@@ -905,6 +918,13 @@ func (p *waylandPlatform) setupInputCallbacks() {
 					w.queueEvent(Event{Type: EventChar, Char: r})
 				}
 			}
+
+			// Key repeat management (Wayland client-side, ADR-033)
+			if pressed {
+				w.startKeyRepeat(key, gpuKey, mods)
+			} else {
+				w.stopKeyRepeat(key)
+			}
 		},
 		OnKeyboardModifiers: func(serial, modsDepressed, modsLatched, modsLocked, group uint32) {
 			w.pointerMu.Lock()
@@ -918,7 +938,10 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			}
 		},
 		OnKeyboardRepeat: func(rate, delay int32) {
-			// Stored for future key repeat implementation
+			w.repeatMu.Lock()
+			w.repeatRate = rate
+			w.repeatDelay = delay
+			w.repeatMu.Unlock()
 		},
 
 		// Touch events
@@ -1214,6 +1237,87 @@ func (w *waylandWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Mod
 // queueEvent pushes a platform event to the window's ring buffer queue.
 func (w *waylandWindow) queueEvent(event Event) {
 	w.events.Push(event)
+}
+
+// startKeyRepeat begins client-side key repeat for the given key (ADR-033).
+// Wayland compositors send repeat_info (rate/delay) but do NOT generate
+// synthetic key events -- the client must implement its own timer.
+func (w *waylandWindow) startKeyRepeat(evdevKey uint32, gpuKey gpucontext.Key, mods gpucontext.Modifiers) {
+	w.repeatMu.Lock()
+	defer w.repeatMu.Unlock()
+
+	// Check if key should repeat (skip modifiers, function keys, etc.)
+	if w.xkb != nil && w.xkb.Ready() {
+		if !w.xkb.KeyRepeats(evdevKey) {
+			return
+		}
+	}
+
+	// Cancel any existing repeat
+	w.cancelRepeatLocked()
+
+	rate := w.repeatRate
+	delay := w.repeatDelay
+	if rate <= 0 || delay <= 0 {
+		return // Repeat disabled by compositor
+	}
+
+	w.repeatKey = evdevKey
+	w.repeatStop = make(chan struct{})
+	stop := w.repeatStop
+
+	interval := time.Second / time.Duration(rate)
+
+	// Start initial delay timer, then repeat at rate
+	w.repeatTimer = time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				// Generate repeat key event
+				w.dispatchKeyEvent(gpuKey, mods, true)
+				// Generate repeat char event (printable keys only)
+				if r := w.keycodeToRune(evdevKey); r >= 32 {
+					w.queueEvent(Event{Type: EventChar, Char: r})
+				}
+			}
+		}
+	})
+}
+
+// stopKeyRepeat stops key repeat if the released key matches the repeating key.
+func (w *waylandWindow) stopKeyRepeat(evdevKey uint32) {
+	w.repeatMu.Lock()
+	defer w.repeatMu.Unlock()
+	if w.repeatKey == evdevKey {
+		w.cancelRepeatLocked()
+	}
+}
+
+// cancelAllKeyRepeat unconditionally cancels any active key repeat.
+// Used on focus lost and window destroy.
+func (w *waylandWindow) cancelAllKeyRepeat() {
+	w.repeatMu.Lock()
+	defer w.repeatMu.Unlock()
+	w.cancelRepeatLocked()
+}
+
+// cancelRepeatLocked stops the repeat timer and goroutine.
+// Caller must hold w.repeatMu.
+func (w *waylandWindow) cancelRepeatLocked() {
+	if w.repeatStop != nil {
+		close(w.repeatStop)
+		w.repeatStop = nil
+	}
+	if w.repeatTimer != nil {
+		w.repeatTimer.Stop()
+		w.repeatTimer = nil
+	}
+	w.repeatKey = 0
 }
 
 // evdevModsToModifiers converts evdev modifier bitmasks to gpucontext.Modifiers.

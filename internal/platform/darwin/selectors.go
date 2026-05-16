@@ -122,6 +122,10 @@ var selectors struct {
 	deltaX                      SEL
 	deltaY                      SEL
 
+	// NSEvent - scroll gesture phases (macOS trackpad)
+	phase         SEL // NSEventPhase bitmask for active gesture
+	momentumPhase SEL // NSEventPhase bitmask for momentum/inertia
+
 	// NSEvent - tablet/pen properties
 	pressure           SEL
 	tilt               SEL // Returns NSPoint {x, y} each -1.0 to 1.0
@@ -314,6 +318,10 @@ func initSelectors() {
 		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
 		selectors.deltaX = RegisterSelector("deltaX")
 		selectors.deltaY = RegisterSelector("deltaY")
+
+		// NSEvent - scroll gesture phases (macOS trackpad)
+		selectors.phase = RegisterSelector("phase")
+		selectors.momentumPhase = RegisterSelector("momentumPhase")
 
 		// NSEvent - tablet/pen properties
 		selectors.pressure = RegisterSelector("pressure")

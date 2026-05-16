@@ -303,6 +303,10 @@ func (m *mockXKBHandle) SetKeymapFromFD(fd int, size uint32) error {
 	return nil
 }
 
+func (m *mockXKBHandle) KeyRepeats(_ uint32) bool {
+	return true // All keys repeat in tests
+}
+
 func (m *mockXKBHandle) Close() {}
 
 // Verify mockXKBHandle satisfies xkbKeyHandler at compile time.

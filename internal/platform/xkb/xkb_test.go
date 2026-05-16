@@ -295,3 +295,30 @@ func TestResolveModsIndicesNoKeymap(t *testing.T) {
 		t.Errorf("resolveModsIndices (no keymap).Alt = %d, want %d", indices.Alt, xkbModInvalid)
 	}
 }
+
+// TestKeyRepeatsNilHandle verifies KeyRepeats returns false on nil handle.
+func TestKeyRepeatsNilHandle(t *testing.T) {
+	var h *Handle
+	if h.KeyRepeats(30) {
+		t.Error("nil Handle.KeyRepeats(30) = true, want false")
+	}
+}
+
+// TestKeyRepeatsNoKeymap verifies KeyRepeats returns false when no keymap is loaded.
+func TestKeyRepeatsNoKeymap(t *testing.T) {
+	h := &Handle{} // keymap is 0
+	if h.KeyRepeats(30) {
+		t.Error("empty Handle.KeyRepeats(30) = true, want false")
+	}
+}
+
+// TestKeyRepeatsNoSymbol verifies KeyRepeats returns false when symbol is not resolved.
+func TestKeyRepeatsNoSymbol(t *testing.T) {
+	h := &Handle{
+		keymap: 0x12345678, // Fake non-zero keymap
+		// fnKeymapKeyRepeats is nil (symbol not resolved)
+	}
+	if h.KeyRepeats(30) {
+		t.Error("Handle.KeyRepeats(30) with nil symbol = true, want false")
+	}
+}
