@@ -300,13 +300,15 @@ func (h *Handle) KeyGetOneSym(keycode uint32) uint32 {
 	return result
 }
 
-// UpdateMask updates the xkb state with modifier/group changes from the compositor.
-// Called from wl_keyboard.modifiers callback on Wayland.
-func (h *Handle) UpdateMask(modsDepressed, modsLatched, modsLocked, group uint32) {
+// UpdateMask updates the xkb state with modifier and layout group changes.
+// All 6 parameters match xkb_state_update_mask exactly.
+// On Wayland: called from wl_keyboard.modifiers (layoutDepressed/layoutLatched = 0).
+// On X11: called from XkbStateNotify with full baseMods/latchedMods/lockedMods + group fields.
+func (h *Handle) UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) {
 	if h == nil || h.state == 0 {
 		return
 	}
-	h.stateUpdateMask(modsDepressed, modsLatched, modsLocked, 0, 0, group)
+	h.stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked)
 }
 
 // UpdateKey updates the xkb state for a key press or release.

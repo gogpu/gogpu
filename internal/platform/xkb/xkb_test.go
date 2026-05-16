@@ -50,7 +50,7 @@ func TestHandleNilSafety(t *testing.T) {
 	}
 
 	// UpdateMask should not panic on nil handle
-	h.UpdateMask(0, 0, 0, 0)
+	h.UpdateMask(0, 0, 0, 0, 0, 0)
 
 	// UpdateKey should not panic on nil handle
 	h.UpdateKey(30, true)
@@ -80,7 +80,7 @@ func TestHandleNoKeymap(t *testing.T) {
 	}
 
 	// UpdateMask should not panic (state is 0)
-	h.UpdateMask(1, 0, 0, 1)
+	h.UpdateMask(1, 0, 0, 0, 0, 1)
 
 	// UpdateKey should not panic (state is 0)
 	h.UpdateKey(30, true)

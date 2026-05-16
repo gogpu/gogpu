@@ -46,7 +46,7 @@ func TestXKBHandleNilSafety(t *testing.T) {
 	}
 
 	// UpdateMask should not panic on nil handle
-	h.UpdateMask(0, 0, 0, 0)
+	h.UpdateMask(0, 0, 0, 0, 0, 0)
 
 	// Close should not panic on nil handle
 	h.Close()
@@ -67,7 +67,7 @@ func TestXKBHandleNoKeymap(t *testing.T) {
 	}
 
 	// UpdateMask should not panic (state is 0)
-	h.UpdateMask(1, 0, 0, 1)
+	h.UpdateMask(1, 0, 0, 0, 0, 1)
 
 	// Close should not panic (nothing to destroy)
 	h.Close()

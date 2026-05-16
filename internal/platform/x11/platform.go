@@ -991,27 +991,47 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 		return
 	}
 
-	// XkbStateNotify event layout (32 bytes total):
-	//   byte 0: event type (= EventBase)
-	//   byte 1: xkb type (= XkbStateNotify = 2)
+	// XCB wire format for xcb_xkb_state_notify_event_t (32 bytes):
+	//   byte 0:    response_type (= EventBase)
+	//   byte 1:    xkb_type (= XkbStateNotify = 2)
 	//   bytes 2-3: sequence
 	//   bytes 4-7: time
-	//   byte 8: device ID
-	//   byte 9: mods
-	//   byte 10: base mods
-	//   byte 11: latched mods
-	//   byte 12: locked mods
-	//   byte 13: group    <-- THIS is what we need
-	//   byte 14: base group
-	//   ...
-	// In UnknownEvent.Data, indices are shifted by 1 (byte 1 of raw = Data[0]).
-	// So group = Data[12] (raw byte 13).
-	if len(e.Data) > 12 {
+	//   byte 8:    deviceID
+	//   byte 9:    mods (effective)
+	//   byte 10:   baseMods
+	//   byte 11:   latchedMods
+	//   byte 12:   lockedMods
+	//   byte 13:   group (effective)
+	//   bytes 14-15: baseGroup (int16 LE)
+	//   bytes 16-17: latchedGroup (int16 LE)
+	//   bytes 18-19: lockedGroup (int16 LE)
+	//
+	// UnknownEvent.Data starts at byte 1 (Data[0] = byte 1 of raw event).
+	// So: baseMods=Data[9], latchedMods=Data[10], lockedMods=Data[11],
+	//     group=Data[12], baseGroup=Data[13:15], etc.
+	if len(e.Data) > 18 {
 		newGroup := int(e.Data[12])
+		baseMods := uint32(e.Data[9])
+		latchedMods := uint32(e.Data[10])
+		lockedMods := uint32(e.Data[11])
+		baseGroup := uint32(uint16(e.Data[13]) | uint16(e.Data[14])<<8)
+		latchedGroup := uint32(uint16(e.Data[15]) | uint16(e.Data[16])<<8)
+		lockedGroup := uint32(uint16(e.Data[17]) | uint16(e.Data[18])<<8)
+
 		p.mu.Lock()
 		p.xkbGroup = newGroup
+		xkbState := p.xkbState
 		p.mu.Unlock()
-		logger().Debug("XKB group changed", "group", newGroup)
+
+		// Sync xkbcommon state with X server state (winit/Qt6 pattern).
+		// This is the ONLY way to update group/modifiers in xkbcommon on X11.
+		// xkb_state_update_key does NOT handle group changes.
+		if xkbState != nil && xkbState.Ready() {
+			xkbState.UpdateMask(baseMods, latchedMods, lockedMods,
+				baseGroup, latchedGroup, lockedGroup)
+		}
+
+		logger().Debug("XKB state changed", "group", newGroup)
 	}
 }
 
@@ -1262,30 +1282,37 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 	keymap := p.keymap
 	p.mu.Unlock()
 
-	if xkbState != nil && xkbState.Ready() {
-		// xkb_state_update_key tracks modifier state (AltGr, Shift, etc.)
-		// Must be called for BOTH press and release to keep state consistent.
-		xkbState.UpdateKey(evdevKey, pressed)
+	if pressed {
+		dispatched := false
 
-		if pressed {
+		// Primary: xkbcommon (handles AltGr/Level3 and all layouts correctly).
+		// State is synced via UpdateMask from XkbStateNotify events (winit pattern).
+		// Do NOT call UpdateKey here — winit never does on X11.
+		if xkbState != nil && xkbState.Ready() {
 			s := xkbState.KeyGetUtf8(evdevKey)
 			if s != "" {
 				for _, r := range s {
 					if r >= 32 {
 						w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
+						dispatched = true
 					}
 				}
 			}
 		}
-	} else if pressed && keymap != nil {
-		// Fallback: manual lookup (no AltGr support)
-		// Extract keyboard group from bits 13-14 of the X11 event state field.
-		group := int((state >> 13) & 3)
-		shift := mods&gpucontext.ModShift != 0
-		capsLock := mods&gpucontext.ModCapsLock != 0
-		keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, group)
-		if r, ok := KeysymToRune(keysym); ok && r >= 32 {
-			w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
+
+		// Fallback: manual lookup with group-aware keysym resolution.
+		// Covers cases where xkb_keymap_new_from_names(NULL) doesn't include
+		// the user's configured layouts (e.g., Russian via desktop settings).
+		if !dispatched && keymap != nil {
+			p.mu.Lock()
+			group := p.xkbGroup
+			p.mu.Unlock()
+			shift := mods&gpucontext.ModShift != 0
+			capsLock := mods&gpucontext.ModCapsLock != 0
+			keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, group)
+			if r, ok := KeysymToRune(keysym); ok && r >= 32 {
+				w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
+			}
 		}
 	}
 }

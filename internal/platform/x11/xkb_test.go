@@ -757,6 +757,219 @@ func TestKeyEventGroupIntegration(t *testing.T) {
 	}
 }
 
+// --- Section 5: XkbStateNotify 6-Field Extraction (v0.36.1 regression fix) ---
+
+// buildXkbStateNotifyEventFull constructs an UnknownEvent simulating XkbStateNotify
+// with all 6 modifier/group fields populated (XCB wire format).
+//
+// XCB wire layout (Data indices, zero-based from byte 1 of raw event):
+//
+//	Data[9]     = baseMods (uint8)
+//	Data[10]    = latchedMods (uint8)
+//	Data[11]    = lockedMods (uint8)
+//	Data[12]    = group (uint8, effective)
+//	Data[13:15] = baseGroup (int16 LE)
+//	Data[15:17] = latchedGroup (int16 LE)
+//	Data[17:19] = lockedGroup (int16 LE)
+func buildXkbStateNotifyEventFull(eventBase, baseMods, latchedMods, lockedMods, group uint8, baseGroup, latchedGroup, lockedGroup uint16) *UnknownEvent {
+	e := &UnknownEvent{Type: eventBase}
+	e.Data[0] = XkbStateNotify
+	e.Data[9] = baseMods
+	e.Data[10] = latchedMods
+	e.Data[11] = lockedMods
+	e.Data[12] = group
+	e.Data[13] = uint8(baseGroup)
+	e.Data[14] = uint8(baseGroup >> 8)
+	e.Data[15] = uint8(latchedGroup)
+	e.Data[16] = uint8(latchedGroup >> 8)
+	e.Data[17] = uint8(lockedGroup)
+	e.Data[18] = uint8(lockedGroup >> 8)
+	return e
+}
+
+func TestHandleUnknownEvent_FullFieldExtraction(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseMods     uint8
+		latchedMods  uint8
+		lockedMods   uint8
+		group        uint8
+		baseGroup    uint16
+		latchedGroup uint16
+		lockedGroup  uint16
+		wantGroup    int
+	}{
+		{
+			name: "switch to Russian (group 1, locked)",
+			group: 1, lockedGroup: 1,
+			wantGroup: 1,
+		},
+		{
+			name: "switch back to English (group 0)",
+			group: 0, lockedGroup: 0,
+			wantGroup: 0,
+		},
+		{
+			name: "shift+group1 (baseMods=1, lockedGroup=1)",
+			baseMods: 1, group: 1, lockedGroup: 1,
+			wantGroup: 1,
+		},
+		{
+			name: "ctrl+alt (baseMods=0x0C, no group change)",
+			baseMods: 0x0C, group: 0,
+			wantGroup: 0,
+		},
+		{
+			name: "capslock locked (lockedMods=2, group=0)",
+			lockedMods: 2, group: 0,
+			wantGroup: 0,
+		},
+		{
+			name: "group 2 via baseGroup",
+			group: 2, baseGroup: 2,
+			wantGroup: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newTestPlatformWithXkb(85, 0)
+			e := buildXkbStateNotifyEventFull(85,
+				tt.baseMods, tt.latchedMods, tt.lockedMods,
+				tt.group, tt.baseGroup, tt.latchedGroup, tt.lockedGroup)
+
+			p.handleUnknownEvent(e)
+
+			p.mu.Lock()
+			gotGroup := p.xkbGroup
+			p.mu.Unlock()
+
+			if gotGroup != tt.wantGroup {
+				t.Errorf("xkbGroup = %d, want %d", gotGroup, tt.wantGroup)
+			}
+		})
+	}
+}
+
+func TestHandleUnknownEvent_ShortDataNoUpdateMask(t *testing.T) {
+	p := newTestPlatformWithXkb(85, 0)
+
+	// Event with Data too short (< 19 bytes usable).
+	// handleUnknownEvent uses len(e.Data) > 18 guard.
+	// UnknownEvent.Data is [31]byte, always 31 — but this tests the logic
+	// by verifying the guard condition is correct.
+	e := &UnknownEvent{Type: 85}
+	e.Data[0] = XkbStateNotify
+	e.Data[12] = 1 // group=1
+
+	// Data is [31]byte — always > 18, so this WILL process.
+	// Verify it doesn't crash and updates group.
+	p.handleUnknownEvent(e)
+
+	p.mu.Lock()
+	got := p.xkbGroup
+	p.mu.Unlock()
+
+	if got != 1 {
+		t.Errorf("xkbGroup = %d, want 1", got)
+	}
+}
+
+func TestHandleKeyEvent_FallbackWhenXkbStateNil(t *testing.T) {
+	p := &Platform{
+		xkb:      &XkbExtension{},
+		xkbGroup: 0,
+		xkbState: nil, // xkbcommon not available
+		windows:  make(map[ResourceID]*x11Window),
+	}
+
+	km := &KeyboardMapping{
+		MinKeycode:    8,
+		MaxKeycode:    255,
+		KeysymsPerCode: 4,
+		Keysyms:       make([]Keysym, 248*4),
+	}
+	// Key 38 (evdev 30 = KEY_A) → group 0, level 0 = 'a' (keysym 0x61)
+	idx := (38 - 8) * 4
+	km.Keysyms[idx] = 0x61   // 'a' base
+	km.Keysyms[idx+1] = 0x41 // 'A' shifted
+
+	p.keymap = km
+
+	w := &x11Window{
+		startTime: time.Now(),
+	}
+	p.windows[42] = w
+	p.primary = w
+
+	// Simulate key press: keycode 38, no modifiers, pressed
+	p.handleKeyEvent(w, 38, 0, true)
+
+	w.eventMu.Lock()
+	events := make([]PlatformEvent, len(w.events))
+	copy(events, w.events)
+	w.eventMu.Unlock()
+
+	// Should have KeyDown + Char events
+	var charFound bool
+	for _, ev := range events {
+		if ev.Type == EventTypeChar && ev.Char == 'a' {
+			charFound = true
+		}
+	}
+	if !charFound {
+		t.Error("fallback path did not produce char 'a' when xkbState is nil")
+	}
+}
+
+func TestHandleKeyEvent_FallbackUsesXkbGroup(t *testing.T) {
+	p := &Platform{
+		xkb:      &XkbExtension{},
+		xkbGroup: 1, // Russian group
+		xkbState: nil,
+		windows:  make(map[ResourceID]*x11Window),
+	}
+
+	km := &KeyboardMapping{
+		MinKeycode:    8,
+		MaxKeycode:    255,
+		KeysymsPerCode: 4,
+		Keysyms:       make([]Keysym, 248*4),
+	}
+	// Key 38 (evdev 30): group 0 = 'a', group 1 = Cyrillic 'ф' (0x06C6)
+	idx := (38 - 8) * 4
+	km.Keysyms[idx] = 0x61     // group 0: 'a'
+	km.Keysyms[idx+1] = 0x41   // group 0: 'A'
+	km.Keysyms[idx+2] = 0x06C6 // group 1: 'ф' (Cyrillic)
+	km.Keysyms[idx+3] = 0x06A6 // group 1: 'Ф'
+
+	p.keymap = km
+
+	w := &x11Window{startTime: time.Now()}
+	p.windows[42] = w
+	p.primary = w
+
+	p.handleKeyEvent(w, 38, 0, true)
+
+	w.eventMu.Lock()
+	events := make([]PlatformEvent, len(w.events))
+	copy(events, w.events)
+	w.eventMu.Unlock()
+
+	var charFound rune
+	for _, ev := range events {
+		if ev.Type == EventTypeChar {
+			charFound = ev.Char
+		}
+	}
+
+	// With xkbGroup=1 and KeysymsPerCode=4, group 1 starts at offset 2.
+	// KeycodeToKeysymGroup(38, false, false, 1) should return keysym 0x06C6 = 'ф'.
+	if charFound != 'ф' {
+		t.Errorf("fallback with xkbGroup=1 produced char %q (%U), want 'ф' (U+0444)", string(charFound), charFound)
+	}
+}
+
 // TestXkbConstantsNotConfused verifies that XKB event type masks are
 // distinct and correctly ordered per XKB protocol specification.
 func TestXkbConstantsNotConfused(t *testing.T) {

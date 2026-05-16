@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.36.1** | 2026-05-16 | **X11 keyboard regression fix** — XkbStateNotify 6-field sync (winit pattern), UpdateKey→UpdateMask, cascading fallback |
 | **v0.36.0** | 2026-05-16 | **Unified XKB text input** (#233, ADR-029, @unxed) — AltGr/Level3 on all layouts, shared xkbcommon for X11+Wayland, 15 FFI bindings, ModsIndices, KeyWithoutModifiers |
 | **v0.35.0** | 2026-05-15 | **Browser/WASM platform** + XKB constant fix (#70, #227) — `GOOS=js GOARCH=wasm`, wgpu v0.28.1, bits 13-14 group extraction |
 | **v0.34.8** | 2026-05-15 | **Wayland keyboard layout** + X11 runtime switch fix (#227, @paulie-g) — xkbcommon, MappingNotify fallback, 44 tests |

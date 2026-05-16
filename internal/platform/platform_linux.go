@@ -17,11 +17,11 @@ import (
 )
 
 // xkbKeyHandler abstracts the keyboard layout handling provided by libxkbcommon.
-// The production implementation is *wayland.XKBHandle; tests use a mock.
+// The production implementation is *xkb.Handle (via wayland.XKBHandle alias); tests use a mock.
 type xkbKeyHandler interface {
 	Ready() bool
 	KeyGetUtf8(keycode uint32) string
-	UpdateMask(modsDepressed, modsLatched, modsLocked, group uint32)
+	UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32)
 	SetKeymapFromFD(fd int, size uint32) error
 	Close()
 }
@@ -879,7 +879,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			// Update xkbcommon state (modifier + layout group tracking).
 			// This enables proper multi-layout keyboard support.
 			if w.xkb != nil {
-				w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, group)
+				w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, 0, 0, group)
 			}
 		},
 		OnKeyboardRepeat: func(rate, delay int32) {

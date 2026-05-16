@@ -287,10 +287,10 @@ func (m *mockXKBHandle) KeyGetUtf8(keycode uint32) string {
 	return m.result
 }
 
-func (m *mockXKBHandle) UpdateMask(modsDepressed, modsLatched, modsLocked, group uint32) {
+func (m *mockXKBHandle) UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.lastGroup = group
+	m.lastGroup = layoutLocked
 	m.updateMaskCalled++
 }
 
@@ -349,7 +349,7 @@ func waylandModifiersCallback(w *waylandWindow, modsDepressed, modsLatched, mods
 	w.pointerMu.Unlock()
 
 	if w.xkb != nil {
-		w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, group)
+		w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, 0, 0, group)
 	}
 }
 
