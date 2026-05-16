@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -166,13 +167,22 @@ func (p *x11Platform) PollEvents() Event {
 	case x11.EventTypeClose:
 		return Event{Type: EventClose, WindowID: p.primaryWindowID}
 	case x11.EventTypeResize:
-		// X11: scale=1.0 baseline, logical == physical
+		// X11 reports physical pixel dimensions. Compute logical size from scale factor.
+		physW := event.Width
+		physH := event.Height
+		scale := p.inner.ScaleFactor()
+		logW := physW
+		logH := physH
+		if scale > 1.0 {
+			logW = int(math.Round(float64(physW) / scale))
+			logH = int(math.Round(float64(physH) / scale))
+		}
 		return Event{
 			Type:           EventResize,
-			Width:          event.Width,
-			Height:         event.Height,
-			PhysicalWidth:  event.Width,
-			PhysicalHeight: event.Height,
+			Width:          logW,
+			Height:         logH,
+			PhysicalWidth:  physW,
+			PhysicalHeight: physH,
 		}
 	case x11.EventTypeFocus:
 		return Event{Type: EventFocus, Focused: event.Focused}
@@ -275,9 +285,16 @@ type x11PlatformWindow struct {
 	id       WindowID
 }
 
-func (w *x11PlatformWindow) ID() WindowID                   { return w.id }
-func (w *x11PlatformWindow) GetHandle() (uintptr, uintptr)  { return w.platform.inner.GetHandle() }
-func (w *x11PlatformWindow) LogicalSize() (int, int)        { return w.platform.inner.GetSize() }
+func (w *x11PlatformWindow) ID() WindowID                  { return w.id }
+func (w *x11PlatformWindow) GetHandle() (uintptr, uintptr) { return w.platform.inner.GetHandle() }
+
+// LogicalSize returns the window size in logical units (DIP/platform points).
+// On HiDPI, divides physical pixels by the scale factor.
+func (w *x11PlatformWindow) LogicalSize() (int, int) {
+	return w.platform.inner.LogicalSize()
+}
+
+// PhysicalSize returns the window size in physical device pixels (what the GPU sees).
 func (w *x11PlatformWindow) PhysicalSize() (int, int)       { return w.platform.inner.GetSize() }
 func (w *x11PlatformWindow) ScaleFactor() float64           { return w.platform.inner.ScaleFactor() }
 func (w *x11PlatformWindow) ShouldClose() bool              { return w.platform.inner.ShouldClose() }
@@ -357,8 +374,15 @@ func (w *waylandPlatformWindow) LogicalSize() (int, int) {
 	return wp.width, wp.height
 }
 
+// PhysicalSize returns the physical pixel dimensions for the GPU framebuffer.
+// On Wayland, configure events report logical size. Physical = logical * scale.
 func (w *waylandPlatformWindow) PhysicalSize() (int, int) {
-	return w.LogicalSize() // Wayland: scale tracking TODO
+	lw, lh := w.LogicalSize()
+	scale := w.ScaleFactor()
+	if scale <= 1.0 {
+		return lw, lh
+	}
+	return int(math.Round(float64(lw) * scale)), int(math.Round(float64(lh) * scale))
 }
 
 func (w *waylandPlatformWindow) ScaleFactor() float64 {
