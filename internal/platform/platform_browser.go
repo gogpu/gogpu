@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"syscall/js"
 
+	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -13,12 +14,14 @@ import (
 // The browser manages its own event loop — we integrate via addEventListener
 // callbacks and requestAnimationFrame for rendering.
 type browserPlatform struct {
-	events []Event
+	events *eventqueue.Queue[Event]
 	window *browserWindow
 }
 
 func newPlatformManager() PlatformManager {
-	return &browserPlatform{}
+	return &browserPlatform{
+		events: eventqueue.New[Event](eventqueue.DefaultCapacity),
+	}
 }
 
 // Init is a no-op on browser — the DOM is always available.
@@ -63,12 +66,10 @@ func (p *browserPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 
 // PollEvents returns the next pending event, or EventNone if the queue is empty.
 func (p *browserPlatform) PollEvents() Event {
-	if len(p.events) == 0 {
-		return Event{Type: EventNone}
+	if e, ok := p.events.Pop(); ok {
+		return e
 	}
-	ev := p.events[0]
-	p.events = p.events[1:]
-	return ev
+	return Event{Type: EventNone}
 }
 
 // WaitEvents blocks until at least one event is available.
@@ -146,7 +147,7 @@ func (p *browserPlatform) Destroy() {}
 
 // enqueueEvent adds an event to the platform event queue.
 func (p *browserPlatform) enqueueEvent(ev Event) {
-	p.events = append(p.events, ev)
+	p.events.Push(ev)
 }
 
 // --------------------------------------------------------------------------

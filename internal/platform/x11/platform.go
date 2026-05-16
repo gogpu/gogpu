@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	xkbcommon "github.com/gogpu/gogpu/internal/platform/xkb"
 	"github.com/gogpu/gpucontext"
 )
@@ -89,15 +90,16 @@ type x11Window struct {
 	// X11 window ID
 	window ResourceID
 
-	// Window state
+	// Window state (guarded by eventMu for thread-safe access from multiple goroutines).
 	width       int
 	height      int
 	shouldClose bool
 	configured  bool
+	eventMu     sync.Mutex // guards window state fields (width, height, shouldClose, configured)
 
-	// Event queue (matches Windows pattern — finite queue, no infinite loops)
-	events  []PlatformEvent
-	eventMu sync.Mutex
+	// Event queue — ring buffer (ADR-031: fixed capacity, zero allocs, drops oldest).
+	// The ring buffer has its own internal mutex — no external lock needed for Push/Pop.
+	events *eventqueue.Queue[PlatformEvent]
 
 	// Mouse state tracking
 	mouseX        float64
@@ -321,6 +323,7 @@ func (p *Platform) Init(config Config) error {
 		startTime:     time.Now(),
 		activeTouches: make(map[uint32]bool),
 		frameless:     config.Frameless,
+		events:        eventqueue.New[PlatformEvent](eventqueue.DefaultCapacity),
 	}
 
 	// Set window properties
@@ -674,21 +677,12 @@ func (p *Platform) PollEvents() PlatformEvent {
 // dequeueEvent removes and returns the first event from the queue.
 // Returns false if the queue is empty.
 func (w *x11Window) dequeueEvent() (PlatformEvent, bool) {
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	if len(w.events) > 0 {
-		event := w.events[0]
-		w.events = w.events[1:]
-		return event, true
-	}
-	return PlatformEvent{}, false
+	return w.events.Pop()
 }
 
-// queueEvent appends a platform event to the window's event queue.
+// queueEvent pushes a platform event to the window's ring buffer queue.
 func (w *x11Window) queueEvent(event PlatformEvent) {
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	w.events = append(w.events, event)
+	w.events.Push(event)
 }
 
 // QueueEvent is an exported wrapper for queueEvent, used by the platform

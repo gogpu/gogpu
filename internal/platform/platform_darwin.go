@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gogpu/internal/platform/darwin"
+	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -21,8 +22,8 @@ type darwinWindow struct {
 	config      Config
 	id          WindowID
 	shouldClose bool
-	events      []Event
-	eventMu     sync.Mutex
+	events      *eventqueue.Queue[Event]
+	eventMu     sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
 
 	// Mouse state tracking
 	pointerX      float64
@@ -84,6 +85,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		frameless: config.Frameless,
 		startTime: time.Now(),
 		id:        id,
+		events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
 	}
 
 	windowConfig := darwin.WindowConfig{
@@ -407,10 +409,8 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 	defer w.eventMu.Unlock()
 
 	// Return queued event first (from previous processing).
-	if len(w.events) > 0 {
-		event := w.events[0]
-		w.events = w.events[1:]
-		return event
+	if e, ok := w.events.Pop(); ok {
+		return e
 	}
 
 	// Process OS events with our handler — queues pointer/key/scroll events.
@@ -421,7 +421,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 	// Check if window should close — queue once, not every call.
 	if !w.shouldClose && w.window != nil && w.window.ShouldClose() {
 		w.shouldClose = true
-		w.events = append(w.events, Event{WindowID: w.id, Type: EventClose})
+		w.events.Push(Event{WindowID: w.id, Type: EventClose})
 	}
 
 	// Check for resize — queue if size changed.
@@ -437,7 +437,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.config.Width = newWidth
 			w.config.Height = newHeight
 			physW, physH := w.window.FramebufferSize()
-			w.events = append(w.events, Event{
+			w.events.Push(Event{
 				Type:           EventResize,
 				Width:          newWidth,
 				Height:         newHeight,
@@ -456,15 +456,13 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.focusInited = true
 		} else if isKey != w.lastKeyWindow {
 			w.lastKeyWindow = isKey
-			w.events = append(w.events, Event{Type: EventFocus, Focused: isKey})
+			w.events.Push(Event{Type: EventFocus, Focused: isKey})
 		}
 	}
 
 	// Return first queued event, or EventNone.
-	if len(w.events) > 0 {
-		event := w.events[0]
-		w.events = w.events[1:]
-		return event
+	if e, ok := w.events.Pop(); ok {
+		return e
 	}
 
 	return Event{Type: EventNone}
@@ -654,13 +652,13 @@ func (w *darwinWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	default:
 		evType = EventPointerMove
 	}
-	w.events = append(w.events, Event{Type: evType, Pointer: ev})
+	w.events.Push(Event{Type: evType, Pointer: ev})
 }
 
 // dispatchScrollEvent pushes a scroll event to the event queue.
 // Called from handleEvent with w.eventMu held.
 func (w *darwinWindow) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	w.events = append(w.events, Event{Type: EventScroll, Scroll: ev})
+	w.events.Push(Event{Type: EventScroll, Scroll: ev})
 }
 
 // dispatchKeyEvent pushes a keyboard event to the event queue.
@@ -670,7 +668,7 @@ func (w *darwinWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modi
 	if !pressed {
 		evType = EventKeyUp
 	}
-	w.events = append(w.events, Event{Type: evType, Key: key, Mods: mods})
+	w.events.Push(Event{Type: evType, Key: key, Mods: mods})
 }
 
 // dispatchCharFromEvent extracts characters from an NSEvent and dispatches them.
@@ -714,7 +712,7 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 			continue
 		}
 		if r >= 32 && r != 127 {
-			w.events = append(w.events, Event{Type: EventChar, Char: r})
+			w.events.Push(Event{Type: EventChar, Char: r})
 		}
 		i += size
 	}
@@ -766,7 +764,7 @@ func (p *darwinPlatform) setCursorImpl(cursorID int) {
 
 // queueEvent adds an event to the event queue.
 func (w *darwinWindow) queueEvent(event Event) {
-	w.events = append(w.events, event)
+	w.events.Push(event)
 }
 
 // checkResize checks for window size changes and queues a resize event.

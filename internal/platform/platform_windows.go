@@ -9,6 +9,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gpucontext"
 	"golang.org/x/sys/windows"
 )
@@ -496,8 +497,8 @@ type windowsPlatform struct {
 	// Unified event queue for ALL windows (ADR-017).
 	// wndProc pushes events here; PollEvents dequeues.
 	// Qt6/GTK4/SDL3/winit all use this pattern.
-	eventMu sync.Mutex
-	events  []Event
+	// Ring buffer (ADR-031): fixed capacity, zero allocs, drops oldest on overflow.
+	events *eventqueue.Queue[Event]
 }
 
 // Global instance for window procedure callback
@@ -510,6 +511,7 @@ var globalPlatform *windowsPlatform
 func newPlatformManager() PlatformManager {
 	return &windowsPlatform{
 		windows: make(map[windows.HWND]*win32Window),
+		events:  eventqueue.New[Event](eventqueue.DefaultCapacity),
 	}
 }
 
@@ -1421,34 +1423,25 @@ func (p *windowsPlatform) CloseWindow() {
 // queueEvent pushes an event to the unified platform queue (ADR-017).
 // Called from wndProc for ALL windows. Per-WindowID resize coalescing.
 func (p *windowsPlatform) queueEvent(event Event) {
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-
 	// Coalesce resize events per-window to avoid swapchain recreation storm.
 	// During drag resize, Windows sends hundreds of WM_SIZE messages.
-	if event.Type == EventResize && len(p.events) > 0 {
-		for i := len(p.events) - 1; i >= 0; i-- {
-			if p.events[i].Type == EventResize && p.events[i].WindowID == event.WindowID {
-				p.events[i] = event
-				return
-			}
+	if event.Type == EventResize {
+		wid := event.WindowID
+		if p.events.CoalesceLast(func(e Event) bool {
+			return e.Type == EventResize && e.WindowID == wid
+		}, event) {
+			return
 		}
 	}
 
-	p.events = append(p.events, event)
+	p.events.Push(event)
 }
 
 // dequeueEvent returns the next event from the unified queue.
 func (p *windowsPlatform) dequeueEvent() Event {
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-
-	if len(p.events) > 0 {
-		event := p.events[0]
-		p.events = p.events[1:]
-		return event
+	if e, ok := p.events.Pop(); ok {
+		return e
 	}
-
 	return Event{Type: EventNone}
 }
 

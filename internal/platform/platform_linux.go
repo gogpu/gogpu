@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gogpu/internal/platform/wayland"
 	"github.com/gogpu/gogpu/internal/platform/x11"
 	"github.com/gogpu/gpucontext"
@@ -41,9 +42,13 @@ type waylandWindow struct {
 	shouldClose bool
 	configured  bool
 
-	// Event queue (same pattern as X11 and Windows platforms)
-	events  []Event
+	// eventMu guards window state fields (shouldClose, maximized, fullscreen,
+	// width, height, savedWidth, savedHeight). The event queue has its own
+	// internal mutex (ring buffer is thread-safe).
 	eventMu sync.Mutex
+
+	// Event queue — ring buffer (ADR-031: fixed capacity, zero allocs, drops oldest).
+	events *eventqueue.Queue[Event]
 
 	savedWidth  int // pre-maximize size for restore
 	savedHeight int
@@ -117,7 +122,10 @@ func newPlatformManager() PlatformManager {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		logger().Info("platform selected", "type", "wayland", "WAYLAND_DISPLAY", os.Getenv("WAYLAND_DISPLAY"))
 		return &waylandPlatform{
-			primary: &waylandWindow{startTime: time.Now()},
+			primary: &waylandWindow{
+				startTime: time.Now(),
+				events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
+			},
 		}
 	}
 	// Fall back to X11 if DISPLAY is set
@@ -129,7 +137,10 @@ func newPlatformManager() PlatformManager {
 	// Default to Wayland (will fail in Init if not available)
 	logger().Info("platform selected", "type", "wayland", "reason", "default (no WAYLAND_DISPLAY or DISPLAY)")
 	return &waylandPlatform{
-		primary: &waylandWindow{startTime: time.Now()},
+		primary: &waylandWindow{
+			startTime: time.Now(),
+			events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
+		},
 	}
 }
 
@@ -1069,7 +1080,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				if vulkanW != w.width || vulkanH != w.height {
 					w.width = vulkanW
 					w.height = vulkanH
-					w.events = append(w.events, Event{
+					w.events.Push(Event{
 						Type:           EventResize,
 						Width:          vulkanW,
 						Height:         vulkanH,
@@ -1200,11 +1211,9 @@ func (w *waylandWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Mod
 	w.queueEvent(Event{Type: evType, Key: key, Mods: mods})
 }
 
-// queueEvent appends a platform event to the window's event queue.
+// queueEvent pushes a platform event to the window's ring buffer queue.
 func (w *waylandWindow) queueEvent(event Event) {
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	w.events = append(w.events, event)
+	w.events.Push(event)
 }
 
 // evdevModsToModifiers converts evdev modifier bitmasks to gpucontext.Modifiers.
@@ -1868,19 +1877,14 @@ func evdevKeycodeToRune(keycode uint32, shift, capsLock bool) rune {
 
 // PollEvents processes pending Wayland events using the event queue pattern.
 // Same architecture as X11 and Windows platforms: callbacks queue events,
-// PollEvents dequeues one at a time.
+// PollEvents dequeues one at a time. Ring buffer (ADR-031).
 func (p *waylandPlatform) PollEvents() Event {
 	w := p.primary
 
 	// First, drain queued events (from previous dispatch).
-	w.eventMu.Lock()
-	if len(w.events) > 0 {
-		event := w.events[0]
-		w.events = w.events[1:]
-		w.eventMu.Unlock()
-		return event
+	if e, ok := w.events.Pop(); ok {
+		return e
 	}
-	w.eventMu.Unlock()
 
 	// Dispatch all pending events on the C display (single connection).
 	// Callbacks will queue events via queueEvent().
@@ -1903,12 +1907,8 @@ func (p *waylandPlatform) PollEvents() Event {
 	}
 
 	// Return first queued event, or EventNone if empty.
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
-	if len(w.events) > 0 {
-		event := w.events[0]
-		w.events = w.events[1:]
-		return event
+	if e, ok := w.events.Pop(); ok {
+		return e
 	}
 	return Event{Type: EventNone}
 }

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 )
 
 // ---------------------------------------------------------------------------
@@ -524,6 +526,7 @@ func TestIntegration_HandleKeyEventReadsXkbGroup(t *testing.T) {
 
 	w := &x11Window{
 		startTime: time.Now(),
+		events:    eventqueue.New[PlatformEvent](eventqueue.DefaultCapacity),
 	}
 
 	p := &Platform{
@@ -624,6 +627,7 @@ func TestHandleEvent_RoutesUnknownEventToXkbHandler(t *testing.T) {
 		width:     800,
 		height:    600,
 		startTime: time.Now(),
+		events:    eventqueue.New[PlatformEvent](eventqueue.DefaultCapacity),
 	}
 
 	p := &Platform{
@@ -662,6 +666,7 @@ func TestHandleEvent_IgnoresUnknownEventWhenXkbNil(t *testing.T) {
 		width:     800,
 		height:    600,
 		startTime: time.Now(),
+		events:    eventqueue.New[PlatformEvent](eventqueue.DefaultCapacity),
 	}
 
 	p := &Platform{
@@ -898,6 +903,7 @@ func TestHandleKeyEvent_FallbackWhenXkbStateNil(t *testing.T) {
 
 	w := &x11Window{
 		startTime: time.Now(),
+		events:    eventqueue.New[PlatformEvent](eventqueue.DefaultCapacity),
 	}
 	p.windows[42] = w
 	p.primary = w
@@ -905,14 +911,13 @@ func TestHandleKeyEvent_FallbackWhenXkbStateNil(t *testing.T) {
 	// Simulate key press: keycode 38, no modifiers, pressed
 	p.handleKeyEvent(w, 38, 0, true)
 
-	w.eventMu.Lock()
-	events := make([]PlatformEvent, len(w.events))
-	copy(events, w.events)
-	w.eventMu.Unlock()
-
-	// Should have KeyDown + Char events
+	// Drain the event queue to check events.
 	var charFound bool
-	for _, ev := range events {
+	for {
+		ev, ok := w.events.Pop()
+		if !ok {
+			break
+		}
 		if ev.Type == EventTypeChar && ev.Char == 'a' {
 			charFound = true
 		}
@@ -945,19 +950,22 @@ func TestHandleKeyEvent_FallbackUsesXkbGroup(t *testing.T) {
 
 	p.keymap = km
 
-	w := &x11Window{startTime: time.Now()}
+	w := &x11Window{
+		startTime: time.Now(),
+		events:    eventqueue.New[PlatformEvent](eventqueue.DefaultCapacity),
+	}
 	p.windows[42] = w
 	p.primary = w
 
 	p.handleKeyEvent(w, 38, 0, true)
 
-	w.eventMu.Lock()
-	events := make([]PlatformEvent, len(w.events))
-	copy(events, w.events)
-	w.eventMu.Unlock()
-
+	// Drain the event queue to check events.
 	var charFound rune
-	for _, ev := range events {
+	for {
+		ev, ok := w.events.Pop()
+		if !ok {
+			break
+		}
 		if ev.Type == EventTypeChar {
 			charFound = ev.Char
 		}
