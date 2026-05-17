@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.4] - 2026-05-17
+
+### Fixed
+
+- **X11 keyboard layout switching "sticks" on Russian** (#233, @unxed) -- two bugs in XkbStateNotify handling: (1) `lockedGroup` read as int16 but is uint8 in XCB wire format, picking up `compatState` byte as high byte; (2) decomposed baseGroup/latchedGroup/lockedGroup can produce different effective group in xkbcommon due to double-wrapping with different keymap rules. Fix: use Wayland pattern on X11 -- pass effective group (already computed by X server) as layoutLocked with zeros for base/latched. Confirmed by xkbcommon source analysis and 5 reference frameworks.
+
 ## [0.37.3] - 2026-05-17
 
 ### Fixed

@@ -696,7 +696,7 @@ func (p *Platform) initXkbcommon() {
 		if fullState, err := p.conn.xkbGetFullState(p.xkb.MajorOpcode); err == nil {
 			p.xkbState.UpdateMask(
 				fullState.BaseMods, fullState.LatchedMods, fullState.LockedMods,
-				fullState.BaseGroup, fullState.LatchedGroup, fullState.LockedGroup,
+				0, 0, uint32(fullState.Group),
 			)
 			p.mu.Lock()
 			p.xkbGroup = fullState.Group
@@ -1228,21 +1228,22 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 		baseMods := uint32(e.Data[9])
 		latchedMods := uint32(e.Data[10])
 		lockedMods := uint32(e.Data[11])
-		baseGroup := uint32(uint16(e.Data[13]) | uint16(e.Data[14])<<8)
-		latchedGroup := uint32(uint16(e.Data[15]) | uint16(e.Data[16])<<8)
-		lockedGroup := uint32(uint16(e.Data[17]) | uint16(e.Data[18])<<8)
 
 		p.mu.Lock()
 		p.xkbGroup = newGroup
 		xkbState := p.xkbState
 		p.mu.Unlock()
 
-		// Sync xkbcommon state with X server state (winit/Qt6 pattern).
-		// This is the ONLY way to update group/modifiers in xkbcommon on X11.
-		// xkb_state_update_key does NOT handle group changes.
+		// Sync xkbcommon state with X server's effective group.
+		// Use Wayland pattern: pass effective group (Data[12]) as layoutLocked,
+		// zeros for baseGroup/latchedGroup. This avoids two bugs:
+		// 1. lockedGroup is uint8 in XCB wire but we were reading 2 bytes (compatState leak)
+		// 2. Decomposed groups can produce different effective group in xkbcommon
+		//    due to double-wrapping with potentially different keymap rules.
+		// The effective group is already computed by the X server — safe to pass directly.
 		if xkbState != nil && xkbState.Ready() {
 			xkbState.UpdateMask(baseMods, latchedMods, lockedMods,
-				baseGroup, latchedGroup, lockedGroup)
+				0, 0, uint32(newGroup))
 		}
 
 		logger().Debug("XKB state changed", "group", newGroup)
@@ -1268,11 +1269,11 @@ func (p *Platform) handleMappingNotify() {
 	xkbState := p.xkbState
 	p.mu.Unlock()
 
-	// Sync xkbcommon state with full modifier + group info.
+	// Sync xkbcommon state using effective group (Wayland pattern).
 	if xkbState != nil && xkbState.Ready() {
 		xkbState.UpdateMask(
 			fullState.BaseMods, fullState.LatchedMods, fullState.LockedMods,
-			fullState.BaseGroup, fullState.LatchedGroup, fullState.LockedGroup,
+			0, 0, uint32(fullState.Group),
 		)
 	}
 
@@ -1308,12 +1309,12 @@ func (p *Platform) reloadXkbKeymap() {
 		}
 	}
 
-	// Sync state after keymap reload.
+	// Sync state after keymap reload using effective group (Wayland pattern).
 	if p.xkb != nil && xkbState.Ready() {
 		if fullState, err := p.conn.xkbGetFullState(p.xkb.MajorOpcode); err == nil {
 			xkbState.UpdateMask(
 				fullState.BaseMods, fullState.LatchedMods, fullState.LockedMods,
-				fullState.BaseGroup, fullState.LatchedGroup, fullState.LockedGroup,
+				0, 0, uint32(fullState.Group),
 			)
 			p.mu.Lock()
 			p.xkbGroup = fullState.Group
