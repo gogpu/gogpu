@@ -154,21 +154,94 @@ func (c *Connection) xkbGetState(majorOpcode uint8) (int, error) {
 	return group, nil
 }
 
+// XkbFullState holds the complete keyboard state from an XKB GetState reply.
+// Used for initial state sync and MappingNotify handling.
+type XkbFullState struct {
+	BaseMods     uint32
+	LatchedMods  uint32
+	LockedMods   uint32
+	BaseGroup    uint32
+	LatchedGroup uint32
+	LockedGroup  uint32
+	Group        int // effective group (0-3)
+}
+
+// xkbGetFullState sends an XkbGetState request (minor opcode 4) and returns the
+// complete keyboard state including modifiers and group fields. This is needed
+// for initial xkbcommon state sync (BUG-INPUT-005: winit pattern) and for
+// MappingNotify handling where the simple group-only xkbGetState is insufficient.
+func (c *Connection) xkbGetFullState(majorOpcode uint8) (XkbFullState, error) {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(majorOpcode)
+	e.PutUint8(XkbMinorOpcodeGetState)
+	e.PutUint16(2) // request length: 8 bytes / 4 = 2 units
+	e.PutUint16(XkbUseCoreKbd)
+	e.PutUint16(0) // pad
+
+	reply, err := c.sendRequestWithReply(e.Bytes())
+	if err != nil {
+		return XkbFullState{}, err
+	}
+
+	if len(reply) < 18 {
+		return XkbFullState{}, fmt.Errorf("xkb: GetState reply too short for full state (%d bytes)", len(reply))
+	}
+
+	// Reply layout (32 bytes):
+	//   byte 0:     response_type (1 = Reply)
+	//   byte 1:     device ID
+	//   bytes 2-3:  sequence
+	//   bytes 4-7:  length
+	//   byte 8:     mods (effective)
+	//   byte 9:     base mods
+	//   byte 10:    latched mods
+	//   byte 11:    locked mods
+	//   byte 12:    group (effective, uint8)
+	//   byte 13:    locked group (uint8)
+	//   bytes 14-15: base group (int16 LE)
+	//   bytes 16-17: latched group (int16 LE)
+	//
+	// NOTE: baseGroup/latchedGroup are int16 in XKB wire format, but
+	// xkb_state_update_mask takes uint32. We convert via uint16 to uint32
+	// (same pattern as handleUnknownEvent).
+	state := XkbFullState{
+		BaseMods:     uint32(reply[9]),
+		LatchedMods:  uint32(reply[10]),
+		LockedMods:   uint32(reply[11]),
+		Group:        int(reply[12]),
+		LockedGroup:  uint32(reply[13]),
+		BaseGroup:    uint32(uint16(reply[14]) | uint16(reply[15])<<8),
+		LatchedGroup: uint32(uint16(reply[16]) | uint16(reply[17])<<8),
+	}
+
+	return state, nil
+}
+
 // xkbSelectEvents sends an XkbSelectEvents request (minor opcode 1) to subscribe
-// to XkbStateNotify events with group change details.
+// to XkbStateNotify, XkbNewKeyboardNotify, and XkbMapNotify events.
+// BUG-INPUT-005: Subscribe to keymap change events for hot-plug and layout reload.
 func (c *Connection) xkbSelectEvents(majorOpcode uint8) error {
+	// Subscribe to three event types:
+	//   - XkbStateNotify (group/modifier changes) — needs per-event details
+	//   - XkbNewKeyboardNotify (keyboard hot-plug) — via selectAll (all details)
+	//   - XkbMapNotify (keymap changed) — via selectAll (all details)
+	//
+	// Events in selectAll get all details automatically (no detail pair needed).
+	// Events in affectWhich but NOT in selectAll require per-event detail pairs.
+	affectWhich := XkbNewKeyboardNotifyMask | XkbMapNotifyMask | XkbStateNotifyMask
+	selectAll := XkbNewKeyboardNotifyMask | XkbMapNotifyMask // auto-select all details
+
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(majorOpcode)
 	e.PutUint8(XkbMinorOpcodeSelectEvents)
-	e.PutUint16(5)                  // request length: 20 bytes / 4 = 5 units
-	e.PutUint16(XkbUseCoreKbd)      // device spec
-	e.PutUint16(XkbStateNotifyMask) // affectWhich: subscribe to state change events
-	e.PutUint16(0)                  // clear: don't clear any event types
-	e.PutUint16(0)                  // selectAll: 0 — use per-event details below (not auto-select all)
-	e.PutUint16(0)                  // affectMap
-	e.PutUint16(0)                  // map
-	// Per-event details for StateNotify (included because StateNotify is in
-	// affectWhich but NOT in selectAll — XKB wire protocol requires detail pair):
+	e.PutUint16(5)                   // request length: 20 bytes / 4 = 5 units
+	e.PutUint16(XkbUseCoreKbd)       // device spec
+	e.PutUint16(uint16(affectWhich)) // affectWhich: subscribe to these event types
+	e.PutUint16(0)                   // clear: don't clear any event types
+	e.PutUint16(uint16(selectAll))   // selectAll: NewKeyboard + Map get all details
+	e.PutUint16(0)                   // affectMap
+	e.PutUint16(0)                   // map
+	// Per-event details for StateNotify (in affectWhich but NOT in selectAll):
 	e.PutUint16(XkbGroupStateMask) // affectState: we want group changes
 	e.PutUint16(XkbGroupStateMask) // stateDetails: group changes
 

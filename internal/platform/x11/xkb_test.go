@@ -1075,3 +1075,139 @@ func TestSplitNullTerminated(t *testing.T) {
 		})
 	}
 }
+
+// --- Section 9: BUG-INPUT-005 — XkbFullState Tests ---
+
+func TestXkbFullState_ZeroValue(t *testing.T) {
+	var state XkbFullState
+	if state.Group != 0 {
+		t.Errorf("zero-value Group = %d, want 0", state.Group)
+	}
+	if state.BaseMods != 0 {
+		t.Errorf("zero-value BaseMods = %d, want 0", state.BaseMods)
+	}
+	if state.LatchedMods != 0 {
+		t.Errorf("zero-value LatchedMods = %d, want 0", state.LatchedMods)
+	}
+	if state.LockedMods != 0 {
+		t.Errorf("zero-value LockedMods = %d, want 0", state.LockedMods)
+	}
+	if state.BaseGroup != 0 {
+		t.Errorf("zero-value BaseGroup = %d, want 0", state.BaseGroup)
+	}
+	if state.LatchedGroup != 0 {
+		t.Errorf("zero-value LatchedGroup = %d, want 0", state.LatchedGroup)
+	}
+	if state.LockedGroup != 0 {
+		t.Errorf("zero-value LockedGroup = %d, want 0", state.LockedGroup)
+	}
+}
+
+func TestXkbFullState_FieldValues(t *testing.T) {
+	state := XkbFullState{
+		BaseMods:     1,
+		LatchedMods:  2,
+		LockedMods:   4,
+		BaseGroup:    1,
+		LatchedGroup: 0,
+		LockedGroup:  1,
+		Group:        1,
+	}
+
+	if state.BaseMods != 1 {
+		t.Errorf("BaseMods = %d, want 1", state.BaseMods)
+	}
+	if state.LockedMods != 4 {
+		t.Errorf("LockedMods = %d, want 4", state.LockedMods)
+	}
+	if state.Group != 1 {
+		t.Errorf("Group = %d, want 1", state.Group)
+	}
+	if state.LockedGroup != 1 {
+		t.Errorf("LockedGroup = %d, want 1", state.LockedGroup)
+	}
+}
+
+// --- Section 10: BUG-INPUT-005 — XkbNewKeyboardNotify/MapNotify Routing ---
+
+func TestHandleUnknownEvent_NewKeyboardNotify(t *testing.T) {
+	// XkbNewKeyboardNotify (type=0) should be handled (not ignored).
+	// We cannot fully test reloadXkbKeymap without a real connection,
+	// but we verify it does not crash and does not update xkbGroup
+	// (reloadXkbKeymap with nil conn just returns).
+	p := &Platform{
+		xkb: &XkbExtension{
+			EventBase: 85,
+		},
+		xkbGroup: 0,
+	}
+
+	e := &UnknownEvent{Type: 85}
+	e.Data[0] = 0 // XkbNewKeyboardNotify
+	e.Data[12] = 1
+
+	// Must not panic. reloadXkbKeymap returns early (xkbState is nil).
+	p.handleUnknownEvent(e)
+}
+
+func TestHandleUnknownEvent_MapNotify(t *testing.T) {
+	// XkbMapNotify (type=1) should be handled similarly.
+	p := &Platform{
+		xkb: &XkbExtension{
+			EventBase: 85,
+		},
+		xkbGroup: 0,
+	}
+
+	e := &UnknownEvent{Type: 85}
+	e.Data[0] = 1 // XkbMapNotify
+	e.Data[12] = 1
+
+	// Must not panic.
+	p.handleUnknownEvent(e)
+}
+
+func TestHandleUnknownEvent_UnknownXkbSubType(t *testing.T) {
+	// Unknown XKB sub-types (> 2) should be ignored without crash.
+	p := &Platform{
+		xkb: &XkbExtension{
+			EventBase: 85,
+		},
+		xkbGroup: 0,
+	}
+
+	for _, subType := range []uint8{3, 4, 5, 10, 255} {
+		e := &UnknownEvent{Type: 85}
+		e.Data[0] = subType
+		e.Data[12] = 1
+
+		p.handleUnknownEvent(e)
+
+		p.mu.Lock()
+		g := p.xkbGroup
+		p.mu.Unlock()
+
+		if g != 0 {
+			t.Errorf("xkbGroup changed to %d on unknown sub-type %d, want 0", g, subType)
+		}
+	}
+}
+
+// --- Section 11: BUG-INPUT-005 — XWayland Detection ---
+
+func TestDetectXWayland_NilConn(t *testing.T) {
+	p := &Platform{conn: nil}
+	if p.detectXWayland() {
+		t.Error("detectXWayland returned true with nil conn, want false")
+	}
+}
+
+func TestReloadXkbKeymap_NilXkbState(t *testing.T) {
+	// reloadXkbKeymap with nil xkbState should return without crash.
+	p := &Platform{
+		xkb:      &XkbExtension{MajorOpcode: 135},
+		xkbState: nil,
+	}
+	// Must not panic.
+	p.reloadXkbKeymap()
+}

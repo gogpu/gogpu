@@ -168,6 +168,10 @@ type Platform struct {
 	// Nil if libxkbcommon is not available (falls back to manual KeycodeToKeysymGroup).
 	xkbState *xkbcommon.Handle
 
+	// XWayland detection: true when running under XWayland (Wayland compositor).
+	// _XKB_RULES_NAMES is unreliable under XWayland (freedesktop#612).
+	isXWayland bool
+
 	// DPI scale factor (from Xft.dpi or screen physical size) — process-level
 	scaleFactor float64
 
@@ -386,6 +390,13 @@ func (p *Platform) Init(config Config) error {
 		p.xkb = xkb
 		p.xkbGroup = xkb.Group
 		logger().Info("XKB enabled", "version", fmt.Sprintf("%d.%d", xkb.MajorVer, xkb.MinorVer), "group", xkb.Group)
+	}
+
+	// Detect XWayland before initXkbcommon — _XKB_RULES_NAMES is unreliable
+	// under XWayland (freedesktop#612). SDL3 uses QueryExtension("XWAYLAND").
+	p.isXWayland = p.detectXWayland()
+	if p.isXWayland {
+		logger().Info("XWayland detected — _XKB_RULES_NAMES may be unreliable")
 	}
 
 	// Load libxkbcommon for proper text input (AltGr, dead keys, multi-layout).
@@ -639,6 +650,7 @@ func parseXftRGBA(resources string) gpucontext.SubpixelLayout {
 // First tries to read the X server's actual RMLVO configuration from
 // _XKB_RULES_NAMES root window property (BUG-INPUT-004: multi-layout support).
 // Falls back to xkb_keymap_new_from_names(NULL) which only loads "us".
+// Under XWayland, skips _XKB_RULES_NAMES (unreliable per freedesktop#612).
 // Non-fatal: if xkbcommon is unavailable, keyboard falls back to manual keysym lookup.
 func (p *Platform) initXkbcommon() {
 	xkbHandle, xkbcommonErr := xkbcommon.New()
@@ -648,19 +660,24 @@ func (p *Platform) initXkbcommon() {
 	}
 
 	// Try to load keymap from X server's actual configuration.
-	// Read _XKB_RULES_NAMES property from root window for RMLVO.
+	// BUG-INPUT-005: Skip _XKB_RULES_NAMES under XWayland (unreliable per freedesktop#612).
 	loaded := false
-	rules, model, layout, variant, options := p.readXKBRulesNames()
-	if layout != "" {
-		if err := xkbHandle.SetKeymapFromRMLVO(rules, model, layout, variant, options); err != nil {
-			logger().Warn("xkbcommon: RMLVO keymap failed, trying defaults", "err", err, "layout", layout)
-		} else {
-			loaded = true
-			logger().Info("xkbcommon: keymap loaded from _XKB_RULES_NAMES", "layout", layout)
+	if !p.isXWayland {
+		// Native X11: read RMLVO from root window property.
+		rules, model, layout, variant, options := p.readXKBRulesNames()
+		if layout != "" {
+			if err := xkbHandle.SetKeymapFromRMLVO(rules, model, layout, variant, options); err != nil {
+				logger().Warn("xkbcommon: RMLVO keymap failed, trying defaults", "err", err, "layout", layout)
+			} else {
+				loaded = true
+				logger().Info("xkbcommon: keymap loaded from _XKB_RULES_NAMES", "layout", layout)
+			}
 		}
+	} else {
+		logger().Debug("xkbcommon: skipping _XKB_RULES_NAMES under XWayland (unreliable)")
 	}
 
-	// Fallback to system defaults if RMLVO not available
+	// Fallback to system defaults if RMLVO not available or under XWayland
 	if !loaded {
 		if err := xkbHandle.SetKeymapFromNames(); err != nil {
 			logger().Warn("xkbcommon: failed to load system keymap", "err", err)
@@ -671,6 +688,22 @@ func (p *Platform) initXkbcommon() {
 	}
 
 	p.xkbState = xkbHandle
+
+	// BUG-INPUT-005: Sync xkbcommon state with X server's current state (winit pattern).
+	// xkb_state_new starts at group=0 with zero modifiers. The X server may already
+	// be at a different group (e.g., Russian) or have modifiers like CapsLock active.
+	if p.xkb != nil && p.xkbState != nil && p.xkbState.Ready() {
+		if fullState, err := p.conn.xkbGetFullState(p.xkb.MajorOpcode); err == nil {
+			p.xkbState.UpdateMask(
+				fullState.BaseMods, fullState.LatchedMods, fullState.LockedMods,
+				fullState.BaseGroup, fullState.LatchedGroup, fullState.LockedGroup,
+			)
+			p.mu.Lock()
+			p.xkbGroup = fullState.Group
+			p.mu.Unlock()
+			logger().Debug("xkbcommon: initial state synced with X server", "group", fullState.Group)
+		}
+	}
 }
 
 // readXKBRulesNames reads the _XKB_RULES_NAMES property from the root window.
@@ -721,6 +754,20 @@ func (p *Platform) readXKBRulesNames() (string, string, string, string, string) 
 	}
 
 	return rules, model, layout, variant, options
+}
+
+// detectXWayland checks if we are running under XWayland by querying the
+// XWAYLAND X11 extension. SDL3 uses the same pattern.
+// Under XWayland, _XKB_RULES_NAMES is unreliable (freedesktop#612).
+func (p *Platform) detectXWayland() bool {
+	if p.conn == nil {
+		return false
+	}
+	ext, err := p.conn.QueryExtension("XWAYLAND")
+	if err != nil {
+		return false
+	}
+	return ext.Present
 }
 
 // splitNullTerminated splits a byte slice by null bytes into up to maxParts strings.
@@ -1142,7 +1189,19 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 	// XKB events share a single event type code (EventBase).
 	// The XKB sub-type is at byte 1 of the raw event (Data[0] in UnknownEvent).
 	xkbType := e.Data[0]
-	if xkbType != XkbStateNotify {
+
+	switch xkbType {
+	case 0, 1: // XkbNewKeyboardNotify (0) or XkbMapNotify (1)
+		// BUG-INPUT-005: Keymap changed (keyboard hot-plug or layout reconfiguration).
+		// Reload the keymap and re-sync state.
+		logger().Debug("XKB keymap changed, reloading", "type", xkbType)
+		p.reloadXkbKeymap()
+		return
+
+	case XkbStateNotify: // = 2
+		// Fall through to state handling below.
+
+	default:
 		return
 	}
 
@@ -1190,25 +1249,85 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 	}
 }
 
-// handleMappingNotify re-reads XKB state when keyboard mapping changes.
+// handleMappingNotify re-reads XKB full state when keyboard mapping changes.
 // Some X servers send MappingNotify instead of XkbStateNotify on layout switch.
 // SDL3 uses the same fallback pattern.
+// BUG-INPUT-005: Now uses full state sync (modifiers + group) instead of group-only.
 func (p *Platform) handleMappingNotify() {
 	if p.xkb == nil {
 		return
 	}
-	group, err := p.conn.xkbGetState(p.xkb.MajorOpcode)
+	fullState, err := p.conn.xkbGetFullState(p.xkb.MajorOpcode)
 	if err != nil {
 		return
 	}
+
 	p.mu.Lock()
-	if p.xkbGroup != group {
-		p.xkbGroup = group
-		p.mu.Unlock()
-		logger().Debug("XKB group changed via MappingNotify", "group", group)
+	changed := p.xkbGroup != fullState.Group
+	p.xkbGroup = fullState.Group
+	xkbState := p.xkbState
+	p.mu.Unlock()
+
+	// Sync xkbcommon state with full modifier + group info.
+	if xkbState != nil && xkbState.Ready() {
+		xkbState.UpdateMask(
+			fullState.BaseMods, fullState.LatchedMods, fullState.LockedMods,
+			fullState.BaseGroup, fullState.LatchedGroup, fullState.LockedGroup,
+		)
+	}
+
+	if changed {
+		logger().Debug("XKB group changed via MappingNotify", "group", fullState.Group)
+	}
+}
+
+// reloadXkbKeymap re-reads the keymap and re-syncs xkbcommon state.
+// Called on XkbNewKeyboardNotify (keyboard hot-plug) and XkbMapNotify (keymap changed).
+// BUG-INPUT-005: Handles layout reconfiguration without restart.
+func (p *Platform) reloadXkbKeymap() {
+	p.mu.Lock()
+	xkbState := p.xkbState
+	p.mu.Unlock()
+
+	if xkbState == nil {
 		return
 	}
-	p.mu.Unlock()
+
+	// Re-read keymap (RMLVO or system defaults).
+	// Under XWayland, _XKB_RULES_NAMES is unreliable — use system defaults.
+	if !p.isXWayland {
+		rules, model, layout, variant, options := p.readXKBRulesNames()
+		if layout != "" {
+			if err := xkbState.SetKeymapFromRMLVO(rules, model, layout, variant, options); err == nil {
+				logger().Info("xkbcommon: keymap reloaded from _XKB_RULES_NAMES", "layout", layout)
+			}
+		}
+	} else {
+		if err := xkbState.SetKeymapFromNames(); err == nil {
+			logger().Info("xkbcommon: keymap reloaded from system defaults (XWayland)")
+		}
+	}
+
+	// Sync state after keymap reload.
+	if p.xkb != nil && xkbState.Ready() {
+		if fullState, err := p.conn.xkbGetFullState(p.xkb.MajorOpcode); err == nil {
+			xkbState.UpdateMask(
+				fullState.BaseMods, fullState.LatchedMods, fullState.LockedMods,
+				fullState.BaseGroup, fullState.LatchedGroup, fullState.LockedGroup,
+			)
+			p.mu.Lock()
+			p.xkbGroup = fullState.Group
+			p.mu.Unlock()
+		}
+	}
+
+	// Also re-read keyboard mapping for the fallback path.
+	keymap, _ := p.conn.GetKeyboardMapping()
+	if keymap != nil {
+		p.mu.Lock()
+		p.keymap = keymap
+		p.mu.Unlock()
+	}
 }
 
 // handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.

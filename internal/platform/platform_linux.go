@@ -141,6 +141,10 @@ func newPlatformManager() PlatformManager {
 	}
 	// Fall back to X11 if DISPLAY is set
 	if os.Getenv("DISPLAY") != "" {
+		// BUG-INPUT-005: Warn when Wayland session uses X11 fallback (XWayland).
+		if os.Getenv("XDG_SESSION_TYPE") == "wayland" {
+			logger().Warn("Wayland session detected but WAYLAND_DISPLAY not set; using X11 (XWayland)")
+		}
 		logger().Info("platform selected", "type", "x11", "DISPLAY", os.Getenv("DISPLAY"))
 		x11.SetLogger(loggerPtr.Load().WithGroup("x11"))
 		return &x11Platform{}

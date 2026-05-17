@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.3] - 2026-05-17
+
+### Fixed
+
+- **X11 initial XKB state sync** (#233, @unxed) -- `xkb_state_new` starts at group=0, but X server may be at group=1 (Russian). Now calls `xkbGetFullState` + `UpdateMask` immediately after state creation (winit FocusIn pattern). Also fixes `handleMappingNotify` to sync full state.
+- **XWayland keyboard support** (#233) -- `_XKB_RULES_NAMES` root window property unreliable under XWayland (freedesktop#612). Now detects XWayland via `QueryExtension("XWAYLAND")` (SDL3 pattern), skips RMLVO, uses system defaults. Subscribes to `XkbNewKeyboardNotify` + `XkbMapNotify` for keymap reload on layout changes.
+- **Platform detection** -- warns when Wayland session detected but `WAYLAND_DISPLAY` not set (XWayland fallback).
+
 ## [0.37.2] - 2026-05-17
 
 ### Added
