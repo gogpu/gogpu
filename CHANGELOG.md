@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.5] - 2026-05-17
+
+### Fixed
+
+- **AltGr / Level3 modifier on X11** (#233, @unxed) -- XkbSelectEvents subscribed to `XkbGroupStateMask` only (group changes). Modifier changes (AltGr press/release) were never delivered to xkbcommon. Added `XkbModifierStateMask` to subscription (SDL3/GTK4 pattern). Guillemets and all Level3 characters now work.
+
 ## [0.37.4] - 2026-05-17
 
 ### Fixed

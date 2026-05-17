@@ -25,7 +25,8 @@ const (
 	XkbStateNotifyMask       = 0x0004 // bit 2: state changes (group, modifiers)
 
 	// XKB state detail masks for per-event details (affectState/stateDetails).
-	XkbGroupStateMask = 0x0010 // group changes specifically
+	XkbModifierStateMask = 0x0001 // modifier changes (AltGr, Shift, Ctrl, etc.)
+	XkbGroupStateMask    = 0x0010 // group changes (layout switching)
 
 	// XKB device spec: use the core keyboard.
 	XkbUseCoreKbd = 0x0100
@@ -241,9 +242,13 @@ func (c *Connection) xkbSelectEvents(majorOpcode uint8) error {
 	e.PutUint16(uint16(selectAll))   // selectAll: NewKeyboard + Map get all details
 	e.PutUint16(0)                   // affectMap
 	e.PutUint16(0)                   // map
-	// Per-event details for StateNotify (in affectWhich but NOT in selectAll):
-	e.PutUint16(XkbGroupStateMask) // affectState: we want group changes
-	e.PutUint16(XkbGroupStateMask) // stateDetails: group changes
+	// Per-event details for StateNotify: subscribe to BOTH modifier and group changes.
+	// Without XkbModifierStateMask, AltGr (Level3) press/release events are never delivered,
+	// so xkbcommon never learns about Level3 modifier → guillemets don't work.
+	// SDL3 and GTK4 use the same pattern: XkbGroupStateMask | XkbModifierStateMask.
+	stateDetails := uint16(XkbGroupStateMask | XkbModifierStateMask)
+	e.PutUint16(stateDetails) // affectState
+	e.PutUint16(stateDetails) // stateDetails
 
 	_, err := c.sendRequest(e.Bytes())
 	return err
