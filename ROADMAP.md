@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.37.6** | 2026-05-17 | **Universal keysym-to-Unicode** (ADR-034) -- 828-entry table replaces 70-entry Cyrillic, all X11 scripts |
 | **v0.37.5** | 2026-05-17 | **AltGr/Level3 fix** (#233) -- XkbModifierStateMask subscription, guillemets work |
 | **v0.37.4** | 2026-05-17 | **X11 layout switch fix** (#233) -- lockedGroup uint8 bug + Wayland pattern for effective group |
 | **v0.37.3** | 2026-05-17 | **X11 initial state sync + XWayland** (#233) -- xkbGetFullState + UpdateMask, XWayland detection, XkbNewKeyboardNotify |

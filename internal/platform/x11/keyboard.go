@@ -343,46 +343,23 @@ func (km *KeyboardMapping) KeycodeToKeysym(keycode uint8, shift, capsLock bool) 
 	return baseSym
 }
 
-// isLetter checks if a keysym is a letter (Latin, legacy Cyrillic, or Unicode Cyrillic).
+// isLetter checks if a keysym represents a letter in any script.
+// Uses the universal keysym-to-Unicode table and unicode.IsLetter,
+// so it works for Latin, Cyrillic, Greek, Arabic, Hebrew, Thai, Korean, etc.
 func isLetter(sym Keysym) bool {
-	if (sym >= Keysyma && sym <= Keysymz) || (sym >= KeysymA && sym <= KeysymZ) {
-		return true
+	r, ok := KeysymToRune(sym)
+	if !ok {
+		return false
 	}
-	// Legacy Cyrillic: lowercase 0x6c0-0x6df, uppercase 0x6e0-0x6ff, special Ё 0x6b3, ё 0x6a3
-	if (sym >= 0x6c0 && sym <= 0x6df) || (sym >= 0x6e0 && sym <= 0x6ff) || sym == 0x6b3 || sym == 0x6a3 {
-		return true
-	}
-	// Unicode keysyms: check via unicode.Cyrillic table
-	if sym >= 0x01000000 && sym <= 0x01ffffff {
-		r := rune(sym - 0x01000000)
-		return unicode.Is(unicode.Cyrillic, r)
-	}
-	return false
+	return unicode.IsLetter(r)
 }
 
 // KeysymToString converts a keysym to a printable string.
 // Returns empty string for non-printable keysyms.
 func KeysymToString(sym Keysym) string {
-	// Latin-1 printable range
-	if sym >= 0x20 && sym <= 0x7e {
-		return string(rune(sym))
-	}
-
-	// Latin-1 extended range
-	if sym >= 0xa0 && sym <= 0xff {
-		return string(rune(sym))
-	}
-
-	// Legacy Cyrillic keysyms (0x6a0-0x6ff)
-	if r, ok := legacyCyrillicToRune[sym]; ok {
+	if r, ok := KeysymToRune(sym); ok {
 		return string(r)
 	}
-
-	// Unicode keysyms (0x01000000 + unicode codepoint)
-	if sym >= 0x01000000 && sym <= 0x01ffffff {
-		return string(rune(sym - 0x01000000))
-	}
-
 	return ""
 }
 
@@ -511,122 +488,45 @@ func (km *KeyboardMapping) KeycodeToKeysymGroup(keycode uint8, shift, capsLock b
 	return baseSym
 }
 
-// KeysymToRune converts a keysym to a Unicode rune.
+// KeysymToRune converts an X11 keysym to a Unicode rune.
+// Handles all legacy X11 scripts via the universal keysym-to-Unicode table
+// (828 entries covering Latin extended, Cyrillic, Arabic, Greek, Hebrew,
+// Thai, Korean, Japanese, mathematical symbols, box-drawing, dead keys, keypad).
 // Returns (0, false) for non-printable keysyms (function keys, modifiers, etc.).
 func KeysymToRune(sym Keysym) (rune, bool) {
 	if sym == 0 {
 		return 0, false
 	}
 
-	// Latin-1 printable range (0x20-0x7e)
-	if sym >= 0x20 && sym <= 0x7e {
+	// Stage 1: Latin-1 printable range (1:1 mapping)
+	if (sym >= 0x0020 && sym <= 0x007e) || (sym >= 0x00a0 && sym <= 0x00ff) {
 		return rune(sym), true
 	}
 
-	// 0x7f (DEL) and 0x80-0x9f (C1 control characters) are not printable
-	if sym >= 0x7f && sym <= 0x9f {
+	// Stage 2: Unicode direct encoding (keysym = 0x01000000 + codepoint)
+	if sym&0xff000000 == 0x01000000 {
+		cp := rune(sym & 0x00ffffff)
+		if cp >= 0x20 {
+			return cp, true
+		}
 		return 0, false
 	}
 
-	// Latin-1 extended (0xa0-0xff)
-	if sym >= 0xa0 && sym <= 0xff {
-		return rune(sym), true
-	}
-
-	// Legacy Cyrillic keysyms (0x6a0-0x6ff)
-	if r, ok := legacyCyrillicToRune[sym]; ok {
-		return r, true
-	}
-
-	// Unicode keysyms (0x01000000 + codepoint)
-	if sym >= 0x01000000 && sym <= 0x01ffffff {
-		return rune(sym - 0x01000000), true
+	// Stage 3: Binary search in universal legacy keysym table
+	key := uint16(sym)
+	lo, hi := 0, len(keysymToUnicode)-1
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		entry := keysymToUnicode[mid]
+		switch {
+		case entry[0] < key:
+			lo = mid + 1
+		case entry[0] > key:
+			hi = mid - 1
+		default:
+			return rune(entry[1]), true
+		}
 	}
 
 	return 0, false
-}
-
-// legacyCyrillicToRune maps X11 legacy Cyrillic keysyms (XK_Cyrillic_*, 0x6a0-0x6ff)
-// to their Unicode codepoints. The mapping is NOT a simple offset — it follows the
-// scattered layout defined in X11/keysymdef.h.
-var legacyCyrillicToRune = map[Keysym]rune{
-	// Lowercase
-	0x6c0: 0x044E, // ю
-	0x6c1: 0x0430, // а
-	0x6c2: 0x0431, // б
-	0x6c3: 0x0446, // ц
-	0x6c4: 0x0434, // д
-	0x6c5: 0x0435, // е
-	0x6c6: 0x0444, // ф
-	0x6c7: 0x0433, // г
-	0x6c8: 0x0445, // х
-	0x6c9: 0x0438, // и
-	0x6ca: 0x0439, // й
-	0x6cb: 0x043A, // к
-	0x6cc: 0x043B, // л
-	0x6cd: 0x043C, // м
-	0x6ce: 0x043D, // н
-	0x6cf: 0x043E, // о
-	0x6d0: 0x043F, // п
-	0x6d1: 0x044F, // я
-	0x6d2: 0x0440, // р
-	0x6d3: 0x0441, // с
-	0x6d4: 0x0442, // т
-	0x6d5: 0x0443, // у
-	0x6d6: 0x0436, // ж
-	0x6d7: 0x0432, // в
-	0x6d8: 0x044C, // ь
-	0x6d9: 0x044B, // ы
-	0x6da: 0x0437, // з
-	0x6db: 0x0448, // ш
-	0x6dc: 0x044D, // э
-	0x6dd: 0x0449, // щ
-	0x6de: 0x0447, // ч
-	0x6df: 0x044A, // ъ
-
-	// Uppercase
-	0x6e0: 0x042E, // Ю
-	0x6e1: 0x0410, // А
-	0x6e2: 0x0411, // Б
-	0x6e3: 0x0426, // Ц
-	0x6e4: 0x0414, // Д
-	0x6e5: 0x0415, // Е
-	0x6e6: 0x0424, // Ф
-	0x6e7: 0x0413, // Г
-	0x6e8: 0x0425, // Х
-	0x6e9: 0x0418, // И
-	0x6ea: 0x0419, // Й
-	0x6eb: 0x041A, // К
-	0x6ec: 0x041B, // Л
-	0x6ed: 0x041C, // М
-	0x6ee: 0x041D, // Н
-	0x6ef: 0x041E, // О
-	0x6f0: 0x041F, // П
-	0x6f1: 0x042F, // Я
-	0x6f2: 0x0420, // Р
-	0x6f3: 0x0421, // С
-	0x6f4: 0x0422, // Т
-	0x6f5: 0x0423, // У
-	0x6f6: 0x0417, // З
-	0x6f7: 0x0412, // В
-	0x6f8: 0x042C, // Ь
-	0x6f9: 0x042B, // Ы
-	0x6fa: 0x0416, // Ж
-	0x6fb: 0x0428, // Ш
-	0x6fc: 0x042D, // Э
-	0x6fd: 0x0429, // Щ
-	0x6fe: 0x0427, // Ч
-	0x6ff: 0x042A, // Ъ
-
-	// Special: Ё/ё and Ukrainian/Belarusian
-	0x6a3: 0x0451, // ё
-	0x6b3: 0x0401, // Ё
-	0x6a4: 0x0454, // є (Ukrainian)
-	0x6b4: 0x0404, // Є (Ukrainian)
-	0x6a6: 0x0456, // і (Ukrainian)
-	0x6b6: 0x0406, // І (Ukrainian)
-	0x6a7: 0x0457, // ї (Ukrainian)
-	0x6b7: 0x0407, // Ї (Ukrainian)
-	0x6a8: 0x045E, // ў (Belarusian)
-	0x6b8: 0x040E, // Ў (Belarusian)
 }

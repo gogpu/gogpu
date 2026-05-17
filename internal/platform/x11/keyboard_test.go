@@ -579,11 +579,13 @@ func TestKeysymToString_Cyrillic(t *testing.T) {
 // KeysymToRune: complete keysym → rune conversion
 // ---------------------------------------------------------------------------
 
-// TestKeysymToRune tests the new KeysymToRune function that converts any
-// keysym to a Unicode rune. This covers:
+// TestKeysymToRune tests the KeysymToRune function that converts any
+// keysym to a Unicode rune via the universal 828-entry keysym-to-Unicode table.
+// This covers:
 //   - Latin-1 (0x20-0xff) → same codepoint
-//   - Legacy Cyrillic (0x6a0-0x6ff) → Unicode U+0400-U+04FF via lookup table
+//   - Legacy scripts (Cyrillic, Arabic, Greek, Hebrew, Thai, Korean, Japanese, etc.)
 //   - Unicode keysyms (0x01000000+) → direct subtraction
+//   - Dead keys, keypad, mathematical symbols
 //   - Non-printable (function keys, modifiers) → (0, false)
 func TestKeysymToRune(t *testing.T) {
 	tests := []struct {
@@ -603,7 +605,7 @@ func TestKeysymToRune(t *testing.T) {
 		{"copyright (0xa9)", 0x00a9, '\u00a9', true},
 		{"umlaut-u (0xfc)", 0x00fc, '\u00fc', true},
 
-		// Legacy Cyrillic (must be converted via lookup table)
+		// Legacy Cyrillic (via universal table)
 		{"Cyrillic а", testKeysymCyrillicA, 'а', true},    // U+0430
 		{"Cyrillic б", testKeysymCyrillicBe, 'б', true},   // U+0431
 		{"Cyrillic ф", testKeysymCyrillicEf, 'ф', true},   // U+0444
@@ -615,6 +617,69 @@ func TestKeysymToRune(t *testing.T) {
 		{"Cyrillic Ю", testKeysymCyrillicYuUp, 'Ю', true}, // U+042E
 		{"Cyrillic я", testKeysymCyrillicYa, 'я', true},   // U+044F
 		{"Cyrillic Я", testKeysymCyrillicYaUp, 'Я', true}, // U+042F
+
+		// Arabic keysyms (new — from universal table)
+		{"Arabic comma", 0x05ac, '\u060c', true},
+		{"Arabic alef", 0x05c7, '\u0627', true},
+		{"Arabic beh", 0x05c8, '\u0628', true},
+		{"Arabic yeh", 0x05ea, '\u064a', true},
+
+		// Greek keysyms (new — from universal table)
+		{"Greek ALPHA", 0x07c1, '\u0391', true},
+		{"Greek OMEGA", 0x07d9, '\u03a9', true},
+		{"Greek alpha", 0x07e1, '\u03b1', true},
+		{"Greek omega", 0x07f9, '\u03c9', true},
+
+		// Hebrew keysyms (new — from universal table)
+		{"Hebrew aleph", 0x0ce0, '\u05d0', true},
+		{"Hebrew taw", 0x0cfa, '\u05ea', true},
+
+		// Thai keysyms (new — from universal table)
+		{"Thai kokai", 0x0da1, '\u0e01', true},
+		{"Thai baht", 0x0ddf, '\u0e3f', true},
+
+		// Korean Hangul keysyms (new — from universal table)
+		{"Hangul Kiyeog", 0x0ea1, '\u3131', true},
+		{"Korean Won", 0x0eff, '\u20a9', true},
+
+		// Japanese Kana keysyms (new — from universal table)
+		{"kana_A", 0x04b1, '\u30a2', true},
+		{"kana_N", 0x04dd, '\u30f3', true},
+
+		// Latin extended keysyms (from universal table)
+		{"Aogonek", 0x01a1, '\u0104', true},
+		{"scaron", 0x01b9, '\u0161', true},
+		{"OE ligature", 0x13bc, '\u0152', true},
+
+		// Mathematical/technical symbols (from universal table)
+		{"infinity", 0x08c2, '\u221e', true},
+		{"integral", 0x08bf, '\u222b', true},
+		{"notequal", 0x08bd, '\u2260', true},
+
+		// Typographic punctuation (from universal table)
+		{"emdash", 0x0aa9, '\u2014', true},
+		{"leftdoublequote", 0x0ad2, '\u201c', true},
+		{"trademark", 0x0ac9, '\u2122', true},
+
+		// Box-drawing (from universal table)
+		{"horizconnector", 0x08a3, '\u2500', true},
+		{"vertconnector", 0x08a6, '\u2502', true},
+
+		// Dead keys (from universal table)
+		{"dead_grave", 0xfe50, '`', true},
+		{"dead_circumflex", 0xfe52, '^', true},
+		{"dead_tilde", 0xfe53, '~', true},
+
+		// Keypad (from universal table)
+		{"KP_Space", 0xff80, ' ', true},
+		{"KP_0", 0xffb0, '0', true},
+		{"KP_9", 0xffb9, '9', true},
+		{"KP_Multiply", 0xffaa, '*', true},
+		{"KP_Add", 0xffab, '+', true},
+		{"KP_Equal", 0xffbd, '=', true},
+
+		// Euro sign (from universal table)
+		{"EuroSign", 0x20ac, '\u20ac', true},
 
 		// Unicode keysyms (0x01000000 + codepoint)
 		{"unicode а", 0x01000430, 'а', true},
@@ -637,6 +702,13 @@ func TestKeysymToRune(t *testing.T) {
 		{"DEL (0x7f)", 0x7f, 0, false},                        // DEL is not printable
 		{"gap between Latin-1 ranges (0x80)", 0x80, 0, false}, // 0x80-0x9f not printable in Latin-1
 		{"gap (0x9f)", 0x9f, 0, false},
+		{"unknown keysym (0x9999)", 0x9999, 0, false}, // not in table, not Latin-1
+
+		// Binary search edge cases
+		{"first table entry (Aogonek)", 0x01a1, '\u0104', true},
+		{"last table entry (KP_Equal)", 0xffbd, '=', true},
+		{"just before first entry", 0x01a0, 0, false},
+		{"just after last entry", 0xffbe, 0, false}, // F1 keysym, non-printable
 	}
 
 	for _, tt := range tests {
@@ -658,41 +730,64 @@ func TestKeysymToRune(t *testing.T) {
 // isLetter: Cyrillic letter recognition
 // ---------------------------------------------------------------------------
 
-// TestIsLetter_Cyrillic tests that isLetter recognizes Cyrillic letters
-// for proper CapsLock handling. Current implementation only checks Latin a-z/A-Z.
-func TestIsLetter_Cyrillic(t *testing.T) {
+// TestIsLetter_MultiScript tests that isLetter recognizes letters from all scripts
+// supported by the universal keysym-to-Unicode table. Uses unicode.IsLetter under
+// the hood, so it works for any script, not just Latin and Cyrillic.
+func TestIsLetter_MultiScript(t *testing.T) {
 	tests := []struct {
 		name string
 		sym  Keysym
 		want bool
 	}{
-		// Latin letters (should still work)
+		// Latin letters
 		{"Latin a", Keysyma, true},
 		{"Latin Z", KeysymZ, true},
 
-		// Legacy Cyrillic lowercase — must be recognized as letters
+		// Legacy Cyrillic lowercase
 		{"Cyrillic а (0x6c1)", testKeysymCyrillicA, true},
 		{"Cyrillic ф (0x6c6)", testKeysymCyrillicEf, true},
 		{"Cyrillic ю (0x6c0)", testKeysymCyrillicYu, true},
 		{"Cyrillic я (0x6d1)", testKeysymCyrillicYa, true},
 		{"Cyrillic ё (0x6a3)", testKeysymCyrillicIoLo, true},
 
-		// Legacy Cyrillic uppercase — must be recognized as letters
+		// Legacy Cyrillic uppercase
 		{"Cyrillic А (0x6e1)", testKeysymCyrillicAUp, true},
 		{"Cyrillic Ф (0x6e6)", testKeysymCyrillicEfUp, true},
 		{"Cyrillic Ю (0x6e0)", testKeysymCyrillicYuUp, true},
 		{"Cyrillic Ё (0x6b3)", testKeysymCyrillicIO, true},
 
-		// Unicode Cyrillic keysyms — also letters
+		// Unicode Cyrillic keysyms
 		{"Unicode а (0x01000430)", 0x01000430, true},
 		{"Unicode Ф (0x01000424)", 0x01000424, true},
 		{"Unicode ё (0x01000451)", 0x01000451, true},
+
+		// Greek letters (new — via universal table)
+		{"Greek ALPHA (0x07c1)", 0x07c1, true},
+		{"Greek omega (0x07f9)", 0x07f9, true},
+
+		// Arabic letters (new — via universal table)
+		{"Arabic alef (0x05c7)", 0x05c7, true},
+		{"Arabic beh (0x05c8)", 0x05c8, true},
+
+		// Hebrew letters (new — via universal table)
+		{"Hebrew aleph (0x0ce0)", 0x0ce0, true},
+		{"Hebrew taw (0x0cfa)", 0x0cfa, true},
+
+		// Thai letters (new — via universal table)
+		{"Thai kokai (0x0da1)", 0x0da1, true},
+
+		// Latin extended letters (new — via universal table)
+		{"Aogonek (0x01a1)", 0x01a1, true},
+		{"scaron (0x01b9)", 0x01b9, true},
 
 		// Non-letters (must remain false)
 		{"digit 0", Keysym0, false},
 		{"space", KeysymSpace, false},
 		{"exclamation", KeysymExclam, false},
 		{"F1 key", KeysymF1, false},
+		{"infinity (0x08c2)", 0x08c2, false},    // mathematical symbol, not a letter
+		{"emdash (0x0aa9)", 0x0aa9, false},      // punctuation, not a letter
+		{"KP_Multiply (0xffaa)", 0xffaa, false}, // operator, not a letter
 	}
 
 	for _, tt := range tests {
@@ -702,6 +797,31 @@ func TestIsLetter_Cyrillic(t *testing.T) {
 				t.Errorf("isLetter(0x%04x): got %v, want %v", tt.sym, got, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Universal keysym-to-Unicode table invariants
+// ---------------------------------------------------------------------------
+
+// TestKeysymToUnicodeTable_Sorted verifies the table is sorted by keysym.
+// This is critical because KeysymToRune uses binary search.
+func TestKeysymToUnicodeTable_Sorted(t *testing.T) {
+	for i := 1; i < len(keysymToUnicode); i++ {
+		if keysymToUnicode[i][0] <= keysymToUnicode[i-1][0] {
+			t.Fatalf("keysymToUnicode not sorted at index %d: 0x%04x <= 0x%04x",
+				i, keysymToUnicode[i][0], keysymToUnicode[i-1][0])
+		}
+	}
+}
+
+// TestKeysymToUnicodeTable_EntryCount verifies the table has the expected
+// number of entries (828, matching GLFW/xkbcommon).
+func TestKeysymToUnicodeTable_EntryCount(t *testing.T) {
+	const want = 828
+	got := len(keysymToUnicode)
+	if got != want {
+		t.Errorf("keysymToUnicode has %d entries, want %d", got, want)
 	}
 }
 

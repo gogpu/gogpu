@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.6] - 2026-05-17
+
+### Changed
+
+- **Universal keysym-to-Unicode table** (ADR-034) -- replaced 70-entry hardcoded Cyrillic map with 828-entry public domain table (Markus G. Kuhn, GLFW/xkbcommon). Binary search, 3.3 KB. Covers ALL X11 scripts: Latin, Cyrillic, Arabic, Greek, Hebrew, Thai, Korean, Japanese, math, box-drawing, dead keys. `isLetter` now uses `unicode.IsLetter` instead of hardcoded ranges.
+
 ## [0.37.5] - 2026-05-17
 
 ### Fixed
