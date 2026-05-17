@@ -7,7 +7,7 @@ require (
 	github.com/go-webgpu/webgpu v0.4.3
 	github.com/gogpu/gpucontext v0.19.0
 	github.com/gogpu/gputypes v0.5.0
-	github.com/gogpu/wgpu v0.28.2
+	github.com/gogpu/wgpu v0.28.3
 	golang.org/x/sys v0.44.0
 )
 
