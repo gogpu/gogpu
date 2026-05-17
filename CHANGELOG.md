@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.1] - 2026-05-17
+
+### Fixed
+
+- **X11 Russian keyboard input** (#233, @unxed) -- `xkb_keymap_new_from_names(NULL)` loaded only system default layout ("us"). Now reads `_XKB_RULES_NAMES` property from X11 root window for actual RMLVO configuration (e.g., "us,ru,ru"). Zero new dependencies -- uses existing pure Go X11 protocol. Graceful fallback to system defaults if property missing.
+
 ## [0.37.0] - 2026-05-17
 
 ### Added

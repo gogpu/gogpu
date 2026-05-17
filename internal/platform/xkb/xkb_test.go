@@ -322,3 +322,23 @@ func TestKeyRepeatsNoSymbol(t *testing.T) {
 		t.Error("Handle.KeyRepeats(30) with nil symbol = true, want false")
 	}
 }
+
+// --- BUG-INPUT-004: SetKeymapFromRMLVO tests ---
+
+// TestSetKeymapFromRMLVO_NilHandle verifies error on nil handle.
+func TestSetKeymapFromRMLVO_NilHandle(t *testing.T) {
+	var h *Handle
+	err := h.SetKeymapFromRMLVO("evdev", "pc105", "us,ru", ",", "")
+	if err == nil {
+		t.Error("nil Handle.SetKeymapFromRMLVO() = nil, want error")
+	}
+}
+
+// TestSetKeymapFromRMLVO_NoFunction verifies error when symbol is not resolved.
+func TestSetKeymapFromRMLVO_NoFunction(t *testing.T) {
+	h := &Handle{} // fnKeymapNewFromNames is nil
+	err := h.SetKeymapFromRMLVO("evdev", "pc105", "us,ru", ",", "")
+	if err == nil {
+		t.Error("Handle.SetKeymapFromRMLVO() with nil symbol = nil, want error")
+	}
+}

@@ -209,6 +209,89 @@ func (h *Handle) SetKeymapFromFD(fd int, size uint32) error {
 	return nil
 }
 
+// SetKeymapFromRMLVO creates a keymap from explicit RMLVO configuration.
+// This is used on X11 to load the server's actual keymap (read from _XKB_RULES_NAMES
+// root window property) instead of system defaults. This ensures multi-layout configs
+// (e.g., "us,ru,ru") are loaded with all groups, not just the first one.
+func (h *Handle) SetKeymapFromRMLVO(rules, model, layout, variant, options string) error {
+	if h == nil {
+		return fmt.Errorf("xkbcommon: handle is nil")
+	}
+	if h.fnKeymapNewFromNames == nil {
+		return fmt.Errorf("xkbcommon: xkb_keymap_new_from_names not available")
+	}
+
+	// Destroy old keymap/state
+	h.destroyState()
+	h.destroyKeymap()
+
+	// Build null-terminated C strings.
+	// These slices MUST stay alive until after the FFI call returns
+	// (Go GC could collect them if no references remain).
+	rulesC := append([]byte(rules), 0)
+	modelC := append([]byte(model), 0)
+	layoutC := append([]byte(layout), 0)
+	variantC := append([]byte(variant), 0)
+	optionsC := append([]byte(options), 0)
+
+	// Build xkb_rule_names struct: 5 consecutive pointer-sized fields.
+	// struct xkb_rule_names { const char *rules, *model, *layout, *variant, *options; }
+	var rulesPtr, modelPtr, layoutPtr, variantPtr, optionsPtr uintptr
+	if rules != "" {
+		rulesPtr = uintptr(unsafe.Pointer(&rulesC[0]))
+	}
+	if model != "" {
+		modelPtr = uintptr(unsafe.Pointer(&modelC[0]))
+	}
+	if layout != "" {
+		layoutPtr = uintptr(unsafe.Pointer(&layoutC[0]))
+	}
+	if variant != "" {
+		variantPtr = uintptr(unsafe.Pointer(&variantC[0]))
+	}
+	if options != "" {
+		optionsPtr = uintptr(unsafe.Pointer(&optionsC[0]))
+	}
+
+	// xkb_rule_names struct in memory: 5 pointers
+	names := [5]uintptr{rulesPtr, modelPtr, layoutPtr, variantPtr, optionsPtr}
+	namesPtr := uintptr(unsafe.Pointer(&names[0]))
+
+	flags := XKBKeymapCompileNoFlags
+	var result uintptr
+	args := [3]unsafe.Pointer{
+		unsafe.Pointer(&h.context),
+		unsafe.Pointer(&namesPtr),
+		unsafe.Pointer(&flags),
+	}
+	_ = ffi.CallFunction(&h.cifKeymapNewFromNames, h.fnKeymapNewFromNames, unsafe.Pointer(&result), args[:])
+	if result == 0 {
+		return fmt.Errorf("xkbcommon: xkb_keymap_new_from_names returned NULL for layout %q", layout)
+	}
+	h.keymap = result
+
+	// Create state
+	state, err := h.stateNew(result)
+	if err != nil {
+		h.destroyKeymap()
+		return err
+	}
+	h.state = state
+
+	// Resolve modifier indices for the new keymap
+	h.resolveModsIndices()
+
+	// Keep references alive past FFI call (prevent premature GC).
+	_ = rulesC
+	_ = modelC
+	_ = layoutC
+	_ = variantC
+	_ = optionsC
+
+	slog.Debug("xkbcommon: keymap loaded from RMLVO", "layout", layout, "model", model, "options", options)
+	return nil
+}
+
 // SetKeymapFromNames creates a keymap from system default XKB configuration.
 // Calls xkb_keymap_new_from_names(context, NULL, 0) which reads RMLVO from:
 // - XKB_DEFAULT_* environment variables

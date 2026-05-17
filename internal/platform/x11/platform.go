@@ -389,20 +389,9 @@ func (p *Platform) Init(config Config) error {
 	}
 
 	// Load libxkbcommon for proper text input (AltGr, dead keys, multi-layout).
-	// Uses system default keymap via xkb_keymap_new_from_names(NULL).
+	// First try RMLVO from _XKB_RULES_NAMES, then system defaults.
 	// Non-fatal: falls back to manual KeycodeToKeysymGroup (no AltGr support).
-	xkbHandle, xkbcommonErr := xkbcommon.New()
-	if xkbcommonErr != nil {
-		logger().Info("xkbcommon not available for X11, AltGr may not work", "err", xkbcommonErr)
-	} else {
-		if namesErr := xkbHandle.SetKeymapFromNames(); namesErr != nil {
-			logger().Warn("xkbcommon: failed to load system keymap", "err", namesErr)
-			xkbHandle.Close()
-		} else {
-			p.xkbState = xkbHandle
-			logger().Info("xkbcommon enabled for X11 text input")
-		}
-	}
+	p.initXkbcommon()
 
 	// Initialize XInput2 for touch support (non-fatal)
 	xi, err := conn.InitXInput2()
@@ -644,6 +633,110 @@ func parseXftRGBA(resources string) gpucontext.SubpixelLayout {
 	}
 	// Xft.rgba not set — default to RGB (most common LCD layout).
 	return gpucontext.SubpixelRGB
+}
+
+// initXkbcommon loads libxkbcommon and creates a keymap.
+// First tries to read the X server's actual RMLVO configuration from
+// _XKB_RULES_NAMES root window property (BUG-INPUT-004: multi-layout support).
+// Falls back to xkb_keymap_new_from_names(NULL) which only loads "us".
+// Non-fatal: if xkbcommon is unavailable, keyboard falls back to manual keysym lookup.
+func (p *Platform) initXkbcommon() {
+	xkbHandle, xkbcommonErr := xkbcommon.New()
+	if xkbcommonErr != nil {
+		logger().Info("xkbcommon not available for X11, AltGr may not work", "err", xkbcommonErr)
+		return
+	}
+
+	// Try to load keymap from X server's actual configuration.
+	// Read _XKB_RULES_NAMES property from root window for RMLVO.
+	loaded := false
+	rules, model, layout, variant, options := p.readXKBRulesNames()
+	if layout != "" {
+		if err := xkbHandle.SetKeymapFromRMLVO(rules, model, layout, variant, options); err != nil {
+			logger().Warn("xkbcommon: RMLVO keymap failed, trying defaults", "err", err, "layout", layout)
+		} else {
+			loaded = true
+			logger().Info("xkbcommon: keymap loaded from _XKB_RULES_NAMES", "layout", layout)
+		}
+	}
+
+	// Fallback to system defaults if RMLVO not available
+	if !loaded {
+		if err := xkbHandle.SetKeymapFromNames(); err != nil {
+			logger().Warn("xkbcommon: failed to load system keymap", "err", err)
+			xkbHandle.Close()
+			return
+		}
+		logger().Info("xkbcommon: keymap loaded from system defaults")
+	}
+
+	p.xkbState = xkbHandle
+}
+
+// readXKBRulesNames reads the _XKB_RULES_NAMES property from the root window.
+// Returns RMLVO (rules, model, layout, variant, options).
+// The property contains 5 null-terminated strings concatenated:
+// "evdev\0pc105\0us,ru,ru\0,,phonetic\0grp:alt_shift_toggle\0"
+// If property is missing or empty, all returned strings are empty.
+func (p *Platform) readXKBRulesNames() (string, string, string, string, string) {
+	if p.conn == nil {
+		return "", "", "", "", ""
+	}
+
+	// Intern the _XKB_RULES_NAMES atom
+	atom, err := p.conn.InternAtom("_XKB_RULES_NAMES", true)
+	if err != nil || atom == AtomNone {
+		return "", "", "", "", ""
+	}
+
+	// Get root window
+	root := p.conn.RootWindow()
+	if root == 0 {
+		return "", "", "", "", ""
+	}
+
+	// Read property (type AnyPropertyType=0, up to 256 longs = 1024 bytes)
+	data, _, _, err := p.conn.GetProperty(root, atom, Atom(0), 0, 256, false)
+	if err != nil || len(data) == 0 {
+		return "", "", "", "", ""
+	}
+
+	// Parse 5 null-terminated strings
+	parts := splitNullTerminated(data, 5)
+	var rules, model, layout, variant, options string
+	if len(parts) >= 1 {
+		rules = parts[0]
+	}
+	if len(parts) >= 2 {
+		model = parts[1]
+	}
+	if len(parts) >= 3 {
+		layout = parts[2]
+	}
+	if len(parts) >= 4 {
+		variant = parts[3]
+	}
+	if len(parts) >= 5 {
+		options = parts[4]
+	}
+
+	return rules, model, layout, variant, options
+}
+
+// splitNullTerminated splits a byte slice by null bytes into up to maxParts strings.
+func splitNullTerminated(data []byte, maxParts int) []string {
+	var parts []string
+	start := 0
+	for i, b := range data {
+		if b == 0 {
+			parts = append(parts, string(data[start:i]))
+			start = i + 1
+			if len(parts) >= maxParts {
+				break
+			}
+		}
+	}
+	return parts
 }
 
 // PollEvents processes pending X11 events.

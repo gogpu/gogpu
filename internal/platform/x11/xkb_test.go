@@ -994,3 +994,84 @@ func TestXkbConstantsNotConfused(t *testing.T) {
 		t.Fatalf("XkbMapNotifyMask = 0x%04X, want 0x0002", XkbMapNotifyMask)
 	}
 }
+
+// --- Section 8: BUG-INPUT-004 — splitNullTerminated Tests ---
+
+func TestSplitNullTerminated(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		maxParts int
+		want     []string
+	}{
+		{
+			name:     "empty data",
+			data:     nil,
+			maxParts: 5,
+			want:     nil,
+		},
+		{
+			name:     "empty byte slice",
+			data:     []byte{},
+			maxParts: 5,
+			want:     nil,
+		},
+		{
+			name:     "5 parts typical RMLVO",
+			data:     []byte("evdev\x00pc105\x00us,ru,ru\x00,,phonetic\x00grp:alt_shift_toggle\x00"),
+			maxParts: 5,
+			want:     []string{"evdev", "pc105", "us,ru,ru", ",,phonetic", "grp:alt_shift_toggle"},
+		},
+		{
+			name:     "5 parts simple",
+			data:     []byte("evdev\x00pc105\x00us\x00\x00\x00"),
+			maxParts: 5,
+			want:     []string{"evdev", "pc105", "us", "", ""},
+		},
+		{
+			name:     "fewer parts than max",
+			data:     []byte("evdev\x00pc105\x00"),
+			maxParts: 5,
+			want:     []string{"evdev", "pc105"},
+		},
+		{
+			name:     "maxParts limits extraction",
+			data:     []byte("a\x00b\x00c\x00d\x00e\x00f\x00"),
+			maxParts: 3,
+			want:     []string{"a", "b", "c"},
+		},
+		{
+			name:     "single null byte",
+			data:     []byte{0},
+			maxParts: 5,
+			want:     []string{""},
+		},
+		{
+			name:     "no null terminator in data",
+			data:     []byte("evdev"),
+			maxParts: 5,
+			want:     nil,
+		},
+		{
+			name:     "trailing data after null",
+			data:     []byte("evdev\x00trailing"),
+			maxParts: 5,
+			want:     []string{"evdev"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitNullTerminated(tt.data, tt.maxParts)
+			if len(got) != len(tt.want) {
+				t.Fatalf("splitNullTerminated() returned %d parts, want %d\ngot:  %q\nwant: %q",
+					len(got), len(tt.want), got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("part[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
