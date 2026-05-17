@@ -63,6 +63,10 @@ type windowSurface struct {
 	// (lazy acquire pattern). Reset at frame boundary.
 	hasGPUWork bool
 
+	// presentLogCount tracks how many times HiDPI diagnostic logs have been
+	// emitted for this surface. Limited to avoid log spam even at Debug level.
+	presentLogCount int
+
 	// frameStarted tracks whether beginFrame was called this frame cycle.
 	// With lazy acquire, beginFrame is deferred until the first draw call.
 	// If OnDraw produces no GPU work, beginFrame is never called → no
@@ -390,6 +394,11 @@ func (ws *windowSurface) resize(width, height int, device *wgpu.Device, adapter 
 	// Save old dimensions in case Configure fails -- we must keep
 	// width/height consistent with the actual swapchain size.
 	oldWidth, oldHeight := ws.width, ws.height
+
+	slog.Debug("gogpu: surface resize",
+		"oldWidth", oldWidth, "oldHeight", oldHeight,
+		"newWidth", width, "newHeight", height,
+	)
 
 	// Note: width/height validated positive above
 	ws.width = uint32(width)   //nolint:gosec // G115: validated positive above
@@ -946,6 +955,17 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		return nil // No frame in progress
 	}
 	ws.hasGPUWork = true
+
+	// HiDPI diagnostic logging (first 3 frames per surface to avoid spam).
+	if ws.presentLogCount < 3 {
+		ws.presentLogCount++
+		slog.Debug("gogpu: drawTexturedQuad",
+			"quadW", opts.Width, "quadH", opts.Height,
+			"texW", tex.width, "texH", tex.height,
+			"surfaceW", ws.width, "surfaceH", ws.height,
+			"frame", ws.presentLogCount,
+		)
+	}
 
 	// Ensure pipeline is initialized (lazy init on first draw)
 	if !r.texQuadPipelineInited {

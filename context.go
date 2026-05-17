@@ -3,6 +3,7 @@ package gogpu
 import (
 	"fmt"
 	"image"
+	"log/slog"
 	"unsafe"
 
 	"github.com/gogpu/gogpu/gmath"
@@ -200,6 +201,11 @@ func (c *Context) PresentTexture(tex any) error {
 		return fmt.Errorf("gogpu: PresentTexture called with nil *Texture")
 	}
 	ws := c.activeSurface()
+	slog.Debug("gogpu: PresentTexture",
+		"texW", t.width, "texH", t.height,
+		"surfaceW", ws.width, "surfaceH", ws.height,
+		"scale", c.scaleFactor,
+	)
 	return c.renderer.drawTexturedQuad(t, DrawTextureOptions{
 		Width:  float32(ws.width),
 		Height: float32(ws.height),
