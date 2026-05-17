@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.2] - 2026-05-17
+
+### Added
+
+- **Diagnostic logging for presentation layer** (#247) -- `slog.Debug` in `PresentTexture` (texture+surface dims+scale), `drawTexturedQuad` (quad+texture dims, first 3 frames), and `resize` (old->new dimensions). For HiDPI remote debugging (gg#327).
+
 ## [0.37.1] - 2026-05-17
 
 ### Fixed

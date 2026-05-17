@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.37.2** | 2026-05-17 | **Diagnostic logging** (#247) — slog.Debug in PresentTexture/drawTexturedQuad/resize for HiDPI debugging |
 | **v0.37.1** | 2026-05-17 | **X11 Russian keyboard fix** (#233) — `_XKB_RULES_NAMES` root window property for multi-layout keymap (pure Go, zero deps) |
 | **v0.37.0** | 2026-05-17 | **ScrollPhase/IsMomentum** (#239, ADR-032) + **Wayland key repeat** (#240, ADR-033) + **X11 detectable auto-repeat** — gpucontext v0.19.0 |
 | **v0.36.2** | 2026-05-16 | **HiDPI logical sizing** (#237, ADR-030) + **Ring buffer event queue** (#238, ADR-031) — WithSize=logical, EventQueue[T] all platforms |
