@@ -2425,12 +2425,6 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Dispatch keyboard event
 		w.dispatchKeyEvent(key, mods, true)
 
-		// ESC to close (convenience)
-		if wParam == vkEscape {
-			w.shouldClose = true
-			p.queueEvent(Event{Type: EventClose, WindowID: w.id})
-		}
-
 		// For WM_SYSKEYDOWN: let DefWindowProc handle Alt+F4, Alt+Tab
 		// but suppress menu activation on Alt alone
 		if message == wmSysKeydown {
