@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.37.8** | 2026-05-17 | **deps:** wgpu v0.28.2 (swapchain extent diagnostics) |
 | **v0.37.7** | 2026-05-17 | **Windows ESC fix** (#254) -- removed hardcoded ESC=close, app decides |
 | **v0.37.6** | 2026-05-17 | **Universal keysym-to-Unicode** (ADR-034) -- 828-entry table replaces 70-entry Cyrillic, all X11 scripts |
 | **v0.37.5** | 2026-05-17 | **AltGr/Level3 fix** (#233) -- XkbModifierStateMask subscription, guillemets work |
