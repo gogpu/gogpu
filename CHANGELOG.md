@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] - 2026-05-19
+
+### Changed
+
+- **Wayland key repeat: timerfd replaces goroutine** (#240, @celer) -- Linux `timerfd_create` integrated into `unix.Poll` set (GLFW/winit pattern). Eliminates GUI freeze during key repeat (goroutine never called WakeUp). Eliminates xkb.Handle data race (all calls now on main thread). Kernel-level timer precision. Zero goroutines.
+
+## [0.38.0] - 2026-05-19
+
+### Changed
+
+- **Wayland key repeat: timerfd replaces goroutine** (#240, @celer) -- Linux `timerfd_create` integrated into `unix.Poll` set (GLFW/winit pattern). Fixes GUI freeze during key repeat (goroutine never called WakeUp, main thread blocked). Also eliminates xkb.Handle data race. Zero goroutines, kernel-level timer precision. Repeat events generated on main thread.
+
 ## [0.37.9] - 2026-05-17
 
 ### Changed

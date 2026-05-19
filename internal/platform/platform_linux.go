@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -76,12 +77,16 @@ type waylandWindow struct {
 	// Key repeat state (Wayland client-side timer, ADR-033).
 	// Wayland compositors send rate/delay via wl_keyboard.repeat_info
 	// but do NOT send synthetic key events. Client must implement timer.
-	repeatMu    sync.Mutex
-	repeatKey   uint32        // evdev keycode of currently repeating key (0 = none)
-	repeatRate  int32         // keys per second (from compositor)
-	repeatDelay int32         // milliseconds before first repeat (from compositor)
-	repeatTimer *time.Timer   // initial delay timer
-	repeatStop  chan struct{} // signal to stop repeat goroutine
+	//
+	// BUG-INPUT-006: Uses timerfd integrated into unix.Poll (GLFW/winit pattern).
+	// All repeat events generated on main thread. Zero goroutines, zero data races.
+	repeatMu     sync.Mutex
+	repeatKey    uint32               // evdev keycode of currently repeating key (0 = none)
+	repeatRate   int32                // keys per second (from compositor)
+	repeatDelay  int32                // milliseconds before first repeat (from compositor)
+	repeatFd     int                  // timerfd for key repeat (-1 = not created)
+	repeatGPUKey gpucontext.Key       // stored key for event generation
+	repeatMods   gpucontext.Modifiers // stored modifiers for event generation
 
 	callbackMu sync.RWMutex
 }
@@ -136,6 +141,7 @@ func newPlatformManager() PlatformManager {
 			primary: &waylandWindow{
 				startTime: time.Now(),
 				events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
+				repeatFd:  -1, // not created yet; created in Init()
 			},
 		}
 	}
@@ -155,6 +161,7 @@ func newPlatformManager() PlatformManager {
 		primary: &waylandWindow{
 			startTime: time.Now(),
 			events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
+			repeatFd:  -1, // not created yet; created in Init()
 		},
 	}
 }
@@ -496,6 +503,17 @@ func (p *waylandPlatform) Init() error {
 	// Create wakeup pipe for WakeUp → WaitEvents unblocking
 	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
 		return fmt.Errorf("wayland: wakeup pipe: %w", err)
+	}
+
+	// Create timerfd for key repeat (BUG-INPUT-006: GLFW/winit pattern).
+	// Integrated into unix.Poll — repeat events generated on main thread,
+	// zero goroutines, zero data races.
+	fd, err := unix.TimerfdCreate(unix.CLOCK_MONOTONIC, unix.TFD_NONBLOCK|unix.TFD_CLOEXEC)
+	if err != nil {
+		logger().Warn("timerfd not available, key repeat may be degraded", "err", err)
+		// p.primary.repeatFd stays -1 from constructor
+	} else {
+		p.primary.repeatFd = fd
 	}
 
 	return nil
@@ -1244,8 +1262,9 @@ func (w *waylandWindow) queueEvent(event Event) {
 }
 
 // startKeyRepeat begins client-side key repeat for the given key (ADR-033).
-// Wayland compositors send repeat_info (rate/delay) but do NOT generate
-// synthetic key events -- the client must implement its own timer.
+// BUG-INPUT-006: Arms a timerfd that is polled by WaitEvents/PollEvents.
+// All repeat events are generated on the main thread — zero goroutines,
+// zero data races on xkb.Handle or event queue.
 func (w *waylandWindow) startKeyRepeat(evdevKey uint32, gpuKey gpucontext.Key, mods gpucontext.Modifiers) {
 	w.repeatMu.Lock()
 	defer w.repeatMu.Unlock()
@@ -1267,30 +1286,21 @@ func (w *waylandWindow) startKeyRepeat(evdevKey uint32, gpuKey gpucontext.Key, m
 	}
 
 	w.repeatKey = evdevKey
-	w.repeatStop = make(chan struct{})
-	stop := w.repeatStop
+	w.repeatGPUKey = gpuKey
+	w.repeatMods = mods
 
-	interval := time.Second / time.Duration(rate)
-
-	// Start initial delay timer, then repeat at rate
-	w.repeatTimer = time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				// Generate repeat key event
-				w.dispatchKeyEvent(gpuKey, mods, true)
-				// Generate repeat char event (printable keys only)
-				if r := w.keycodeToRune(evdevKey); r >= 32 {
-					w.queueEvent(Event{Type: EventChar, Char: r})
-				}
-			}
+	// Arm timerfd: initial delay, then periodic at rate (BUG-INPUT-006).
+	if w.repeatFd >= 0 {
+		delayNs := int64(delay) * 1e6 // ms to ns
+		intervalNs := int64(time.Second) / int64(rate)
+		spec := unix.ItimerSpec{
+			Value:    unix.NsecToTimespec(delayNs),
+			Interval: unix.NsecToTimespec(intervalNs),
 		}
-	})
+		if err := unix.TimerfdSettime(w.repeatFd, 0, &spec, nil); err != nil {
+			logger().Warn("timerfd arm failed", "err", err)
+		}
+	}
 }
 
 // stopKeyRepeat stops key repeat if the released key matches the repeating key.
@@ -1310,18 +1320,64 @@ func (w *waylandWindow) cancelAllKeyRepeat() {
 	w.cancelRepeatLocked()
 }
 
-// cancelRepeatLocked stops the repeat timer and goroutine.
+// cancelRepeatLocked disarms the timerfd and clears repeat state.
 // Caller must hold w.repeatMu.
 func (w *waylandWindow) cancelRepeatLocked() {
-	if w.repeatStop != nil {
-		close(w.repeatStop)
-		w.repeatStop = nil
-	}
-	if w.repeatTimer != nil {
-		w.repeatTimer.Stop()
-		w.repeatTimer = nil
-	}
 	w.repeatKey = 0
+	w.repeatGPUKey = 0
+	w.repeatMods = 0
+	// Disarm timerfd (zero spec = stop timer).
+	if w.repeatFd >= 0 {
+		var zero unix.ItimerSpec
+		if err := unix.TimerfdSettime(w.repeatFd, 0, &zero, nil); err != nil {
+			logger().Warn("timerfd disarm failed", "err", err)
+		}
+	}
+}
+
+// processRepeatTimer reads the timerfd and generates key repeat events.
+// Called on the main thread from PollEvents — zero data races (BUG-INPUT-006).
+//
+// The timerfd returns a uint64 count of expirations since last read.
+// We generate one key-down + optional char event per expiration, capped at
+// maxRepeatPerPoll to prevent event flood if the app was slow to poll.
+func (w *waylandWindow) processRepeatTimer() {
+	w.repeatMu.Lock()
+	fd := w.repeatFd
+	evdevKey := w.repeatKey
+	gpuKey := w.repeatGPUKey
+	mods := w.repeatMods
+	w.repeatMu.Unlock()
+
+	if fd < 0 || evdevKey == 0 {
+		return
+	}
+
+	var buf [8]byte
+	n, err := unix.Read(fd, buf[:])
+	if n != 8 || err != nil {
+		return // Timer not fired or EAGAIN (non-blocking)
+	}
+
+	repeats := binary.LittleEndian.Uint64(buf[:])
+	if repeats == 0 {
+		return
+	}
+
+	// Cap repeats per poll cycle to prevent event flood when the app
+	// was slow to poll (e.g., long frame). 10 = ~330ms at 30 keys/sec.
+	const maxRepeatPerPoll = 10
+	if repeats > maxRepeatPerPoll {
+		repeats = maxRepeatPerPoll
+	}
+
+	// Generate repeat events on main thread — xkb access is safe here.
+	for range repeats {
+		w.dispatchKeyEvent(gpuKey, mods, true)
+		if r := w.keycodeToRune(evdevKey); r >= 32 {
+			w.queueEvent(Event{Type: EventChar, Char: r})
+		}
+	}
 }
 
 // evdevModsToModifiers converts evdev modifier bitmasks to gpucontext.Modifiers.
@@ -1994,6 +2050,16 @@ func (p *waylandPlatform) PollEvents() Event {
 		return e
 	}
 
+	// BUG-INPUT-006: Process timerfd repeat events on main thread.
+	// This happens BEFORE Wayland dispatch so repeat events are queued
+	// alongside real keyboard events in natural order.
+	w.processRepeatTimer()
+
+	// Check if repeat generated events.
+	if e, ok := w.events.Pop(); ok {
+		return e
+	}
+
 	// Dispatch all pending events on the C display (single connection).
 	// Callbacks will queue events via queueEvent().
 	if p.libwl != nil {
@@ -2052,6 +2118,17 @@ func (p *waylandPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Cancel any active key repeat and close timerfd (BUG-INPUT-006)
+	if p.primary != nil {
+		p.primary.cancelAllKeyRepeat()
+		p.primary.repeatMu.Lock()
+		if p.primary.repeatFd >= 0 {
+			_ = unix.Close(p.primary.repeatFd)
+			p.primary.repeatFd = -1
+		}
+		p.primary.repeatMu.Unlock()
+	}
+
 	// Close xkbcommon state (libxkbcommon objects)
 	if p.primary != nil && p.primary.xkb != nil {
 		p.primary.xkb.Close()
@@ -2089,7 +2166,9 @@ func (p *waylandPlatform) InSizeMove() bool {
 func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}
 
 // WaitEvents blocks until at least one OS event is available.
-// Uses unix.Poll on the C display fd and a wakeup pipe to block with 0% CPU.
+// Uses unix.Poll on the C display fd, wakeup pipe, and timerfd (BUG-INPUT-006)
+// to block with 0% CPU. The timerfd fires when a key repeat is due, unblocking
+// Poll so PollEvents can generate repeat events on the main thread.
 func (p *waylandPlatform) WaitEvents() {
 	if p.libwl == nil {
 		return
@@ -2103,7 +2182,22 @@ func (p *waylandPlatform) WaitEvents() {
 		{Fd: int32(dispFd), Events: unix.POLLIN | unix.POLLERR},
 		{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN},
 	}
-	// Block indefinitely until an event arrives or WakeUp is called.
+
+	// BUG-INPUT-006: Add timerfd to poll set when a key is actively repeating.
+	// This makes unix.Poll wake up when the repeat timer fires instead of
+	// requiring a goroutine + WakeUp() call.
+	w := p.primary
+	w.repeatMu.Lock()
+	repeatFd := w.repeatFd
+	hasRepeat := w.repeatKey != 0
+	w.repeatMu.Unlock()
+
+	if repeatFd >= 0 && hasRepeat {
+		fds = append(fds, unix.PollFd{Fd: int32(repeatFd), Events: unix.POLLIN})
+	}
+
+	// Block indefinitely until an event arrives, WakeUp is called,
+	// or the repeat timer fires.
 	_, _ = unix.Poll(fds, -1)
 
 	// Drain the wakeup pipe so it is ready for the next WakeUp call.

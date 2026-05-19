@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.38.0** | 2026-05-19 | **timerfd key repeat** (#240) -- goroutine→timerfd in Poll set, fixes GUI freeze + xkb data race |
 | **v0.37.9** | 2026-05-17 | **deps:** wgpu v0.28.3 |
 | **v0.37.8** | 2026-05-17 | **deps:** wgpu v0.28.2 (swapchain extent diagnostics) |
 | **v0.37.7** | 2026-05-17 | **Windows ESC fix** (#254) -- removed hardcoded ESC=close, app decides |
