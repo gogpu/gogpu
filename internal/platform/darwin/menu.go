@@ -3,24 +3,29 @@
 package darwin
 
 import (
+	"sync"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
-	"github.com/go-webgpu/goffi/types"
 )
 
 // Menu-related selectors (initialized lazily).
 var menuSels struct {
-	initWithTitle               SEL
-	addItem                     SEL
-	setSubmenu                  SEL
-	setMainMenu                 SEL
-	separatorItem               SEL
-	setKeyEquivalentModMask     SEL
-	setServicesMenu             SEL
-	initWithTitleActionKeyEquiv SEL
-	addItemWithTitleActionKey   SEL
-	setWindowsMenu              SEL
+	initWithTitle                SEL
+	addItem                      SEL
+	setSubmenu                   SEL
+	setMainMenu                  SEL
+	separatorItem                SEL
+	setKeyEquivalentModMask      SEL
+	setServicesMenu              SEL
+	initWithTitleActionKeyEquiv  SEL
+	addItemWithTitleActionKey    SEL
+	setWindowsMenu               SEL
+	orderFrontStandardAboutPanel SEL
+	orderFrontPreferencesPanel   SEL
+	performClose                 SEL
+	toggleFullScreen             SEL
+	arrangeInFront               SEL
 }
 
 func initMenuSelectors() {
@@ -34,6 +39,11 @@ func initMenuSelectors() {
 	menuSels.initWithTitleActionKeyEquiv = RegisterSelector("initWithTitle:action:keyEquivalent:")
 	menuSels.addItemWithTitleActionKey = RegisterSelector("addItemWithTitle:action:keyEquivalent:")
 	menuSels.setWindowsMenu = RegisterSelector("setWindowsMenu:")
+	menuSels.orderFrontStandardAboutPanel = RegisterSelector("orderFrontStandardAboutPanel:")
+	menuSels.orderFrontPreferencesPanel = RegisterSelector("orderFrontPreferencesPanel:")
+	menuSels.performClose = RegisterSelector("performClose:")
+	menuSels.toggleFullScreen = RegisterSelector("toggleFullScreen:")
+	menuSels.arrangeInFront = RegisterSelector("arrangeInFront:")
 }
 
 // createMenuBar creates the standard macOS application menu bar.
@@ -56,6 +66,35 @@ func (a *Application) createMenuBar(appName string) {
 		return
 	}
 
+	// Build and add App Menu
+	appMenu := a.createAppMenu(appName, nsMenuClass, nsMenuItemClass)
+	if !appMenu.IsNil() {
+		appMenuItem := ID(nsMenuItemClass).Send(selectors.alloc)
+		appMenuItem = appMenuItem.Send(selectors.init)
+		if !appMenuItem.IsNil() {
+			menuBar.SendPtr(menuSels.addItem, appMenuItem.Ptr())
+			appMenuItem.SendPtr(menuSels.setSubmenu, appMenu.Ptr())
+		}
+	}
+
+	// Build and add Window Menu
+	windowMenu := a.createWindowMenu(nsMenuClass, nsMenuItemClass)
+	if !windowMenu.IsNil() {
+		windowMenuItem := ID(nsMenuItemClass).Send(selectors.alloc)
+		windowMenuItem = windowMenuItem.Send(selectors.init)
+		if !windowMenuItem.IsNil() {
+			menuBar.SendPtr(menuSels.addItem, windowMenuItem.Ptr())
+			windowMenuItem.SendPtr(menuSels.setSubmenu, windowMenu.Ptr())
+		}
+	}
+
+	// Set as main menu + register window menu for automatic management
+	a.nsApp.SendPtr(menuSels.setMainMenu, menuBar.Ptr())
+	a.nsApp.SendPtr(menuSels.setWindowsMenu, windowMenu.Ptr())
+}
+
+// createAppMenu builds the application (App) menu with standard items.
+func (a *Application) createAppMenu(appName string, nsMenuClass, nsMenuItemClass Class) ID {
 	// === App Menu ===
 	appMenu := ID(nsMenuClass).Send(selectors.alloc)
 	appMenuTitle := NewNSString(appName)
@@ -63,6 +102,45 @@ func (a *Application) createMenuBar(appName string) {
 		appMenu = appMenu.SendPtr(menuSels.initWithTitle, appMenuTitle.ID().Ptr())
 	} else {
 		appMenu = appMenu.Send(selectors.init)
+	}
+
+	// About {appName}
+	aboutTitle := NewNSString("About " + appName)
+	if aboutTitle != nil {
+		item := createMenuItem(nsMenuItemClass, aboutTitle.ID(), menuSels.orderFrontStandardAboutPanel, "")
+		if !item.IsNil() {
+			appMenu.SendPtr(menuSels.addItem, item.Ptr())
+		}
+	}
+
+	// Separator after About
+	sepAbout := ID(nsMenuItemClass).Send(menuSels.separatorItem)
+	if !sepAbout.IsNil() {
+		appMenu.SendPtr(menuSels.addItem, sepAbout.Ptr())
+	}
+
+	// Preferences… (Cmd+,)
+	prefsTitle := NewNSString("Preferences…")
+	if prefsTitle != nil {
+		addMenuItem(nsMenuItemClass, appMenu, prefsTitle.ID(), menuSels.orderFrontPreferencesPanel, ",")
+	}
+
+	// Separator before Services
+	sepPrefs := ID(nsMenuItemClass).Send(menuSels.separatorItem)
+	if !sepPrefs.IsNil() {
+		appMenu.SendPtr(menuSels.addItem, sepPrefs.Ptr())
+	}
+
+	// Services submenu – filled by the system automatically.
+	servicesMenu := ID(nsMenuClass).Send(selectors.alloc).Send(selectors.init)
+	if !servicesMenu.IsNil() {
+		a.nsApp.SendPtr(menuSels.setServicesMenu, servicesMenu.Ptr())
+	}
+
+	// Separator after Services
+	sepServices := ID(nsMenuItemClass).Send(menuSels.separatorItem)
+	if !sepServices.IsNil() {
+		appMenu.SendPtr(menuSels.addItem, sepServices.Ptr())
 	}
 
 	// "Hide {appName}" — Cmd+H
@@ -100,14 +178,11 @@ func (a *Application) createMenuBar(appName string) {
 		addMenuItem(nsMenuItemClass, appMenu, quitTitle.ID(), selectors.terminate, "q")
 	}
 
-	// Add app menu to menu bar
-	appMenuItem := ID(nsMenuItemClass).Send(selectors.alloc)
-	appMenuItem = appMenuItem.Send(selectors.init)
-	if !appMenuItem.IsNil() {
-		menuBar.SendPtr(menuSels.addItem, appMenuItem.Ptr())
-		appMenuItem.SendPtr(menuSels.setSubmenu, appMenu.Ptr())
-	}
+	return appMenu
+}
 
+// createWindowMenu builds the Window menu with standard items.
+func (a *Application) createWindowMenu(nsMenuClass, nsMenuItemClass Class) ID {
 	// === Window Menu ===
 	windowMenu := ID(nsMenuClass).Send(selectors.alloc)
 	windowTitle := NewNSString("Window")
@@ -129,21 +204,40 @@ func (a *Application) createMenuBar(appName string) {
 		addMenuItem(nsMenuItemClass, windowMenu, zoomTitle.ID(), RegisterSelector("performZoom:"), "")
 	}
 
-	// Add window menu to menu bar
-	windowMenuItem := ID(nsMenuItemClass).Send(selectors.alloc)
-	windowMenuItem = windowMenuItem.Send(selectors.init)
-	if !windowMenuItem.IsNil() {
-		menuBar.SendPtr(menuSels.addItem, windowMenuItem.Ptr())
-		windowMenuItem.SendPtr(menuSels.setSubmenu, windowMenu.Ptr())
+	// Separator before Close/Full Screen/Bring All
+	sepWindow := ID(nsMenuItemClass).Send(menuSels.separatorItem)
+	if !sepWindow.IsNil() {
+		windowMenu.SendPtr(menuSels.addItem, sepWindow.Ptr())
 	}
 
-	// Set as main menu + register window menu for automatic management
-	a.nsApp.SendPtr(menuSels.setMainMenu, menuBar.Ptr())
-	a.nsApp.SendPtr(menuSels.setWindowsMenu, windowMenu.Ptr())
+	// Close (Cmd+W)
+	closeTitle := NewNSString("Close")
+	if closeTitle != nil {
+		addMenuItem(nsMenuItemClass, windowMenu, closeTitle.ID(), menuSels.performClose, "w")
+	}
+
+	// Full Screen (Ctrl+Cmd+F)
+	fullScrTitle := NewNSString("Full Screen")
+	if fullScrTitle != nil {
+		item := createMenuItem(nsMenuItemClass, fullScrTitle.ID(), menuSels.toggleFullScreen, "f")
+		if !item.IsNil() {
+			item.SendInt(menuSels.setKeyEquivalentModMask,
+				int64(NSEventModifierFlagCommand|NSEventModifierFlagControl))
+			windowMenu.SendPtr(menuSels.addItem, item.Ptr())
+		}
+	}
+
+	// Bring All to Front
+	bringTitle := NewNSString("Bring All to Front")
+	if bringTitle != nil {
+		addMenuItem(nsMenuItemClass, windowMenu, bringTitle.ID(), menuSels.arrangeInFront, "")
+	}
+
+	return windowMenu
 }
 
 // createMenuItem creates an NSMenuItem with title, action, and key equivalent.
-// Uses objc_msgSend with 3 pointer args for initWithTitle:action:keyEquivalent:.
+// Uses Send5Ptr (pre-cached CIF) for maximum performance.
 func createMenuItem(nsMenuItemClass Class, title ID, action SEL, keyEquiv string) ID {
 	item := ID(nsMenuItemClass).Send(selectors.alloc)
 	if item.IsNil() {
@@ -161,7 +255,8 @@ func createMenuItem(nsMenuItemClass Class, title ID, action SEL, keyEquiv string
 		}
 	}
 
-	return MsgSend3Ptr(item, menuSels.initWithTitleActionKeyEquiv, title.Ptr(), uintptr(action), keyPtr)
+	// initWithTitle:action:keyEquivalent: takes three pointer arguments.
+	return item.Send5Ptr(menuSels.initWithTitleActionKeyEquiv, title.Ptr(), uintptr(action), keyPtr)
 }
 
 // addMenuItem is a convenience that creates and adds a menu item in one step.
@@ -172,42 +267,170 @@ func addMenuItem(nsMenuItemClass Class, menu ID, title ID, action SEL, keyEquiv 
 	}
 }
 
-// MsgSend3Ptr calls objc_msgSend with self, sel, and 3 pointer arguments.
-func MsgSend3Ptr(id ID, sel SEL, arg0, arg1, arg2 uintptr) ID {
+var appDelegateClassOnce sync.Once
+
+func ensureAppDelegate() {
+	appDelegateClassOnce.Do(func() {
+		if err := initRuntime(); err != nil {
+			return
+		}
+		nsObjectClass := GetClass("NSObject")
+		cls := AllocateClassPair(nsObjectClass, "GoGPUAppDelegate")
+		if cls == 0 {
+			return
+		}
+		handleMenuItemIMP := ffi.NewCallback(func(self, sel, sender uintptr) uintptr {
+			fn := getMenuItemAction(ID(sender))
+			if fn != nil {
+				fn()
+			}
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("handleMenuItem:"), handleMenuItemIMP, "v@:@")
+		RegisterClassPair(cls)
+
+		alloc := ID(cls).Send(RegisterSelector("alloc"))
+		delegate := alloc.Send(RegisterSelector("init"))
+		nsApp := GetClass("NSApplication").Send(RegisterSelector("sharedApplication"))
+		nsApp.SendPtr(RegisterSelector("setDelegate:"), delegate.Ptr())
+	})
+}
+
+var menuItemActionKey = "gogpu.menuItem.action"
+
+func setMenuItemAction(item ID, action func()) {
+	SetAssociatedObject(item, unsafe.Pointer(&menuItemActionKey), unsafe.Pointer(&action), ObjcAssociationAssign)
+}
+
+func getMenuItemAction(item ID) func() {
+	ptr := GetAssociatedObject(item, unsafe.Pointer(&menuItemActionKey))
+	if ptr == nil {
+		return nil
+	}
+	return *(*func())(ptr)
+}
+
+// NewMainMenu creates an empty NSMenu, sets it as the main menu of NSApp,
+// and returns its ID. Returns 0 on failure.
+func NewMainMenu() ID {
 	if err := initRuntime(); err != nil {
 		return 0
 	}
+	ensureAppDelegate()
 
-	cif := &types.CallInterface{}
-	if err := ffi.PrepareCallInterface(cif, types.DefaultCall,
-		types.PointerTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // self
-			types.PointerTypeDescriptor, // _cmd
-			types.PointerTypeDescriptor, // arg0
-			types.PointerTypeDescriptor, // arg1
-			types.PointerTypeDescriptor, // arg2
-		},
-	); err != nil {
+	nsMenuClass := GetClass("NSMenu")
+	alloc := ID(nsMenuClass).Send(RegisterSelector("alloc"))
+	if alloc.IsNil() {
 		return 0
 	}
 
-	self := uintptr(id)
-	cmd := uintptr(sel)
-
-	var result uintptr
-	if err := ffi.CallFunction(cif,
-		objcRT.objcMsgSend,
-		unsafe.Pointer(&result),
-		[]unsafe.Pointer{
-			unsafe.Pointer(&self),
-			unsafe.Pointer(&cmd),
-			unsafe.Pointer(&arg0),
-			unsafe.Pointer(&arg1),
-			unsafe.Pointer(&arg2),
-		},
-	); err != nil {
+	titleNS := createNSString("")
+	if titleNS == 0 {
 		return 0
 	}
-	return ID(result)
+	mainMenu := alloc.SendPtr(RegisterSelector("initWithTitle:"), uintptr(titleNS))
+	if mainMenu.IsNil() {
+		return 0
+	}
+
+	nsApp := GetClass("NSApplication").Send(RegisterSelector("sharedApplication"))
+	if nsApp.IsNil() {
+		return 0
+	}
+
+	nsApp.SendPtr(menuSels.setMainMenu, mainMenu.Ptr())
+
+	return mainMenu
+}
+
+// AddSeparatorItem adds a separator to the given menu.
+func AddSeparatorItem(menu ID) {
+	if menu.IsNil() {
+		return
+	}
+	sep := GetClass("NSMenuItem").Send(RegisterSelector("separatorItem"))
+	menu.SendPtr(menuSels.addItem, sep.Ptr())
+}
+
+// AddMenuItemWithCallback adds a menu item that executes the provided Go function
+// when selected. keyEquivalent can be "" for no shortcut.
+func AddMenuItemWithCallback(menu ID, title string, action func(), keyEquivalent string) ID {
+	if menu.IsNil() {
+		return 0
+	}
+	ensureAppDelegate()
+
+	titleNS := createNSString(title)
+	keyNS := createNSString(keyEquivalent)
+
+	itemClass := GetClass("NSMenuItem")
+	alloc := itemClass.Send(RegisterSelector("alloc"))
+	selInit := RegisterSelector("initWithTitle:action:keyEquivalent:")
+	item := alloc.Send5Ptr(selInit,
+		uintptr(titleNS),
+		uintptr(RegisterSelector("handleMenuItem:")),
+		uintptr(keyNS),
+	)
+	if item.IsNil() {
+		return 0
+	}
+	setMenuItemAction(item, action)
+	menu.SendPtr(menuSels.addItem, item.Ptr())
+	return item
+}
+
+// createNSString is a helper to create an NSString from a Go string.
+func createNSString(s string) ID {
+	ns := NewNSString(s)
+	if ns == nil {
+		return 0
+	}
+	return ns.ID()
+}
+
+// NewMenuWithTitle creates a new NSMenu with the specified title.
+func NewMenuWithTitle(title string) ID {
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+	nsMenuClass := GetClass("NSMenu")
+	alloc := ID(nsMenuClass).Send(RegisterSelector("alloc"))
+	if alloc.IsNil() {
+		return 0
+	}
+	titleNS := createNSString(title)
+	if titleNS == 0 {
+		return 0
+	}
+	return alloc.SendPtr(RegisterSelector("initWithTitle:"), uintptr(titleNS))
+}
+
+// NewMenuItemWithSubmenu creates an NSMenuItem with a title and an attached submenu.
+func NewMenuItemWithSubmenu(title string, submenu ID) ID {
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+	itemClass := GetClass("NSMenuItem")
+	alloc := ID(itemClass).Send(RegisterSelector("alloc"))
+	if alloc.IsNil() {
+		return 0
+	}
+	titleNS := createNSString(title)
+	if titleNS == 0 {
+		return 0
+	}
+	keyNS := createNSString("")
+	if keyNS == 0 {
+		return 0
+	}
+	item := alloc.Send5Ptr(RegisterSelector("initWithTitle:action:keyEquivalent:"),
+		uintptr(titleNS),
+		0,
+		uintptr(keyNS),
+	)
+	if item.IsNil() {
+		return 0
+	}
+	item.SendPtr(RegisterSelector("setSubmenu:"), submenu.Ptr())
+	return item
 }

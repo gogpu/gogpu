@@ -26,6 +26,7 @@ type Application struct {
 	initialized     bool
 	running         bool
 	shouldTerminate bool
+	appName         string
 }
 
 // global application instance
@@ -73,7 +74,10 @@ func (a *Application) Init() error {
 	a.nsApp.SendInt(selectors.setActivationPolicy, int64(NSApplicationActivationPolicyRegular))
 
 	// Create default application menu (ADR-016: Cmd+Q, Cmd+H, Cmd+M).
-	a.createMenuBar("GoGPU")
+	if a.appName == "" {
+		a.appName = "GoGPU"
+	}
+	a.createMenuBar(a.appName)
 
 	// Finish launching (required for event processing)
 	a.nsApp.Send(selectors.finishLaunching)
@@ -83,6 +87,14 @@ func (a *Application) Init() error {
 
 	a.initialized = true
 	return nil
+}
+
+// SetAppName sets the name of the application that will
+// be displayed in the About, Quit and other menus.
+func (a *Application) SetAppName(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.appName = name
 }
 
 // Terminate requests application termination.

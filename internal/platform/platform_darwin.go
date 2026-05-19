@@ -59,6 +59,10 @@ type darwinPlatform struct {
 	primary *darwinWindow
 
 	windows []*darwinWindow
+
+	// pending menu set before Init() was called
+	pendingMenu []MenuItem
+	hasPending  bool
 }
 
 // newPlatformManager returns a PlatformManager for macOS.
@@ -74,7 +78,16 @@ func (p *darwinPlatform) Init() error {
 	defer p.mu.Unlock()
 
 	p.app = darwin.GetApplication()
-	return p.app.Init()
+	if err := p.app.Init(); err != nil {
+		return err
+	}
+
+	if p.hasPending {
+		p.applyMenu(p.pendingMenu)
+		p.hasPending = false
+	}
+
+	return nil
 }
 
 // CreateWindow creates a macOS window with the given configuration.
@@ -1299,6 +1312,147 @@ func (p *darwinPlatform) FontScale() float32 { return 1.0 }
 // All modern macOS versions use grayscale AA only.
 func (p *darwinPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
+}
+
+// SetApplicationMenu replaces the native application menu with the provided items.
+// On macOS this replaces the current NSMenu. On platforms that don't support
+// native menus the call is silently ignored (the interface is optional).
+//
+// If the NSApplication has already been initialized, the menu is applied immediately.
+// Otherwise the items are stored and applied during Init() — this covers the common
+// pattern of calling SetMenu before Run().
+//
+// Thread-safe: acquires the platform mutex.
+func (p *darwinPlatform) SetApplicationMenu(items []MenuItem) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.app != nil && p.app.IsInitialized() {
+		p.applyMenu(items)
+		return
+	}
+
+	// Still before Init – store for later
+	p.pendingMenu = items
+	p.hasPending = true
+}
+
+// applyMenu does the real work when NSApp is ready.
+// It creates a new empty NSMenu, installs it as the main menu, and populates
+// it with the given items. Separators are created via NSMenuItem.separatorItem,
+// regular items via initWithTitle:action:keyEquivalent: and linked to their
+// Go callback through the application delegate (handleMenuItem:).
+//
+// Must only be called after NSApplication has been initialized.
+func (p *darwinPlatform) applyMenu(items []MenuItem) {
+	nsApp := p.app.NSApp()
+	if nsApp.IsNil() {
+		return
+	}
+	mainMenu := nsApp.Send(darwin.RegisterSelector("mainMenu"))
+	if mainMenu.IsNil() {
+		return
+	}
+
+	appleMenuItem := mainMenu.Send(darwin.RegisterSelector("itemAtIndex:"))
+
+	mainMenu.Send(darwin.RegisterSelector("removeAllItems"))
+
+	if !appleMenuItem.IsNil() {
+		mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), appleMenuItem.Ptr())
+	}
+
+	// Add custom items as separate menu items.
+	for _, item := range items {
+		if item.Separator {
+			continue
+		}
+
+		submenu := darwin.NewMenuWithTitle(item.Title)
+		if submenu.IsNil() {
+			continue
+		}
+
+		darwin.AddMenuItemWithCallback(submenu, item.Title, item.Action, "")
+
+		menuItem := darwin.NewMenuItemWithSubmenu(item.Title, submenu)
+		if !menuItem.IsNil() {
+			mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), menuItem.Ptr())
+		}
+	}
+}
+
+// AddToSystemMenu adds items to a standard system menu (e.g., the Apple menu
+// or the Window menu). This enables the Godot-style system menu extension:
+// users can add custom items to existing menus without replacing them entirely.
+//
+// Returns false if the platform is not initialized or the requested menu
+// does not exist.
+//
+// Thread-safe: acquires the platform read lock.
+func (p *darwinPlatform) AddToSystemMenu(menu SystemMenu, items []MenuItem) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if p.app == nil || !p.app.IsInitialized() {
+		return false
+	}
+
+	nsMenu := p.getSystemMenu(menu)
+	if nsMenu.IsNil() {
+		return false
+	}
+
+	for _, item := range items {
+		if item.Separator {
+			darwin.AddSeparatorItem(nsMenu)
+			continue
+		}
+		darwin.AddMenuItemWithCallback(nsMenu, item.Title, item.Action, "")
+	}
+	return true
+}
+
+// getSystemMenu returns the native NSMenu for the given system menu role.
+// Currently supports SystemMenuApplication (the Apple menu) and SystemMenuWindow.
+func (p *darwinPlatform) getSystemMenu(menu SystemMenu) darwin.ID {
+	switch menu {
+	case SystemMenuApplication:
+		return p.getAppMenu()
+	case SystemMenuWindow:
+		return p.getWindowMenu()
+	}
+	return 0
+}
+
+// getAppMenu returns the NSMenu of the Apple menu (the first submenu of the main menu).
+// This is the menu that contains About, Preferences, Services, Quit, etc.
+func (p *darwinPlatform) getAppMenu() darwin.ID {
+	nsApp := p.app.NSApp()
+	if nsApp.IsNil() {
+		return 0
+	}
+	mainMenu := nsApp.Send(darwin.RegisterSelector("mainMenu"))
+	if mainMenu.IsNil() {
+		return 0
+	}
+
+	appMenuItem := mainMenu.SendInt(darwin.RegisterSelector("itemAtIndex:"), 0)
+	if appMenuItem.IsNil() {
+		return 0
+	}
+	return appMenuItem.Send(darwin.RegisterSelector("submenu"))
+}
+
+// getWindowMenu returns the NSMenu of the Window menu.
+// NSApplication automatically manages the Window menu when setWindowsMenu: is called,
+// which createMenuBar already does during Init().
+func (p *darwinPlatform) getWindowMenu() darwin.ID {
+	nsApp := p.app.NSApp()
+	if nsApp.IsNil() {
+		return 0
+	}
+	return nsApp.Send(darwin.RegisterSelector("windowsMenu"))
 }
 
 // detectModifierKeyChange detects which modifier key was pressed/released.

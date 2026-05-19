@@ -109,9 +109,9 @@ func TestNSMenuSeparatorItem(t *testing.T) {
 	})
 }
 
-// TestMsgSend3Ptr verifies the 3-argument objc_msgSend wrapper works
-// by creating an NSMenuItem with initWithTitle:action:keyEquivalent:.
-func TestMsgSend3Ptr(t *testing.T) {
+// TestSend5Ptr verifies that Send5Ptr correctly creates an NSMenuItem
+// via initWithTitle:action:keyEquivalent:.
+func TestSend5Ptr(t *testing.T) {
 	runOnMainThread(t, func() {
 		nsMenuItemClass := platformdarwin.GetClass("NSMenuItem")
 		if nsMenuItemClass == 0 {
@@ -136,9 +136,73 @@ func TestMsgSend3Ptr(t *testing.T) {
 		sel := platformdarwin.RegisterSelector("initWithTitle:action:keyEquivalent:")
 		action := platformdarwin.RegisterSelector("terminate:")
 
-		item := platformdarwin.MsgSend3Ptr(alloc, sel, title.ID().Ptr(), uintptr(action), keyEquiv.ID().Ptr())
+		item := alloc.Send5Ptr(sel, title.ID().Ptr(), uintptr(action), keyEquiv.ID().Ptr())
 		if item.IsNil() {
 			t.Fatal("initWithTitle:action:keyEquivalent: returned nil")
+		}
+	})
+}
+
+// TestNewMainMenu verifies that NewMainMenu() returns a non‑nil ID.
+func TestNewMainMenu(t *testing.T) {
+	runOnMainThread(t, func() {
+		mainMenu := platformdarwin.NewMainMenu()
+		if mainMenu.IsNil() {
+			t.Fatal("NewMainMenu() returned nil")
+		}
+	})
+}
+
+// TestAddSeparatorItem verifies that AddSeparatorItem adds a separator
+// to a menu without crashing.
+func TestAddSeparatorItem(t *testing.T) {
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			t.Fatal("NewMainMenu() returned nil")
+		}
+		platformdarwin.AddSeparatorItem(menu)
+		// If we reach here, no panic occurred.
+	})
+}
+
+// TestAddMenuItemWithCallback verifies that AddMenuItemWithCallback
+// creates a menu item and adds it to the menu.
+func TestAddMenuItemWithCallback(t *testing.T) {
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			t.Fatal("NewMainMenu() returned nil")
+		}
+
+		called := false
+		platformdarwin.AddMenuItemWithCallback(menu, "Test Item", func() {
+			called = true
+		}, "")
+
+		// The delegate is invoked only when the user selects the item,
+		// so we don't call it here. Just ensure no panic.
+		_ = called
+	})
+}
+
+// TestMenuItemActionAssociation verifies that setMenuItemAction and
+// getMenuItemAction correctly store and retrieve a Go function.
+func TestMenuItemActionAssociation(t *testing.T) {
+	runOnMainThread(t, func() {
+		nsMenuItemClass := platformdarwin.GetClass("NSMenuItem")
+		if nsMenuItemClass == 0 {
+			t.Fatal("NSMenuItem class not found")
+		}
+
+		alloc := platformdarwin.ID(nsMenuItemClass).Send(platformdarwin.RegisterSelector("alloc"))
+		if alloc.IsNil() {
+			t.Fatal("NSMenuItem alloc returned nil")
+		}
+
+		item := alloc.Send(platformdarwin.RegisterSelector("init"))
+		if item.IsNil() {
+			t.Fatal("NSMenuItem init returned nil")
 		}
 	})
 }

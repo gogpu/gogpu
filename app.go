@@ -69,6 +69,9 @@ type App struct {
 	// platforms implement PlatformManager.
 	windowManager *WindowManager
 	primaryWindow *Window
+
+	menu                   *Menu
+	pendingSystemMenuItems map[SystemMenu][]MenuItem
 }
 
 // NewApp creates a new application with the given configuration.
@@ -178,93 +181,16 @@ func (a *App) Run() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// Initialize platform manager (process-level) — must be on main thread.
-	platform.SetLogger(slogger())
-	a.manager = platform.NewManager()
-	if err := a.manager.Init(); err != nil {
-		return err
-	}
-	defer a.manager.Destroy()
-
-	// Create primary platform window.
-	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:      a.config.Title,
-		Width:      a.config.Width,
-		Height:     a.config.Height,
-		Resizable:  a.config.Resizable,
-		Fullscreen: a.config.Fullscreen,
-		Frameless:  a.config.Frameless,
-	})
+	platWindow, err := a.initPlatform()
 	if err != nil {
 		return err
 	}
 	defer platWindow.Destroy()
+	defer a.manager.Destroy()
 
-	// Store the primary platform window for per-window operations.
-	a.platWindow = platWindow
-
-	if a.hitTestCallback != nil {
-		a.applyHitTestCallback()
+	if err := a.initRenderer(platWindow); err != nil {
+		return err
 	}
-
-	// Ensure input subsystems exist. Both EventSource() and Input() use
-	// lazy init so callers can register callbacks before Run(). We must
-	// NOT overwrite instances that were already created — UI frameworks
-	// register callbacks on the EventSource obtained before Run().
-	_ = a.Input()       // ensures a.inputState is initialized
-	_ = a.EventSource() // ensures a.eventSource is initialized
-
-	// Enable rendering during Win32 modal drag/resize loop.
-	//
-	// On Windows, DefWindowProc enters a modal message loop during window
-	// drag/resize that blocks our main loop entirely. A WM_TIMER (~60fps)
-	// fires inside the modal loop to invoke this callback, which runs the
-	// same update+render cycle as the normal main loop.
-	//
-	// This callback runs on the main thread (same as the normal loop),
-	// preserving serialization between onUpdate and onDraw — no data races.
-	//
-	// On macOS/Linux this is a no-op (those platforms have no modal loops).
-	//
-	// Future: An independent render thread running on its own schedule
-	// would eliminate this callback entirely. See ROADMAP.md for details.
-	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
-
-	// Create render loop with dedicated render thread
-	a.renderLoop = thread.NewRenderLoop()
-	defer a.renderLoop.Stop()
-
-	// Initialize renderer on render thread (all GPU operations must be on same thread)
-	var initErr error
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(
-			a.platWindow, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
-		)
-	})
-	if initErr != nil {
-		return initErr
-	}
-	defer func() {
-		// Shutdown sequence (all on render thread for GPU safety):
-		// 1. WaitIdle — ensure all GPU work completes
-		// 2. DrainDeferredDestroys — release GC-enqueued resources
-		// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
-		// 4. onClose callback — manual cleanup (legacy pattern)
-		// 5. Renderer.Destroy() — release GPU device
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.WaitForGPU()
-			a.renderer.DrainDeferredDestroys()
-			if a.tracker != nil {
-				_ = a.tracker.CloseAll()
-			}
-			if a.onClose != nil {
-				a.onClose()
-			}
-		})
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.Destroy()
-		})
-	}()
 
 	a.registerPrimaryWindow(platWindow)
 
@@ -337,6 +263,122 @@ func (a *App) Run() error {
 			a.renderFrameMultiThread()
 		}
 	}
+
+	return nil
+}
+
+// initPlatform initializes the platform manager, applies pending menu,
+// and creates the primary window. All operations must be on the main thread.
+func (a *App) initPlatform() (platform.PlatformWindow, error) {
+	// Initialize platform manager (process-level) — must be on main thread.
+	platform.SetLogger(slogger())
+	a.manager = platform.NewManager()
+	if err := a.manager.Init(); err != nil {
+		return nil, err
+	}
+
+	// Apply any menu set before Run().
+	if a.menu != nil {
+		a.SetMenu(a.menu)
+	}
+	// Apply pending system menu items.
+	if a.pendingSystemMenuItems != nil {
+		for menu, items := range a.pendingSystemMenuItems {
+			if mgr, ok := a.manager.(platform.PlatMenuManager); ok {
+				for _, item := range items {
+					mgr.AddToSystemMenu(platform.SystemMenu(menu), []platform.MenuItem{{
+						Title: item.Title, Action: item.Action,
+						Enabled: item.Enabled, Separator: item.Separator,
+					}})
+				}
+			}
+		}
+		a.pendingSystemMenuItems = nil
+	}
+
+	// Create primary platform window.
+	platWindow, err := a.manager.CreateWindow(platform.Config{
+		Title:      a.config.Title,
+		Width:      a.config.Width,
+		Height:     a.config.Height,
+		Resizable:  a.config.Resizable,
+		Fullscreen: a.config.Fullscreen,
+		Frameless:  a.config.Frameless,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Store the primary platform window for per-window operations.
+	a.platWindow = platWindow
+
+	if a.hitTestCallback != nil {
+		a.applyHitTestCallback()
+	}
+
+	// Ensure input subsystems exist. Both EventSource() and Input() use
+	// lazy init so callers can register callbacks before Run(). We must
+	// NOT overwrite instances that were already created — UI frameworks
+	// register callbacks on the EventSource obtained before Run().
+	_ = a.Input()       // ensures a.inputState is initialized
+	_ = a.EventSource() // ensures a.eventSource is initialized
+
+	// Enable rendering during Win32 modal drag/resize loop.
+	//
+	// On Windows, DefWindowProc enters a modal message loop during window
+	// drag/resize that blocks our main loop entirely. A WM_TIMER (~60fps)
+	// fires inside the modal loop to invoke this callback, which runs the
+	// same update+render cycle as the normal main loop.
+	//
+	// This callback runs on the main thread (same as the normal loop),
+	// preserving serialization between onUpdate and onDraw — no data races.
+	//
+	// On macOS/Linux this is a no-op (those platforms have no modal loops).
+	//
+	// Future: An independent render thread running on its own schedule
+	// would eliminate this callback entirely. See ROADMAP.md for details.
+	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
+
+	return platWindow, nil
+}
+
+// initRenderer creates the render loop and initializes the renderer
+// on the dedicated render thread. All GPU operations are confined there.
+func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
+	// Create render loop with dedicated render thread
+	a.renderLoop = thread.NewRenderLoop()
+
+	// Initialize renderer on render thread (all GPU operations must be on same thread)
+	var initErr error
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer, initErr = newRenderer(
+			platWindow, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
+		)
+	})
+	if initErr != nil {
+		a.renderLoop.Stop()
+		return initErr
+	}
+
+	// Shutdown sequence (all on render thread for GPU safety):
+	// 1. WaitIdle — ensure all GPU work completes
+	// 2. DrainDeferredDestroys — release GC-enqueued resources
+	// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
+	// 4. onClose callback — manual cleanup (legacy pattern)
+	// 5. Renderer.Destroy() — release GPU device
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer.WaitForGPU()
+		a.renderer.DrainDeferredDestroys()
+		if a.tracker != nil {
+			_ = a.tracker.CloseAll()
+		}
+		if a.onClose != nil {
+			a.onClose()
+		}
+	})
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer.Destroy()
+	})
 
 	return nil
 }
@@ -970,6 +1012,49 @@ func (a *App) Close() {
 	if a.platWindow != nil {
 		a.platWindow.Close()
 	}
+}
+
+// SetMenu replaces the native application menu with the provided menu.
+// On macOS this modifies the menu bar; on other platforms it's a no-op.
+func (a *App) SetMenu(menu *Menu) {
+	a.menu = menu
+	if a.manager == nil {
+		return
+	}
+	if mgr, ok := a.manager.(platform.PlatMenuManager); ok {
+		items := make([]platform.MenuItem, len(menu.Items))
+		for i, it := range menu.Items {
+			items[i] = platform.MenuItem{
+				Title:     it.Title,
+				Action:    it.Action,
+				Enabled:   it.Enabled,
+				Separator: it.Separator,
+			}
+		}
+		mgr.SetApplicationMenu(items)
+	}
+}
+
+// GetSystemMenu returns a handle to a standard system menu (e.g., the Apple menu).
+// On macOS this allows adding custom items to the native menu.
+// On other platforms it returns nil.
+func (a *App) GetSystemMenu(menu SystemMenu) *SystemMenuHandle {
+	if a.manager == nil {
+		if a.pendingSystemMenuItems == nil {
+			a.pendingSystemMenuItems = make(map[SystemMenu][]MenuItem)
+		}
+		return &SystemMenuHandle{
+			app:  a,
+			menu: platform.SystemMenu(menu),
+		}
+	}
+	if mgr, ok := a.manager.(platform.PlatMenuManager); ok {
+		return &SystemMenuHandle{
+			manager: mgr,
+			menu:    platform.SystemMenu(menu),
+		}
+	}
+	return nil
 }
 
 // Compile-time interface checks.
