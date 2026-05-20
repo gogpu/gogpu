@@ -95,6 +95,10 @@ func (a *Application) SetAppName(name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.appName = name
+
+	if a.initialized {
+		a.updateMenuBar(name)
+	}
 }
 
 // Terminate requests application termination.

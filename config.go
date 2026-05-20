@@ -97,6 +97,9 @@ type Config struct {
 	// Windows with the same identifier will be grouped together.
 	// See: https://developer.apple.com/documentation/appkit/nswindow/1644704-tabbingidentifier
 	TabbingIdentifier string
+
+	// AppName is the application name (displayed in menus).
+	AppName string
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -283,6 +286,12 @@ func (c Config) WithTabbingMode(mode TabbingMode) Config {
 // WithTabbingIdentifier sets the tabbing identifier.
 func (c Config) WithTabbingIdentifier(id string) Config {
 	c.TabbingIdentifier = id
+	return c
+}
+
+// WithAppName sets the application name.
+func (c Config) WithAppName(name string) Config {
+	c.AppName = name
 	return c
 }
 

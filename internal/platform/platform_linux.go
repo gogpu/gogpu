@@ -305,6 +305,8 @@ func (p *x11Platform) HighContrast() bool { return detectHighContrast() }
 // FontScale returns font size preference multiplier.
 func (p *x11Platform) FontScale() float32 { return detectFontScale() }
 
+func (p *x11Platform) SetAppName(name string) {}
+
 // Destroy closes all windows and releases resources.
 func (p *x11Platform) Destroy() {
 	p.inner.Destroy()
@@ -2464,3 +2466,5 @@ func (p *waylandPlatform) CloseWindow() {
 	w.eventMu.Unlock()
 	w.queueEvent(Event{Type: EventClose, WindowID: p.primaryWindowID})
 }
+
+func (p *waylandPlatform) SetAppName(name string) {}

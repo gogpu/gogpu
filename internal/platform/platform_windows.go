@@ -1420,6 +1420,8 @@ func (p *windowsPlatform) CloseWindow() {
 	procPostMessageW.Call(uintptr(p.primary.hwnd), wmClose, 0, 0)
 }
 
+func (p *windowsPlatform) SetAppName(name string) {}
+
 // queueEvent pushes an event to the unified platform queue (ADR-017).
 // Called from wndProc for ALL windows. Per-WindowID resize coalescing.
 func (p *windowsPlatform) queueEvent(event Event) {

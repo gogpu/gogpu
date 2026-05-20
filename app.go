@@ -303,6 +303,11 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		return nil, err
 	}
 
+	// Apply application name if set in config.
+	if a.config.AppName != "" {
+		a.manager.SetAppName(a.config.AppName)
+	}
+
 	// Apply any menu set before Run().
 	if a.menu != nil {
 		a.SetMenu(a.menu)
@@ -765,6 +770,15 @@ func (a *App) modalFrameTick() {
 	// This ensures our frame and the DWM window border update
 	// appear in the same composition cycle, reducing resize lag.
 	a.platWindow.SyncFrame()
+}
+
+// SetAppName sets the name of the application.
+// This name is used in system menus (e.g. "About {AppName}", "Quit {AppName}" on macOS).
+func (a *App) SetAppName(name string) {
+	a.config.AppName = name
+	if a.manager != nil {
+		a.manager.SetAppName(name)
+	}
 }
 
 // Quit requests the application to quit.

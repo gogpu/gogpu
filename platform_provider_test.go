@@ -91,6 +91,7 @@ func (m *mockManager) ReduceMotion() bool                        { return m.redu
 func (m *mockManager) HighContrast() bool                        { return m.highContrast }
 func (m *mockManager) FontScale() float32                        { return m.fontScale }
 func (m *mockManager) SubpixelLayout() gpucontext.SubpixelLayout { return m.subpixelLayout }
+func (m *mockManager) SetAppName(name string)                    {}
 func (m *mockManager) Destroy()                                  {}
 func (m *mockWindow) SetOnClose(fn func() bool)                  { m.closeFn = fn }
 

@@ -104,6 +104,64 @@ func (a *Application) createMenuBar(appName string) {
 	a.nsApp.SendPtr(menuSels.setWindowsMenu, windowMenu.Ptr())
 }
 
+// updateMenuBar updates the titles of standard menu items when the app name changes.
+func (a *Application) updateMenuBar(appName string) {
+	mainMenu := a.nsApp.Send(RegisterSelector("mainMenu"))
+	if mainMenu.IsNil() {
+		return
+	}
+
+	// The App Menu is usually at index 0
+	appMenuItem := mainMenu.SendInt(RegisterSelector("itemAtIndex:"), 0)
+	if appMenuItem.IsNil() {
+		return
+	}
+
+	appMenu := appMenuItem.Send(RegisterSelector("submenu"))
+	if appMenu.IsNil() {
+		return
+	}
+
+	// Update App Menu title
+	nsTitle := NewNSString(appName)
+	if nsTitle != nil {
+		appMenu.SendPtr(selectors.setTitle, nsTitle.ID().Ptr())
+	}
+
+	// Update items in App Menu
+	itemCount := appMenu.GetInt64(RegisterSelector("numberOfItems"))
+	for i := int64(0); i < itemCount; i++ {
+		item := appMenu.SendInt(RegisterSelector("itemAtIndex:"), i)
+		if item.IsNil() {
+			continue
+		}
+
+		action := SEL(item.Send(RegisterSelector("action")).Ptr())
+		title := item.Send(RegisterSelector("title"))
+		if title.IsNil() {
+			continue
+		}
+
+		switch action {
+		case menuSels.orderFrontStandardAboutPanel:
+			t := NewNSString("About " + appName)
+			if t != nil {
+				item.SendPtr(selectors.setTitle, t.ID().Ptr())
+			}
+		case RegisterSelector("hide:"):
+			t := NewNSString("Hide " + appName)
+			if t != nil {
+				item.SendPtr(selectors.setTitle, t.ID().Ptr())
+			}
+		case selectors.terminate:
+			t := NewNSString("Quit " + appName)
+			if t != nil {
+				item.SendPtr(selectors.setTitle, t.ID().Ptr())
+			}
+		}
+	}
+}
+
 // createAppMenu builds the application (App) menu with standard items.
 func (a *Application) createAppMenu(appName string, nsMenuClass, nsMenuItemClass Class) ID {
 	// === App Menu ===
@@ -398,11 +456,13 @@ func createNSString(s string) ID {
 	return ns.ID()
 }
 
+// GetMenuSelectors returns the selector for a predefined menu item role.
 func (a *Application) GetMenuSelectors() any {
 	initMenuSelectors()
 	return menuSels
 }
 
+// GetMenuSelector returns the selector for a predefined menu item role.
 func (a *Application) GetMenuSelector(role string) SEL {
 	initMenuSelectors()
 	switch role {
@@ -434,6 +494,7 @@ func (a *Application) GetMenuSelector(role string) SEL {
 	return 0
 }
 
+// AddMenuItemWithRole creates a menu item with a predefined role and returns its ID.
 func AddMenuItemWithRole(menu ID, title string, role string) ID {
 	initMenuSelectors()
 	nsMenuItemClass := GetClass("NSMenuItem")

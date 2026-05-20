@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	app := gogpu.NewApp(gogpu.DefaultConfig().WithTitle("My App"))
+	app := gogpu.NewApp(gogpu.DefaultConfig().WithTitle("My App").WithAppName("Example App"))
 
 	// Replacing the main menu
 	app.SetMenu(gogpu.NewMenu().

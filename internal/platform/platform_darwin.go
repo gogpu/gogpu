@@ -1314,6 +1314,12 @@ func (p *darwinPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+func (p *darwinPlatform) SetAppName(name string) {
+	if p.app != nil {
+		p.app.SetAppName(name)
+	}
+}
+
 // SetApplicationMenu replaces the native application menu with the provided items.
 // On macOS this replaces the current NSMenu. On platforms that don't support
 // native menus the call is silently ignored (the interface is optional).

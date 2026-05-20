@@ -137,6 +137,9 @@ type PlatformManager interface {
 	// SubpixelLayout returns the display's subpixel arrangement for LCD text.
 	SubpixelLayout() gpucontext.SubpixelLayout
 
+	// SetAppName sets the application name (displayed in menus).
+	SetAppName(name string)
+
 	// Destroy releases all platform resources.
 	Destroy()
 }
