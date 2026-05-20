@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/gogpu/gogpu"
@@ -12,26 +11,36 @@ func main() {
 
 	// Replacing the main menu
 	app.SetMenu(gogpu.NewMenu().
-		AddItem(gogpu.MenuItem{Title: "Open", Action: func() { fmt.Println("Open") }}).
+		AddItem(gogpu.MenuItem{Title: "App", Role: gogpu.RoleNone}). // Placeholder for app name on some platforms
+		AddItem(gogpu.MenuItem{Title: "About My App", Role: gogpu.RoleAbout}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Preferences…", Role: gogpu.RolePreferences}).
-		AddItem(gogpu.MenuItem{Title: "Save", Action: func() { fmt.Println("Save") }, Disabled: false}).
+		AddItem(gogpu.MenuItem{Title: "Services", Role: gogpu.RoleServices}).
+		AddItem(gogpu.MenuItem{Separator: true}).
+		AddItem(gogpu.MenuItem{Title: "Hide My App", Role: gogpu.RoleHide}).
+		AddItem(gogpu.MenuItem{Title: "Hide Others", Role: gogpu.RoleHideOthers}).
+		AddItem(gogpu.MenuItem{Title: "Show All", Role: gogpu.RoleShowAll}).
+		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Quit", Role: gogpu.RoleQuit}),
 	)
 
-	// Add an item to the menu (the app's standard menu)
-	if menu := app.GetSystemMenu(gogpu.SystemMenuApplication); menu != nil {
-		menu.AddItem(gogpu.MenuItem{
-			Title:  "Custom Settings…",
-			Action: func() { fmt.Println("Custom Settings") },
-		})
+	// Add items to the Window menu using roles
+	if windowMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); windowMenu != nil {
+		windowMenu.AddItem(gogpu.MenuItem{Separator: true})
+		windowMenu.AddItem(gogpu.MenuItem{Title: "Minimize", Role: gogpu.RoleMinimize})
+		windowMenu.AddItem(gogpu.MenuItem{Title: "Zoom", Role: gogpu.RoleZoom})
+		windowMenu.AddItem(gogpu.MenuItem{Title: "Enter Full Screen", Role: gogpu.RoleFullScreen})
+		windowMenu.AddItem(gogpu.MenuItem{Separator: true})
+		windowMenu.AddItem(gogpu.MenuItem{Title: "Bring All to Front", Role: gogpu.RoleBringAllToFront})
+		windowMenu.AddItem(gogpu.MenuItem{Title: "Close", Role: gogpu.RoleClose})
 	}
 
-	// Add an item to the Window menu
-	if windowMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); windowMenu != nil {
-		windowMenu.AddItem(gogpu.MenuItem{
-			Title:  "My Window Command",
-			Action: func() { fmt.Println("Window command") },
+	// Add custom items to the Application menu
+	if appMenu := app.GetSystemMenu(gogpu.SystemMenuApplication); appMenu != nil {
+		appMenu.AddItem(gogpu.MenuItem{Separator: true})
+		appMenu.AddItem(gogpu.MenuItem{
+			Title:  "Custom App Command",
+			Action: func() { log.Println("Custom app command executed") },
 		})
 	}
 

@@ -1368,6 +1368,14 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 			continue
 		}
 
+		if item.Role != MenuRoleNone {
+			roleStr := roleToString(item.Role)
+			if roleStr != "" {
+				darwin.AddMenuItemWithRole(mainMenu, item.Title, roleStr)
+				continue
+			}
+		}
+
 		submenu := darwin.NewMenuWithTitle(item.Title)
 		if submenu.IsNil() {
 			continue
@@ -1380,6 +1388,37 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 			mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), menuItem.Ptr())
 		}
 	}
+}
+
+// roleToString converts a MenuRole value to its corresponding string representation for OS-specific menu integration.
+func roleToString(role MenuRole) string {
+	switch role {
+	case MenuRoleAbout:
+		return "about"
+	case MenuRolePreferences:
+		return "preferences"
+	case MenuRoleServices:
+		return "services"
+	case MenuRoleHide:
+		return "hide"
+	case MenuRoleHideOthers:
+		return "hideOthers"
+	case MenuRoleShowAll:
+		return "showAll"
+	case MenuRoleQuit:
+		return "quit"
+	case MenuRoleClose:
+		return "close"
+	case MenuRoleMinimize:
+		return "minimize"
+	case MenuRoleZoom:
+		return "zoom"
+	case MenuRoleFullScreen:
+		return "fullScreen"
+	case MenuRoleBringAllToFront:
+		return "bringAllToFront"
+	}
+	return ""
 }
 
 // AddToSystemMenu adds items to a standard system menu (e.g., the Apple menu
@@ -1407,6 +1446,13 @@ func (p *darwinPlatform) AddToSystemMenu(menu SystemMenu, items []MenuItem) bool
 		if item.Separator {
 			darwin.AddSeparatorItem(nsMenu)
 			continue
+		}
+		if item.Role != MenuRoleNone {
+			roleStr := roleToString(item.Role)
+			if roleStr != "" {
+				darwin.AddMenuItemWithRole(nsMenu, item.Title, roleStr)
+				continue
+			}
 		}
 		darwin.AddMenuItemWithCallback(nsMenu, item.Title, item.Action, "")
 	}

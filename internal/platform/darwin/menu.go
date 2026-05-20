@@ -398,6 +398,105 @@ func createNSString(s string) ID {
 	return ns.ID()
 }
 
+func (a *Application) GetMenuSelectors() any {
+	initMenuSelectors()
+	return menuSels
+}
+
+func (a *Application) GetMenuSelector(role string) SEL {
+	initMenuSelectors()
+	switch role {
+	case "about":
+		return menuSels.orderFrontStandardAboutPanel
+	case "preferences":
+		return menuSels.orderFrontPreferencesPanel
+	case "services":
+		return 0 // Services menu is handled specially
+	case "hide":
+		return menuSels.hide
+	case "hideOthers":
+		return menuSels.hideOtherApplications
+	case "showAll":
+		return menuSels.unhideAllApplications
+	case "quit":
+		return menuSels.terminate
+	case "close":
+		return menuSels.performClose
+	case "minimize":
+		return menuSels.performMiniaturize
+	case "zoom":
+		return menuSels.performZoom
+	case "fullScreen":
+		return menuSels.toggleFullScreen
+	case "bringAllToFront":
+		return menuSels.arrangeInFront
+	}
+	return 0
+}
+
+func AddMenuItemWithRole(menu ID, title string, role string) ID {
+	initMenuSelectors()
+	nsMenuItemClass := GetClass("NSMenuItem")
+	if nsMenuItemClass == 0 {
+		return 0
+	}
+
+	var action SEL
+	var keyEquiv string
+	var modMask int64
+
+	switch role {
+	case "about":
+		action = menuSels.orderFrontStandardAboutPanel
+	case "preferences":
+		action = menuSels.orderFrontPreferencesPanel
+		keyEquiv = ","
+	case "services":
+		// Services is usually a submenu
+		return 0
+	case "hide":
+		action = menuSels.hide
+		keyEquiv = "h"
+	case "hideOthers":
+		action = menuSels.hideOtherApplications
+		keyEquiv = "h"
+		modMask = int64(NSEventModifierFlagCommand | NSEventModifierFlagOption)
+	case "showAll":
+		action = menuSels.unhideAllApplications
+	case "quit":
+		action = menuSels.terminate
+		keyEquiv = "q"
+	case "close":
+		action = menuSels.performClose
+		keyEquiv = "w"
+	case "minimize":
+		action = menuSels.performMiniaturize
+		keyEquiv = "m"
+	case "zoom":
+		action = menuSels.performZoom
+	case "fullScreen":
+		action = menuSels.toggleFullScreen
+		keyEquiv = "f"
+		modMask = int64(NSEventModifierFlagCommand | NSEventModifierFlagControl)
+	case "bringAllToFront":
+		action = menuSels.arrangeInFront
+	}
+
+	nsTitle := NewNSString(title)
+	if nsTitle == nil {
+		return 0
+	}
+
+	item := createMenuItem(nsMenuItemClass, nsTitle.ID(), action, keyEquiv)
+	if !item.IsNil() {
+		if modMask != 0 {
+			item.SendInt(menuSels.setKeyEquivalentModMask, modMask)
+		}
+		menu.SendPtr(menuSels.addItem, item.Ptr())
+	}
+	return item
+}
+
 // NewMenuWithTitle creates a new NSMenu with the specified title.
 func NewMenuWithTitle(title string) ID {
 	if err := initRuntime(); err != nil {

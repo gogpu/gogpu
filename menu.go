@@ -68,7 +68,7 @@ func (h *SystemMenuHandle) AddItem(item MenuItem) bool {
 		return h.manager.AddToSystemMenu(h.menu, []platform.MenuItem{{
 			Title:     item.Title,
 			Action:    item.Action,
-			Role:      platform.MenuRole(item.Role),   // <-- добавили
+			Role:      platform.MenuRole(item.Role),
 			Disabled:  item.Disabled,
 			Separator: item.Separator,
 		}})
