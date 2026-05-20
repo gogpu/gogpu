@@ -1354,12 +1354,12 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 		return
 	}
 
-	appleMenuItem := mainMenu.Send(darwin.RegisterSelector("itemAtIndex:"))
+	appMenuItem := mainMenu.SendInt(darwin.RegisterSelector("itemAtIndex:"), 0)
 
 	mainMenu.Send(darwin.RegisterSelector("removeAllItems"))
 
-	if !appleMenuItem.IsNil() {
-		mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), appleMenuItem.Ptr())
+	if !appMenuItem.IsNil() {
+		mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), appMenuItem.Ptr())
 	}
 
 	// Add custom items as separate menu items.

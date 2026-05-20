@@ -6,7 +6,8 @@ import "github.com/gogpu/gogpu/internal/platform"
 type MenuRole int
 
 const (
-	RoleAbout MenuRole = iota
+	RoleNone MenuRole = iota
+	RoleAbout
 	RolePreferences
 	RoleServices
 	RoleHide
@@ -25,7 +26,7 @@ type MenuItem struct {
 	Title     string
 	Action    func()
 	Role      MenuRole
-	Enabled   bool
+	Disabled  bool
 	Separator bool
 }
 
@@ -65,8 +66,11 @@ type SystemMenuHandle struct {
 func (h *SystemMenuHandle) AddItem(item MenuItem) bool {
 	if h.manager != nil {
 		return h.manager.AddToSystemMenu(h.menu, []platform.MenuItem{{
-			Title: item.Title, Action: item.Action,
-			Enabled: item.Enabled, Separator: item.Separator,
+			Title:     item.Title,
+			Action:    item.Action,
+			Role:      platform.MenuRole(item.Role),   // <-- добавили
+			Disabled:  item.Disabled,
+			Separator: item.Separator,
 		}})
 	}
 	if h.app != nil && h.app.pendingSystemMenuItems != nil {

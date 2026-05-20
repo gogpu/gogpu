@@ -221,6 +221,24 @@ type PlatformWindow interface {
 	Destroy()
 }
 
+type MenuRole int
+
+const (
+	MenuRoleNone MenuRole = iota
+	MenuRoleAbout
+	MenuRolePreferences
+	MenuRoleServices
+	MenuRoleHide
+	MenuRoleHideOthers
+	MenuRoleShowAll
+	MenuRoleQuit
+	MenuRoleClose
+	MenuRoleMinimize
+	MenuRoleZoom
+	MenuRoleFullScreen
+	MenuRoleBringAllToFront
+)
+
 // PlatMenuManager is an optional interface for platforms that support
 // native application menus (macOS). Platforms that don't support menus
 // simply don't implement this interface.
@@ -245,7 +263,8 @@ const (
 type MenuItem struct {
 	Title     string
 	Action    func()
-	Enabled   bool
+	Role      MenuRole
+	Disabled  bool
 	Separator bool
 }
 

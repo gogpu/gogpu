@@ -70,9 +70,6 @@ type objcRuntime struct {
 	cifVoidPtr  *types.CallInterface // Returns void*, takes variadic args
 	cifFpret    *types.CallInterface // Returns floating point
 	cifSelector *types.CallInterface // For sel_registerName
-
-	cifSend3Ptr *types.CallInterface // self, _cmd, arg0 (3 ptr)
-	cifSend4Ptr *types.CallInterface // self, _cmd, arg0, arg1 (4 ptr)
 	cifSend5Ptr *types.CallInterface // self, _cmd, arg0, arg1, arg2 (5 ptr)
 
 	// Protect shared CIF usage; CallInterface is not concurrency-safe.
@@ -224,8 +221,6 @@ func loadRuntime() error {
 	objcRT.cifVoidPtr = &types.CallInterface{}
 	objcRT.cifFpret = &types.CallInterface{}
 	objcRT.cifSelector = &types.CallInterface{}
-	objcRT.cifSend3Ptr = &types.CallInterface{}
-	objcRT.cifSend4Ptr = &types.CallInterface{}
 	objcRT.cifSend5Ptr = &types.CallInterface{}
 
 	// CIF for generic pointer-returning calls (2 args: self, _cmd)
@@ -255,39 +250,7 @@ func loadRuntime() error {
 		return err
 	}
 
-	// CIF for Send3Ptr (self, _cmd, arg0)
-	err = ffi.PrepareCallInterface(
-		objcRT.cifSend3Ptr,
-		types.DefaultCall,
-		types.PointerTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // self
-			types.PointerTypeDescriptor, // _cmd
-			types.PointerTypeDescriptor, // arg0
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	// CIF for Send4Ptr (self, _cmd, arg0, arg1)
-	err = ffi.PrepareCallInterface(
-		objcRT.cifSend4Ptr,
-		types.DefaultCall,
-		types.PointerTypeDescriptor,
-		[]*types.TypeDescriptor{
-			types.PointerTypeDescriptor, // self
-			types.PointerTypeDescriptor, // _cmd
-			types.PointerTypeDescriptor, // arg0
-			types.PointerTypeDescriptor, // arg1
-		},
-	)
-	if err != nil {
-		return err
-	}
-
 	// CIF for Send5Ptr (self, _cmd, arg0, arg1, arg2)
-	objcRT.cifSend5Ptr = &types.CallInterface{}
 	err = ffi.PrepareCallInterface(
 		objcRT.cifSend5Ptr,
 		types.DefaultCall,
@@ -547,74 +510,6 @@ func msgSend(self ID, sel SEL, args ...uintptr) ID {
 // SendPtr sends a message with one pointer argument.
 func (id ID) SendPtr(sel SEL, arg uintptr) ID {
 	return msgSend(id, sel, arg)
-}
-
-// Send3Ptr calls objc_msgSend with one additional pointer argument.
-// Uses a pre-cached CallInterface for maximum performance.
-func (id ID) Send3Ptr(sel SEL, arg0 uintptr) ID {
-	if id == 0 || sel == 0 {
-		return 0
-	}
-	if err := initRuntime(); err != nil {
-		return 0
-	}
-
-	argBox := &struct {
-		self uintptr
-		sel  uintptr
-		arg0 uintptr
-	}{
-		self: uintptr(id),
-		sel:  uintptr(sel),
-		arg0: arg0,
-	}
-	argPtrs := []unsafe.Pointer{
-		unsafe.Pointer(&argBox.self),
-		unsafe.Pointer(&argBox.sel),
-		unsafe.Pointer(&argBox.arg0),
-	}
-
-	var result uintptr
-	if err := ffi.CallFunction(objcRT.cifSend3Ptr, objcRT.objcMsgSend,
-		unsafe.Pointer(&result), argPtrs); err != nil {
-		return 0
-	}
-	return ID(result)
-}
-
-// Send4Ptr calls objc_msgSend with two additional pointer arguments.
-func (id ID) Send4Ptr(sel SEL, arg0, arg1 uintptr) ID {
-	if id == 0 || sel == 0 {
-		return 0
-	}
-	if err := initRuntime(); err != nil {
-		return 0
-	}
-
-	argBox := &struct {
-		self uintptr
-		sel  uintptr
-		arg0 uintptr
-		arg1 uintptr
-	}{
-		self: uintptr(id),
-		sel:  uintptr(sel),
-		arg0: arg0,
-		arg1: arg1,
-	}
-	argPtrs := []unsafe.Pointer{
-		unsafe.Pointer(&argBox.self),
-		unsafe.Pointer(&argBox.sel),
-		unsafe.Pointer(&argBox.arg0),
-		unsafe.Pointer(&argBox.arg1),
-	}
-
-	var result uintptr
-	if err := ffi.CallFunction(objcRT.cifSend4Ptr, objcRT.objcMsgSend,
-		unsafe.Pointer(&result), argPtrs); err != nil {
-		return 0
-	}
-	return ID(result)
 }
 
 // Send5Ptr calls objc_msgSend with three additional pointer arguments.

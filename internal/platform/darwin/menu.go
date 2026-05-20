@@ -4,7 +4,6 @@ package darwin
 
 import (
 	"sync"
-	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
 )
@@ -26,6 +25,12 @@ var menuSels struct {
 	performClose                 SEL
 	toggleFullScreen             SEL
 	arrangeInFront               SEL
+	hide                         SEL
+	hideOtherApplications        SEL
+	unhideAllApplications        SEL
+	performMiniaturize           SEL
+	performZoom                  SEL
+	terminate                    SEL
 }
 
 func initMenuSelectors() {
@@ -44,6 +49,12 @@ func initMenuSelectors() {
 	menuSels.performClose = RegisterSelector("performClose:")
 	menuSels.toggleFullScreen = RegisterSelector("toggleFullScreen:")
 	menuSels.arrangeInFront = RegisterSelector("arrangeInFront:")
+	menuSels.hide = RegisterSelector("hide:")
+	menuSels.hideOtherApplications = RegisterSelector("hideOtherApplications:")
+	menuSels.unhideAllApplications = RegisterSelector("unhideAllApplications:")
+	menuSels.performMiniaturize = RegisterSelector("performMiniaturize:")
+	menuSels.performZoom = RegisterSelector("performZoom:")
+	menuSels.terminate = selectors.terminate
 }
 
 // createMenuBar creates the standard macOS application menu bar.
@@ -268,6 +279,7 @@ func addMenuItem(nsMenuItemClass Class, menu ID, title ID, action SEL, keyEquiv 
 }
 
 var appDelegateClassOnce sync.Once
+var menuActionMap sync.Map
 
 func ensureAppDelegate() {
 	appDelegateClassOnce.Do(func() {
@@ -296,18 +308,16 @@ func ensureAppDelegate() {
 	})
 }
 
-var menuItemActionKey = "gogpu.menuItem.action"
-
 func setMenuItemAction(item ID, action func()) {
-	SetAssociatedObject(item, unsafe.Pointer(&menuItemActionKey), unsafe.Pointer(&action), ObjcAssociationAssign)
+	menuActionMap.Store(uintptr(item), action)
 }
 
 func getMenuItemAction(item ID) func() {
-	ptr := GetAssociatedObject(item, unsafe.Pointer(&menuItemActionKey))
-	if ptr == nil {
+	val, ok := menuActionMap.Load(uintptr(item))
+	if !ok {
 		return nil
 	}
-	return *(*func())(ptr)
+	return val.(func())
 }
 
 // NewMainMenu creates an empty NSMenu, sets it as the main menu of NSApp,

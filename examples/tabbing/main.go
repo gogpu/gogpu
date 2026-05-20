@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+
 	"github.com/gogpu/gogpu"
 )
 
@@ -31,5 +33,7 @@ func main() {
 		ctx.Clear(0.1, 0.1, 0.1, 1.0)
 	})
 
-	app.Run()
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
 }

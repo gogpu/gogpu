@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/gogpu/gogpu"
 )
@@ -14,7 +15,7 @@ func main() {
 		AddItem(gogpu.MenuItem{Title: "Open", Action: func() { fmt.Println("Open") }}).
 		AddItem(gogpu.MenuItem{Separator: true}).
 		AddItem(gogpu.MenuItem{Title: "Preferences…", Role: gogpu.RolePreferences}).
-		AddItem(gogpu.MenuItem{Title: "Save", Action: func() { fmt.Println("Save") }, Enabled: false}).
+		AddItem(gogpu.MenuItem{Title: "Save", Action: func() { fmt.Println("Save") }, Disabled: false}).
 		AddItem(gogpu.MenuItem{Title: "Quit", Role: gogpu.RoleQuit}),
 	)
 
@@ -38,5 +39,7 @@ func main() {
 	app.OnUpdate(func(dt float64) {
 	})
 
-	app.Run()
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
 }

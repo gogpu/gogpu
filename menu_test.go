@@ -74,7 +74,7 @@ func TestSystemMenuHandleWithManager(t *testing.T) {
 	ok := handle.AddItem(MenuItem{
 		Title:     "Test",
 		Action:    func() {},
-		Enabled:   true,
+		Disabled:  true,
 		Separator: false,
 	})
 	if !ok {
@@ -90,7 +90,7 @@ func TestSystemMenuHandleWithManager(t *testing.T) {
 		t.Fatalf("expected 1 item, got %d", len(mgr.addToSystemMenuItems))
 	}
 	item := mgr.addToSystemMenuItems[0]
-	if item.Title != "Test" || item.Enabled != true || item.Separator != false {
+	if item.Title != "Test" || item.Disabled != true || item.Separator != false {
 		t.Errorf("item fields mismatch: %+v", item)
 	}
 	if item.Action == nil {

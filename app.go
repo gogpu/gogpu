@@ -185,12 +185,38 @@ func (a *App) Run() error {
 	if err != nil {
 		return err
 	}
-	defer platWindow.Destroy()
 	defer a.manager.Destroy()
+	defer platWindow.Destroy()
+
+	a.renderLoop = thread.NewRenderLoop()
+	defer a.renderLoop.Stop()
 
 	if err := a.initRenderer(platWindow); err != nil {
 		return err
 	}
+
+	// Shutdown sequence (all on render thread for GPU safety):
+	// 1. WaitIdle — ensure all GPU work completes
+	// 2. DrainDeferredDestroys — release GC-enqueued resources
+	// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
+	// 4. onClose callback — manual cleanup (legacy pattern)
+	// 5. Renderer.Destroy() — release GPU device
+	defer func() {
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.WaitForGPU()
+			a.renderer.DrainDeferredDestroys()
+			if a.tracker != nil {
+				_ = a.tracker.CloseAll()
+			}
+			if a.onClose != nil {
+				a.onClose()
+			}
+		})
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.Destroy()
+		})
+		a.renderLoop.Stop()
+	}()
 
 	a.registerPrimaryWindow(platWindow)
 
@@ -287,8 +313,10 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 			if mgr, ok := a.manager.(platform.PlatMenuManager); ok {
 				for _, item := range items {
 					mgr.AddToSystemMenu(platform.SystemMenu(menu), []platform.MenuItem{{
-						Title: item.Title, Action: item.Action,
-						Enabled: item.Enabled, Separator: item.Separator,
+						Title:     item.Title,
+						Action:    item.Action,
+						Disabled:  item.Disabled,
+						Separator: item.Separator,
 					}})
 				}
 			}
@@ -359,26 +387,6 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 		a.renderLoop.Stop()
 		return initErr
 	}
-
-	// Shutdown sequence (all on render thread for GPU safety):
-	// 1. WaitIdle — ensure all GPU work completes
-	// 2. DrainDeferredDestroys — release GC-enqueued resources
-	// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
-	// 4. onClose callback — manual cleanup (legacy pattern)
-	// 5. Renderer.Destroy() — release GPU device
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer.WaitForGPU()
-		a.renderer.DrainDeferredDestroys()
-		if a.tracker != nil {
-			_ = a.tracker.CloseAll()
-		}
-		if a.onClose != nil {
-			a.onClose()
-		}
-	})
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer.Destroy()
-	})
 
 	return nil
 }
@@ -1027,7 +1035,7 @@ func (a *App) SetMenu(menu *Menu) {
 			items[i] = platform.MenuItem{
 				Title:     it.Title,
 				Action:    it.Action,
-				Enabled:   it.Enabled,
+				Disabled:  it.Disabled,
 				Separator: it.Separator,
 			}
 		}
