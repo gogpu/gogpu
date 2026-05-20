@@ -12,18 +12,6 @@ import (
 	"github.com/go-webgpu/goffi/types"
 )
 
-const (
-	ObjcAssociationAssign = 0
-
-	// The following constants are not currently used but are kept for future
-	// use when objects need to be retained or copied (e.g., custom views,
-	// complex delegates, or configuration objects attached via associated objects).
-	ObjcAssociationRetainNonatomic = 1
-	ObjcAssociationCopyNonatomic   = 3
-	ObjcAssociationRetain          = 0x301
-	ObjcAssociationCopy            = 0x303
-)
-
 // Errors returned by Objective-C runtime operations.
 var (
 	ErrLibraryNotLoaded = errors.New("darwin: failed to load library")
