@@ -230,7 +230,7 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 | **gogpu/gpucontext** | v0.14.0 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
 | **gogpu/gputypes** | v0.5.0 | WebGPU type definitions (zero value = spec default) |
 | **gogpu/compose** | design | Multi-process composition library |
-| **gogpu/g3d** | design | 3D rendering (scene graph, PBR, GLTF) |
+| **gogpu/g3d** | v0.1.0 | 3D rendering (scene graph, PBR Blinn-Phong, forward renderer, 5 backends) |
 | **gogpu/gg-pdf** | v0.1.0 | PDF export |
 | **gogpu/gg-svg** | v0.1.0 | SVG export |
 
