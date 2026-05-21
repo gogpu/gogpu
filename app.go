@@ -378,9 +378,6 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 // initRenderer creates the render loop and initializes the renderer
 // on the dedicated render thread. All GPU operations are confined there.
 func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
-	// Create render loop with dedicated render thread
-	a.renderLoop = thread.NewRenderLoop()
-
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
@@ -389,7 +386,6 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 		)
 	})
 	if initErr != nil {
-		a.renderLoop.Stop()
 		return initErr
 	}
 
@@ -1051,6 +1047,7 @@ func (a *App) SetMenu(menu *Menu) {
 				Action:    it.Action,
 				Disabled:  it.Disabled,
 				Separator: it.Separator,
+				Role:      platform.MenuRole(it.Role),
 			}
 		}
 		mgr.SetApplicationMenu(items)
