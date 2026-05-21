@@ -694,11 +694,10 @@ func (a *App) renderFrameMultiThread() {
 				continue
 			}
 
-			// Lazy acquire: store state for deferred beginFrame.
+			// Lazy acquire: reset per-frame state for deferred beginFrame.
 			// beginFrame is called on first draw call, not upfront.
 			// If OnDraw produces no GPU work → no acquire, no present.
-			platWin := frame.window.platWindow
-			ws.prepareLazyAcquire(platWin, a.renderer.device, a.renderer.adapter)
+			ws.prepareLazyAcquire()
 
 			// Set renderer's currentSurface so draw methods target this window.
 			a.renderer.currentSurface = ws

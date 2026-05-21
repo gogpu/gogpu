@@ -89,11 +89,6 @@ type windowSurface struct {
 	// If OnDraw produces no GPU work, beginFrame is never called → no
 	// swapchain acquire/present → zero GPU overhead.
 	frameStarted bool
-
-	// Lazy acquire state — stored by prepareForDraw, consumed by ensureFrameStarted.
-	lazyPlatWin platform.PlatformWindow
-	lazyDevice  *wgpu.Device
-	lazyAdapter *wgpu.Adapter
 }
 
 // Renderer manages the GPU rendering pipeline.
@@ -565,14 +560,12 @@ func (ws *windowSurface) present() {
 	}
 }
 
-// prepareLazyAcquire stores state for deferred beginFrame.
+// prepareLazyAcquire resets per-frame state for deferred beginFrame.
 // The actual swapchain acquire happens on first draw call via ensureFrameStarted.
-func (ws *windowSurface) prepareLazyAcquire(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) {
+// Uses ws.platWindow and ws.renderer.{device,adapter} — no parameters needed.
+func (ws *windowSurface) prepareLazyAcquire() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
-	ws.lazyPlatWin = platWin
-	ws.lazyDevice = device
-	ws.lazyAdapter = adapter
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
@@ -582,14 +575,11 @@ func (ws *windowSurface) ensureFrameStarted() bool {
 		return ws.currentView != nil
 	}
 	ws.frameStarted = true
-	return ws.beginFrame(ws.lazyPlatWin, ws.lazyDevice, ws.lazyAdapter)
+	return ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter)
 }
 
-// resetLazyState clears lazy acquire references after frame cycle.
+// resetLazyState clears per-frame state after frame cycle.
 func (ws *windowSurface) resetLazyState() {
-	ws.lazyPlatWin = nil
-	ws.lazyDevice = nil
-	ws.lazyAdapter = nil
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 }

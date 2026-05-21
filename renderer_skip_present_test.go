@@ -7,9 +7,13 @@ import (
 )
 
 func newTestWindowSurface() *windowSurface {
-	return &windowSurface{
-		format: gputypes.TextureFormatBGRA8Unorm,
+	r := &Renderer{}
+	ws := &windowSurface{
+		renderer: r,
+		format:   gputypes.TextureFormatBGRA8Unorm,
 	}
+	r.primary = ws
+	return ws
 }
 
 func TestWindowSurface_HasGPUWork_DefaultFalse(t *testing.T) {
@@ -31,7 +35,7 @@ func TestPrepareLazyAcquire_SetsState(t *testing.T) {
 	ws.hasGPUWork = true
 	ws.frameStarted = true
 
-	ws.prepareLazyAcquire(nil, nil, nil)
+	ws.prepareLazyAcquire()
 
 	if ws.hasGPUWork {
 		t.Error("prepareLazyAcquire should reset hasGPUWork")
@@ -54,14 +58,11 @@ func TestResetLazyState_ClearsAll(t *testing.T) {
 	if ws.hasGPUWork {
 		t.Error("resetLazyState should clear hasGPUWork")
 	}
-	if ws.lazyPlatWin != nil || ws.lazyDevice != nil || ws.lazyAdapter != nil {
-		t.Error("resetLazyState should clear lazy references")
-	}
 }
 
 func TestEnsureFrameStarted_NoSurface_ReturnsFalse(t *testing.T) {
 	ws := newTestWindowSurface()
-	ws.prepareLazyAcquire(nil, nil, nil)
+	ws.prepareLazyAcquire()
 
 	// No configured surface → beginFrame returns false
 	result := ws.ensureFrameStarted()
@@ -76,7 +77,7 @@ func TestEnsureFrameStarted_NoSurface_ReturnsFalse(t *testing.T) {
 
 func TestEnsureFrameStarted_CalledOnce(t *testing.T) {
 	ws := newTestWindowSurface()
-	ws.prepareLazyAcquire(nil, nil, nil)
+	ws.prepareLazyAcquire()
 
 	// First call: tries beginFrame
 	ws.ensureFrameStarted()
@@ -102,7 +103,7 @@ func TestEndFrameForSurface_OnlyWhenStarted(t *testing.T) {
 
 func TestWindowSurface_Clear_NilView_NoGPUWork(t *testing.T) {
 	ws := newTestWindowSurface()
-	ws.prepareLazyAcquire(nil, nil, nil)
+	ws.prepareLazyAcquire()
 	ws.clear(0, 0, 0, 1)
 
 	// ensureFrameStarted fails (no surface) → no GPU work

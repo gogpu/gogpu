@@ -332,10 +332,12 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 
 	// Create windowSurface for this window.
 	ws := &windowSurface{
-		renderer: a.renderer,
-		surface:  surface,
-		format:   a.renderer.primary.format,
-		vsync:    false, // Secondary windows: Immediate (ADR-010 VSync strategy)
+		renderer:   a.renderer,
+		platWindow: platWindow,
+		surface:    surface,
+		format:     a.renderer.primary.format,
+		vsync:      false, // Secondary windows: Immediate (ADR-010 VSync strategy)
+		state:      SurfaceReady,
 	}
 
 	// Configure surface with initial dimensions on the render thread.
