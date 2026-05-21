@@ -178,6 +178,81 @@ func TestGPUContextAdapterWindowProvider(t *testing.T) {
 	})
 }
 
+// TestGPUContextAdapterPlatformProvider verifies PlatformProvider delegation to App.
+func TestGPUContextAdapterPlatformProvider(t *testing.T) {
+	t.Run("type assertion succeeds", func(t *testing.T) {
+		app := &App{}
+		adapter := &gpuContextAdapter{app: app}
+		var provider gpucontext.DeviceProvider = adapter
+
+		if _, ok := provider.(gpucontext.PlatformProvider); !ok {
+			t.Fatal("gpuContextAdapter must implement PlatformProvider (ggcanvas LCD auto-detection depends on this)")
+		}
+	})
+
+	t.Run("SubpixelLayout delegates to app", func(t *testing.T) {
+		app := &App{}
+		adapter := &gpuContextAdapter{app: app}
+
+		layout := adapter.SubpixelLayout()
+		if layout != gpucontext.SubpixelNone {
+			t.Errorf("SubpixelLayout() = %v, want SubpixelNone (no platform manager)", layout)
+		}
+	})
+
+	t.Run("SubpixelLayout nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		layout := adapter.SubpixelLayout()
+		if layout != gpucontext.SubpixelNone {
+			t.Errorf("SubpixelLayout() = %v, want SubpixelNone", layout)
+		}
+	})
+
+	t.Run("DarkMode nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		if adapter.DarkMode() {
+			t.Error("DarkMode() should return false with nil app")
+		}
+	})
+
+	t.Run("FontScale nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		if adapter.FontScale() != 1.0 {
+			t.Errorf("FontScale() = %f, want 1.0", adapter.FontScale())
+		}
+	})
+
+	t.Run("Clipboard nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		text, err := adapter.ClipboardRead()
+		if text != "" || err != nil {
+			t.Errorf("ClipboardRead() = (%q, %v), want (\"\", nil)", text, err)
+		}
+		if adapter.ClipboardWrite("test") != nil {
+			t.Error("ClipboardWrite() should return nil with nil app")
+		}
+	})
+
+	t.Run("SetCursor nil app no panic", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		adapter.SetCursor(gpucontext.CursorDefault)
+	})
+
+	t.Run("ReduceMotion nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		if adapter.ReduceMotion() {
+			t.Error("ReduceMotion() should return false with nil app")
+		}
+	})
+
+	t.Run("HighContrast nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		if adapter.HighContrast() {
+			t.Error("HighContrast() should return false with nil app")
+		}
+	})
+}
+
 // TestGPUContextAdapterResourceTracker tests resource tracking via adapter.
 func TestGPUContextAdapterResourceTracker(t *testing.T) {
 	t.Run("TrackResource with tracker", func(t *testing.T) {

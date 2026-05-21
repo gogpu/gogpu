@@ -123,11 +123,73 @@ func (a *gpuContextAdapter) UntrackResource(c io.Closer) {
 	}
 }
 
+// --- PlatformProvider delegation (ADR-024) ---
+// Enables ggcanvas auto-detection of LCD subpixel layout via
+// provider.(gpucontext.PlatformProvider) type assertion.
+
+func (a *gpuContextAdapter) ClipboardRead() (string, error) {
+	if a.app != nil {
+		return a.app.ClipboardRead()
+	}
+	return "", nil
+}
+
+func (a *gpuContextAdapter) ClipboardWrite(text string) error {
+	if a.app != nil {
+		return a.app.ClipboardWrite(text)
+	}
+	return nil
+}
+
+func (a *gpuContextAdapter) SetCursor(cursor gpucontext.CursorShape) {
+	if a.app != nil {
+		a.app.SetCursor(cursor)
+	}
+}
+
+func (a *gpuContextAdapter) DarkMode() bool {
+	if a.app != nil {
+		return a.app.DarkMode()
+	}
+	return false
+}
+
+func (a *gpuContextAdapter) ReduceMotion() bool {
+	if a.app != nil {
+		return a.app.ReduceMotion()
+	}
+	return false
+}
+
+func (a *gpuContextAdapter) HighContrast() bool {
+	if a.app != nil {
+		return a.app.HighContrast()
+	}
+	return false
+}
+
+func (a *gpuContextAdapter) FontScale() float32 {
+	if a.app != nil {
+		return a.app.FontScale()
+	}
+	return 1.0
+}
+
+func (a *gpuContextAdapter) SubpixelLayout() gpucontext.SubpixelLayout {
+	if a.app != nil {
+		return a.app.SubpixelLayout()
+	}
+	return gpucontext.SubpixelNone
+}
+
 // Ensure gpuContextAdapter implements gpucontext.DeviceProvider.
 var _ gpucontext.DeviceProvider = (*gpuContextAdapter)(nil)
 
 // Ensure gpuContextAdapter implements gpucontext.WindowProvider.
 var _ gpucontext.WindowProvider = (*gpuContextAdapter)(nil)
+
+// Ensure gpuContextAdapter implements gpucontext.PlatformProvider.
+var _ gpucontext.PlatformProvider = (*gpuContextAdapter)(nil)
 
 // mapTextureFormat converts gogpu TextureFormat to gputypes TextureFormat.
 func mapTextureFormat(format gputypes.TextureFormat) gputypes.TextureFormat {
