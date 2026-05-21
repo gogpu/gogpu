@@ -269,6 +269,7 @@ type MenuItem struct {
 	Role      MenuRole
 	Disabled  bool
 	Separator bool
+	Submenu   []MenuItem
 }
 
 // NewManager creates a platform-specific PlatformManager.

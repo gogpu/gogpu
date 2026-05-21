@@ -1,13 +1,18 @@
 package gogpu
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/gpucontext"
 )
 
 // mockMenuManager implements platform.PlatMenuManager
 type mockMenuManager struct {
+	setApplicationMenuCalled bool
+	setApplicationMenuItems  []platform.MenuItem
+
 	addToSystemMenuCalled bool
 	addToSystemMenuMenu   platform.SystemMenu
 	addToSystemMenuItems  []platform.MenuItem
@@ -15,7 +20,8 @@ type mockMenuManager struct {
 }
 
 func (m *mockMenuManager) SetApplicationMenu(items []platform.MenuItem) {
-	// Not needed for these tests
+	m.setApplicationMenuCalled = true
+	m.setApplicationMenuItems = items
 }
 
 func (m *mockMenuManager) AddToSystemMenu(menu platform.SystemMenu, items []platform.MenuItem) bool {
@@ -25,11 +31,33 @@ func (m *mockMenuManager) AddToSystemMenu(menu platform.SystemMenu, items []plat
 	return m.addToSystemMenuResult
 }
 
+// Ensure mockMenuManager implements platform.PlatformManager (partially)
+// and PlatMenuManager.
+func (m *mockMenuManager) Init() error { return nil }
+func (m *mockMenuManager) Destroy()    {}
+func (m *mockMenuManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockMenuManager) PollEvents() platform.Event                { return platform.Event{} }
+func (m *mockMenuManager) WaitEvents()                               {}
+func (m *mockMenuManager) WakeUp()                                   {}
+func (m *mockMenuManager) ClipboardRead() (string, error)            { return "", nil }
+func (m *mockMenuManager) ClipboardWrite(string) error               { return nil }
+func (m *mockMenuManager) DarkMode() bool                            { return false }
+func (m *mockMenuManager) ReduceMotion() bool                        { return false }
+func (m *mockMenuManager) HighContrast() bool                        { return false }
+func (m *mockMenuManager) FontScale() float32                        { return 1.0 }
+func (m *mockMenuManager) SubpixelLayout() gpucontext.SubpixelLayout { return 0 }
+func (m *mockMenuManager) SetAppName(string)                         {}
+
 // TestNewMenu checks that NewMenu is not nil and that the menu is empty.
 func TestNewMenu(t *testing.T) {
-	menu := NewMenu()
+	menu := NewMenu("Test")
 	if menu == nil {
 		t.Fatal("NewMenu returned nil")
+	}
+	if menu.Title != "Test" {
+		t.Errorf("expected title Test, got %q", menu.Title)
 	}
 	if len(menu.Items) != 0 {
 		t.Fatalf("expected empty menu, got %d items", len(menu.Items))
@@ -38,7 +66,7 @@ func TestNewMenu(t *testing.T) {
 
 // TestAddItem checks for the addition of elements and chained returns.
 func TestAddItem(t *testing.T) {
-	menu := NewMenu()
+	menu := NewMenu("")
 	result := menu.AddItem(MenuItem{Title: "Item 1"})
 	if result != menu {
 		t.Error("AddItem did not return the same menu for chaining")
@@ -156,5 +184,61 @@ func TestSystemMenuHandleNoApp(t *testing.T) {
 	ok = handle.AddItem(MenuItem{Title: "Noop"})
 	if ok {
 		t.Error("expected false when both manager and app are nil")
+	}
+}
+
+func TestCustomMenus(t *testing.T) {
+	mgr := &mockMenuManager{}
+	app := &App{
+		manager: mgr,
+	}
+
+	// Initial main menu
+	mainMenu := NewMenu("").AddItem(MenuItem{Title: "File"})
+	app.SetMenu(mainMenu)
+
+	if !mgr.setApplicationMenuCalled {
+		t.Fatal("SetApplicationMenu was not called")
+	}
+	if len(mgr.setApplicationMenuItems) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(mgr.setApplicationMenuItems))
+	}
+	if mgr.setApplicationMenuItems[0].Title != "File" {
+		t.Errorf("expected File, got %q", mgr.setApplicationMenuItems[0].Title)
+	}
+
+	// Add custom menu
+	mgr.setApplicationMenuCalled = false
+	customMenu := NewMenu("Tools").AddItem(MenuItem{Title: "Setting 1"})
+	app.AddCustomMenu("tools", customMenu)
+
+	if !mgr.setApplicationMenuCalled {
+		t.Fatal("SetApplicationMenu was not called after AddCustomMenu")
+	}
+	// Items should be combined: "File" from main, "Tools" as a submenu
+	if len(mgr.setApplicationMenuItems) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(mgr.setApplicationMenuItems))
+	}
+	if mgr.setApplicationMenuItems[1].Title != "Tools" {
+		t.Errorf("expected Tools, got %q", mgr.setApplicationMenuItems[1].Title)
+	}
+	if len(mgr.setApplicationMenuItems[1].Submenu) != 1 {
+		t.Fatalf("expected 1 submenu item, got %d", len(mgr.setApplicationMenuItems[1].Submenu))
+	}
+
+	// Update custom menu
+	mgr.setApplicationMenuCalled = false
+	customMenu.AddItem(MenuItem{Title: "Setting 2"})
+	app.UpdateCustomMenu("tools", customMenu)
+
+	if !mgr.setApplicationMenuCalled {
+		t.Fatal("SetApplicationMenu was not called after UpdateCustomMenu")
+	}
+	// Now should have 2 top-level items, but the second one has 2 items in submenu
+	if len(mgr.setApplicationMenuItems) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(mgr.setApplicationMenuItems))
+	}
+	if len(mgr.setApplicationMenuItems[1].Submenu) != 2 {
+		t.Fatalf("expected 2 submenu items, got %d", len(mgr.setApplicationMenuItems[1].Submenu))
 	}
 }

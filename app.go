@@ -71,6 +71,7 @@ type App struct {
 	primaryWindow *Window
 
 	menu                   *Menu
+	customMenus            map[string]*Menu
 	pendingSystemMenuItems map[SystemMenu][]MenuItem
 }
 
@@ -308,8 +309,8 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	}
 
 	// Apply any menu set before Run().
-	if a.menu != nil {
-		a.SetMenu(a.menu)
+	if a.menu != nil || len(a.customMenus) > 0 {
+		a.updateNativeMenu()
 	}
 	// Apply pending system menu items.
 	if a.pendingSystemMenuItems != nil {
@@ -1035,22 +1036,74 @@ func (a *App) Close() {
 // On macOS this modifies the menu bar; on other platforms it's a no-op.
 func (a *App) SetMenu(menu *Menu) {
 	a.menu = menu
+	a.updateNativeMenu()
+}
+
+// AddCustomMenu adds an additional menu to the main menu bar.
+// If the menu is initially empty, it will not be displayed until items are added.
+func (a *App) AddCustomMenu(name string, menu *Menu) {
+	if a.customMenus == nil {
+		a.customMenus = make(map[string]*Menu)
+	}
+	a.customMenus[name] = menu
+	a.updateNativeMenu()
+}
+
+// UpdateCustomMenu updates an existing custom menu.
+func (a *App) UpdateCustomMenu(name string, menu *Menu) {
+	if a.customMenus == nil {
+		a.customMenus = make(map[string]*Menu)
+	}
+	a.customMenus[name] = menu
+	a.updateNativeMenu()
+}
+
+func (a *App) updateNativeMenu() {
 	if a.manager == nil {
 		return
 	}
-	if mgr, ok := a.manager.(platform.PlatMenuManager); ok {
-		items := make([]platform.MenuItem, len(menu.Items))
-		for i, it := range menu.Items {
-			items[i] = platform.MenuItem{
-				Title:     it.Title,
-				Action:    it.Action,
-				Disabled:  it.Disabled,
-				Separator: it.Separator,
-				Role:      platform.MenuRole(it.Role),
-			}
-		}
-		mgr.SetApplicationMenu(items)
+	mgr, ok := a.manager.(platform.PlatMenuManager)
+	if !ok {
+		return
 	}
+
+	var allItems []platform.MenuItem
+
+	// Add items from the main menu
+	if a.menu != nil {
+		allItems = append(allItems, a.convertMenuToPlatformItems(a.menu.Items)...)
+	}
+
+	// Add items from custom menus
+	for _, menu := range a.customMenus {
+		// Each custom menu at the top level should be its own menu item with a submenu
+		// in the native menu bar, unless it's intended to be merged (but the PR description
+		// implies they appear "next to File").
+		// To make it appear "next to File", it must be a MenuItem with a Submenu at the top level of NSMenu.
+		allItems = append(allItems, platform.MenuItem{
+			Title:   menu.Title,
+			Submenu: a.convertMenuToPlatformItems(menu.Items),
+		})
+	}
+
+	mgr.SetApplicationMenu(allItems)
+}
+
+func (a *App) convertMenuToPlatformItems(items []MenuItem) []platform.MenuItem {
+	res := make([]platform.MenuItem, len(items))
+	for i, it := range items {
+		res[i] = platform.MenuItem{
+			Title:     it.Title,
+			Action:    it.Action,
+			Disabled:  it.Disabled,
+			Separator: it.Separator,
+			Role:      platform.MenuRole(it.Role),
+		}
+		if it.Submenu != nil {
+			res[i].Submenu = a.convertMenuToPlatformItems(it.Submenu.Items)
+		}
+	}
+	return res
 }
 
 // GetSystemMenu returns a handle to a standard system menu (e.g., the Apple menu).

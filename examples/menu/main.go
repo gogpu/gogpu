@@ -9,20 +9,16 @@ import (
 func main() {
 	app := gogpu.NewApp(gogpu.DefaultConfig().WithTitle("My App").WithAppName("Example App"))
 
-	// Replacing the main menu
-	app.SetMenu(gogpu.NewMenu().
-		AddItem(gogpu.MenuItem{Title: "App", Role: gogpu.RoleNone}). // Placeholder for app name on some platforms
-		AddItem(gogpu.MenuItem{Title: "About My App", Role: gogpu.RoleAbout}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Preferences…", Role: gogpu.RolePreferences}).
-		AddItem(gogpu.MenuItem{Title: "Services", Role: gogpu.RoleServices}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Hide My App", Role: gogpu.RoleHide}).
-		AddItem(gogpu.MenuItem{Title: "Hide Others", Role: gogpu.RoleHideOthers}).
-		AddItem(gogpu.MenuItem{Title: "Show All", Role: gogpu.RoleShowAll}).
-		AddItem(gogpu.MenuItem{Separator: true}).
-		AddItem(gogpu.MenuItem{Title: "Quit", Role: gogpu.RoleQuit}),
-	)
+	// Additional custom menu (initially empty, will not be displayed until items added)
+	toolsMenu := gogpu.NewMenu("Tools")
+	app.AddCustomMenu("tools", toolsMenu)
+
+	// Later we add items to it
+	toolsMenu.AddItem(gogpu.MenuItem{
+		Title:  "Settings",
+		Action: func() { log.Println("Tools -> Settings clicked") },
+	})
+	app.UpdateCustomMenu("tools", toolsMenu)
 
 	// Add items to the Window menu using roles
 	if windowMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); windowMenu != nil {

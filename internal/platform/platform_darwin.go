@@ -1368,32 +1368,44 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 		mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), appMenuItem.Ptr())
 	}
 
-	// Add custom items as separate menu items.
+	// Add items as separate menu items.
 	for _, item := range items {
-		if item.Separator {
-			continue
-		}
+		p.addPlatformItem(mainMenu, item)
+	}
+}
 
-		if item.Role != MenuRoleNone {
-			roleStr := roleToString(item.Role)
-			if roleStr != "" {
-				darwin.AddMenuItemWithRole(mainMenu, item.Title, roleStr)
-				continue
-			}
-		}
+func (p *darwinPlatform) addPlatformItem(parentMenu darwin.ID, item MenuItem) {
+	if item.Separator {
+		darwin.AddSeparatorItem(parentMenu)
+		return
+	}
 
+	if item.Role != MenuRoleNone {
+		roleStr := roleToString(item.Role)
+		if roleStr != "" {
+			darwin.AddMenuItemWithRole(parentMenu, item.Title, roleStr)
+			return
+		}
+	}
+
+	if len(item.Submenu) > 0 {
 		submenu := darwin.NewMenuWithTitle(item.Title)
 		if submenu.IsNil() {
-			continue
+			return
 		}
 
-		darwin.AddMenuItemWithCallback(submenu, item.Title, item.Action, "")
+		for _, sub := range item.Submenu {
+			p.addPlatformItem(submenu, sub)
+		}
 
 		menuItem := darwin.NewMenuItemWithSubmenu(item.Title, submenu)
 		if !menuItem.IsNil() {
-			mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), menuItem.Ptr())
+			parentMenu.SendPtr(darwin.RegisterSelector("addItem:"), menuItem.Ptr())
 		}
+		return
 	}
+
+	darwin.AddMenuItemWithCallback(parentMenu, item.Title, item.Action, "")
 }
 
 // roleToString converts a MenuRole value to its corresponding string representation for OS-specific menu integration.
