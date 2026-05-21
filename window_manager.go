@@ -347,7 +347,7 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 			if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
 				slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
 			} else {
-				ws.configured = true
+				ws.state = SurfaceConfigured
 			}
 		}
 	})
