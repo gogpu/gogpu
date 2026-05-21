@@ -15,9 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Renderer decoupled from window** (LIFECYCLE Phase 2, #223) -- `SurfaceState` enum (None/Ready/Configured/Lost) replaces boolean `configured` flag. `CanRender()` method with explicit Outdated/Lost recovery (wgpu framework.rs pattern). `platWindow` moved from Renderer to per-window windowSurface. Lazy acquire fields eliminated — windowSurface is fully self-contained. Prepares for multi-window surface lifecycle and mobile platforms.
 
+## [0.37.12] - 2026-05-21
+
 ### Fixed
 
-- **GPUContextProvider now implements PlatformProvider** (ADR-024) -- `gpuContextAdapter` delegates all 8 `PlatformProvider` methods to `App`. Fixes `ggcanvas.New()` LCD subpixel auto-detection: `provider.(gpucontext.PlatformProvider)` type assertion now succeeds. ClearType rendering works automatically without UI-layer workaround.
+- **GPUContextProvider implements PlatformProvider** (ADR-024) -- `gpuContextAdapter` delegates all 8 `PlatformProvider` methods to `App`. Fixes `ggcanvas.New()` LCD subpixel auto-detection: `provider.(gpucontext.PlatformProvider)` type assertion now succeeds. ClearType rendering works automatically without UI-layer workaround.
+
+### Changed
+
+- **deps:** wgpu v0.28.5 -> v0.28.6 (GLES hidden window pattern — Instance-owned GL context on hidden 1×1 HWND, Rust wgpu parity)
 
 ## [0.37.11] - 2026-05-21
 
