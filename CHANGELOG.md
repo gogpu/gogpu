@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **macOS system menu API** (#242, @lkmavi) -- `SetMenu()`, `GetSystemMenu()`, `MenuRole` for native macOS menu bar. Role-based item mapping (About, Preferences, Quit, Minimize, Zoom, etc.). `SetAppName()` / `WithAppName()` for menu display. Pending menu support (set before `Run()`). New `examples/menu/` demo.
 
+### Changed
+
+- **Renderer decoupled from window** (LIFECYCLE Phase 2, #223) -- `SurfaceState` enum (None/Ready/Configured/Lost) replaces boolean `configured` flag. `CanRender()` method with explicit Outdated/Lost recovery (wgpu framework.rs pattern). `platWindow` moved from Renderer to per-window windowSurface. Lazy acquire fields eliminated — windowSurface is fully self-contained. Prepares for multi-window surface lifecycle and mobile platforms.
+
 ## [0.37.11] - 2026-05-21
 
 ### Changed
