@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.38.0** | 2026-05-21 | **macOS menu API** (#242, @lkmavi) + **custom dynamic menus** (#264, @lkmavi) — SetMenu, SetCustomMenu, MenuRole, Submenu. **Renderer decoupling** (LIFECYCLE Phase 2) — SurfaceState, per-window platWindow. PlatformProvider delegation (ADR-024). deps: wgpu v0.28.6 (GLES hidden window) |
 | **v0.37.12** | 2026-05-21 | **PlatformProvider delegation** (ADR-024) -- GPUContextAdapter implements PlatformProvider, LCD auto-detection works. deps: wgpu v0.28.6 (GLES hidden window) |
 | **v0.37.11** | 2026-05-21 | **deps:** wgpu v0.28.5 (indirect validation nil guard, Metal present fixes) |
 | **v0.37.10** | 2026-05-19 | **timerfd key repeat** (#240) -- goroutine→timerfd in Poll set, fixes GUI freeze + xkb data race |

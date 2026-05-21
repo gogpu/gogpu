@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.38.0] - 2026-05-21
 
 ### Added
 
 - **macOS system menu API** (#242, @lkmavi) -- `SetMenu()`, `GetSystemMenu()`, `MenuRole` for native macOS menu bar. Role-based item mapping (About, Preferences, Quit, Minimize, Zoom, etc.). `SetAppName()` / `WithAppName()` for menu display. Pending menu support (set before `Run()`). New `examples/menu/` demo.
+- **Custom dynamic menus** (#264, @lkmavi) -- `SetCustomMenu(name, menu)` for additional menu bar entries. `NewMenuWithTitle(title)` constructor. `MenuItem.Submenu *Menu` for recursive nested menus. Insertion-order preserved via ordered slice. `NewMenu()` backward compatible (no args).
 
 ### Changed
 
