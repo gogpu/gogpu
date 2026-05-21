@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.37.11** | 2026-05-21 | **deps:** wgpu v0.28.5 (indirect validation nil guard, Metal present fixes) |
 | **v0.37.10** | 2026-05-19 | **timerfd key repeat** (#240) -- goroutine→timerfd in Poll set, fixes GUI freeze + xkb data race |
 | **v0.37.9** | 2026-05-17 | **deps:** wgpu v0.28.3 |
 | **v0.37.8** | 2026-05-17 | **deps:** wgpu v0.28.2 (swapchain extent diagnostics) |
