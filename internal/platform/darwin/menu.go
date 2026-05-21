@@ -456,12 +456,6 @@ func createNSString(s string) ID {
 	return ns.ID()
 }
 
-// GetMenuSelectors returns the selector for a predefined menu item role.
-func (a *Application) GetMenuSelectors() any {
-	initMenuSelectors()
-	return menuSels
-}
-
 // GetMenuSelector returns the selector for a predefined menu item role.
 func (a *Application) GetMenuSelector(role string) SEL {
 	initMenuSelectors()

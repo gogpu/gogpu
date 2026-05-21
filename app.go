@@ -215,7 +215,6 @@ func (a *App) Run() error {
 		a.renderLoop.RunOnRenderThreadVoid(func() {
 			a.renderer.Destroy()
 		})
-		a.renderLoop.Stop()
 	}()
 
 	a.registerPrimaryWindow(platWindow)
@@ -320,6 +319,7 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 					mgr.AddToSystemMenu(platform.SystemMenu(menu), []platform.MenuItem{{
 						Title:     item.Title,
 						Action:    item.Action,
+						Role:      platform.MenuRole(item.Role),
 						Disabled:  item.Disabled,
 						Separator: item.Separator,
 					}})
