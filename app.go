@@ -71,8 +71,13 @@ type App struct {
 	primaryWindow *Window
 
 	menu                   *Menu
-	customMenus            map[string]*Menu
+	customMenus            []customMenuEntry
 	pendingSystemMenuItems map[SystemMenu][]MenuItem
+}
+
+type customMenuEntry struct {
+	name string
+	menu *Menu
 }
 
 // NewApp creates a new application with the given configuration.
@@ -1039,22 +1044,18 @@ func (a *App) SetMenu(menu *Menu) {
 	a.updateNativeMenu()
 }
 
-// AddCustomMenu adds an additional menu to the main menu bar.
+// SetCustomMenu adds or updates an additional menu in the main menu bar.
 // If the menu is initially empty, it will not be displayed until items are added.
-func (a *App) AddCustomMenu(name string, menu *Menu) {
-	if a.customMenus == nil {
-		a.customMenus = make(map[string]*Menu)
+// Insertion order is preserved for display in the native menu bar.
+func (a *App) SetCustomMenu(name string, menu *Menu) {
+	for i, entry := range a.customMenus {
+		if entry.name == name {
+			a.customMenus[i].menu = menu
+			a.updateNativeMenu()
+			return
+		}
 	}
-	a.customMenus[name] = menu
-	a.updateNativeMenu()
-}
-
-// UpdateCustomMenu updates an existing custom menu.
-func (a *App) UpdateCustomMenu(name string, menu *Menu) {
-	if a.customMenus == nil {
-		a.customMenus = make(map[string]*Menu)
-	}
-	a.customMenus[name] = menu
+	a.customMenus = append(a.customMenus, customMenuEntry{name: name, menu: menu})
 	a.updateNativeMenu()
 }
 
@@ -1075,14 +1076,14 @@ func (a *App) updateNativeMenu() {
 	}
 
 	// Add items from custom menus
-	for _, menu := range a.customMenus {
+	for _, entry := range a.customMenus {
 		// Each custom menu at the top level should be its own menu item with a submenu
 		// in the native menu bar, unless it's intended to be merged (but the PR description
 		// implies they appear "next to File").
 		// To make it appear "next to File", it must be a MenuItem with a Submenu at the top level of NSMenu.
 		allItems = append(allItems, platform.MenuItem{
-			Title:   menu.Title,
-			Submenu: a.convertMenuToPlatformItems(menu.Items),
+			Title:   entry.menu.Title,
+			Submenu: a.convertMenuToPlatformItems(entry.menu.Items),
 		})
 	}
 

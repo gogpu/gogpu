@@ -37,8 +37,13 @@ type Menu struct {
 	Items []MenuItem
 }
 
-// NewMenu creates an empty menu with the specified title.
-func NewMenu(title string) *Menu {
+// NewMenu creates an empty menu.
+func NewMenu() *Menu {
+	return &Menu{}
+}
+
+// NewMenuWithTitle creates an empty menu with the specified title.
+func NewMenuWithTitle(title string) *Menu {
 	return &Menu{Title: title}
 }
 

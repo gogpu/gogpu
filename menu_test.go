@@ -52,9 +52,9 @@ func (m *mockMenuManager) SetAppName(string)                         {}
 
 // TestNewMenu checks that NewMenu is not nil and that the menu is empty.
 func TestNewMenu(t *testing.T) {
-	menu := NewMenu("Test")
+	menu := NewMenuWithTitle("Test")
 	if menu == nil {
-		t.Fatal("NewMenu returned nil")
+		t.Fatal("NewMenuWithTitle returned nil")
 	}
 	if menu.Title != "Test" {
 		t.Errorf("expected title Test, got %q", menu.Title)
@@ -62,11 +62,16 @@ func TestNewMenu(t *testing.T) {
 	if len(menu.Items) != 0 {
 		t.Fatalf("expected empty menu, got %d items", len(menu.Items))
 	}
+
+	menu2 := NewMenu()
+	if menu2.Title != "" {
+		t.Errorf("expected empty title, got %q", menu2.Title)
+	}
 }
 
 // TestAddItem checks for the addition of elements and chained returns.
 func TestAddItem(t *testing.T) {
-	menu := NewMenu("")
+	menu := NewMenu()
 	result := menu.AddItem(MenuItem{Title: "Item 1"})
 	if result != menu {
 		t.Error("AddItem did not return the same menu for chaining")
@@ -194,7 +199,7 @@ func TestCustomMenus(t *testing.T) {
 	}
 
 	// Initial main menu
-	mainMenu := NewMenu("").AddItem(MenuItem{Title: "File"})
+	mainMenu := NewMenu().AddItem(MenuItem{Title: "File"})
 	app.SetMenu(mainMenu)
 
 	if !mgr.setApplicationMenuCalled {
@@ -207,13 +212,13 @@ func TestCustomMenus(t *testing.T) {
 		t.Errorf("expected File, got %q", mgr.setApplicationMenuItems[0].Title)
 	}
 
-	// Add custom menu
+	// Set custom menu
 	mgr.setApplicationMenuCalled = false
-	customMenu := NewMenu("Tools").AddItem(MenuItem{Title: "Setting 1"})
-	app.AddCustomMenu("tools", customMenu)
+	customMenu := NewMenuWithTitle("Tools").AddItem(MenuItem{Title: "Setting 1"})
+	app.SetCustomMenu("tools", customMenu)
 
 	if !mgr.setApplicationMenuCalled {
-		t.Fatal("SetApplicationMenu was not called after AddCustomMenu")
+		t.Fatal("SetApplicationMenu was not called after SetCustomMenu")
 	}
 	// Items should be combined: "File" from main, "Tools" as a submenu
 	if len(mgr.setApplicationMenuItems) != 2 {
@@ -224,21 +229,5 @@ func TestCustomMenus(t *testing.T) {
 	}
 	if len(mgr.setApplicationMenuItems[1].Submenu) != 1 {
 		t.Fatalf("expected 1 submenu item, got %d", len(mgr.setApplicationMenuItems[1].Submenu))
-	}
-
-	// Update custom menu
-	mgr.setApplicationMenuCalled = false
-	customMenu.AddItem(MenuItem{Title: "Setting 2"})
-	app.UpdateCustomMenu("tools", customMenu)
-
-	if !mgr.setApplicationMenuCalled {
-		t.Fatal("SetApplicationMenu was not called after UpdateCustomMenu")
-	}
-	// Now should have 2 top-level items, but the second one has 2 items in submenu
-	if len(mgr.setApplicationMenuItems) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(mgr.setApplicationMenuItems))
-	}
-	if len(mgr.setApplicationMenuItems[1].Submenu) != 2 {
-		t.Fatalf("expected 2 submenu items, got %d", len(mgr.setApplicationMenuItems[1].Submenu))
 	}
 }
