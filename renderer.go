@@ -42,6 +42,8 @@ const (
 type windowSurface struct {
 	renderer *Renderer // back-reference to shared GPU state
 
+	platWindow platform.PlatformWindow // platform window for PrepareFrame and handle access
+
 	surface *wgpu.Surface
 	format  gputypes.TextureFormat
 	width   uint32
@@ -145,9 +147,6 @@ type Renderer struct {
 	deferredDestroys   []func()
 	deferredDestroysMu sync.Mutex
 
-	// Platform window reference for surface creation and frame queries
-	platWindow platform.PlatformWindow
-
 	// PowerPreference for adapter selection
 	powerPreference gputypes.PowerPreference
 
@@ -166,13 +165,12 @@ type Renderer struct {
 // newRenderer creates and initializes a new renderer.
 func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference) (*Renderer, error) {
 	r := &Renderer{
-		platWindow:      platWin,
 		powerPreference: powerPref,
 	}
-	// Store vsync temporarily; initCommon will move it to the primary windowSurface.
 	r.primary = &windowSurface{
-		renderer: r,
-		vsync:    vsync,
+		renderer:   r,
+		platWindow: platWin,
+		vsync:      vsync,
 	}
 
 	if err := r.init(backendType, graphicsAPI); err != nil {
@@ -237,7 +235,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	}
 
 	// Get platform handles for surface creation
-	displayHandle, windowHandle := r.platWindow.GetHandle()
+	displayHandle, windowHandle := r.primary.platWindow.GetHandle()
 
 	// Create surface via wgpu public API — stored on primary windowSurface
 	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
@@ -278,7 +276,7 @@ func (r *Renderer) initCommon() error {
 	// On some platforms (especially macOS), the window may not have valid
 	// dimensions immediately after creation. In that case, we defer surface
 	// configuration until the first Resize event.
-	width, height := r.platWindow.PhysicalSize()
+	width, height := r.primary.platWindow.PhysicalSize()
 
 	// Use BGRA8Unorm which is common across platforms
 	r.primary.format = gputypes.TextureFormatBGRA8Unorm
@@ -439,7 +437,7 @@ func (r *Renderer) BeginFrame() bool {
 	// on the render thread where GPU operations are safe.
 	r.DrainDeferredDestroys()
 
-	return r.primary.beginFrame(r.platWindow, r.device, r.adapter)
+	return r.primary.beginFrame(r.primary.platWindow, r.device, r.adapter)
 }
 
 // CanRender reports whether this surface is ready for draw operations.

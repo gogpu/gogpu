@@ -38,7 +38,7 @@ func (r *Renderer) initRust() error {
 	}
 
 	// Get platform handles for surface creation
-	displayHandle, windowHandle := r.platWindow.GetHandle()
+	displayHandle, windowHandle := r.primary.platWindow.GetHandle()
 
 	// Create HAL surface
 	halSurface, err := halInstance.CreateSurface(displayHandle, windowHandle)
