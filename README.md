@@ -34,7 +34,7 @@
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
-| **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference, native macOS window tabbing |
+| **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference, native macOS window tabbing, native macOS system menu (role-based) |
 | **Scroll** | ScrollPhase + IsMomentum for macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes |
 | **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |
 | **Compute** | Full compute shader support |
@@ -315,6 +315,29 @@ if app.ReduceMotion() { /* disable animations */ }
 if app.HighContrast() { /* increase contrast */ }
 fontMul := app.FontScale() // user's font size preference
 ```
+
+### macOS System Menu
+
+Native menu bar with role-based items (About, Preferences, Quit, etc.):
+
+```go
+app := gogpu.NewApp(gogpu.DefaultConfig().WithAppName("My App"))
+
+app.SetMenu(gogpu.NewMenu().
+    AddItem(gogpu.MenuItem{Title: "About My App", Role: gogpu.RoleAbout}).
+    AddItem(gogpu.MenuItem{Separator: true}).
+    AddItem(gogpu.MenuItem{Title: "Preferences…", Role: gogpu.RolePreferences}).
+    AddItem(gogpu.MenuItem{Separator: true}).
+    AddItem(gogpu.MenuItem{Title: "Quit", Role: gogpu.RoleQuit}),
+)
+
+if windowMenu := app.GetSystemMenu(gogpu.SystemMenuWindow); windowMenu != nil {
+    windowMenu.AddItem(gogpu.MenuItem{Title: "Minimize", Role: gogpu.RoleMinimize})
+    windowMenu.AddItem(gogpu.MenuItem{Title: "Close", Role: gogpu.RoleClose})
+}
+```
+
+Menu can be set before or after `Run()`. On non-macOS platforms these calls are no-ops. See `examples/menu/` for a complete example.
 
 ### Ebiten-Style Input Polling
 
