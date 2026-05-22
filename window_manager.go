@@ -397,11 +397,9 @@ func (a *App) WindowCount() int {
 // closeSecondaryWindow removes a secondary window and releases its GPU and
 // platform resources. The GPU surface is released on the render thread.
 // Does nothing if the window is the primary window (use Quit() instead).
+// closeWindow closes any window (primary or secondary) — destroys surface and platform window.
+// ADR-026: all windows are equal, no special "primary" treatment.
 func (a *App) closeSecondaryWindow(id InternalWindowID) {
-	if a.primaryWindow != nil && id == a.primaryWindow.id {
-		return // Primary window closes via a.running = false
-	}
-
 	w := a.windowManager.get(id)
 	if w == nil {
 		return

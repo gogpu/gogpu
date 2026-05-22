@@ -46,8 +46,9 @@ type App struct {
 	hitTestCallback   gpucontext.HitTestCallback // deferred until platWindow exists
 
 	// State
-	running   bool
-	lastFrame time.Time
+	running                bool
+	quitOnLastWindowClosed bool // default true — exit when last window closes (ADR-026)
+	lastFrame              time.Time
 
 	// Event-driven rendering
 	invalidator *Invalidator
@@ -83,8 +84,17 @@ type customMenuEntry struct {
 // NewApp creates a new application with the given configuration.
 func NewApp(config Config) *App {
 	return &App{
-		config: config,
+		config:                 config,
+		quitOnLastWindowClosed: true,
 	}
+}
+
+// SetQuitOnLastWindowClosed controls whether the app exits when the last
+// window is closed. Default is true (standard desktop behavior).
+// Set to false for tray apps, background services, or headless mode (ADR-026).
+func (a *App) SetQuitOnLastWindowClosed(quit bool) *App {
+	a.quitOnLastWindowClosed = quit
+	return a
 }
 
 // OnDraw sets the callback for rendering each frame.
@@ -236,7 +246,7 @@ func (a *App) Run() error {
 	a.animations = &AnimationController{}
 	a.invalidator.Invalidate() // Request initial frame
 
-	for a.running && !a.platWindow.ShouldClose() {
+	for a.running && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
 		// Three-mode state detection (ADR-023)
 		continuousRender := a.config.ContinuousRender
 		animating := a.animations.IsAnimating()
@@ -426,7 +436,7 @@ func (a *App) processEventsMultiThread() {
 
 	// Queue primary window resize for render thread (deferred pattern).
 	// Don't apply resize during modal resize loop (Windows).
-	if lastResize != nil && !a.platWindow.InSizeMove() {
+	if lastResize != nil && a.platWindow != nil && !a.platWindow.InSizeMove() {
 		// Queue PHYSICAL size for render thread (GPU surface reconfiguration)
 		physW, physH := lastResize.PhysicalWidth, lastResize.PhysicalHeight
 		if physW > 0 && physH > 0 {
@@ -592,37 +602,31 @@ func (a *App) dispatchScrollEvent(event *platform.Event) {
 
 // windowCloseEvent handles CloseEvent from the platform.
 func (a *App) windowCloseEvent(event *platform.Event) {
-	// Primary check
-	isPrimary := a.primaryWindow != nil && event.WindowID == a.primaryPlatformID
+	w := a.windowManager.getByPlatformID(event.WindowID)
+	if w == nil {
+		return
+	}
 
-	if !isPrimary {
-		w := a.windowManager.getByPlatformID(event.WindowID)
-		if w == nil {
-			return
+	if !w.safeOnClose() {
+		return
+	}
+
+	isPrimary := a.primaryWindow != nil && w.id == a.primaryWindow.id
+
+	// Close the window (destroy surface + platform window)
+	a.closeSecondaryWindow(w.id)
+
+	if isPrimary {
+		a.primaryWindow = nil
+		a.platWindow = nil
+		if a.renderer != nil {
+			a.renderer.primary = nil
 		}
-
-		if !w.safeOnClose() {
-			return
-		}
-
-		a.closeSecondaryWindow(w.id)
-		return
 	}
 
-	// Primary window — terminate app
-	if a.primaryWindow == nil {
-		return
-	}
-
-	if !a.primaryWindow.safeOnClose() {
-		return
-	}
-
-	a.running = false
-	a.windowManager.release(a.primaryWindow.id)
-
-	if a.onAnyWindowClosed != nil {
-		a.onAnyWindowClosed(a.primaryWindow.id)
+	// Check if app should quit (ADR-026: QuitOnLastWindowClosed)
+	if a.quitOnLastWindowClosed && a.windowManager.count() == 0 {
+		a.running = false
 	}
 }
 
@@ -686,9 +690,11 @@ func (a *App) renderFrameMultiThread() {
 
 	// Execute GPU operations on render thread.
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		// Apply pending resize for the primary window.
+		// Apply pending resize for the primary window (if still alive).
 		if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
-			a.renderer.Resize(int(w), int(h))
+			if a.renderer.primary != nil {
+				a.renderer.Resize(int(w), int(h))
+			}
 		}
 
 		// Drain deferred destroys once per frame, not per window.
@@ -759,6 +765,9 @@ func (a *App) modalFrameTick() {
 	// Propagate PHYSICAL window size to render thread for swapchain resize.
 	// During modal loop, processEventsMultiThread doesn't run, so
 	// RequestResize wouldn't be called otherwise.
+	if a.platWindow == nil {
+		return
+	}
 	width, height := a.platWindow.PhysicalSize()
 	if width > 0 && height > 0 {
 		a.renderLoop.RequestResize(uint32(width), uint32(height)) //nolint:gosec // G115: validated positive
