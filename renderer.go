@@ -219,8 +219,13 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	}
 
 	// Request adapter WITHOUT CompatibleSurface — device is window-independent.
-	// Vulkan/DX12: enumerates all adapters. GLES: uses hidden window (wgpu v0.28.6).
-	// WebGPU spec: CompatibleSurface is a hint, not a requirement.
+	// Vulkan/DX12: enumerates all adapters without surface.
+	// GLES: deferred enumeration not triggered without surface hint — core
+	// returns Software adapter. Actual GL context (hidden window, wgpu v0.28.6)
+	// is created lazily on render thread. Adapter name may show "Software"
+	// but GLES rendering uses real GPU via hidden window GL context.
+	// TODO(wgpu): core.RequestAdapter should trigger deferred GLES enumeration
+	// when hidden window exists, even without surface hint.
 	r.adapter, err = r.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
 		PowerPreference: r.powerPreference,
 	})
