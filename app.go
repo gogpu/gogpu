@@ -38,16 +38,22 @@ type App struct {
 	renderLoop appRenderLoop
 
 	// User callbacks
-	onDraw            func(*Context)
-	onUpdate          func(float64) // delta time in seconds
-	onResize          func(int, int)
-	onClose           func() // called before renderer destruction
-	onAnyWindowClosed func(WindowID)
-	hitTestCallback   gpucontext.HitTestCallback // deferred until platWindow exists
+	onDraw             func(*Context)
+	onUpdate           func(float64) // delta time in seconds
+	onResize           func(int, int)
+	onClose            func() // called before renderer destruction
+	onAnyWindowClosed  func(WindowID)
+	onSurfaceAvailable func() // platform can create GPU surfaces (ADR-026)
+	onSurfaceDestroyed func() // must drop GPU surfaces NOW (ADR-026)
+	onResumed          func() // app visible/active (ADR-026)
+	onSuspended        func() // app backgrounded (ADR-026)
+	onMemoryWarning    func() // free caches or be killed (ADR-026)
+	hitTestCallback    gpucontext.HitTestCallback
 
 	// State
 	running                bool
-	quitOnLastWindowClosed bool // default true — exit when last window closes (ADR-026)
+	lifecycle              AppLifecycle // ADR-026 universal lifecycle state
+	quitOnLastWindowClosed bool         // default true — exit when last window closes
 	lastFrame              time.Time
 
 	// Event-driven rendering
@@ -94,6 +100,54 @@ func NewApp(config Config) *App {
 // Set to false for tray apps, background services, or headless mode (ADR-026).
 func (a *App) SetQuitOnLastWindowClosed(quit bool) *App {
 	a.quitOnLastWindowClosed = quit
+	return a
+}
+
+// Lifecycle returns the current application lifecycle state (ADR-026).
+// Desktop apps are always AppRunning after Run() starts.
+// Mobile/web apps cycle through all states.
+func (a *App) Lifecycle() AppLifecycle {
+	return a.lifecycle
+}
+
+// OnSurfaceAvailable registers a callback invoked when the platform can
+// create GPU surfaces. On desktop this fires once during init. On mobile
+// it fires each time the native window becomes available (e.g. Android
+// ANativeWindow creation after resume).
+func (a *App) OnSurfaceAvailable(fn func()) *App {
+	a.onSurfaceAvailable = fn
+	return a
+}
+
+// OnSurfaceDestroyed registers a callback invoked when GPU surfaces must
+// be dropped immediately. On desktop this never fires. On mobile it fires
+// when the native window is being destroyed (e.g. Android onStop).
+func (a *App) OnSurfaceDestroyed(fn func()) *App {
+	a.onSurfaceDestroyed = fn
+	return a
+}
+
+// OnResumed registers a callback invoked when the app becomes visible
+// and interactive. On desktop this never fires. On mobile it maps to
+// Activity.onStart / UIApplication.didBecomeActive.
+func (a *App) OnResumed(fn func()) *App {
+	a.onResumed = fn
+	return a
+}
+
+// OnSuspended registers a callback invoked when the app is backgrounded.
+// On desktop this never fires. On mobile it maps to Activity.onStop /
+// UIApplication.willResignActive. Stop rendering, save state.
+func (a *App) OnSuspended(fn func()) *App {
+	a.onSuspended = fn
+	return a
+}
+
+// OnMemoryWarning registers a callback invoked when the OS requests
+// the app to free memory. On desktop this never fires. On mobile it maps
+// to Activity.onLowMemory / UIApplication.didReceiveMemoryWarning.
+func (a *App) OnMemoryWarning(fn func()) *App {
+	a.onMemoryWarning = fn
 	return a
 }
 
@@ -241,6 +295,12 @@ func (a *App) Run() error {
 	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
 	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
 	a.running = true
+	a.lifecycle = AppRunning
+
+	// ADR-026: surface available on desktop = once at init.
+	if a.onSurfaceAvailable != nil {
+		a.onSurfaceAvailable()
+	}
 	a.lastFrame = time.Now()
 	a.invalidator = newInvalidator(a.manager.WakeUp)
 	a.animations = &AnimationController{}
@@ -305,6 +365,7 @@ func (a *App) Run() error {
 		}
 	}
 
+	a.lifecycle = AppIdle
 	return nil
 }
 
