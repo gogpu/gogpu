@@ -395,14 +395,24 @@ All input events flow through centralized dispatch with `WindowID` routing (wini
 
 ### Window Lifecycle (ADR-026)
 
-GPU Device is independent of any window. Closing a window destroys its surface but the device stays alive — remaining windows keep rendering.
+GPU Device is independent of any window. Closing a window destroys its surface but the device stays alive — remaining windows keep rendering. Same API on desktop, mobile, and web.
 
 ```go
-// Default: app exits when last window closes (standard desktop behavior)
-app := gogpu.NewApp(gogpu.DefaultConfig())
+// App lifecycle state: Idle → Running → Suspending → Suspended → Resuming
+state := app.Lifecycle()      // AppRunning on desktop
+if state.IsActive() { ... }   // true for Running/Suspending/Resuming
 
-// Tray/headless: app stays alive with zero windows
-app.SetQuitOnLastWindowClosed(false)
+// Exit policy
+app.SetQuitOnLastWindowClosed(false) // tray/headless: stay alive with zero windows
+
+// Surface lifecycle (desktop: once at init; mobile: per-ANativeWindow)
+app.OnSurfaceAvailable(func() { /* create GPU resources */ })
+app.OnSurfaceDestroyed(func() { /* drop GPU surfaces NOW */ })
+
+// App lifecycle (desktop: no-ops; mobile: Activity/UIApplication events)
+app.OnResumed(func() { /* app visible */ })
+app.OnSuspended(func() { /* app backgrounded, stop rendering */ })
+app.OnMemoryWarning(func() { /* free caches */ })
 ```
 
 See `examples/lifecycle/` for a visual demo: close the primary window, the secondary keeps rendering.

@@ -5,16 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.39.1] - 2026-05-22
 
 ### Added
 
-- **Universal App Lifecycle API** (ADR-026 Phase 3) -- `AppLifecycle` enum (Idle/Running/Suspending/Suspended/Resuming) with `IsActive()`. `App.Lifecycle()` getter. Surface callbacks: `OnSurfaceAvailable`, `OnSurfaceDestroyed`. App callbacks: `OnResumed`, `OnSuspended`, `OnMemoryWarning`. `SetQuitOnLastWindowClosed(bool)` controls exit policy. Desktop: surfaces available once at init, lifecycle callbacks are no-ops (fire on mobile). New `examples/lifecycle/` demo.
-
-### Changed
-
-- **Renderer fully decoupled from window** (ADR-026 Phase 1-2, #223) -- Device creation independent of any window (`RequestAdapter` without `CompatibleSurface`). `initNative` split into `initDevice()` + `initSurface(ws)`. `windowSurface` renamed to `RenderTarget` (public type). `SurfaceState` enum (None/Ready/Configured/Lost) with explicit Outdated/Lost recovery. `surfaceFormat` on Renderer (device-level). Per-surface `beginFrameForSurface` / `endFrameForSurface` / `ResizeSurface`. Nil guards for primary close. 24 new tests.
-- **deps:** wgpu v0.28.6 → v0.28.7 (GLES hidden window + deferred enumeration fix)
+- **AppLifecycle enum** (ADR-026) -- `AppLifecycle` type: Idle, Running, Suspending, Suspended, Resuming. `IsActive()` method. `App.Lifecycle()` getter. Desktop: always Running after init.
+- **Surface lifecycle callbacks** -- `OnSurfaceAvailable(func())`, `OnSurfaceDestroyed(func())`. Desktop: OnSurfaceAvailable fires once at init, OnSurfaceDestroyed never. Mobile (future): maps to ANativeWindow creation/destruction.
+- **App lifecycle callbacks** -- `OnResumed(func())`, `OnSuspended(func())`, `OnMemoryWarning(func())`. Desktop: no-ops. Mobile (future): maps to Activity/UIApplication lifecycle.
 
 ## [0.38.0] - 2026-05-21
 

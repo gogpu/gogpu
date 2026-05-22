@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.39.1** | 2026-05-22 | **AppLifecycle enum + callbacks** (ADR-026 Phase 3 complete) — AppLifecycle (5 states), OnSurfaceAvailable/Destroyed, OnResumed/Suspended/MemoryWarning |
 | **v0.39.0** | 2026-05-22 | **ADR-026 Universal Lifecycle** — QuitOnLastWindowClosed, primary close resilience, RenderTarget (public type), initDevice/initSurface split, SurfaceState, WindowID real type. `examples/lifecycle/`. deps: wgpu v0.28.7 |
 | **v0.38.0** | 2026-05-21 | **macOS menu API** (#242, @lkmavi) + **custom dynamic menus** (#264, @lkmavi) — SetMenu, SetCustomMenu, MenuRole, Submenu. **Renderer decoupling** (LIFECYCLE Phase 2) — SurfaceState, per-window platWindow. PlatformProvider delegation (ADR-024). deps: wgpu v0.28.6 (GLES hidden window) |
 | **v0.37.12** | 2026-05-21 | **PlatformProvider delegation** (ADR-024) -- GPUContextAdapter implements PlatformProvider, LCD auto-detection works. deps: wgpu v0.28.6 (GLES hidden window) |
