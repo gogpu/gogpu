@@ -10,11 +10,8 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// InternalWindowID is an internal identifier for windows, used for tracking and management.
-type InternalWindowID uint32
-
-// WindowID uniquely identifies a window. Zero is invalid.
-type WindowID = InternalWindowID
+// WindowID uniquely identifies a window within the application. Zero is invalid.
+type WindowID uint32
 
 // PlatformWindowCloser is an optional interface for platforms that support
 // per-window close callbacks (macOS delegate pattern).
@@ -30,7 +27,7 @@ type PlatformWindowCloser interface {
 // is supported. Multi-window rendering will be enabled when platforms
 // implement PlatformManager.
 type Window struct {
-	id         InternalWindowID
+	id         WindowID
 	platformID platform.WindowID // platform-native ID for event routing
 	config     Config
 	surface    *RenderTarget
@@ -152,19 +149,19 @@ func (w *Window) Visible() bool {
 // Thread-safe: all methods are protected by a read-write mutex.
 type WindowManager struct {
 	mu      sync.RWMutex
-	windows map[InternalWindowID]*Window
-	order   []InternalWindowID // insertion order for deterministic render iteration
-	focused InternalWindowID   // currently focused window, zero if none
+	windows map[WindowID]*Window
+	order   []WindowID // insertion order for deterministic render iteration
+	focused WindowID   // currently focused window, zero if none
 	// ID pool
-	freeIDs       []InternalWindowID            // available IDs for reuse
-	nextID        InternalWindowID              // 1, 2, 3... (monotonically increasing when pool is empty)
+	freeIDs       []WindowID                    // available IDs for reuse
+	nextID        WindowID                      // 1, 2, 3... (monotonically increasing when pool is empty)
 	platformIndex map[platform.WindowID]*Window // for routing platform events by platform ID
 }
 
 // newWindowManager creates a new empty WindowManager.
 func newWindowManager() *WindowManager {
 	return &WindowManager{
-		windows:       make(map[InternalWindowID]*Window, 8),
+		windows:       make(map[WindowID]*Window, 8),
 		platformIndex: make(map[platform.WindowID]*Window, 8),
 		nextID:        1,
 	}
@@ -190,7 +187,7 @@ func (wm *WindowManager) add(w *Window) {
 
 // remove unregisters a window from the manager.
 // If the removed window had focus, focus moves to the first remaining window.
-func (wm *WindowManager) remove(id InternalWindowID) {
+func (wm *WindowManager) remove(id WindowID) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
@@ -219,7 +216,7 @@ func (wm *WindowManager) remove(id InternalWindowID) {
 }
 
 // get returns the window with the given ID, or nil if not found.
-func (wm *WindowManager) get(id InternalWindowID) *Window {
+func (wm *WindowManager) get(id WindowID) *Window {
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
 	return wm.windows[id]
@@ -246,7 +243,7 @@ func (wm *WindowManager) focusedWindow() *Window { //nolint:unused // VSync swit
 
 // setFocus changes the focused window and adjusts VSync strategy.
 // Called when platform sends focus events (EventFocus).
-func (wm *WindowManager) setFocus(id InternalWindowID) {
+func (wm *WindowManager) setFocus(id WindowID) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 	if _, ok := wm.windows[id]; ok {
@@ -256,7 +253,7 @@ func (wm *WindowManager) setFocus(id InternalWindowID) {
 
 // allocate returns a fresh WindowID, reusing freed IDs when possible.
 // Thread-safe.
-func (wm *WindowManager) allocate() InternalWindowID {
+func (wm *WindowManager) allocate() WindowID {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
@@ -273,7 +270,7 @@ func (wm *WindowManager) allocate() InternalWindowID {
 
 // release returns a WindowID back to the pool for future reuse.
 // Thread-safe.
-func (wm *WindowManager) release(id InternalWindowID) {
+func (wm *WindowManager) release(id WindowID) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
@@ -399,7 +396,7 @@ func (a *App) WindowCount() int {
 // Does nothing if the window is the primary window (use Quit() instead).
 // closeWindow closes any window (primary or secondary) — destroys surface and platform window.
 // ADR-026: all windows are equal, no special "primary" treatment.
-func (a *App) closeSecondaryWindow(id InternalWindowID) {
+func (a *App) closeSecondaryWindow(id WindowID) {
 	w := a.windowManager.get(id)
 	if w == nil {
 		return

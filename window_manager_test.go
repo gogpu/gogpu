@@ -106,7 +106,7 @@ func TestWindowManager_SetFocusInvalidID(t *testing.T) {
 func TestWindow_SetOnKeyPress(t *testing.T) {
 	t.Run(
 		"fires when set", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			var receivedKey gpucontext.Key
 			var receivedMods gpucontext.Modifiers
 			w.SetOnKeyPress(
@@ -129,7 +129,7 @@ func TestWindow_SetOnKeyPress(t *testing.T) {
 
 	t.Run(
 		"nil callback safe", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			if w.onKeyPress != nil {
 				t.Error("onKeyPress should be nil by default")
 			}
@@ -138,7 +138,7 @@ func TestWindow_SetOnKeyPress(t *testing.T) {
 
 	t.Run(
 		"replacement", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			callCount := 0
 			w.SetOnKeyPress(
 				func(gpucontext.Key, gpucontext.Modifiers) {
@@ -163,7 +163,7 @@ func TestWindow_SetOnKeyPress(t *testing.T) {
 func TestWindow_SetOnKeyRelease(t *testing.T) {
 	t.Run(
 		"fires when set", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			var receivedKey gpucontext.Key
 			w.SetOnKeyRelease(
 				func(key gpucontext.Key, mods gpucontext.Modifiers) {
@@ -181,7 +181,7 @@ func TestWindow_SetOnKeyRelease(t *testing.T) {
 
 	t.Run(
 		"nil callback safe", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			if w.onKeyRelease != nil {
 				t.Error("onKeyRelease should be nil by default")
 			}
@@ -192,7 +192,7 @@ func TestWindow_SetOnKeyRelease(t *testing.T) {
 func TestWindow_SetOnTextInput(t *testing.T) {
 	t.Run(
 		"fires when set", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			var received string
 			w.SetOnTextInput(
 				func(text string) {
@@ -210,7 +210,7 @@ func TestWindow_SetOnTextInput(t *testing.T) {
 
 	t.Run(
 		"nil callback safe", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			if w.onTextInput != nil {
 				t.Error("onTextInput should be nil by default")
 			}
@@ -221,7 +221,7 @@ func TestWindow_SetOnTextInput(t *testing.T) {
 func TestWindow_SetOnPointer(t *testing.T) {
 	t.Run(
 		"fires when set", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			var received gpucontext.PointerEvent
 			w.SetOnPointer(
 				func(ev gpucontext.PointerEvent) {
@@ -244,7 +244,7 @@ func TestWindow_SetOnPointer(t *testing.T) {
 
 	t.Run(
 		"nil callback safe", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			if w.onPointer != nil {
 				t.Error("onPointer should be nil by default")
 			}
@@ -255,7 +255,7 @@ func TestWindow_SetOnPointer(t *testing.T) {
 func TestWindow_SetOnScroll(t *testing.T) {
 	t.Run(
 		"fires when set", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			var received gpucontext.ScrollEvent
 			w.SetOnScroll(
 				func(ev gpucontext.ScrollEvent) {
@@ -274,7 +274,7 @@ func TestWindow_SetOnScroll(t *testing.T) {
 
 	t.Run(
 		"nil callback safe", func(t *testing.T) {
-			w := &Window{id: InternalWindowID(1)}
+			w := &Window{id: WindowID(1)}
 			if w.onScroll != nil {
 				t.Error("onScroll should be nil by default")
 			}
@@ -283,7 +283,7 @@ func TestWindow_SetOnScroll(t *testing.T) {
 }
 
 func TestWindow_ID(t *testing.T) {
-	id := InternalWindowID(1)
+	id := WindowID(1)
 	w := &Window{id: id}
 
 	if w.ID() != id {
@@ -450,7 +450,7 @@ func TestWindowManager_GetByPlatformID_AfterRemove(t *testing.T) {
 
 func TestWindowManager_RemoveUnknownID(t *testing.T) {
 	wm := newWindowManager()
-	wm.remove(InternalWindowID(999))
+	wm.remove(WindowID(999))
 	if wm.count() != 0 {
 		t.Error("count should remain 0 after removing unknown ID")
 	}

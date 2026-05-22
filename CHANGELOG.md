@@ -5,16 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **QuitOnLastWindowClosed** (ADR-026 Phase 3) -- `SetQuitOnLastWindowClosed(bool)` controls app exit policy. Default true (standard desktop). Set false for tray apps, background services, or headless mode. Primary window close no longer force-exits — app stays alive while any window remains. New `examples/lifecycle/` demo.
+
+### Changed
+
+- **Renderer fully decoupled from window** (ADR-026 Phase 1-2, #223) -- Device creation independent of any window (`RequestAdapter` without `CompatibleSurface`). `initNative` split into `initDevice()` + `initSurface(ws)`. `windowSurface` renamed to `RenderTarget` (public type). `SurfaceState` enum (None/Ready/Configured/Lost) with explicit Outdated/Lost recovery. `surfaceFormat` on Renderer (device-level). Per-surface `beginFrameForSurface` / `endFrameForSurface` / `ResizeSurface`. Nil guards for primary close. 24 new tests.
+- **deps:** wgpu v0.28.6 → v0.28.7 (GLES hidden window + deferred enumeration fix)
+
 ## [0.38.0] - 2026-05-21
 
 ### Added
 
 - **macOS system menu API** (#242, @lkmavi) -- `SetMenu()`, `GetSystemMenu()`, `MenuRole` for native macOS menu bar. Role-based item mapping (About, Preferences, Quit, Minimize, Zoom, etc.). `SetAppName()` / `WithAppName()` for menu display. Pending menu support (set before `Run()`). New `examples/menu/` demo.
 - **Custom dynamic menus** (#264, @lkmavi) -- `SetCustomMenu(name, menu)` for additional menu bar entries. `NewMenuWithTitle(title)` constructor. `MenuItem.Submenu *Menu` for recursive nested menus. Insertion-order preserved via ordered slice. `NewMenu()` backward compatible (no args).
-
-### Changed
-
-- **Renderer fully decoupled from window** (LIFECYCLE Phase 2, #223, ADR-026) -- Device creation independent of any window (`RequestAdapter` without `CompatibleSurface`). `initNative` split into `initDevice()` + `initSurface(ws)`. `windowSurface` renamed to `RenderTarget` (ADR-026 public type). `surfaceFormat` moved to Renderer (device-level constant). `beginFrameForSurface(ws)` / `endFrameForSurface(ws)` / `ResizeSurface(ws)` accept any RenderTarget. Primary close does not affect secondary windows. `SurfaceState` enum with explicit Outdated/Lost recovery. 22 new tests.
 
 ## [0.37.12] - 2026-05-21
 
