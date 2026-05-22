@@ -168,15 +168,22 @@ func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType,
 		vsync:      vsync,
 	}
 
-	if err := r.init(backendType, graphicsAPI); err != nil {
+	// Phase 1: Create GPU device (independent of any window)
+	if err := r.initDevice(backendType, graphicsAPI); err != nil {
+		return nil, err
+	}
+
+	// Phase 2: Create surface for the primary window
+	if err := r.initSurface(r.primary); err != nil {
 		return nil, err
 	}
 
 	return r, nil
 }
 
-// init initializes WebGPU and creates the rendering pipeline.
-func (r *Renderer) init(backendType types.BackendType, graphicsAPI types.GraphicsAPI) error {
+// initDevice creates the GPU instance, adapter, and device.
+// No window or surface needed — device is window-independent (ADR-026).
+func (r *Renderer) initDevice(backendType types.BackendType, graphicsAPI types.GraphicsAPI) error {
 	// Select backend and initialize via the appropriate path.
 	// BackendRust requires -tags rust build.
 	// BackendNative/BackendGo uses the pure Go wgpu implementation.
@@ -203,19 +210,12 @@ func (r *Renderer) init(backendType types.BackendType, graphicsAPI types.Graphic
 	return r.initNative(graphicsAPI)
 }
 
-// initNative initializes the renderer using the pure Go wgpu path.
-// This uses wgpu.CreateInstance() which discovers HAL backends registered
-// by the native backend package imports (vulkan, metal, dx12, gles).
+// initNative initializes the GPU device using the pure Go wgpu path.
+// Device creation is independent of any window — follows ADR-026 universal lifecycle.
 func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
-	// Get backend metadata. The import side-effects in native.BackendInfo
-	// register the HAL backends (vulkan, metal, etc.) via init() functions.
 	var backendVariant gputypes.Backend
 	r.backendName, backendVariant = native.BackendInfo(graphicsAPI)
 
-	// Create WebGPU instance via the wgpu public API.
-	// Enable debug/validation layer when GOGPU_DEBUG=1 is set. This catches
-	// GPU-side errors (invalid shaders, bad PSO, etc.) before submission,
-	// preventing driver-level crashes (e.g. DPC_WATCHDOG_VIOLATION BSOD on DX12).
 	var instanceFlags gputypes.InstanceFlags
 	if os.Getenv("GOGPU_DEBUG") == "1" {
 		instanceFlags = gputypes.InstanceFlagsDebug | gputypes.InstanceFlagsValidation
@@ -229,68 +229,49 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
 	}
 
-	// Get platform handles for surface creation
-	displayHandle, windowHandle := r.primary.platWindow.GetHandle()
-
-	// Create surface via wgpu public API — stored on primary windowSurface
-	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
-	if err != nil {
-		return fmt.Errorf("gogpu: failed to create surface: %w", err)
-	}
-	r.primary.surface = surface
-	r.primary.state = SurfaceReady
-
-	// Request adapter compatible with the surface.
-	// Passing CompatibleSurface is required for GLES backends which defer
-	// adapter enumeration until a surface (GL context) is available.
+	// Request adapter WITHOUT CompatibleSurface — device is window-independent.
+	// Vulkan/DX12: enumerates all adapters. GLES: uses hidden window (wgpu v0.28.6).
+	// WebGPU spec: CompatibleSurface is a hint, not a requirement.
 	r.adapter, err = r.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
-		CompatibleSurface: r.primary.surface,
-		PowerPreference:   r.powerPreference,
+		PowerPreference: r.powerPreference,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
 	}
 	slog.Info("adapter selected", "name", r.adapter.Info().Name, "type", r.adapter.Info().DeviceType)
 
-	// Request device with default features and limits
 	r.device, err = r.adapter.RequestDevice(nil)
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request device: %w", err)
 	}
 
-	return r.initCommon()
+	return nil
 }
 
-// initCommon performs common initialization after device and surface are ready.
-// This is shared between the native and Rust init paths.
-func (r *Renderer) initCommon() error {
-	// Submission tracker is zero-value ready — no initialization needed.
+// initSurface creates and configures a GPU surface for a window.
+// Called after initDevice — device must already exist.
+// Separated from device init per ADR-026: surfaces come and go, device is permanent.
+func (r *Renderer) initSurface(ws *windowSurface) error {
+	displayHandle, windowHandle := ws.platWindow.GetHandle()
 
-	// Configure primary window surface with PHYSICAL pixel dimensions.
-	// GPU surfaces operate in device pixels, not logical points.
-	// On some platforms (especially macOS), the window may not have valid
-	// dimensions immediately after creation. In that case, we defer surface
-	// configuration until the first Resize event.
-	width, height := r.primary.platWindow.PhysicalSize()
+	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to create surface: %w", err)
+	}
+	ws.surface = surface
+	ws.state = SurfaceReady
+	ws.format = gputypes.TextureFormatBGRA8Unorm
 
-	// Use BGRA8Unorm which is common across platforms
-	r.primary.format = gputypes.TextureFormatBGRA8Unorm
-
-	// Only configure surface if dimensions are valid.
-	// If dimensions are zero (window not yet visible, minimized, or timing issue),
-	// defer configuration until Resize is called with valid dimensions.
-	// This matches wgpu-core behavior which returns ConfigureSurfaceError::ZeroArea.
+	width, height := ws.platWindow.PhysicalSize()
 	if width > 0 && height > 0 {
-		r.primary.width = uint32(width)   //nolint:gosec // G115: validated positive above
-		r.primary.height = uint32(height) //nolint:gosec // G115: validated positive above
+		ws.width = uint32(width)   //nolint:gosec // G115: validated positive above
+		ws.height = uint32(height) //nolint:gosec // G115: validated positive above
 
-		if err := r.primary.configure(r.device, r.adapter); err != nil {
+		if err := ws.configure(r.device, r.adapter); err != nil {
 			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
 		}
-		r.primary.state = SurfaceConfigured
+		ws.state = SurfaceConfigured
 	}
-	// If dimensions are zero, state remains SurfaceReady.
-	// The surface will be configured on the first Resize event with valid dimensions.
 
 	return nil
 }

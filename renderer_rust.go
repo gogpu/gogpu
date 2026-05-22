@@ -81,12 +81,19 @@ func (r *Renderer) initRust() error {
 
 	// Wrap HAL surface into wgpu.Surface — stored on primary windowSurface.
 	r.primary.surface = wgpu.NewSurfaceFromHAL(halSurface, "Rust Surface")
+	r.primary.state = SurfaceReady
+	r.primary.format = gputypes.TextureFormatBGRA8Unorm
 
-	// Note: We don't wrap halInstance and exposed.Adapter into wgpu types
-	// because the renderer only needs them for cleanup. We store nil for
-	// instance/adapter -- the halInstance will be cleaned up when the
-	// wgpu device/surface are released (they hold the HAL references).
-	// TODO: Proper lifecycle management for Rust HAL instance/adapter.
+	// Configure surface with initial dimensions.
+	width, height := r.primary.platWindow.PhysicalSize()
+	if width > 0 && height > 0 {
+		r.primary.width = uint32(width)   //nolint:gosec // G115: validated positive above
+		r.primary.height = uint32(height) //nolint:gosec // G115: validated positive above
+		if err := r.primary.configure(r.device, r.adapter); err != nil {
+			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
+		}
+		r.primary.state = SurfaceConfigured
+	}
 
-	return r.initCommon()
+	return nil
 }
