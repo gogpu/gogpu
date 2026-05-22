@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **QuitOnLastWindowClosed** (ADR-026 Phase 3) -- `SetQuitOnLastWindowClosed(bool)` controls app exit policy. Default true (standard desktop). Set false for tray apps, background services, or headless mode. Primary window close no longer force-exits — app stays alive while any window remains. New `examples/lifecycle/` demo.
+- **Universal App Lifecycle API** (ADR-026 Phase 3) -- `AppLifecycle` enum (Idle/Running/Suspending/Suspended/Resuming) with `IsActive()`. `App.Lifecycle()` getter. Surface callbacks: `OnSurfaceAvailable`, `OnSurfaceDestroyed`. App callbacks: `OnResumed`, `OnSuspended`, `OnMemoryWarning`. `SetQuitOnLastWindowClosed(bool)` controls exit policy. Desktop: surfaces available once at init, lifecycle callbacks are no-ops (fire on mobile). New `examples/lifecycle/` demo.
 
 ### Changed
 
