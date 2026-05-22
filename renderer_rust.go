@@ -79,7 +79,7 @@ func (r *Renderer) initRust() error {
 		return fmt.Errorf("gogpu: failed to wrap rust device: %w", err)
 	}
 
-	// Wrap HAL surface into wgpu.Surface — stored on primary windowSurface.
+	// Wrap HAL surface into wgpu.Surface — stored on primary RenderTarget.
 	r.primary.surface = wgpu.NewSurfaceFromHAL(halSurface, "Rust Surface")
 	r.primary.state = SurfaceReady
 	r.primary.format = gputypes.TextureFormatBGRA8Unorm

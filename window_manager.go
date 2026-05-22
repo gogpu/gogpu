@@ -33,7 +33,7 @@ type Window struct {
 	id         InternalWindowID
 	platformID platform.WindowID // platform-native ID for event routing
 	config     Config
-	surface    *windowSurface
+	surface    *RenderTarget
 	platWindow platform.PlatformWindow // underlying platform window
 
 	// Per-window callbacks
@@ -330,8 +330,8 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		return nil, fmt.Errorf("gogpu: create surface: %w", surfaceErr)
 	}
 
-	// Create windowSurface for this window.
-	ws := &windowSurface{
+	// Create RenderTarget for this window.
+	ws := &RenderTarget{
 		renderer:   a.renderer,
 		platWindow: platWindow,
 		surface:    surface,

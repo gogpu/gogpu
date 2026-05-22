@@ -36,10 +36,10 @@ const (
 	SurfaceLost                           // Device lost or fatal error — must recreate
 )
 
-// windowSurface holds per-window GPU rendering state.
+// RenderTarget holds per-window GPU rendering state.
 // Each window gets its own surface, format, dimensions, and frame state.
-// In multi-window mode, one Renderer holds multiple windowSurface instances.
-type windowSurface struct {
+// In multi-window mode, one Renderer holds multiple RenderTarget instances.
+type RenderTarget struct {
 	renderer *Renderer // back-reference to shared GPU state
 
 	platWindow platform.PlatformWindow // platform window for PrepareFrame and handle access
@@ -93,7 +93,7 @@ type windowSurface struct {
 
 // Renderer manages the GPU rendering pipeline.
 // It holds shared GPU state (instance, adapter, device, pipelines) that is
-// independent of any specific window. Per-window state lives in windowSurface
+// independent of any specific window. Per-window state lives in RenderTarget
 // (owned by Window, not Renderer). This enables multi-window, headless, and
 // mobile suspend/resume where surfaces come and go (ADR-026).
 type Renderer struct {
@@ -137,13 +137,13 @@ type Renderer struct {
 	// PowerPreference for adapter selection
 	powerPreference gputypes.PowerPreference
 
-	// Primary windowSurface — backward compatibility for single-window API.
+	// Primary RenderTarget — backward compatibility for single-window API.
 	// TODO(lifecycle-phase3): remove once all callers use per-window surfaces.
-	primary *windowSurface
+	primary *RenderTarget
 
-	// currentSurface is the windowSurface being drawn in the current frame.
+	// currentSurface is the RenderTarget being drawn in the current frame.
 	// Set by the multi-window frame loop before each window's draw callback.
-	currentSurface *windowSurface
+	currentSurface *RenderTarget
 }
 
 // newRenderer creates and initializes a new renderer.
@@ -151,7 +151,7 @@ func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType,
 	r := &Renderer{
 		powerPreference: powerPref,
 	}
-	r.primary = &windowSurface{
+	r.primary = &RenderTarget{
 		renderer:   r,
 		platWindow: platWin,
 		vsync:      vsync,
@@ -241,7 +241,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 // initSurface creates and configures a GPU surface for a window.
 // Called after initDevice — device must already exist.
 // Separated from device init per ADR-026: surfaces come and go, device is permanent.
-func (r *Renderer) initSurface(ws *windowSurface) error {
+func (r *Renderer) initSurface(ws *RenderTarget) error {
 	displayHandle, windowHandle := ws.platWindow.GetHandle()
 
 	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
@@ -267,7 +267,7 @@ func (r *Renderer) initSurface(ws *windowSurface) error {
 }
 
 // configure configures the wgpu surface with current dimensions and format.
-func (ws *windowSurface) configure(device *wgpu.Device, adapter *wgpu.Adapter) error {
+func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) error {
 	presentMode := ws.resolvePresentMode(adapter)
 
 	return ws.surface.Configure(device, &wgpu.SurfaceConfiguration{
@@ -284,7 +284,7 @@ func (ws *windowSurface) configure(device *wgpu.Device, adapter *wgpu.Adapter) e
 // Rust wgpu fallback pattern. For VSync on (AutoVsync): FifoRelaxed -> Fifo.
 // For VSync off (AutoNoVsync): Immediate -> Mailbox -> Fifo.
 // Falls back to Fifo which is guaranteed by the Vulkan spec.
-func (ws *windowSurface) resolvePresentMode(adapter *wgpu.Adapter) gputypes.PresentMode {
+func (ws *RenderTarget) resolvePresentMode(adapter *wgpu.Adapter) gputypes.PresentMode {
 	caps := adapter.GetSurfaceCapabilities(ws.surface)
 	if caps == nil {
 		// No capabilities available — use safe default.
@@ -336,10 +336,10 @@ func pickPresentMode(supported []gputypes.PresentMode, preferred ...gputypes.Pre
 	return gputypes.PresentModeFifo
 }
 
-// activeSurface returns the currently active windowSurface for draw operations.
+// activeSurface returns the currently active RenderTarget for draw operations.
 // During multi-window rendering, this returns the surface of the window being drawn.
 // Otherwise, it returns the primary window surface.
-func (r *Renderer) activeSurface() *windowSurface {
+func (r *Renderer) activeSurface() *RenderTarget {
 	if r.currentSurface != nil {
 		return r.currentSurface
 	}
@@ -354,12 +354,12 @@ func (r *Renderer) Resize(width, height int) {
 }
 
 // ResizeSurface handles window resize for any surface.
-func (r *Renderer) ResizeSurface(ws *windowSurface, width, height int) {
+func (r *Renderer) ResizeSurface(ws *RenderTarget, width, height int) {
 	ws.resize(width, height, r.device, r.adapter)
 }
 
 // resize handles window resize for this surface.
-func (ws *windowSurface) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) {
+func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) {
 	if width <= 0 || height <= 0 {
 		// Window minimized or invisible -- unconfigure surface to prevent
 		// zero-extent swapchain creation on the next frame (VK-VAL-001).
@@ -408,12 +408,12 @@ func (r *Renderer) BeginFrame() bool {
 }
 
 // beginFrameForSurface acquires the next texture for any surface.
-func (r *Renderer) beginFrameForSurface(ws *windowSurface) bool {
+func (r *Renderer) beginFrameForSurface(ws *RenderTarget) bool {
 	return ws.beginFrame(ws.platWindow, r.device, r.adapter)
 }
 
 // CanRender reports whether this surface is ready for draw operations.
-func (ws *windowSurface) CanRender() bool {
+func (ws *RenderTarget) CanRender() bool {
 	return ws.state == SurfaceConfigured && ws.surface != nil
 }
 
@@ -422,7 +422,7 @@ func (ws *windowSurface) CanRender() bool {
 // Recovery follows the wgpu framework.rs pattern:
 //   - ErrSurfaceOutdated → reconfigure (swapchain stale after resize/DPI change)
 //   - ErrSurfaceLost → mark SurfaceLost (caller must recreate)
-func (ws *windowSurface) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) bool {
+func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) bool {
 	if !ws.CanRender() {
 		return false
 	}
@@ -467,7 +467,7 @@ func (ws *windowSurface) beginFrame(platWin platform.PlatformWindow, device *wgp
 // recoverFromAcquireError handles surface texture acquisition failures.
 // Outdated surfaces are reconfigured (common after resize/DPI change).
 // Lost surfaces transition to SurfaceLost for caller-level recreation.
-func (ws *windowSurface) recoverFromAcquireError(err error, device *wgpu.Device, adapter *wgpu.Adapter) {
+func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, adapter *wgpu.Adapter) {
 	switch {
 	case errors.Is(err, wgpu.ErrSurfaceOutdated):
 		slog.Debug("gogpu: surface outdated, reconfiguring", "width", ws.width, "height", ws.height)
@@ -500,9 +500,9 @@ func (r *Renderer) EndFrame() {
 }
 
 // endFrameForSurface flushes, presents, and releases frame resources for a
-// specific windowSurface. Used by the multi-window frame loop. Unlike EndFrame,
+// specific RenderTarget. Used by the multi-window frame loop. Unlike EndFrame,
 // it does NOT poll submissions -- the caller polls once after all windows.
-func (r *Renderer) endFrameForSurface(ws *windowSurface) {
+func (r *Renderer) endFrameForSurface(ws *RenderTarget) {
 	ws.flushClear(r.device, r)
 	ws.present()
 	ws.releaseFrame()
@@ -518,7 +518,7 @@ func (r *Renderer) pollSubmissions() {
 // present presents the surface texture to the screen, passing any
 // damage rects to the platform compositor. Damage rects are consumed
 // (set to nil) after presentation so they don't leak to the next frame.
-func (ws *windowSurface) present() {
+func (ws *RenderTarget) present() {
 	if ws.currentSurfaceTexture != nil {
 		if err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects); err != nil {
 			slog.Error("PRESENT ERROR", "err", err)
@@ -530,14 +530,14 @@ func (ws *windowSurface) present() {
 // prepareLazyAcquire resets per-frame state for deferred beginFrame.
 // The actual swapchain acquire happens on first draw call via ensureFrameStarted.
 // Uses ws.platWindow and ws.renderer.{device,adapter} — no parameters needed.
-func (ws *windowSurface) prepareLazyAcquire() {
+func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
 // Returns true if frame is ready for rendering.
-func (ws *windowSurface) ensureFrameStarted() bool {
+func (ws *RenderTarget) ensureFrameStarted() bool {
 	if ws.frameStarted {
 		return ws.currentView != nil
 	}
@@ -546,13 +546,13 @@ func (ws *windowSurface) ensureFrameStarted() bool {
 }
 
 // resetLazyState clears per-frame state after frame cycle.
-func (ws *windowSurface) resetLazyState() {
+func (ws *RenderTarget) resetLazyState() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 }
 
 // releaseFrame releases per-frame resources after presentation.
-func (ws *windowSurface) releaseFrame() {
+func (ws *RenderTarget) releaseFrame() {
 	if ws.currentView != nil {
 		ws.currentView.Release()
 		ws.currentView = nil
@@ -570,7 +570,7 @@ func (r *Renderer) Clear(red, green, blue, alpha float64) {
 }
 
 // clear defers a clear command on this window's surface.
-func (ws *windowSurface) clear(red, green, blue, alpha float64) {
+func (ws *RenderTarget) clear(red, green, blue, alpha float64) {
 	if !ws.ensureFrameStarted() {
 		return
 	}
@@ -581,7 +581,7 @@ func (ws *windowSurface) clear(red, green, blue, alpha float64) {
 
 // flushClear applies any pending clear immediately as a standalone render pass.
 // Called by EndFrame if no draw calls consumed the pending clear.
-func (ws *windowSurface) flushClear(device *wgpu.Device, r *Renderer) {
+func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) {
 	if !ws.hasPendingClear || ws.currentView == nil {
 		return
 	}
@@ -1168,7 +1168,7 @@ func (r *Renderer) Destroy() {
 }
 
 // destroy releases all resources owned by this window surface.
-func (ws *windowSurface) destroy() {
+func (ws *RenderTarget) destroy() {
 	if ws.currentView != nil {
 		ws.currentView.Release()
 		ws.currentView = nil

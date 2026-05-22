@@ -41,7 +41,7 @@ func TestCanRender_RequiresConfiguredAndSurface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ws := &windowSurface{
+			ws := &RenderTarget{
 				state:  tt.state,
 				format: gputypes.TextureFormatBGRA8Unorm,
 			}
@@ -56,7 +56,7 @@ func TestCanRender_RequiresConfiguredAndSurface(t *testing.T) {
 }
 
 func TestResize_UnconfigureOnZeroDimensions(t *testing.T) {
-	ws := &windowSurface{
+	ws := &RenderTarget{
 		state:  SurfaceConfigured,
 		format: gputypes.TextureFormatBGRA8Unorm,
 		width:  800,
@@ -73,7 +73,7 @@ func TestResize_UnconfigureOnZeroDimensions(t *testing.T) {
 }
 
 func TestDestroy_ResetsSurfaceState(t *testing.T) {
-	ws := &windowSurface{
+	ws := &RenderTarget{
 		state:  SurfaceConfigured,
 		format: gputypes.TextureFormatBGRA8Unorm,
 		width:  800,
@@ -89,7 +89,7 @@ func TestDestroy_ResetsSurfaceState(t *testing.T) {
 }
 
 func TestRecoverFromAcquireError_OutdatedKeepsConfigured(t *testing.T) {
-	ws := &windowSurface{
+	ws := &RenderTarget{
 		state:  SurfaceConfigured,
 		format: gputypes.TextureFormatBGRA8Unorm,
 		width:  800,
@@ -115,7 +115,7 @@ func TestBeginFrame_SkipsWhenNotConfigured(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ws := &windowSurface{
+			ws := &RenderTarget{
 				state:  tt.state,
 				format: gputypes.TextureFormatBGRA8Unorm,
 			}

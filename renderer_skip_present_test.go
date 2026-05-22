@@ -6,9 +6,9 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-func newTestWindowSurface() *windowSurface {
+func newTestWindowSurface() *RenderTarget {
 	r := &Renderer{}
-	ws := &windowSurface{
+	ws := &RenderTarget{
 		renderer: r,
 		format:   gputypes.TextureFormatBGRA8Unorm,
 	}

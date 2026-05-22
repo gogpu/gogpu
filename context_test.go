@@ -20,11 +20,11 @@ func newTestWgpuDevice(t *testing.T, mockDev *mockFenceDevice) (*wgpu.Device, er
 	)
 }
 
-// newTestRenderer creates a Renderer with a primary windowSurface for testing.
+// newTestRenderer creates a Renderer with a primary RenderTarget for testing.
 // Sets up the minimum fields needed for read-only wrapper methods.
 func newTestRenderer(width, height uint32) *Renderer {
 	r := &Renderer{
-		primary: &windowSurface{
+		primary: &RenderTarget{
 			width:  width,
 			height: height,
 		},
@@ -37,7 +37,7 @@ func newTestRenderer(width, height uint32) *Renderer {
 func newTestRendererFull(width, height uint32, format gputypes.TextureFormat, backendName string) *Renderer {
 	r := &Renderer{
 		backendName: backendName,
-		primary: &windowSurface{
+		primary: &RenderTarget{
 			width:  width,
 			height: height,
 			format: format,

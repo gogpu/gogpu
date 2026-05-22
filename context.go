@@ -16,12 +16,12 @@ import (
 // It is only valid during the OnDraw callback and should not be stored.
 //
 // In multi-window mode, each Context targets a specific window surface.
-// The surface field points to the target windowSurface; if nil, the
+// The surface field points to the target RenderTarget; if nil, the
 // renderer's primary surface is used (single-window backward compat).
 type Context struct {
 	renderer    *Renderer
-	surface     *windowSurface // target window surface (nil = use renderer.primary)
-	scaleFactor float64        // DPI scale factor (1.0 = standard, 2.0 = Retina/HiDPI)
+	surface     *RenderTarget // target window surface (nil = use renderer.primary)
+	scaleFactor float64       // DPI scale factor (1.0 = standard, 2.0 = Retina/HiDPI)
 	cleared     bool
 }
 
@@ -38,7 +38,7 @@ func newContext(renderer *Renderer, scaleFactor float64) *Context {
 
 // newContextForSurface creates a Context targeting a specific window surface.
 // Used by the multi-window frame loop to create per-window contexts.
-func newContextForSurface(renderer *Renderer, ws *windowSurface, scaleFactor float64) *Context {
+func newContextForSurface(renderer *Renderer, ws *RenderTarget, scaleFactor float64) *Context {
 	if scaleFactor <= 0 {
 		scaleFactor = 1.0
 	}
@@ -49,8 +49,8 @@ func newContextForSurface(renderer *Renderer, ws *windowSurface, scaleFactor flo
 	}
 }
 
-// activeSurface returns the windowSurface targeted by this Context.
-func (c *Context) activeSurface() *windowSurface {
+// activeSurface returns the RenderTarget targeted by this Context.
+func (c *Context) activeSurface() *RenderTarget {
 	if c.surface != nil {
 		return c.surface
 	}

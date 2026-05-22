@@ -604,7 +604,7 @@ func TestApp_OnAnyWindowClosed_Primary(t *testing.T) {
 		platformID: pid,
 		visible:    true,
 		platWindow: &mockWindow{},
-		surface:    &windowSurface{},
+		surface:    &RenderTarget{},
 	}
 	app.primaryPlatformID = pid
 	app.windowManager.add(app.primaryWindow)
@@ -639,7 +639,7 @@ func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
 		platformID: pid,
 		visible:    true,
 		platWindow: &mockWindow{},
-		surface:    &windowSurface{},
+		surface:    &RenderTarget{},
 	}
 	app.primaryWindow.SetOnClose(func() bool { return false })
 	app.windowManager.add(app.primaryWindow)
@@ -773,7 +773,7 @@ func TestApp_HandleSecondaryResize_NoPhysicalResize(t *testing.T) {
 	}
 	platformID := platform.NewWindowID()
 	internalID := app.windowManager.allocate()
-	surface := &windowSurface{width: 10, height: 10}
+	surface := &RenderTarget{width: 10, height: 10}
 	w := &Window{id: internalID, platformID: platformID, surface: surface, visible: true}
 	app.windowManager.add(w)
 
@@ -812,7 +812,7 @@ func TestApp_PrimaryWindow_IDs(t *testing.T) {
 		platformID: platformID,
 		visible:    true,
 		platWindow: &mockWindow{},
-		surface:    &windowSurface{},
+		surface:    &RenderTarget{},
 	}
 	app.windowManager.add(app.primaryWindow)
 
@@ -836,7 +836,7 @@ func TestApp_ProcessEvents_SecondaryResizeCycle(t *testing.T) {
 
 	platformID := platform.NewWindowID()
 	internalID := app.windowManager.allocate()
-	surface := &windowSurface{width: 10, height: 10}
+	surface := &RenderTarget{width: 10, height: 10}
 	w := &Window{
 		id:         internalID,
 		platformID: platformID,
@@ -894,7 +894,7 @@ func TestApp_WindowCloseEvent_OnClosePanic(t *testing.T) {
 		platformID: pid,
 		visible:    true,
 		platWindow: &mockWindow{},
-		surface:    &windowSurface{},
+		surface:    &RenderTarget{},
 	}
 	app.primaryPlatformID = pid
 	app.windowManager.add(app.primaryWindow)
