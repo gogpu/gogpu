@@ -393,6 +393,20 @@ app.EventSource().OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers)
 
 All input events flow through centralized dispatch with `WindowID` routing (winit/SDL3/Qt6 pattern).
 
+### Window Lifecycle (ADR-026)
+
+GPU Device is independent of any window. Closing a window destroys its surface but the device stays alive — remaining windows keep rendering.
+
+```go
+// Default: app exits when last window closes (standard desktop behavior)
+app := gogpu.NewApp(gogpu.DefaultConfig())
+
+// Tray/headless: app stays alive with zero windows
+app.SetQuitOnLastWindowClosed(false)
+```
+
+See `examples/lifecycle/` for a visual demo: close the primary window, the secondary keeps rendering.
+
 ### Event-Driven Rendering
 
 GoGPU uses a three-state rendering model for optimal power efficiency:
