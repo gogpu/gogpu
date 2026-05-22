@@ -335,7 +335,7 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		renderer:   a.renderer,
 		platWindow: platWindow,
 		surface:    surface,
-		format:     a.renderer.primary.format,
+		format:     a.renderer.surfaceFormat,
 		vsync:      false, // Secondary windows: Immediate (ADR-010 VSync strategy)
 		state:      SurfaceReady,
 	}

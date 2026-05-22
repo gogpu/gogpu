@@ -92,27 +92,23 @@ type windowSurface struct {
 }
 
 // Renderer manages the GPU rendering pipeline.
-// It handles device initialization, surface management, and frame presentation.
-//
-// The renderer uses the wgpu public API for all GPU operations. Both the native
-// (Pure Go) and Rust backends are accessed through this unified API layer.
-//
-// Architecture: Renderer holds shared GPU state (instance, adapter, device,
-// pipelines) and a primary windowSurface for per-window rendering state.
-// This split prepares for multi-window support where one Renderer serves
-// multiple windows.
+// It holds shared GPU state (instance, adapter, device, pipelines) that is
+// independent of any specific window. Per-window state lives in windowSurface
+// (owned by Window, not Renderer). This enables multi-window, headless, and
+// mobile suspend/resume where surfaces come and go (ADR-026).
 type Renderer struct {
-	// Shared GPU objects
+	// Shared GPU objects — independent of any window
 	instance *wgpu.Instance
 	adapter  *wgpu.Adapter
 	device   *wgpu.Device
+
+	// Surface format — device-level constant, same for all windows
+	surfaceFormat gputypes.TextureFormat
 
 	// Backend metadata
 	backendName string
 
 	// Submission tracker for non-blocking resource recycling.
-	// Each Submit returns a submission index; Poll returns the last completed.
-	// Command buffers are freed when their submission completes.
 	tracker submissionTracker
 
 	// Built-in pipelines (shared across all windows)
@@ -128,32 +124,25 @@ type Renderer struct {
 	texQuadPipelineLayout *wgpu.PipelineLayout
 	texQuadUniformBuffer  *wgpu.Buffer
 	texQuadUniformBindGrp *wgpu.BindGroup
-	texQuadUniformData    []byte // Pre-allocated buffer for uniform data (reduces GC pressure)
+	texQuadUniformData    []byte
 	texQuadPipelineInited bool
 
-	// Texture bind group cache - avoids creating new bind groups per draw call.
-	// Keyed by *wgpu.TextureView pointer identity.
-	// Device-level resource, shared across all windows.
+	// Texture bind group cache — device-level, shared across all windows.
 	texBindGroupCache map[*wgpu.TextureView]*wgpu.BindGroup
 
-	// Deferred destruction queue for resources enqueued by runtime.AddCleanup.
-	// These are resources that were garbage collected without explicit Close/Destroy.
-	// Drained at the start of each frame (BeginFrame) when GPU is idle.
+	// Deferred destruction queue for GC-enqueued resources.
 	deferredDestroys   []func()
 	deferredDestroysMu sync.Mutex
 
 	// PowerPreference for adapter selection
 	powerPreference gputypes.PowerPreference
 
-	// Primary window surface (single-window backward compatibility).
-	// In multi-window mode, additional surfaces will be stored separately.
+	// Primary windowSurface — backward compatibility for single-window API.
+	// TODO(lifecycle-phase3): remove once all callers use per-window surfaces.
 	primary *windowSurface
 
-	// currentSurface is set during multi-window rendering to the windowSurface
-	// of the window being drawn. Draw methods (drawTexturedQuad, DrawTriangle)
-	// use activeSurface() which returns currentSurface if set, otherwise primary.
-	// Set by the multi-window frame loop before each window's draw callback,
-	// cleared after endFrame.
+	// currentSurface is the windowSurface being drawn in the current frame.
+	// Set by the multi-window frame loop before each window's draw callback.
 	currentSurface *windowSurface
 }
 
@@ -245,6 +234,7 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 		return fmt.Errorf("gogpu: failed to request device: %w", err)
 	}
 
+	r.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 	return nil
 }
 
@@ -260,7 +250,7 @@ func (r *Renderer) initSurface(ws *windowSurface) error {
 	}
 	ws.surface = surface
 	ws.state = SurfaceReady
-	ws.format = gputypes.TextureFormatBGRA8Unorm
+	ws.format = r.surfaceFormat
 
 	width, height := ws.platWindow.PhysicalSize()
 	if width > 0 && height > 0 {
@@ -360,7 +350,12 @@ func (r *Renderer) activeSurface() *windowSurface {
 // This also handles deferred surface configuration when the window
 // first becomes visible with valid dimensions (especially important on macOS).
 func (r *Renderer) Resize(width, height int) {
-	r.primary.resize(width, height, r.device, r.adapter)
+	r.ResizeSurface(r.primary, width, height)
+}
+
+// ResizeSurface handles window resize for any surface.
+func (r *Renderer) ResizeSurface(ws *windowSurface, width, height int) {
+	ws.resize(width, height, r.device, r.adapter)
 }
 
 // resize handles window resize for this surface.
@@ -405,15 +400,16 @@ func (ws *windowSurface) resize(width, height int, device *wgpu.Device, adapter 
 	ws.state = SurfaceConfigured
 }
 
-// BeginFrame prepares a new frame for rendering.
-// Returns false if frame cannot be acquired (surface not configured, minimized, etc.).
+// BeginFrame prepares a new frame for rendering on the primary surface.
+// Backward compatibility wrapper — multi-window code uses beginFrameForSurface.
 func (r *Renderer) BeginFrame() bool {
-	// Drain deferred destruction queue at frame boundary.
-	// Resources enqueued by runtime.AddCleanup are destroyed here
-	// on the render thread where GPU operations are safe.
 	r.DrainDeferredDestroys()
+	return r.beginFrameForSurface(r.primary)
+}
 
-	return r.primary.beginFrame(r.primary.platWindow, r.device, r.adapter)
+// beginFrameForSurface acquires the next texture for any surface.
+func (r *Renderer) beginFrameForSurface(ws *windowSurface) bool {
+	return ws.beginFrame(ws.platWindow, r.device, r.adapter)
 }
 
 // CanRender reports whether this surface is ready for draw operations.
@@ -492,25 +488,15 @@ func (ws *windowSurface) recoverFromAcquireError(err error, device *wgpu.Device,
 	}
 }
 
-// EndFrame presents the rendered frame on the primary window.
+// EndFrame presents the rendered frame on the primary surface.
+// Backward compatibility wrapper — multi-window code uses endFrameForSurface.
 func (r *Renderer) EndFrame() {
 	if !r.primary.frameStarted {
 		r.pollSubmissions()
 		return
 	}
-
-	// Flush any pending clear that wasn't consumed by a draw call.
-	// This handles the case where user calls ClearColor without drawing.
-	r.primary.flushClear(r.device, r)
-
-	// Present the surface texture on the primary window.
-	r.primary.present()
-
-	// Non-blocking submission tracking: free resources for completed submissions.
+	r.endFrameForSurface(r.primary)
 	r.pollSubmissions()
-
-	// Release per-frame resources after presentation.
-	r.primary.releaseFrame()
 }
 
 // endFrameForSurface flushes, presents, and releases frame resources for a
@@ -703,7 +689,7 @@ func (r *Renderer) initTrianglePipeline() error {
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
 				{
-					Format:    r.primary.format,
+					Format:    r.surfaceFormat,
 					WriteMask: gputypes.ColorWriteMaskAll,
 				},
 			},
@@ -860,7 +846,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
 				{
-					Format:    r.primary.format,
+					Format:    r.surfaceFormat,
 					WriteMask: gputypes.ColorWriteMaskAll,
 					Blend: &gputypes.BlendState{
 						Color: gputypes.BlendComponent{
