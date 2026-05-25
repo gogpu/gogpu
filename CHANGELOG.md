@@ -5,16 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.39.2] - 2026-05-24
+## [0.39.2] - 2026-05-25
+
+### Added
+
+- **Wayland: cursor shapes via wp_cursor_shape_manager_v1** (PLAT-008, CSD-CURSOR-001) — `SetCursor` on Wayland now works. 12 cursor shapes (arrow, hand, text, crosshair, move, resize, wait, not-allowed) via the modern cursor shape protocol. CSD border subsurfaces show correct resize cursors (N/S/E/W/NW/NE/SW/SE). Shape caching with invalidation on pointer re-enter. Graceful fallback on compositors without the protocol.
+- **X11: frameless window drag/resize via _NET_WM_MOVERESIZE** (#270) — `handleButtonPress` invokes `hitTestCallback` on left click. Caption → move, resize edges → WM resize. Standard EWMH protocol.
 
 ### Fixed
 
-- **Wayland: damage_buffer before commit** (#272) — `wl_surface.damage_buffer` (opcode 9, v4+) now called before configure-time commit. Compositor receives correct damage regions instead of repainting entire surface.
-- **Wayland: Activated state → EventFocus** (#273) — `xdg_toplevel` Activated state (4) parsed from configure states array and emitted as `EventFocus`. Previously only `wl_keyboard.enter/leave` triggered focus events.
-- **Windows: DPI-correct MouseLeave coordinates** (#271) — `wmMouseLeave` now applies `scaleFactor()` to cached physical pixel coordinates, matching all other pointer events. Fixes mouse position mismatch at non-100% DPI scaling.
-- **X11: HitTestCallback invocation for frameless windows** (#270) — `handleButtonPress` now calls `hitTestCallback` on left click for frameless windows. If result is Caption or Resize edge, sends `_NET_WM_MOVERESIZE` client message to the window manager. Frameless window dragging and resizing now works on X11.
-- **Focus events dispatched to UI layer** (BUG-FOCUS-001) — `EventFocus` handler now calls `eventSource.dispatchFocus()`. Previously focus events reached the window manager but never the UI layer, causing broken redraw on focus change.
-- **Wayland: cursor shapes via wp_cursor_shape_manager_v1** (PLAT-008, CSD-CURSOR-001) — `SetCursor` on Wayland now works. 12 cursor shapes (arrow, hand, text, crosshair, move, resize, wait, not-allowed) via the modern Wayland cursor shape protocol. CSD border subsurfaces show correct resize cursors (N/S/E/W/NW/NE/SW/SE). Graceful fallback to no-op on compositors without the protocol.
+- **Wayland: damage_buffer before commit** (#272) — `wl_surface.damage_buffer` (opcode 9, v4+) now called before configure-time commit. Compositor receives correct damage regions.
+- **Wayland: Activated state → EventFocus** (#273) — `xdg_toplevel` Activated state (4) parsed from configure states array and emitted as `EventFocus`.
+- **Windows: DPI-correct MouseLeave coordinates** (#271) — `wmMouseLeave` now applies `scaleFactor()` to cached physical pixel coordinates, matching all other pointer events.
+- **Focus events dispatched to UI layer** (BUG-FOCUS-001) — `EventFocus` handler now calls `eventSource.dispatchFocus()`. UI layer receives FocusGained/FocusLost callbacks.
 
 ## [0.39.1] - 2026-05-22
 
