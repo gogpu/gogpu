@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Wayland: Activated state → EventFocus** (#273) — `xdg_toplevel` Activated state (4) parsed from configure states array and emitted as `EventFocus`. Previously only `wl_keyboard.enter/leave` triggered focus events.
 - **Windows: DPI-correct MouseLeave coordinates** (#271) — `wmMouseLeave` now applies `scaleFactor()` to cached physical pixel coordinates, matching all other pointer events. Fixes mouse position mismatch at non-100% DPI scaling.
 - **X11: HitTestCallback invocation for frameless windows** (#270) — `handleButtonPress` now calls `hitTestCallback` on left click for frameless windows. If result is Caption or Resize edge, sends `_NET_WM_MOVERESIZE` client message to the window manager. Frameless window dragging and resizing now works on X11.
+- **Focus events dispatched to UI layer** (BUG-FOCUS-001) — `EventFocus` handler now calls `eventSource.dispatchFocus()`. Previously focus events reached the window manager but never the UI layer, causing broken redraw on focus change.
 
 ## [0.39.1] - 2026-05-22
 

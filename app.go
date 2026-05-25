@@ -566,6 +566,9 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 				a.windowManager.setFocus(w.id)
 			}
 		}
+		if a.eventSource != nil {
+			a.eventSource.dispatchFocus(event.Focused)
+		}
 		a.RequestRedraw()
 
 	case platform.EventKeyDown:
