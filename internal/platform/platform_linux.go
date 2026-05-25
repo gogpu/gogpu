@@ -43,6 +43,7 @@ type waylandWindow struct {
 	height      int
 	shouldClose bool
 	configured  bool
+	activated   bool // xdg_toplevel Activated state (window manager focus)
 
 	// eventMu guards window state fields (shouldClose, maximized, fullscreen,
 	// width, height, savedWidth, savedHeight). The event queue has its own
@@ -1080,10 +1081,16 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.queueEvent(Event{Type: EventClose, WindowID: p.primaryWindowID})
 			p.WakeUp() // unblock WaitEvents so main loop sees shouldClose
 		},
-		OnConfigure: func(width, height int32) {
-			logger().Debug("wayland toplevel.configure", "rawW", width, "rawH", height)
+		OnConfigure: func(width, height int32, activated bool) {
+			logger().Debug("wayland toplevel.configure", "rawW", width, "rawH", height, "activated", activated)
 			w.eventMu.Lock()
 			defer w.eventMu.Unlock()
+
+			// Emit EventFocus when Activated state changes (#273).
+			if activated != w.activated {
+				w.activated = activated
+				w.queueEvent(Event{Type: EventFocus, Focused: activated, WindowID: p.primaryWindowID})
+			}
 
 			isMaximized := p.libwl != nil && p.libwl.CSDActive() && p.libwl.IsMaximized()
 

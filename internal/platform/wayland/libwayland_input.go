@@ -55,8 +55,8 @@ type InputCallbacks struct {
 	// Close event from xdg_toplevel
 	OnClose func()
 
-	// Configure event from xdg_toplevel (width, height, states)
-	OnConfigure func(width, height int32)
+	// Configure event from xdg_toplevel (width, height, activated state)
+	OnConfigure func(width, height int32, activated bool)
 }
 
 // Input-related fields are added to LibwaylandHandle via composition in the
@@ -513,14 +513,17 @@ func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 		return
 	}
 
-	// Parse states array for maximized state.
+	// Parse states array for maximized (1) and activated (4) states.
 	// wl_array layout on 64-bit: { uint64 size, uint64 alloc, uintptr data }
-	// xdg_toplevel_state::maximized = 1
-	if states != 0 && h.csdActive {
-		maximized := wlArrayContainsUint32(states, 1)
-		if h.csdState.Maximized != maximized {
-			h.csdState.Maximized = maximized
-			h.csdPendingRepaint = true
+	var activated bool
+	if states != 0 {
+		activated = wlArrayContainsUint32(states, 4) // xdg_toplevel_state::activated
+		if h.csdActive {
+			maximized := wlArrayContainsUint32(states, 1) // xdg_toplevel_state::maximized
+			if h.csdState.Maximized != maximized {
+				h.csdState.Maximized = maximized
+				h.csdPendingRepaint = true
+			}
 		}
 	}
 
@@ -530,12 +533,8 @@ func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 		h.configuredH = int(int32(height))
 	}
 
-	// Call platform OnConfigure — it calculates CSD content dimensions
-	// (handling restore-from-saved, border subtraction) and calls
-	// SetPendingCSDResize. The actual CSD resize happens in
-	// xdgSurfaceConfigureCb after ack_configure.
 	if h.inputCallbacks.OnConfigure != nil {
-		h.inputCallbacks.OnConfigure(int32(width), int32(height))
+		h.inputCallbacks.OnConfigure(int32(width), int32(height), activated)
 	}
 }
 

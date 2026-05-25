@@ -246,7 +246,14 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 			uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
 	}
 
-	// Commit the main surface — atomic: ack + geometry + subsurface changes all at once.
+	// Damage entire buffer before commit so compositor knows what changed (#272).
+	// wl_surface.damage_buffer = opcode 9 (v4+), signature "iiii".
+	if h.configuredW > 0 && h.configuredH > 0 {
+		h.marshalVoid(h.surface, 9, 0, 0,
+			uintptr(uint32(h.configuredW)), uintptr(uint32(h.configuredH)))
+	}
+
+	// Commit the main surface — atomic: ack + geometry + damage + subsurface changes.
 	h.marshalVoid(h.surface, 6)
 	slog.Debug("parent surface committed")
 }
