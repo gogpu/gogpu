@@ -34,6 +34,10 @@ const (
 	// Used for mouse grab / pointer lock (CursorModeLocked, CursorModeConfined).
 	InterfaceZwpPointerConstraintsV1     = "zwp_pointer_constraints_v1"
 	InterfaceZwpRelativePointerManagerV1 = "zwp_relative_pointer_manager_v1"
+
+	// Cursor shape protocol (wp_cursor_shape_manager_v1).
+	// Modern protocol for setting cursor shapes without loading xcursor themes.
+	InterfaceWpCursorShapeManagerV1 = "wp_cursor_shape_manager_v1"
 )
 
 // Global represents a Wayland global interface advertised by the compositor.

@@ -97,6 +97,7 @@ type LibwaylandHandle struct {
 	csdPendingAction  CSDHitResult // action to perform outside callback
 	csdPendingSerial  uint32       // serial for pending move/resize
 	csdPendingRepaint bool         // title bar needs repaint (deferred from callback)
+	csdPendingCursor  bool         // CSD cursor shape needs update (deferred from callback)
 	csdPendingResize  bool         // CSD needs resize on next xdg_surface.configure
 	csdPendingResizeW int          // pending CSD content width for resize
 	csdPendingResizeH int          // pending CSD content height for resize
@@ -116,6 +117,11 @@ type LibwaylandHandle struct {
 	confinedPointer       uintptr // current zwp_confined_pointer_v1* (or 0)
 	relativePointer       uintptr // current zwp_relative_pointer_v1* (or 0)
 	pointerEnterSerial    uint32  // last wl_pointer.enter serial (needed for set_cursor)
+
+	// Cursor shape (wp_cursor_shape_manager_v1)
+	cursorShapeMgr       uintptr // wp_cursor_shape_manager_v1* manager proxy (or 0)
+	cursorShapeDevice    uintptr // wp_cursor_shape_device_v1* for main pointer (or 0)
+	csdCursorShapeDevice uintptr // wp_cursor_shape_device_v1* for CSD pointer (or 0)
 
 	// Data symbols (interface descriptors — pointers to static C structs)
 	registryInterface      unsafe.Pointer // &wl_registry_interface
@@ -243,6 +249,14 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 func (h *LibwaylandHandle) Close() {
 	if h == nil {
 		return
+	}
+
+	// Destroy cursor shape objects (before pointer constraints and input)
+	h.DestroyCursorShapeDevices()
+	if h.cursorShapeMgr != 0 {
+		h.marshalVoid(h.cursorShapeMgr, 0) // wp_cursor_shape_manager_v1::destroy (opcode 0)
+		h.proxyDestroy(h.cursorShapeMgr)
+		h.cursorShapeMgr = 0
 	}
 
 	// Destroy pointer constraint objects (before input, in reverse creation order)

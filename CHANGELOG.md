@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Windows: DPI-correct MouseLeave coordinates** (#271) — `wmMouseLeave` now applies `scaleFactor()` to cached physical pixel coordinates, matching all other pointer events. Fixes mouse position mismatch at non-100% DPI scaling.
 - **X11: HitTestCallback invocation for frameless windows** (#270) — `handleButtonPress` now calls `hitTestCallback` on left click for frameless windows. If result is Caption or Resize edge, sends `_NET_WM_MOVERESIZE` client message to the window manager. Frameless window dragging and resizing now works on X11.
 - **Focus events dispatched to UI layer** (BUG-FOCUS-001) — `EventFocus` handler now calls `eventSource.dispatchFocus()`. Previously focus events reached the window manager but never the UI layer, causing broken redraw on focus change.
+- **Wayland: cursor shapes via wp_cursor_shape_manager_v1** (PLAT-008, CSD-CURSOR-001) — `SetCursor` on Wayland now works. 12 cursor shapes (arrow, hand, text, crosshair, move, resize, wait, not-allowed) via the modern Wayland cursor shape protocol. CSD border subsurfaces show correct resize cursors (N/S/E/W/NW/NE/SW/SE). Graceful fallback to no-op on compositors without the protocol.
 
 ## [0.39.1] - 2026-05-22
 

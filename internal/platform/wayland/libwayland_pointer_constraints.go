@@ -470,21 +470,16 @@ func (h *LibwaylandHandle) HideCursor(serial uint32) {
 	h.marshalVoid(h.inputPointer, 0, uintptr(serial), 0, 0, 0)
 }
 
-// ShowCursor restores the default cursor by requesting the compositor set
-// the cursor to the default shape. On Wayland, this is done by NOT setting
-// a cursor surface — the compositor will use the default cursor shape.
-// For a proper implementation, this would need cursor shape manager or
-// xcursor theme loading. For now, we set the enter serial so the compositor
-// knows we want the default cursor back.
+// ShowCursor restores the default cursor shape.
+// Uses wp_cursor_shape_manager_v1 if available, otherwise relies on
+// the compositor restoring the cursor when the pointer re-enters the surface.
 func (h *LibwaylandHandle) ShowCursor(serial uint32) {
-	// Wayland cursor restoration requires either:
-	// 1. wp_cursor_shape_manager_v1.set_cursor_shape(default)
-	// 2. Loading xcursor theme → wl_surface → wl_pointer.set_cursor
-	// Both are significant effort (PLAT-008 task).
-	//
-	// For pointer lock exit, the enter callback in the platform layer
-	// will trigger cursor restoration naturally when the pointer re-enters.
-	// No-op here — the compositor restores the cursor automatically when
-	// the pointer constraint is released and the pointer re-enters the surface.
-	_ = serial
+	if h.cursorShapeDevice != 0 {
+		// Use cursor shape protocol to set default cursor
+		h.SetCursorShape(0, serial) // 0 = CursorDefault
+		return
+	}
+	// Without cursor shape manager, the compositor restores the cursor
+	// automatically when the pointer constraint is released and the
+	// pointer re-enters the surface. No-op is correct here.
 }

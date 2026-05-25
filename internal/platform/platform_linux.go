@@ -65,6 +65,9 @@ type waylandWindow struct {
 	pointerIn bool // True when pointer is inside our surface
 	startTime time.Time
 
+	// Cursor shape cache — avoids redundant set_shape protocol messages.
+	currentCursor int // last cursorID set via SetCursor (-1 = unset)
+
 	// Cursor mode (0=normal, 1=locked, 2=confined)
 	cursorMode int
 
@@ -160,9 +163,10 @@ func newPlatformManager() PlatformManager {
 	logger().Info("platform selected", "type", "wayland", "reason", "default (no WAYLAND_DISPLAY or DISPLAY)")
 	return &waylandPlatform{
 		primary: &waylandWindow{
-			startTime: time.Now(),
-			events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
-			repeatFd:  -1, // not created yet; created in Init()
+			startTime:     time.Now(),
+			events:        eventqueue.New[Event](eventqueue.DefaultCapacity),
+			repeatFd:      -1, // not created yet; created in Init()
+			currentCursor: -1, // unset — ensures first SetCursor(0) takes effect
 		},
 	}
 }
@@ -535,7 +539,7 @@ func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 // initSingleConnection initializes using a single C libwayland connection.
 // Uses Pure Go wire protocol ONLY for registry global discovery, then
 // creates all objects on the C connection via goffi.
-func (p *waylandPlatform) initSingleConnection(config Config) error {
+func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:gocognit // Wayland init binds many protocol extensions sequentially
 	// Step 1: Use Pure Go protocol to discover registry globals.
 	// This is lightweight (just reads global names/versions), then we disconnect.
 	display, err := wayland.Connect()
@@ -668,6 +672,22 @@ func (p *waylandPlatform) initSingleConnection(config Config) error {
 		}
 	}
 
+	// Bind wp_cursor_shape_manager_v1 (optional, for cursor shapes)
+	cursorShapeGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpCursorShapeManagerV1)
+	if cursorShapeGlobal != nil {
+		if err := libwl.SetupCursorShape(cursorShapeGlobal.Name, cursorShapeGlobal.Version); err != nil {
+			logger().Warn("cursor shape setup failed (cursor changes unavailable)", "err", err)
+		} else {
+			logger().Debug("cursor shape protocol bound")
+			// Create cursor shape device for main pointer (if available)
+			if libwl.InputPointer() != 0 {
+				if err := libwl.CreateCursorShapeDevice(libwl.InputPointer()); err != nil {
+					logger().Warn("cursor shape device creation failed", "err", err)
+				}
+			}
+		}
+	}
+
 	// Activate CSD if SSD was not available and window is not frameless
 	if decorGlobal == nil && !config.Frameless {
 		if err := p.initCSD(config); err != nil {
@@ -746,6 +766,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.pointerX = x
 			w.pointerY = y
 			w.pointerIn = true
+			w.currentCursor = -1 // invalidate cache — compositor resets cursor on enter
 			w.pointerMu.Unlock()
 
 			w.dispatchPointerEvent(gpucontext.PointerEvent{
@@ -2266,12 +2287,29 @@ func (p *waylandPlatform) ScaleFactor() float64 {
 	return 1.0
 }
 
-// SetCursor changes the mouse cursor shape.
-// TODO(PLAT-008): Implement using wp_cursor_shape_manager_v1 or xcursor theme loading.
-// wp_cursor_shape_manager_v1 is the modern approach (Wayland protocol extension).
-// Fallback: load xcursor theme files from $XCURSOR_PATH, render to wl_buffer,
-// attach via wl_pointer.set_cursor. Both approaches are significant effort.
-func (p *waylandPlatform) SetCursor(int) {}
+// SetCursor changes the mouse cursor shape using wp_cursor_shape_manager_v1.
+// Falls back to no-op if the compositor does not support the protocol.
+// Caches current shape to avoid redundant protocol messages (winit PR #1116 pattern).
+func (p *waylandPlatform) SetCursor(cursorID int) {
+	if p.libwl == nil || !p.libwl.HasCursorShape() {
+		return
+	}
+	w := p.primary
+	if w == nil {
+		return
+	}
+	w.pointerMu.RLock()
+	current := w.currentCursor
+	w.pointerMu.RUnlock()
+	if cursorID == current {
+		return
+	}
+	serial := p.libwl.PointerEnterSerial()
+	p.libwl.SetCursorShape(cursorID, serial)
+	w.pointerMu.Lock()
+	w.currentCursor = cursorID
+	w.pointerMu.Unlock()
+}
 
 // SetCursorMode sets cursor confinement/lock mode on Wayland.
 // 0=normal, 1=locked (hidden + pointer lock + relative deltas), 2=confined (visible + confined to surface).

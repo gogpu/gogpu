@@ -172,6 +172,11 @@ func (h *LibwaylandHandle) SetupCSD(subcompName, subcompVersion, shmName, shmVer
 	if err := h.setupCSDPointer(seatName, seatVersion); err != nil {
 		// Non-fatal: decorations render but aren't interactive
 		slog.Warn("CSD pointer setup failed, decorations not interactive", "err", err)
+	} else if h.cursorShapeMgr != 0 && h.csdPointer != 0 {
+		// Create cursor shape device for CSD pointer (resize/move cursors)
+		if err := h.CreateCSDCursorShapeDevice(h.csdPointer); err != nil {
+			slog.Warn("CSD cursor shape device creation failed", "err", err)
+		}
 	}
 
 	return nil
@@ -228,6 +233,12 @@ func (h *LibwaylandHandle) DispatchCSDEvents() error {
 	if h.csdPendingRepaint {
 		h.csdPendingRepaint = false
 		h.repaintCSDTitleBar()
+	}
+
+	// Process pending cursor shape update (deferred from goffi callbacks).
+	if h.csdPendingCursor {
+		h.csdPendingCursor = false
+		h.UpdateCSDCursor()
 	}
 
 	// Process pending actions (deferred from goffi callbacks to avoid nested FFI).
@@ -459,12 +470,13 @@ func (h *LibwaylandHandle) updateCSDHitTest() {
 		h.csdHitResult = CSDHitNone
 	}
 
-	// Update hover states if changed
+	// Update hover states and cursor shape if changed
 	if oldHit != h.csdHitResult {
 		h.csdState.Close.Hovered = h.csdHitResult == CSDHitClose
 		h.csdState.Maximize.Hovered = h.csdHitResult == CSDHitMaximize
 		h.csdState.Minimize.Hovered = h.csdHitResult == CSDHitMinimize
 		h.csdPendingRepaint = true
+		h.csdPendingCursor = true // deferred cursor shape update
 	}
 }
 
