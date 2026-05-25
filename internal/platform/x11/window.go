@@ -490,3 +490,90 @@ func (c *Connection) SendClientMessage(window, target ResourceID, msgType Atom, 
 	}
 	return nil
 }
+
+// SetSelectionOwner sets the owner of a selection (opcode 22).
+// Use owner=0 to release ownership. Timestamp 0 means CurrentTime.
+func (c *Connection) SetSelectionOwner(selection Atom, owner ResourceID, timestamp Timestamp) error {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeSetSelectionOwner)
+	e.PutUint8(0)  // unused
+	e.PutUint16(4) // length = 4 (4-byte units)
+	e.PutUint32(uint32(owner))
+	e.PutUint32(uint32(selection))
+	e.PutUint32(uint32(timestamp))
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: SetSelectionOwner failed: %w", err)
+	}
+	return nil
+}
+
+// GetSelectionOwner returns the current owner of a selection (opcode 23).
+// Returns 0 if no owner.
+func (c *Connection) GetSelectionOwner(selection Atom) (ResourceID, error) {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeGetSelectionOwner)
+	e.PutUint8(0)  // unused
+	e.PutUint16(2) // length = 2 (4-byte units)
+	e.PutUint32(uint32(selection))
+
+	reply, err := c.sendRequestWithReply(e.Bytes())
+	if err != nil {
+		return 0, fmt.Errorf("x11: GetSelectionOwner failed: %w", err)
+	}
+
+	// Reply: [1:reply][1:unused][2:seq][4:length=0][4:owner][20:unused]
+	if len(reply) < 12 {
+		return 0, fmt.Errorf("x11: GetSelectionOwner reply too short")
+	}
+
+	d := NewDecoder(c.byteOrder, reply[8:12])
+	owner, _ := d.Uint32()
+	return ResourceID(owner), nil
+}
+
+// ConvertSelection requests conversion of a selection to a target type (opcode 24).
+// The result will be delivered as a SelectionNotify event.
+func (c *Connection) ConvertSelection(requestor ResourceID, selection, target, property Atom, timestamp Timestamp) error {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeConvertSelection)
+	e.PutUint8(0)  // unused
+	e.PutUint16(6) // length = 6 (4-byte units)
+	e.PutUint32(uint32(requestor))
+	e.PutUint32(uint32(selection))
+	e.PutUint32(uint32(target))
+	e.PutUint32(uint32(property))
+	e.PutUint32(uint32(timestamp))
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: ConvertSelection failed: %w", err)
+	}
+	return nil
+}
+
+// SendEvent sends a raw event to a destination window (opcode 25).
+// eventData must be exactly 32 bytes. propagate controls whether the event
+// propagates up the window hierarchy. eventMask selects which clients receive it.
+func (c *Connection) SendEvent(destination ResourceID, propagate bool, eventMask uint32, eventData []byte) error {
+	if len(eventData) != 32 {
+		return fmt.Errorf("x11: SendEvent requires 32-byte event data, got %d", len(eventData))
+	}
+
+	var propagateByte uint8
+	if propagate {
+		propagateByte = 1
+	}
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeSendEvent)
+	e.PutUint8(propagateByte)
+	e.PutUint16(11) // length = 11 (4-byte units): 1+1+2+4+4+32 = 44 bytes / 4
+	e.PutUint32(uint32(destination))
+	e.PutUint32(eventMask)
+	e.PutBytes(eventData)
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: SendEvent failed: %w", err)
+	}
+	return nil
+}

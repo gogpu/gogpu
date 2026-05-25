@@ -180,6 +180,12 @@ type Platform struct {
 	cursorCache   map[int]ResourceID // cursor shape → X11 cursor resource ID
 	blankCursorID ResourceID         // 1x1 transparent cursor for locked mode
 
+	// Clipboard state (ICCCM selection protocol)
+	clipboardMu    sync.Mutex // guards clipboard fields below
+	clipboardText  string     // locally stored clipboard content
+	ownsClipboard  bool       // true if we are the CLIPBOARD selection owner
+	clipboardReady bool       // signaled by SelectionNotify handler during read
+
 	// Window registry keyed by X11 ResourceID for event routing.
 	windowMu sync.RWMutex
 	windows  map[ResourceID]*x11Window
@@ -938,6 +944,12 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		if e.Detail != 5 && e.Detail != 6 && e.Mode == 0 {
 			return PlatformEvent{Type: EventTypeFocus, Focused: false}
 		}
+
+	case *SelectionClearEvent:
+		p.handleSelectionClear(e)
+
+	case *SelectionRequestEvent:
+		p.handleSelectionRequest(e)
 
 	case *GenericEvent:
 		p.handleGenericEvent(w, e)

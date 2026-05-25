@@ -249,6 +249,31 @@ type SelectionClearEvent struct {
 
 func (*SelectionClearEvent) eventMarker() {}
 
+// SelectionRequestEvent is generated when another client requests the selection.
+type SelectionRequestEvent struct {
+	Sequence  uint16     // Sequence number
+	Time      Timestamp  // Server timestamp
+	Owner     ResourceID // Selection owner
+	Requestor ResourceID // Requesting client's window
+	Selection Atom       // Selection atom (e.g., CLIPBOARD)
+	Target    Atom       // Requested format (e.g., UTF8_STRING)
+	Property  Atom       // Property to store result (AtomNone = refused)
+}
+
+func (*SelectionRequestEvent) eventMarker() {}
+
+// SelectionNotifyEvent is sent to the requestor after a ConvertSelection request.
+type SelectionNotifyEvent struct {
+	Sequence  uint16     // Sequence number
+	Time      Timestamp  // Server timestamp
+	Requestor ResourceID // Requesting client's window
+	Selection Atom       // Selection atom
+	Target    Atom       // Requested format
+	Property  Atom       // Property with data (AtomNone = conversion refused)
+}
+
+func (*SelectionNotifyEvent) eventMarker() {}
+
 // MappingNotifyEvent is generated when keyboard mapping changes.
 type MappingNotifyEvent struct {
 	Sequence     uint16 // Sequence number
@@ -324,6 +349,10 @@ func (c *Connection) parseEvent(buf []byte) (Event, error) {
 		return c.parseClientMessageEvent(buf)
 	case EventSelectionClear:
 		return c.parseSelectionClearEvent(buf)
+	case EventSelectionRequest:
+		return c.parseSelectionRequestEvent(buf)
+	case EventSelectionNotify:
+		return c.parseSelectionNotifyEvent(buf)
 	case EventMappingNotify:
 		return c.parseMappingNotifyEvent(buf)
 	default:
@@ -668,6 +697,52 @@ func (c *Connection) parseSelectionClearEvent(buf []byte) (Event, error) {
 		Time:      Timestamp(tstamp),
 		Owner:     ResourceID(owner),
 		Selection: Atom(selection),
+	}, nil
+}
+
+func (c *Connection) parseSelectionRequestEvent(buf []byte) (Event, error) {
+	d := NewDecoder(c.byteOrder, buf)
+
+	_, _ = d.Uint8() // event type
+	_, _ = d.Uint8() // unused
+	seq, _ := d.Uint16()
+	tstamp, _ := d.Uint32()
+	owner, _ := d.Uint32()
+	requestor, _ := d.Uint32()
+	selection, _ := d.Uint32()
+	target, _ := d.Uint32()
+	property, _ := d.Uint32()
+
+	return &SelectionRequestEvent{
+		Sequence:  seq,
+		Time:      Timestamp(tstamp),
+		Owner:     ResourceID(owner),
+		Requestor: ResourceID(requestor),
+		Selection: Atom(selection),
+		Target:    Atom(target),
+		Property:  Atom(property),
+	}, nil
+}
+
+func (c *Connection) parseSelectionNotifyEvent(buf []byte) (Event, error) {
+	d := NewDecoder(c.byteOrder, buf)
+
+	_, _ = d.Uint8() // event type
+	_, _ = d.Uint8() // unused
+	seq, _ := d.Uint16()
+	tstamp, _ := d.Uint32()
+	requestor, _ := d.Uint32()
+	selection, _ := d.Uint32()
+	target, _ := d.Uint32()
+	property, _ := d.Uint32()
+
+	return &SelectionNotifyEvent{
+		Sequence:  seq,
+		Time:      Timestamp(tstamp),
+		Requestor: ResourceID(requestor),
+		Selection: Atom(selection),
+		Target:    Atom(target),
+		Property:  Atom(property),
 	}, nil
 }
 

@@ -4,6 +4,7 @@ package wayland
 
 import (
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
@@ -122,6 +123,17 @@ type LibwaylandHandle struct {
 	cursorShapeMgr       uintptr // wp_cursor_shape_manager_v1* manager proxy (or 0)
 	cursorShapeDevice    uintptr // wp_cursor_shape_device_v1* for main pointer (or 0)
 	csdCursorShapeDevice uintptr // wp_cursor_shape_device_v1* for CSD pointer (or 0)
+
+	// Clipboard (wl_data_device_manager protocol)
+	clipboardMgr          uintptr    // wl_data_device_manager* proxy (or 0)
+	clipboardDevice       uintptr    // wl_data_device* proxy (or 0)
+	clipboardSource       uintptr    // current wl_data_source* we own (or 0)
+	clipboardOffer        uintptr    // current wl_data_offer* from selection event (or 0)
+	clipboardPendingOffer uintptr    // offer introduced by data_offer event, not yet confirmed
+	clipboardText         string     // locally stored clipboard text (what we copied)
+	ownsClipboard         bool       // true if our source is the active clipboard
+	clipboardOfferHasText bool       // true if current offer advertised text/plain mime
+	clipboardMu           sync.Mutex // protects clipboard state
 
 	// Data symbols (interface descriptors — pointers to static C structs)
 	registryInterface      unsafe.Pointer // &wl_registry_interface
@@ -250,6 +262,9 @@ func (h *LibwaylandHandle) Close() {
 	if h == nil {
 		return
 	}
+
+	// Destroy clipboard objects (before cursor shape, pointer constraints, and input)
+	h.DestroyClipboard()
 
 	// Destroy cursor shape objects (before pointer constraints and input)
 	h.DestroyCursorShapeDevices()

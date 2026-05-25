@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.3] - 2026-05-25
+
+### Added
+
+- **Linux clipboard** (PLAT-009, ADR-037) — `ClipboardRead` and `ClipboardWrite` now work on X11 and Wayland. Full ICCCM selection protocol on X11: SetSelectionOwner, ConvertSelection, SelectionNotify/SelectionRequest handling, TARGETS negotiation, 1s timeout with event pump. Wayland: wl_data_device_manager/source/offer/device protocol, pipe-based transfer, 5s timeout, `send`/`cancelled` event handling. Self-read optimization avoids deadlock. Writes to both CLIPBOARD and PRIMARY on X11. Two MIME types offered on Wayland: `text/plain;charset=utf-8` + `text/plain`.
+
 ## [0.39.2] - 2026-05-25
 
 ### Added

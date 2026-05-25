@@ -66,6 +66,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.39.3** | 2026-05-25 | **Linux clipboard** (PLAT-009, ADR-037) — X11 ICCCM selection + Wayland data_device. ClipboardRead/Write work on all Linux platforms. 861 LOC. |
 | **v0.39.2** | 2026-05-25 | **Wayland cursor shapes** (wp_cursor_shape_manager_v1, 12 shapes + CSD resize cursors) + **platform fixes** — damage_buffer (#272), Activated→EventFocus (#273), DPI MouseLeave (#271), X11 HitTest (#270), dispatchFocus (BUG-FOCUS-001) |
 | **v0.39.1** | 2026-05-22 | **AppLifecycle enum + callbacks** (ADR-026 Phase 3 complete) — AppLifecycle (5 states), OnSurfaceAvailable/Destroyed, OnResumed/Suspended/MemoryWarning |
 | **v0.39.0** | 2026-05-22 | **ADR-026 Universal Lifecycle** — QuitOnLastWindowClosed, primary close resilience, RenderTarget (public type), initDevice/initSurface split, SurfaceState, WindowID real type. `examples/lifecycle/`. deps: wgpu v0.28.7 |

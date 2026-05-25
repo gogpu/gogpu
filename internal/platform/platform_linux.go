@@ -281,13 +281,15 @@ func (p *x11Platform) WakeUp() {
 	}
 }
 
-// ClipboardRead reads text from the system clipboard.
-// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
-func (p *x11Platform) ClipboardRead() (string, error) { return "", nil }
+// ClipboardRead reads text from the system clipboard via ICCCM selection protocol.
+func (p *x11Platform) ClipboardRead() (string, error) {
+	return p.inner.ClipboardRead()
+}
 
-// ClipboardWrite writes text to the system clipboard.
-// TODO(PLAT-008): Implement using X11 selections (XA_CLIPBOARD).
-func (p *x11Platform) ClipboardWrite(string) error { return nil }
+// ClipboardWrite writes text to the system clipboard via ICCCM selection protocol.
+func (p *x11Platform) ClipboardWrite(text string) error {
+	return p.inner.ClipboardWrite(text)
+}
 
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
 // Delegates to the X11 platform which reads Xft.rgba from RESOURCE_MANAGER.
@@ -685,6 +687,16 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 					logger().Warn("cursor shape device creation failed", "err", err)
 				}
 			}
+		}
+	}
+
+	// Bind wl_data_device_manager for clipboard (optional, for copy/paste)
+	ddmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlDataDeviceManager)
+	if ddmGlobal != nil {
+		if err := libwl.SetupClipboard(ddmGlobal.Name, ddmGlobal.Version); err != nil {
+			logger().Warn("clipboard setup failed (copy/paste unavailable)", "err", err)
+		} else {
+			logger().Debug("clipboard protocol bound (wl_data_device_manager)")
 		}
 	}
 
@@ -2118,12 +2130,28 @@ func (p *waylandPlatform) PollEvents() Event {
 }
 
 // ClipboardRead reads text from the system clipboard.
-// TODO(PLAT-008): Implement using wl_data_device and wl_data_offer.
-func (p *waylandPlatform) ClipboardRead() (string, error) { return "", nil }
+// Uses wl_data_device + wl_data_offer protocol for inter-client clipboard.
+func (p *waylandPlatform) ClipboardRead() (string, error) {
+	if p.libwl == nil {
+		return "", fmt.Errorf("wayland: not initialized")
+	}
+	if !p.libwl.HasClipboard() {
+		return "", nil // Clipboard protocol not available
+	}
+	return p.libwl.ClipboardRead()
+}
 
 // ClipboardWrite writes text to the system clipboard.
-// TODO(PLAT-008): Implement using wl_data_device and wl_data_source.
-func (p *waylandPlatform) ClipboardWrite(string) error { return nil }
+// Uses wl_data_device + wl_data_source protocol for inter-client clipboard.
+func (p *waylandPlatform) ClipboardWrite(text string) error {
+	if p.libwl == nil {
+		return fmt.Errorf("wayland: not initialized")
+	}
+	if !p.libwl.HasClipboard() {
+		return fmt.Errorf("wayland: clipboard protocol not available")
+	}
+	return p.libwl.ClipboardWrite(text)
+}
 
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
 // Wayland does not expose X resources, so this falls back to fontconfig detection.

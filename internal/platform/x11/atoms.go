@@ -26,6 +26,9 @@ const (
 	AtomNameNetWMMoveresize         = "_NET_WM_MOVERESIZE"
 	AtomNameUTF8String              = "UTF8_STRING"
 	AtomNameMotifWMHints            = "_MOTIF_WM_HINTS"
+	AtomNameClipboard               = "CLIPBOARD"
+	AtomNameTargets                 = "TARGETS"
+	AtomNameGogpuSelection          = "GOGPU_SELECTION"
 )
 
 // InternAtom interns an atom name and returns its ID.
@@ -183,6 +186,9 @@ type StandardAtoms struct {
 	NetWMPID                Atom
 	UTF8String              Atom
 	MotifWMHints            Atom
+	Clipboard               Atom // CLIPBOARD selection atom (not XA_PRIMARY)
+	Targets                 Atom // TARGETS atom for selection target negotiation
+	GogpuSelection          Atom // Property name for clipboard data transfer
 }
 
 // InternStandardAtoms interns all standard atoms needed for windowing.
@@ -262,6 +268,21 @@ func (c *Connection) InternStandardAtoms() (*StandardAtoms, error) {
 	}
 
 	atoms.MotifWMHints, err = c.InternAtom(AtomNameMotifWMHints, false)
+	if err != nil {
+		return nil, err
+	}
+
+	atoms.Clipboard, err = c.InternAtom(AtomNameClipboard, false)
+	if err != nil {
+		return nil, err
+	}
+
+	atoms.Targets, err = c.InternAtom(AtomNameTargets, false)
+	if err != nil {
+		return nil, err
+	}
+
+	atoms.GogpuSelection, err = c.InternAtom(AtomNameGogpuSelection, false)
 	if err != nil {
 		return nil, err
 	}
