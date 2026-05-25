@@ -23,6 +23,7 @@ const (
 	AtomNameNetWMPID                = "_NET_WM_PID"
 	AtomNameNetWMIcon               = "_NET_WM_ICON"
 	AtomNameNetFrameExtents         = "_NET_FRAME_EXTENTS"
+	AtomNameNetWMMoveresize         = "_NET_WM_MOVERESIZE"
 	AtomNameUTF8String              = "UTF8_STRING"
 	AtomNameMotifWMHints            = "_MOTIF_WM_HINTS"
 )
@@ -176,6 +177,7 @@ type StandardAtoms struct {
 	NetWMStateFullscreen    Atom
 	NetWMStateMaximizedVert Atom
 	NetWMStateMaximizedHorz Atom
+	NetWMMoveresize         Atom
 	NetWMWindowType         Atom
 	NetWMWindowTypeNormal   Atom
 	NetWMPID                Atom
@@ -230,6 +232,11 @@ func (c *Connection) InternStandardAtoms() (*StandardAtoms, error) {
 	}
 
 	atoms.NetWMStateMaximizedHorz, err = c.InternAtom(AtomNameNetWMStateMaximizedHorz, false)
+	if err != nil {
+		return nil, err
+	}
+
+	atoms.NetWMMoveresize, err = c.InternAtom(AtomNameNetWMMoveresize, false)
 	if err != nil {
 		return nil, err
 	}

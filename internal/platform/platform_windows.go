@@ -2602,6 +2602,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		w.mouseInWindow = false
 		w.mouseMu.Unlock()
 
+		// Convert cached physical pixels to logical (DIP) coordinates,
+		// same as createPointerEvent does for all other pointer events.
+		scale := w.scaleFactor()
+		if scale > 1.0 {
+			x /= scale
+			y /= scale
+		}
+
 		ev := gpucontext.PointerEvent{
 			Type:        gpucontext.PointerLeave,
 			PointerID:   1,

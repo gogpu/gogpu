@@ -1004,6 +1004,27 @@ func (p *Platform) handleButtonPress(w *x11Window, e *ButtonPressEvent) {
 		return
 	}
 
+	// Check hit test for frameless window move/resize (left button only).
+	// When the WM takes over, we must not dispatch PointerDown.
+	if e.Detail == 1 {
+		w.callbackMu.RLock()
+		cb := w.hitTestCallback
+		frameless := w.frameless
+		w.callbackMu.RUnlock()
+
+		if frameless && cb != nil {
+			result := cb(x, y)
+			if dir, ok := hitTestToMoveResizeDirection(result); ok {
+				// Send _NET_WM_MOVERESIZE to the window manager.
+				// data: [x_root, y_root, direction, button, source_indication]
+				_ = p.conn.SendClientMessage(w.window, p.conn.RootWindow(),
+					p.atoms.NetWMMoveresize,
+					uint32(e.RootX), uint32(e.RootY), dir, 1, 1)
+				return
+			}
+		}
+	}
+
 	// Regular button press
 	button := x11ButtonToButton(e.Detail)
 	if button == gpucontext.ButtonNone {
@@ -2054,6 +2075,35 @@ func (p *Platform) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestRe
 	w.callbackMu.Lock()
 	defer w.callbackMu.Unlock()
 	w.hitTestCallback = fn
+}
+
+// hitTestToMoveResizeDirection maps a HitTestResult to the _NET_WM_MOVERESIZE
+// direction constant used by the EWMH specification.
+// Returns the direction and true if the result should initiate a WM move/resize,
+// or (0, false) for client area and button regions that we handle ourselves.
+func hitTestToMoveResizeDirection(result gpucontext.HitTestResult) (uint32, bool) {
+	switch result {
+	case gpucontext.HitTestCaption:
+		return 8, true // _NET_WM_MOVERESIZE_MOVE
+	case gpucontext.HitTestResizeNW:
+		return 0, true // _NET_WM_MOVERESIZE_SIZE_TOPLEFT
+	case gpucontext.HitTestResizeN:
+		return 1, true // _NET_WM_MOVERESIZE_SIZE_TOP
+	case gpucontext.HitTestResizeNE:
+		return 2, true // _NET_WM_MOVERESIZE_SIZE_TOPRIGHT
+	case gpucontext.HitTestResizeE:
+		return 3, true // _NET_WM_MOVERESIZE_SIZE_RIGHT
+	case gpucontext.HitTestResizeSE:
+		return 4, true // _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT
+	case gpucontext.HitTestResizeS:
+		return 5, true // _NET_WM_MOVERESIZE_SIZE_BOTTOM
+	case gpucontext.HitTestResizeSW:
+		return 6, true // _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT
+	case gpucontext.HitTestResizeW:
+		return 7, true // _NET_WM_MOVERESIZE_SIZE_LEFT
+	default:
+		return 0, false
+	}
 }
 
 func (p *Platform) Minimize() {
