@@ -391,7 +391,9 @@ Research: `docs/dev/research/JBR-FRAMELESS-SHADOW-RESEARCH.md`
 
 Clipboard, cursor (12 shapes), dark mode, accessibility (reduce motion,
 high contrast, font scale), BlitPixels — implemented on Windows, macOS, Linux X11.
-Linux clipboard and Wayland cursor/BlitPixels remain TODO.
+Clipboard works on all platforms: Win32 (WinAPI), macOS (NSPasteboard), X11 (ICCCM
+selection protocol), Wayland (wl_data_device). Wayland cursor shapes (12 shapes via
+wp_cursor_shape_manager_v1) shipped in v0.39.2. Wayland BlitPixels remains TODO.
 See `docs/dev/research/PLATFORM-IMPLEMENTATION-MATRIX.md` for full matrix.
 
 ### Thread Safety

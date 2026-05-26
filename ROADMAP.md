@@ -25,9 +25,13 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.35.0
+## Current State: v0.39.3
 
 ✅ **Production-ready** with full feature set:
+- **Universal App Lifecycle** — RenderTarget, QuitOnLastWindowClosed, AppLifecycle enum (5 states), surface/lifecycle callbacks (ADR-026, Phases 1-3)
+- **macOS system menu** — `SetMenu()`, `SetCustomMenu()`, `MenuRole`, native menu bar (ADR-022, @lkmavi)
+- **Linux clipboard** — X11 ICCCM selection + Wayland wl_data_device (PLAT-009, ADR-037)
+- **Wayland cursor shapes** — 12 cursor shapes via wp_cursor_shape_manager_v1, CSD resize cursors (PLAT-008)
 - **Three-mode render loop** — IDLE/ANIMATING/CONTINUOUS modes with lazy swapchain acquire (ADR-023)
 - **SubpixelLayout detection** — LCD/ClearType auto-detect on all platforms (ADR-024)
 - **Platform system sounds** — `sound.Play(sound.Click)` on Windows/macOS/Linux, zero CGO (ADR-025)
@@ -43,9 +47,13 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)
+- **ScrollPhase / IsMomentum** — macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes
+- **Wayland key repeat** — client-side timer via timerfd, `xkb_keymap_key_repeats` (ADR-033)
 - **Multi-keyboard layout (X11 + Wayland)** — XKB extension + xkbcommon, group-aware keysym lookup, Cyrillic/Ukrainian/Belarusian (ADR-027, @unxed)
 - **Unified XKB text input** — shared xkbcommon for X11+Wayland, AltGr/Level3 on all international layouts, named modifier resolution, `KeyWithoutModifiers` for shortcuts (ADR-029, @unxed)
 - **Unicode text input** — SetCharCallback on all platforms (Win32/macOS/X11/Wayland)
+- **HiDPI logical sizing** — `WithSize` in logical DIP, per-monitor DPI, WM_DPICHANGED (ADR-030)
+- **Ring buffer event queue** — lock-free EventQueue[T] on all platforms (ADR-031)
 - **Automatic GPU resource lifecycle** — `TrackResource(io.Closer)` + LIFO shutdown
 - DeviceProvider/EventSource/WindowProvider/PlatformProvider for UI integration
 - Zero-copy surface rendering via SurfaceView
@@ -66,7 +74,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v0.39.3** | 2026-05-25 | **Linux clipboard** (PLAT-009, ADR-037) — X11 ICCCM selection + Wayland data_device. ClipboardRead/Write work on all Linux platforms. 861 LOC. |
+| **v0.39.3** | 2026-05-26 | **Linux clipboard** (PLAT-009, ADR-037) — X11 ICCCM selection + Wayland data_device. ClipboardRead/Write work on all Linux platforms. deps: wgpu v0.28.8. |
 | **v0.39.2** | 2026-05-25 | **Wayland cursor shapes** (wp_cursor_shape_manager_v1, 12 shapes + CSD resize cursors) + **platform fixes** — damage_buffer (#272), Activated→EventFocus (#273), DPI MouseLeave (#271), X11 HitTest (#270), dispatchFocus (BUG-FOCUS-001) |
 | **v0.39.1** | 2026-05-22 | **AppLifecycle enum + callbacks** (ADR-026 Phase 3 complete) — AppLifecycle (5 states), OnSurfaceAvailable/Destroyed, OnResumed/Suspended/MemoryWarning |
 | **v0.39.0** | 2026-05-22 | **ADR-026 Universal Lifecycle** — QuitOnLastWindowClosed, primary close resilience, RenderTarget (public type), initDevice/initSurface split, SurfaceState, WindowID real type. `examples/lifecycle/`. deps: wgpu v0.28.7 |
@@ -162,8 +170,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary window" concept. GPU Device decoupled from any window. Research: 15 enterprise frameworks (Flutter, SDL3, Qt6, winit, Bevy).
 
-- [ ] **Phase 2** — Renderer decoupling: RenderTarget with nilable surface, Device/Queue independent (@kolkov)
-- [ ] **Phase 3** — Lifecycle API: `AppLifecycle` states, `QuitOnLastSurfaceClosed` (@kolkov)
+- [x] **Phase 2** — Renderer decoupling: RenderTarget, SurfaceState, per-window platWindow, initDevice/initSurface split (v0.38.0)
+- [x] **Phase 3** — Lifecycle API: `AppLifecycle` enum (5 states), `QuitOnLastWindowClosed`, OnSurfaceAvailable/Destroyed, OnResumed/Suspended/MemoryWarning (v0.39.0-v0.39.1)
 - [ ] **Phase 4** — Mobile platforms: Android ANativeWindow, iOS CAMetalLayer, Web canvas (community)
 
 ### v1.0.0 — Production Release
@@ -188,7 +196,7 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 | **System Tray** | OS-level tray icon (Win32/macOS/Linux) | ✅ Shipped — [gogpu/systray](https://github.com/gogpu/systray) v0.1.0 |
 | **Native Dialogs** | File open/save, color picker, message box | Planned |
 | **Drag & Drop** | OS-level and inter-window drag and drop | Planned |
-| **Clipboard** | Rich clipboard (images, HTML, custom types) | Planned |
+| **Clipboard** | Text clipboard on all platforms (Win32/macOS/X11/Wayland). Rich clipboard (images, HTML, custom types) planned | ✅ Text shipped (v0.39.3) |
 | **Notifications** | OS-level desktop notifications | Planned |
 | **Independent Render Thread** | Decouple render loop from message pump | [Research](docs/dev/research/INDEPENDENT_RENDER_THREAD.md) |
 | **Ray Tracing** | RT extensions when available | Future |
