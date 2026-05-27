@@ -172,30 +172,10 @@ func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType,
 
 // initDevice creates the GPU instance, adapter, and device.
 // No window or surface needed — device is window-independent (ADR-026).
-func (r *Renderer) initDevice(backendType types.BackendType, graphicsAPI types.GraphicsAPI) error {
-	// Select backend and initialize via the appropriate path.
-	// BackendRust requires -tags rust build.
-	// BackendNative/BackendGo uses the pure Go wgpu implementation.
-	// BackendAuto prefers Rust if available, otherwise falls back to native.
-
-	useRust := false
-	switch backendType {
-	case types.BackendRust:
-		if !rustHalAvailable() {
-			return fmt.Errorf("gogpu: rust backend requested but not available (build with -tags rust)")
-		}
-		useRust = true
-	case types.BackendNative:
-		// Use native (pure Go) path
-	default: // BackendAuto
-		if rustHalAvailable() {
-			useRust = true
-		}
-	}
-
-	if useRust {
-		return r.initRust()
-	}
+func (r *Renderer) initDevice(_ types.BackendType, graphicsAPI types.GraphicsAPI) error {
+	// ADR-038: Rust/Native selection is now inside wgpu via build tags.
+	// gogpu always calls initNative which uses wgpu.CreateInstance().
+	// With -tags rust, wgpu internally redirects to go-webgpu/webgpu (wgpu-native).
 	return r.initNative(graphicsAPI)
 }
 

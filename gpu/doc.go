@@ -1,24 +1,17 @@
-// Package gpu provides backend selection and GPU types for gogpu.
+// Package gpu provides GPU types for gogpu.
 //
-// # Architecture
+// # Architecture (ADR-038)
 //
-// The renderer uses wgpu HAL interfaces (hal.Device, hal.Queue, etc.) directly.
-// Backend selection determines which HAL implementation to use:
+// Backend selection (Native Go / Rust FFI / Browser) is handled inside wgpu
+// via build tags. gogpu always uses the wgpu public API — the implementation
+// is transparent.
 //
-//   - Native (Pure Go): Uses gogpu/wgpu with Vulkan (Windows/Linux) or Metal (macOS)
-//   - Rust: Uses wgpu-native via go-webgpu/webgpu (build with -tags rust)
-//
-// # Backend Selection
-//
-// By default, gogpu uses the Pure Go backend. Users can choose explicitly:
-//
-//	config := gogpu.DefaultConfig()                              // Auto-select
-//	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendRust)   // Rust backend
-//	config := gogpu.DefaultConfig().WithBackend(gogpu.BackendNative) // Pure Go backend
+//   - Default: Pure Go (wgpu/core → wgpu/hal → Vulkan/Metal/DX12/GLES/Software)
+//   - -tags rust: Rust FFI (go-webgpu/webgpu → wgpu-native)
+//   - js,wasm: Browser (syscall/js → Browser WebGPU)
 //
 // # Subpackages
 //
 //   - gpu/types: BackendType enum and related constants
-//   - gpu/backend/native: Pure Go HAL backend (Vulkan/Metal)
-//   - gpu/backend/rust: Rust HAL backend (wgpu-native, all platforms)
+//   - gpu/backend/native: Native HAL backend registration
 package gpu

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-05-27
+
+### Removed
+
+- **ADR-038: Rust backend moved to wgpu** — Deleted `gpu/backend/rust/` (1827 LOC), `renderer_rust.go`, `renderer_norust.go`. Rust/Native selection now handled inside wgpu via build tags (browser pattern). gogpu always uses `wgpu.CreateInstance()` — with `-tags rust`, wgpu internally routes to go-webgpu/webgpu → wgpu-native.
+
+### Changed
+
+- **deps:** wgpu v0.28.8 → v0.29.1 (ADR-038 triple-backend), goffi v0.5.2, x/sys v0.45.0
+- **renderer:** simplified `initDevice()` — removed Rust/Native branching logic
+
 ## [0.39.3] - 2026-05-26
 
 ### Added

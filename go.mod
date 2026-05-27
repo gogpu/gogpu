@@ -3,12 +3,14 @@ module github.com/gogpu/gogpu
 go 1.25.0
 
 require (
-	github.com/go-webgpu/goffi v0.5.1
-	github.com/go-webgpu/webgpu v0.4.3
+	github.com/go-webgpu/goffi v0.5.2
 	github.com/gogpu/gpucontext v0.19.0
 	github.com/gogpu/gputypes v0.5.0
-	github.com/gogpu/wgpu v0.28.8
-	golang.org/x/sys v0.44.0
+	github.com/gogpu/wgpu v0.29.1
+	golang.org/x/sys v0.45.0
 )
 
-require github.com/gogpu/naga v0.17.13 // indirect
+require (
+	github.com/go-webgpu/webgpu v0.5.2 // indirect
+	github.com/gogpu/naga v0.17.13 // indirect
+)
