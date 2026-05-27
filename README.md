@@ -24,13 +24,13 @@
 
 ## Overview
 
-**GoGPU** is a GPU computing framework for Go that provides a high-level API for graphics and compute operations. It supports dual backends: a high-performance Rust backend (wgpu-native) and a pure Go backend for zero-dependency builds.
+**GoGPU** is a GPU computing framework for Go that provides a high-level API for graphics and compute operations. Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU package with three backends: Pure Go (default), Rust FFI (`-tags rust`), and Browser WASM.
 
 ### Key Features
 
 | Category | Capabilities |
 |----------|--------------|
-| **Backends** | Rust (wgpu-native) or Pure Go (gogpu/wgpu) |
+| **Backends** | Pure Go (default), Rust FFI (`-tags rust`), Browser WASM — via [gogpu/wgpu](https://github.com/gogpu/wgpu) |
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
@@ -92,43 +92,32 @@ func main() {
 
 ---
 
-## Backend Selection
+## Backend Selection (ADR-038)
 
-GoGPU supports two WebGPU implementations, selectable at compile time or runtime.
-
-### Build Tags
+Backend selection is handled inside [gogpu/wgpu](https://github.com/gogpu/wgpu) via build tags. gogpu uses `wgpu.CreateInstance()` — the build tag determines which implementation runs.
 
 ```bash
-# Pure Go backend (default, zero dependencies)
+# Pure Go (default, zero dependencies)
 go build ./...
 
-# Enable Rust backend (requires wgpu-native shared library)
+# Rust FFI (requires wgpu-native v29 shared library)
 go build -tags rust ./...
+
+# Download wgpu-native automatically:
+go run github.com/go-webgpu/webgpu/cmd/setup@latest
 ```
 
-### Runtime Selection
+| Backend | Build Tag | Use Case |
+|---------|-----------|----------|
+| **Pure Go** | (default) | Zero deps, cross-compile, air-gapped deploy |
+| **Rust FFI** | `-tags rust` | Battle-tested GPU drivers, max compatibility |
+| **Browser** | `GOOS=js GOARCH=wasm` | Web applications |
 
-```go
-// Auto-select best available (default)
-app := gogpu.NewApp(gogpu.DefaultConfig())
-
-// Explicit Rust backend
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
-
-// Explicit Pure Go backend
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
-```
-
-| Backend | Build Tag | Library | Use Case |
-|---------|-----------|---------|----------|
-| **Native Go** | (default) | gogpu/wgpu | Zero dependencies, simple deployment |
-| **Rust** | `-tags rust` | wgpu-native via FFI | Maximum performance (all platforms) |
-
-> **Note:** Rust backend requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases) DLL.
+> **Note:** Rust backend requires [wgpu-native](https://github.com/gfx-rs/wgpu-native/releases/tag/v29.0.0.0). See [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) for setup.
 
 ### Graphics API Selection
 
-Backend (Rust/Native) and Graphics API (Vulkan/DX12/Metal/GLES) are independent choices:
+Graphics API (Vulkan/DX12/Metal/GLES) is selected independently from the backend:
 
 ```go
 // Force Vulkan on Windows (instead of auto-detected default)

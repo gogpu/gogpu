@@ -4,7 +4,7 @@ This document describes the architecture of the GoGPU ecosystem.
 
 ## Overview
 
-GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
+GoGPU is a GPU computing ecosystem for Go with triple-backend WebGPU support (ADR-038).
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -18,37 +18,32 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
        │  Framework  │  (device sharing)  │ 2D Graphics │
        └──────┬──────┘                    └──────┬──────┘
               │                                  │
-              │ Uses wgpu.Device/Queue           │
-              │ (wgpu public API)                │
-              │                    ┌─────────────┼──────────────┐
-              │                    │             │              │
-              │             ┌──────▼────┐  ┌─────▼─────┐  ┌─────▼─────┐
-              │             │gg/internal│  │gg/internal│  │  gg/gpu   │
-              │             │  /raster/ │  │   /gpu/   │  │ (opt-in   │
-              │             │ CPU Core  │  │ GPU Accel │  │  import)  │
-              │             └───────────┘  └─────┬─────┘  └───────────┘
+              │ Uses *wgpu.Device / *wgpu.Queue  │
+              │ (unified wgpu public API)        │
               │                                  │
-              └──────────────────────────────────┘
-                              │
-                       ┌──────▼──────┐
-                       │  wgpu API   │  ◄── public API (typed wrappers)
-                       └──────┬──────┘
-                              │
-                       ┌──────▼──────┐
-                       │  wgpu/core  │  ◄── validation, state machine, lifecycle
-                       └──────┬──────┘
-                              │
-                       ┌──────▼──────┐
-                       │  wgpu/hal   │  ◄── GPU API interfaces (advanced users)
-                       └──────┬──────┘
-                              │
-           ┌──────────┬───────┼───────┬──────────┐
-           │          │       │       │          │
-      ┌────▼───┐ ┌────▼──┐ ┌──▼──┐ ┌──▼───┐ ┌────▼────┐
-      │ Vulkan │ │ Metal │ │DX12 │ │ GLES │ │Software │
-      │(Win/   │ │(macOS)│ │(Win)│ │(Win/ │ │ (CPU)   │
-      │ Lin)   │ │       │ │     │ │ Lin) │ │         │
-      └────────┘ └───────┘ └─────┘ └──────┘ └─────────┘
+              └──────────────┬───────────────────┘
+                             │
+                      ┌──────▼──────┐
+                      │  wgpu API   │  ◄── same types on all backends
+                      └──┬────┬──┬──┘
+                         │    │  │
+          ┌──────────────┘    │  └──────────────────┐
+          │ (default)         │ (-tags rust)         │ (js,wasm)
+          │ *_native.go       │ *_rust.go            │ *_browser.go
+   ┌──────▼──────┐    ┌──────▼──────────┐    ┌──────▼──────────┐
+   │  wgpu/core  │    │ go-webgpu/webgpu│    │ internal/browser│
+   │  validation │    │ → wgpu-native   │    │ → syscall/js    │
+   └──────┬──────┘    │   v29 (Rust)    │    │ → Browser WebGPU│
+          │           └─────────────────┘    └─────────────────┘
+   ┌──────▼──────┐
+   │  wgpu/hal   │
+   └──────┬──────┘
+          │
+   ┌──────┼──────┬───────┬──────────┐
+   │      │      │       │          │
+┌──▼───┐┌─▼──┐┌──▼──┐┌───▼──┐┌─────▼───┐
+│Vulkan││Metal││DX12 ││ GLES ││Software │
+└──────┘└─────┘└─────┘└──────┘└─────────┘
 ```
 
 ## Projects
@@ -59,7 +54,7 @@ GoGPU is a Pure Go GPU computing ecosystem with dual-backend WebGPU support.
 | **gputypes**  | Shared WebGPU types (ZERO deps)      | [gogpu/gputypes](https://github.com/gogpu/gputypes)  |
 | **gpucontext**| Shared interfaces (imports gputypes) | [gogpu/gpucontext](https://github.com/gogpu/gpucontext) |
 | **gg**        | 2D graphics library (Canvas API)     | [gogpu/gg](https://github.com/gogpu/gg)              |
-| **wgpu**      | Pure Go WebGPU implementation        | [gogpu/wgpu](https://github.com/gogpu/wgpu)          |
+| **wgpu**      | Unified Go WebGPU (3 backends)       | [gogpu/wgpu](https://github.com/gogpu/wgpu)          |
 | **naga**      | WGSL shader compiler                 | [gogpu/naga](https://github.com/gogpu/naga)          |
 | **ui**        | GUI toolkit (22+ widgets, 4 themes)  | [gogpu/ui](https://github.com/gogpu/ui)              |
 | **g3d**       | 3D rendering (scene graph, PBR, GLTF)| [gogpu/g3d](https://github.com/gogpu/g3d)            |
@@ -87,16 +82,17 @@ The ecosystem uses two shared packages to ensure type compatibility:
 
 See the internal research document GPUCONTEXT_GPUTYPES_DECISION.md for full rationale.
 
-## Backend System
+## Backend System (ADR-038)
 
-### gogpu Backends
+### wgpu Triple-Backend Architecture
 
-The renderer uses `*wgpu.Device`/`*wgpu.Queue` through the wgpu public API. All GPU operations go through the three-layer stack: wgpu API → wgpu/core → wgpu/hal.
+Backend selection is inside wgpu via build tags. gogpu always uses `wgpu.CreateInstance()` — the build tag determines the implementation.
 
-| Backend      | Description                | Build Tag      | GPU Required |
-|--------------|----------------------------|----------------|--------------|
-| **Native**   | Pure Go via wgpu API → core → hal | (default)      | Yes          |
-| **Rust**     | wgpu-native via FFI        | `-tags rust`   | Yes          |
+| Backend      | Description                              | Build Tag      | GPU Required |
+|--------------|------------------------------------------|----------------|--------------|
+| **Pure Go**  | wgpu/core → wgpu/hal → Vulkan/Metal/DX12/GLES/Software | (default)      | Yes          |
+| **Rust FFI** | go-webgpu/webgpu → wgpu-native v29       | `-tags rust`   | Yes          |
+| **Browser**  | syscall/js → Browser WebGPU API          | `js,wasm`      | Yes (WebGPU) |
 
 ### gg: CPU Core + GPU Accelerator (ARCH-008)
 
