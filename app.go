@@ -926,6 +926,30 @@ func (a *App) ClipboardWrite(text string) error {
 	return nil
 }
 
+// FileDialogOptions configures a native file open or save dialog.
+type FileDialogOptions = platform.FileDialogOptions
+
+// FileTypeFilter restricts the visible files in a dialog by extension.
+type FileTypeFilter = platform.FileTypeFilter
+
+// ShowOpenFileDialog opens a native file picker dialog on the primary window.
+// Returns nil, nil if the user cancels without making a selection.
+func (a *App) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
+	if a.manager != nil {
+		return a.manager.ShowOpenFileDialog(opts)
+	}
+	return nil, nil
+}
+
+// ShowSaveFileDialog opens a native file save dialog on the primary window.
+// Returns "", nil if the user cancels.
+func (a *App) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
+	if a.manager != nil {
+		return a.manager.ShowSaveFileDialog(opts)
+	}
+	return "", nil
+}
+
 // SetCursor changes the mouse cursor shape.
 // Implements gpucontext.PlatformProvider.
 func (a *App) SetCursor(cursor gpucontext.CursorShape) {

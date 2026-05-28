@@ -1561,3 +1561,11 @@ func detectModifierKeyChange(keyCode uint16, flags darwin.NSEventModifierFlags) 
 	pressed := (flags & flagMask) != 0
 	return key, pressed
 }
+
+func (p *darwinPlatform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
+	return showOpenFileDialog(opts)
+}
+
+func (p *darwinPlatform) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
+	return showSaveFileDialog(opts)
+}

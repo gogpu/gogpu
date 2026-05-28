@@ -49,6 +49,12 @@ func (m *mockMenuManager) HighContrast() bool                        { return fa
 func (m *mockMenuManager) FontScale() float32                        { return 1.0 }
 func (m *mockMenuManager) SubpixelLayout() gpucontext.SubpixelLayout { return 0 }
 func (m *mockMenuManager) SetAppName(string)                         {}
+func (m *mockMenuManager) ShowOpenFileDialog(platform.FileDialogOptions) ([]string, error) {
+	return nil, nil
+}
+func (m *mockMenuManager) ShowSaveFileDialog(platform.FileDialogOptions) (string, error) {
+	return "", nil
+}
 
 // TestNewMenu checks that NewMenu is not nil and that the menu is empty.
 func TestNewMenu(t *testing.T) {

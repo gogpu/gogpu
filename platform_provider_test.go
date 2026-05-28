@@ -75,6 +75,12 @@ type mockManager struct {
 	highContrast   bool
 	fontScale      float32
 	subpixelLayout gpucontext.SubpixelLayout
+
+	// dialog stubs — set these to control what ShowOpen/SaveFileDialog return
+	openDialogPaths []string
+	saveDialogPath  string
+	// last opts received — inspected in delegation tests
+	lastDialogOpts platform.FileDialogOptions
 }
 
 func (m *mockManager) Init() error { return nil }
@@ -92,8 +98,16 @@ func (m *mockManager) HighContrast() bool                        { return m.high
 func (m *mockManager) FontScale() float32                        { return m.fontScale }
 func (m *mockManager) SubpixelLayout() gpucontext.SubpixelLayout { return m.subpixelLayout }
 func (m *mockManager) SetAppName(name string)                    {}
-func (m *mockManager) Destroy()                                  {}
-func (m *mockWindow) SetOnClose(fn func() bool)                  { m.closeFn = fn }
+func (m *mockManager) ShowOpenFileDialog(opts platform.FileDialogOptions) ([]string, error) {
+	m.lastDialogOpts = opts
+	return m.openDialogPaths, nil
+}
+func (m *mockManager) ShowSaveFileDialog(opts platform.FileDialogOptions) (string, error) {
+	m.lastDialogOpts = opts
+	return m.saveDialogPath, nil
+}
+func (m *mockManager) Destroy()                 {}
+func (m *mockWindow) SetOnClose(fn func() bool) { m.closeFn = fn }
 
 // TestWindowProviderInterface verifies App implements gpucontext.WindowProvider.
 func TestWindowProviderInterface(t *testing.T) {
@@ -315,6 +329,138 @@ func TestPlatformProviderDelegation(t *testing.T) {
 			t.Errorf("SubpixelLayout() = %v, want SubpixelBGR", sl)
 		}
 	})
+}
+
+// TestFileDialogNilPlatform verifies ShowOpen/SaveFileDialog are safe when manager is nil.
+func TestFileDialogNilPlatform(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	t.Run("ShowOpenFileDialog", func(t *testing.T) {
+		paths, err := app.ShowOpenFileDialog(FileDialogOptions{Title: "Open"})
+		if err != nil {
+			t.Errorf("ShowOpenFileDialog() error = %v, want nil", err)
+		}
+		if paths != nil {
+			t.Errorf("ShowOpenFileDialog() = %v, want nil", paths)
+		}
+	})
+
+	t.Run("ShowSaveFileDialog", func(t *testing.T) {
+		path, err := app.ShowSaveFileDialog(FileDialogOptions{Title: "Save"})
+		if err != nil {
+			t.Errorf("ShowSaveFileDialog() error = %v, want nil", err)
+		}
+		if path != "" {
+			t.Errorf("ShowSaveFileDialog() = %q, want empty", path)
+		}
+	})
+}
+
+// TestFileDialogDelegation verifies App forwards options and returns results from the manager.
+func TestFileDialogDelegation(t *testing.T) {
+	mgr := &mockManager{
+		openDialogPaths: []string{"/tmp/a.png", "/tmp/b.png"},
+		saveDialogPath:  "/tmp/out.txt",
+	}
+	app := &App{manager: mgr}
+
+	openOpts := FileDialogOptions{
+		Title:    "Pick images",
+		Multiple: true,
+		Filters: []FileTypeFilter{
+			{Name: "Images", Extensions: []string{"*.png", "*.jpg"}},
+		},
+	}
+
+	t.Run("ShowOpenFileDialog delegates opts and returns paths", func(t *testing.T) {
+		paths, err := app.ShowOpenFileDialog(openOpts)
+		if err != nil {
+			t.Fatalf("ShowOpenFileDialog() error = %v", err)
+		}
+		if len(paths) != 2 || paths[0] != "/tmp/a.png" || paths[1] != "/tmp/b.png" {
+			t.Errorf("ShowOpenFileDialog() = %v, want [/tmp/a.png /tmp/b.png]", paths)
+		}
+		if mgr.lastDialogOpts.Title != "Pick images" {
+			t.Errorf("delegated Title = %q, want %q", mgr.lastDialogOpts.Title, "Pick images")
+		}
+		if !mgr.lastDialogOpts.Multiple {
+			t.Error("delegated Multiple should be true")
+		}
+		if len(mgr.lastDialogOpts.Filters) != 1 {
+			t.Errorf("delegated Filters len = %d, want 1", len(mgr.lastDialogOpts.Filters))
+		}
+	})
+
+	saveOpts := FileDialogOptions{
+		Title:           "Save log",
+		DefaultFilename: "out.txt",
+	}
+
+	t.Run("ShowSaveFileDialog delegates opts and returns path", func(t *testing.T) {
+		path, err := app.ShowSaveFileDialog(saveOpts)
+		if err != nil {
+			t.Fatalf("ShowSaveFileDialog() error = %v", err)
+		}
+		if path != "/tmp/out.txt" {
+			t.Errorf("ShowSaveFileDialog() = %q, want %q", path, "/tmp/out.txt")
+		}
+		if mgr.lastDialogOpts.Title != "Save log" {
+			t.Errorf("delegated Title = %q, want %q", mgr.lastDialogOpts.Title, "Save log")
+		}
+		if mgr.lastDialogOpts.DefaultFilename != "out.txt" {
+			t.Errorf("delegated DefaultFilename = %q, want %q", mgr.lastDialogOpts.DefaultFilename, "out.txt")
+		}
+	})
+
+	t.Run("ShowOpenFileDialog cancel returns nil nil", func(t *testing.T) {
+		mgr.openDialogPaths = nil
+		paths, err := app.ShowOpenFileDialog(FileDialogOptions{})
+		if err != nil || paths != nil {
+			t.Errorf("ShowOpenFileDialog() = (%v, %v), want (nil, nil)", paths, err)
+		}
+	})
+
+	t.Run("ShowSaveFileDialog cancel returns empty nil", func(t *testing.T) {
+		mgr.saveDialogPath = ""
+		path, err := app.ShowSaveFileDialog(FileDialogOptions{})
+		if err != nil || path != "" {
+			t.Errorf("ShowSaveFileDialog() = (%q, %v), want (\"\", nil)", path, err)
+		}
+	})
+}
+
+// TestFileDialogOptions verifies struct fields round-trip correctly.
+func TestFileDialogOptions(t *testing.T) {
+	opts := FileDialogOptions{
+		Title:            "My Dialog",
+		Directory:        true,
+		Multiple:         true,
+		InitialDirectory: "/home/user",
+		DefaultFilename:  "report.pdf",
+		Filters: []FileTypeFilter{
+			{Name: "PDF", Extensions: []string{"*.pdf"}},
+			{Name: "All", Extensions: []string{"*"}},
+		},
+	}
+
+	if opts.Title != "My Dialog" {
+		t.Errorf("Title = %q", opts.Title)
+	}
+	if !opts.Directory {
+		t.Error("Directory should be true")
+	}
+	if !opts.Multiple {
+		t.Error("Multiple should be true")
+	}
+	if opts.InitialDirectory != "/home/user" {
+		t.Errorf("InitialDirectory = %q", opts.InitialDirectory)
+	}
+	if opts.DefaultFilename != "report.pdf" {
+		t.Errorf("DefaultFilename = %q", opts.DefaultFilename)
+	}
+	if len(opts.Filters) != 2 || opts.Filters[0].Name != "PDF" {
+		t.Errorf("Filters = %v", opts.Filters)
+	}
 }
 
 // TestPlatformProviderFalseValues verifies delegation when platform returns false/default values.

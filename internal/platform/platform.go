@@ -97,6 +97,22 @@ type PixelBlitter interface {
 	BlitPixels(pixels []byte, width, height int) error
 }
 
+// FileDialogOptions configures a native file open or save dialog.
+type FileDialogOptions struct {
+	Title            string
+	Filters          []FileTypeFilter
+	Directory        bool   // pick a directory instead of a file
+	Multiple         bool   // allow multi-selection (open only)
+	InitialDirectory string // starting directory (optional)
+	DefaultFilename  string // suggested filename for save dialog (optional)
+}
+
+// FileTypeFilter restricts visible files in the dialog.
+type FileTypeFilter struct {
+	Name       string   // e.g. "Images"
+	Extensions []string // e.g. ["*.png", "*.jpg"] or ["png", "jpg"]
+}
+
 // PlatformManager handles process-level platform operations.
 // One per application. Manages window lifecycle and event loop.
 type PlatformManager interface {
@@ -139,6 +155,14 @@ type PlatformManager interface {
 
 	// SetAppName sets the application name (displayed in menus).
 	SetAppName(name string)
+
+	// ShowOpenFileDialog opens a native file picker dialog.
+	// Returns nil, nil if the user cancels.
+	ShowOpenFileDialog(opts FileDialogOptions) ([]string, error)
+
+	// ShowSaveFileDialog opens a native file save dialog.
+	// Returns "", nil if the user cancels.
+	ShowSaveFileDialog(opts FileDialogOptions) (string, error)
 
 	// Destroy releases all platform resources.
 	Destroy()

@@ -2785,3 +2785,19 @@ func (w *win32Window) BlitPixels(pixels []byte, width, height int) error {
 
 	return nil
 }
+
+func (p *windowsPlatform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
+	hwnd := uintptr(0)
+	if p.primary != nil {
+		hwnd = uintptr(p.primary.hwnd)
+	}
+	return showOpenFileDialog(hwnd, opts)
+}
+
+func (p *windowsPlatform) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
+	hwnd := uintptr(0)
+	if p.primary != nil {
+		hwnd = uintptr(p.primary.hwnd)
+	}
+	return showSaveFileDialog(hwnd, opts)
+}

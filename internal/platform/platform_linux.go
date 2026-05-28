@@ -2541,3 +2541,19 @@ func (p *waylandPlatform) CloseWindow() {
 }
 
 func (p *waylandPlatform) SetAppName(name string) {}
+
+func (p *x11Platform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
+	return showOpenFileDialog(opts)
+}
+
+func (p *x11Platform) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
+	return showSaveFileDialog(opts)
+}
+
+func (p *waylandPlatform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
+	return showOpenFileDialog(opts)
+}
+
+func (p *waylandPlatform) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
+	return showSaveFileDialog(opts)
+}
