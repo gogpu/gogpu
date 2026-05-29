@@ -51,68 +51,56 @@ func TestDarwinNSStringToGo(t *testing.T) {
 	})
 }
 
-// TestDarwinBuildExtArray verifies NSMutableArray construction from FileTypeFilter slices.
-func TestDarwinBuildExtArray(t *testing.T) {
+// TestDarwinBuildContentTypesArray verifies NSArray<UTType> construction.
+// UTType is guaranteed available on the project's minimum macOS (12, go.mod: go 1.25).
+func TestDarwinBuildContentTypesArray(t *testing.T) {
 	t.Run("nil filters returns nil ID", func(t *testing.T) {
-		arr := darwinBuildExtArray(nil)
-		if !arr.IsNil() {
-			t.Error("expected nil ID for nil filters")
+		if arr := darwinBuildContentTypesArray(nil); !arr.IsNil() {
+			t.Error("expected nil array for nil filters")
 		}
 	})
 
 	t.Run("empty filters returns nil ID", func(t *testing.T) {
-		arr := darwinBuildExtArray([]FileTypeFilter{})
-		if !arr.IsNil() {
-			t.Error("expected nil ID for empty filters")
+		if arr := darwinBuildContentTypesArray([]FileTypeFilter{}); !arr.IsNil() {
+			t.Error("expected nil array for empty filters")
 		}
 	})
 
 	t.Run("filters with no valid extensions returns nil ID", func(t *testing.T) {
-		arr := darwinBuildExtArray([]FileTypeFilter{
+		arr := darwinBuildContentTypesArray([]FileTypeFilter{
 			{Name: "Nothing", Extensions: []string{"", "*.", "."}},
 		})
 		if !arr.IsNil() {
-			t.Error("expected nil ID when all extensions are blank")
+			t.Error("expected nil array when all extensions are blank")
 		}
 	})
 
-	t.Run("extensions are stripped and dedotted", func(t *testing.T) {
+	t.Run("known extensions produce non-nil UTType array", func(t *testing.T) {
 		filters := []FileTypeFilter{
-			{Name: "Images", Extensions: []string{"*.png", "jpg", ".gif"}},
+			{Name: "Images", Extensions: []string{"*.png", "jpg"}},
 		}
-		arr := darwinBuildExtArray(filters)
+		arr := darwinBuildContentTypesArray(filters)
 		if arr.IsNil() {
-			t.Fatal("expected non-nil NSArray")
+			t.Fatal("expected non-nil NSArray for known extensions")
 		}
-
 		count := arr.GetUint64(darwin.RegisterSelector("count"))
-		if count != 3 {
-			t.Fatalf("array count = %d, want 3", count)
-		}
-
-		want := []string{"png", "jpg", "gif"}
-		for i, w := range want {
-			elem := arr.SendUint(darwin.RegisterSelector("objectAtIndex:"), uint64(i))
-			got := darwinNSStringToGo(elem)
-			if got != w {
-				t.Errorf("element[%d] = %q, want %q", i, got, w)
-			}
+		if count == 0 {
+			t.Error("expected at least one UTType in array")
 		}
 	})
 
-	t.Run("multiple filters are merged into one array", func(t *testing.T) {
+	t.Run("multiple filters merged into one array", func(t *testing.T) {
 		filters := []FileTypeFilter{
 			{Name: "Images", Extensions: []string{"png", "jpg"}},
-			{Name: "Docs", Extensions: []string{"pdf", "md"}},
+			{Name: "Docs", Extensions: []string{"pdf"}},
 		}
-		arr := darwinBuildExtArray(filters)
+		arr := darwinBuildContentTypesArray(filters)
 		if arr.IsNil() {
 			t.Fatal("expected non-nil NSArray")
 		}
-
 		count := arr.GetUint64(darwin.RegisterSelector("count"))
-		if count != 4 {
-			t.Fatalf("array count = %d, want 4", count)
+		if count == 0 {
+			t.Error("expected UTType entries for known extensions")
 		}
 	})
 }

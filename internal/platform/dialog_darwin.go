@@ -91,20 +91,28 @@ func applyDialogCommon(panel darwin.ID, opts FileDialogOptions) {
 		}
 	}
 
+	// Filters are skipped in directory mode: the panel restricts to folders, not file types.
 	if len(opts.Filters) > 0 && !opts.Directory {
-		if arr := darwinBuildExtArray(opts.Filters); !arr.IsNil() {
-			panel.SendPtr(darwin.RegisterSelector("setAllowedFileTypes:"), uintptr(arr))
+		if arr := darwinBuildContentTypesArray(opts.Filters); !arr.IsNil() {
+			panel.SendPtr(darwin.RegisterSelector("setAllowedContentTypes:"), uintptr(arr))
 		}
 	}
 }
 
-// darwinBuildExtArray builds an NSMutableArray of extension NSStrings for setAllowedFileTypes:.
-// Extensions are stripped of "*." or "." prefixes; e.g. "*.png" → "png".
-func darwinBuildExtArray(filters []FileTypeFilter) darwin.ID {
+// darwinBuildContentTypesArray builds an NSMutableArray<UTType> for setAllowedContentTypes:.
+// UTType is guaranteed available on the project's minimum macOS (12, go.mod: go 1.25).
+func darwinBuildContentTypesArray(filters []FileTypeFilter) darwin.ID {
+	utTypeClass := darwin.GetClass("UTType")
+	if utTypeClass == 0 {
+		return 0
+	}
+
 	arr := darwin.ID(darwin.GetClass("NSMutableArray")).Send(darwin.RegisterSelector("array"))
 	if arr.IsNil() {
 		return 0
 	}
+
+	sel := darwin.RegisterSelector("typeWithFilenameExtension:")
 	added := 0
 	for _, f := range filters {
 		for _, e := range f.Extensions {
@@ -117,9 +125,12 @@ func darwinBuildExtArray(filters []FileTypeFilter) darwin.ID {
 			if ns == nil {
 				continue
 			}
-			arr.SendPtr(darwin.RegisterSelector("addObject:"), uintptr(ns.ID()))
+			utType := darwin.ID(utTypeClass).SendPtr(sel, uintptr(ns.ID()))
 			ns.Release()
-			added++
+			if !utType.IsNil() {
+				arr.SendPtr(darwin.RegisterSelector("addObject:"), uintptr(utType))
+				added++
+			}
 		}
 	}
 	if added == 0 {

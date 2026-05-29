@@ -38,17 +38,17 @@ func TestDlgBuildFilterSpec(t *testing.T) {
 		{
 			name: "nil slice falls back to wildcard",
 			exts: nil,
-			want: "*.*",
+			want: defaultFilterPattern,
 		},
 		{
 			name: "empty slice falls back to wildcard",
 			exts: []string{},
-			want: "*.*",
+			want: defaultFilterPattern,
 		},
 		{
 			name: "blank entries are skipped",
 			exts: []string{"", "*.", "."},
-			want: "*.*",
+			want: defaultFilterPattern,
 		},
 	}
 

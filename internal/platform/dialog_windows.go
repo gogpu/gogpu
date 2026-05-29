@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -20,9 +21,11 @@ const (
 	hresultCancelled        uintptr = 0x800704C7
 
 	// IFileDialog option flags
-	fosFOS_PICKFOLDERS      uint32 = 0x00000020
-	fosFOS_ALLOWMULTISELECT uint32 = 0x00000200
-	fosFOS_FORCEFILESYSTEM  uint32 = 0x00000040
+	fosPickFolders      uint32 = 0x00000020
+	fosAllowMultiselect uint32 = 0x00000200
+	fosForceFilesystem  uint32 = 0x00000040
+
+	defaultFilterPattern = "*.*"
 
 	// IFileDialog vtable indices (IUnknown=0-2, IModalWindow=3, IFileDialog=4-26)
 	vtblDlgRelease      = 2
@@ -96,10 +99,10 @@ func showOpenFileDialog(hwnd uintptr, opts FileDialogOptions) ([]string, error) 
 
 	var dialog uintptr
 	hr, _, _ = procCoCreateInstance.Call(
-		uintptr(unsafe.Pointer(&clsidFileOpenDialog)), //nolint:govet // GUID passed by address to COM
+		uintptr(unsafe.Pointer(&clsidFileOpenDialog)),
 		0,
 		clsctxInprocServer,
-		uintptr(unsafe.Pointer(&iidIFileOpenDialog)), //nolint:govet // IID passed by address to COM
+		uintptr(unsafe.Pointer(&iidIFileOpenDialog)),
 		uintptr(unsafe.Pointer(&dialog)),
 	)
 	if hr != comSOK {
@@ -107,7 +110,7 @@ func showOpenFileDialog(hwnd uintptr, opts FileDialogOptions) ([]string, error) 
 	}
 	defer comRelease(dialog)
 
-	setDlgCommonOptions(dialog, hwnd, opts)
+	setDlgCommonOptions(dialog, hwnd, opts, true)
 
 	hr, _, _ = syscall.SyscallN(comVtbl(dialog)[vtblDlgShow], dialog, hwnd)
 	if hr == hresultCancelled {
@@ -125,7 +128,10 @@ func showOpenFileDialog(hwnd uintptr, opts FileDialogOptions) ([]string, error) 
 	defer comRelease(results)
 
 	var count uint32
-	syscall.SyscallN(comVtbl(results)[vtblSIAGetCount], results, uintptr(unsafe.Pointer(&count)))
+	hr, _, _ = syscall.SyscallN(comVtbl(results)[vtblSIAGetCount], results, uintptr(unsafe.Pointer(&count)))
+	if hr != comSOK {
+		return nil, fmt.Errorf("file dialog: GetCount failed (0x%08X)", uint32(hr))
+	}
 
 	paths := make([]string, 0, int(count))
 	for i := uint32(0); i < count; i++ {
@@ -150,10 +156,10 @@ func showSaveFileDialog(hwnd uintptr, opts FileDialogOptions) (string, error) {
 
 	var dialog uintptr
 	hr, _, _ = procCoCreateInstance.Call(
-		uintptr(unsafe.Pointer(&clsidFileSaveDialog)), //nolint:govet // GUID passed by address to COM
+		uintptr(unsafe.Pointer(&clsidFileSaveDialog)),
 		0,
 		clsctxInprocServer,
-		uintptr(unsafe.Pointer(&iidIFileSaveDialog)), //nolint:govet // IID passed by address to COM
+		uintptr(unsafe.Pointer(&iidIFileSaveDialog)),
 		uintptr(unsafe.Pointer(&dialog)),
 	)
 	if hr != comSOK {
@@ -161,7 +167,7 @@ func showSaveFileDialog(hwnd uintptr, opts FileDialogOptions) (string, error) {
 	}
 	defer comRelease(dialog)
 
-	setDlgCommonOptions(dialog, hwnd, opts)
+	setDlgCommonOptions(dialog, hwnd, opts, false)
 
 	if opts.DefaultFilename != "" {
 		nameW, err := windows.UTF16PtrFromString(opts.DefaultFilename)
@@ -189,7 +195,8 @@ func showSaveFileDialog(hwnd uintptr, opts FileDialogOptions) (string, error) {
 }
 
 // setDlgCommonOptions applies title, folder, option flags, and file type filters.
-func setDlgCommonOptions(dialog, hwnd uintptr, opts FileDialogOptions) {
+// isOpen must be true for IFileOpenDialog (Multiple selection is open-only).
+func setDlgCommonOptions(dialog, hwnd uintptr, opts FileDialogOptions, isOpen bool) {
 	_ = hwnd // reserved for future per-window modality
 
 	if opts.Title != "" {
@@ -201,12 +208,12 @@ func setDlgCommonOptions(dialog, hwnd uintptr, opts FileDialogOptions) {
 
 	var flags uint32
 	syscall.SyscallN(comVtbl(dialog)[vtblDlgGetOptions], dialog, uintptr(unsafe.Pointer(&flags)))
-	flags |= fosFOS_FORCEFILESYSTEM
+	flags |= fosForceFilesystem
 	if opts.Directory {
-		flags |= fosFOS_PICKFOLDERS
+		flags |= fosPickFolders
 	}
-	if opts.Multiple {
-		flags |= fosFOS_ALLOWMULTISELECT
+	if isOpen && opts.Multiple {
+		flags |= fosAllowMultiselect
 	}
 	syscall.SyscallN(comVtbl(dialog)[vtblDlgSetOptions], dialog, uintptr(flags))
 
@@ -217,7 +224,7 @@ func setDlgCommonOptions(dialog, hwnd uintptr, opts FileDialogOptions) {
 			hr, _, _ := procSHCreateItemFromParsingName.Call(
 				uintptr(unsafe.Pointer(pathW)),
 				0,
-				uintptr(unsafe.Pointer(&iidIShellItem)), //nolint:govet // IID passed by address to COM
+				uintptr(unsafe.Pointer(&iidIShellItem)),
 				uintptr(unsafe.Pointer(&si)),
 			)
 			if hr == comSOK && si != 0 {
@@ -258,7 +265,7 @@ func setDlgFileTypes(dialog uintptr, filters []FileTypeFilter) {
 		uintptr(len(specs)),
 		uintptr(unsafe.Pointer(&specs[0])),
 	)
-	_ = backing // prevent GC before vtable call completes
+	runtime.KeepAlive(backing)
 }
 
 // dlgBuildFilterSpec converts extension slice to a Windows filter spec like "*.png;*.jpg".
@@ -272,7 +279,7 @@ func dlgBuildFilterSpec(exts []string) string {
 		}
 	}
 	if len(parts) == 0 {
-		return "*.*"
+		return defaultFilterPattern
 	}
 	return strings.Join(parts, ";")
 }
