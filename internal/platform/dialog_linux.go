@@ -159,10 +159,13 @@ func zenitySaveArgs(opts FileDialogOptions) []string {
 		args = append(args, "--title="+opts.Title)
 	}
 	startPath := opts.InitialDirectory
-	if startPath != "" && opts.DefaultFilename != "" {
+	switch {
+	case startPath != "" && opts.DefaultFilename != "":
 		startPath += "/" + opts.DefaultFilename
-	} else if opts.DefaultFilename != "" {
+	case opts.DefaultFilename != "":
 		startPath = opts.DefaultFilename
+	case startPath != "":
+		startPath += "/" // trailing slash = directory hint (no pre-filled filename)
 	}
 	if startPath != "" {
 		args = append(args, "--filename="+startPath)
