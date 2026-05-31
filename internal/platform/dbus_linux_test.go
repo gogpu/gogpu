@@ -5,6 +5,7 @@ package platform
 import (
 	"bytes"
 	"encoding/binary"
+	"net"
 	"reflect"
 	"slices"
 	"testing"
@@ -442,6 +443,135 @@ func TestDBusTypeAlign_Variant(t *testing.T) {
 	}
 	if got := dbusTypeAlign('{'); got != 8 {
 		t.Errorf("dbusTypeAlign('{') = %d, want 8", got)
+	}
+}
+
+// TestWaitResponse_EarlySignal verifies that a Response signal arriving before
+// METHOD_RETURN is buffered and returned correctly. The D-Bus spec permits signals
+// to be delivered before the method return that triggers them.
+func TestWaitResponse_EarlySignal(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	const callSerial = uint32(3)
+	handlePath := "/org/freedesktop/portal/desktop/request/1_42/gogpu_1"
+
+	// Portal response body: success(0) + {"uris": ["file:///tmp/x.txt"]}
+	var respBody []byte
+	{
+		b := newMsgBuf(0)
+		b.u32(0)
+		lp, cp := b.arrayStart(8)
+		b.padTo(8)
+		b.str("uris")
+		b.sig("as")
+		ilp, icp := b.arrayStart(4)
+		b.str("file:///tmp/x.txt")
+		b.arrayEnd(ilp, icp)
+		b.arrayEnd(lp, cp)
+		respBody = b.data
+	}
+
+	// METHOD_RETURN with REPLY_SERIAL = callSerial (empty body).
+	var retMsg []byte
+	{
+		hdr := newMsgBuf(16)
+		dbusWriteHdrField(hdr, dbusFieldReplySerial, "u", func() { hdr.u32(callSerial) })
+		hdrBytes := hdr.data
+		var fixed [16]byte
+		fixed[0] = 'l'
+		fixed[1] = dbusMsgReturn
+		fixed[3] = 1
+		binary.LittleEndian.PutUint32(fixed[8:], 99)
+		binary.LittleEndian.PutUint32(fixed[12:], uint32(len(hdrBytes)))
+		totalHdr := 16 + len(hdrBytes)
+		padLen := (8 - totalHdr%8) % 8
+		retMsg = append(retMsg, fixed[:]...)
+		retMsg = append(retMsg, hdrBytes...)
+		retMsg = append(retMsg, make([]byte, padLen)...)
+	}
+
+	go func() {
+		defer server.Close()
+		// Write Response signal FIRST — before METHOD_RETURN.
+		sig := dbusEncodeMsg(dbusMsgSignal, 1, "",
+			handlePath, "org.freedesktop.portal.Request", "Response", "ua{sv}", respBody)
+		server.Write(sig)
+		// Then METHOD_RETURN — client must not have missed the signal.
+		server.Write(retMsg)
+	}()
+
+	conn := &dbusConn{rw: client}
+	paths, err := conn.waitResponse(callSerial, handlePath)
+	if err != nil {
+		t.Fatalf("waitResponse: %v", err)
+	}
+	want := []string{"/tmp/x.txt"}
+	if !slices.Equal(paths, want) {
+		t.Errorf("got %v, want %v", paths, want)
+	}
+}
+
+// TestWaitResponse_NormalOrder verifies the common case: METHOD_RETURN before signal.
+func TestWaitResponse_NormalOrder(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	const callSerial = uint32(5)
+	handlePath := "/org/freedesktop/portal/desktop/request/1_42/gogpu_2"
+
+	var respBody []byte
+	{
+		b := newMsgBuf(0)
+		b.u32(0)
+		lp, cp := b.arrayStart(8)
+		b.padTo(8)
+		b.str("uris")
+		b.sig("as")
+		ilp, icp := b.arrayStart(4)
+		b.str("file:///home/user/doc.pdf")
+		b.arrayEnd(ilp, icp)
+		b.arrayEnd(lp, cp)
+		respBody = b.data
+	}
+
+	var retMsg []byte
+	{
+		hdr := newMsgBuf(16)
+		dbusWriteHdrField(hdr, dbusFieldReplySerial, "u", func() { hdr.u32(callSerial) })
+		hdrBytes := hdr.data
+		var fixed [16]byte
+		fixed[0] = 'l'
+		fixed[1] = dbusMsgReturn
+		fixed[3] = 1
+		binary.LittleEndian.PutUint32(fixed[8:], 99)
+		binary.LittleEndian.PutUint32(fixed[12:], uint32(len(hdrBytes)))
+		totalHdr := 16 + len(hdrBytes)
+		padLen := (8 - totalHdr%8) % 8
+		retMsg = append(retMsg, fixed[:]...)
+		retMsg = append(retMsg, hdrBytes...)
+		retMsg = append(retMsg, make([]byte, padLen)...)
+	}
+
+	go func() {
+		defer server.Close()
+		// Normal order: METHOD_RETURN first, then signal.
+		server.Write(retMsg)
+		sig := dbusEncodeMsg(dbusMsgSignal, 2, "",
+			handlePath, "org.freedesktop.portal.Request", "Response", "ua{sv}", respBody)
+		server.Write(sig)
+	}()
+
+	conn := &dbusConn{rw: client}
+	paths, err := conn.waitResponse(callSerial, handlePath)
+	if err != nil {
+		t.Fatalf("waitResponse: %v", err)
+	}
+	want := []string{"/home/user/doc.pdf"}
+	if !slices.Equal(paths, want) {
+		t.Errorf("got %v, want %v", paths, want)
 	}
 }
 

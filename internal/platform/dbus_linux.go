@@ -217,13 +217,16 @@ func (c *dbusConn) sendCall(dest, path, iface, member, sig string, body []byte) 
 
 // waitResponse reads incoming messages and waits in two stages:
 //  1. Discard all messages until the METHOD_RETURN (or METHOD_ERROR) for callSerial.
+//     Any Response signal that arrives during this phase is buffered — the D-Bus spec
+//     permits signals to be delivered before their triggering method return.
 //  2. After the return is received, look for the org.freedesktop.portal.Request.Response
-//     signal on handlePath.
+//     signal on handlePath (or return the signal buffered in phase 1).
 //
 // Returns nil, nil if the portal reports that the user canceled (response code 1).
 // A 5-minute deadline guards against a hung or crashed portal daemon.
 func (c *dbusConn) waitResponse(callSerial uint32, handlePath string) ([]string, error) {
 	c.rw.SetDeadline(time.Now().Add(5 * time.Minute))
+	var early *dbusMsg // Response signal buffered before METHOD_RETURN
 	gotReturn := false
 	for {
 		msg, err := c.readMsg()
@@ -238,7 +241,14 @@ func (c *dbusConn) waitResponse(callSerial uint32, handlePath string) ([]string,
 				}
 				if msg.Type == dbusMsgReturn {
 					gotReturn = true
+					if early != nil {
+						return decodePortalResponse(early.Body)
+					}
 				}
+			} else if msg.Type == dbusMsgSignal &&
+				msg.Path == handlePath &&
+				msg.Member == "Response" {
+				early = msg
 			}
 			continue
 		}
