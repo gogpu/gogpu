@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.1] - 2026-05-31
+
+### Fixed
+
+- **DrawTexture default clear color** (BUG-RENDERER-001, discussion #276) — default clear changed from opaque black `{0,0,0,1}` to transparent black `{0,0,0,0}`, matching WebGPU spec and Rust wgpu `Color::default()`. Fixes ggcanvas transparency when compositing via `DrawTexture`/`RenderTo`.
+
+### Added
+
+- **Native file dialogs** (ADR-036 Phase 1, #241, @lkmavi) — `ShowOpenFileDialog` / `ShowSaveFileDialog` for macOS (NSOpenPanel/NSSavePanel via ObjC runtime) and Windows (IFileOpenDialog COM). Linux stubs with descriptive error. UTType migration for macOS 12+.
+
 ## [0.40.0] - 2026-05-27
 
 ### Removed

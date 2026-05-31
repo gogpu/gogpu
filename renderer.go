@@ -987,8 +987,10 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	}
 
 	// Determine LoadOp: consume pending clear if available, otherwise preserve content.
+	// Default clear = transparent black (WebGPU spec, Rust wgpu Color::default).
+	// Opaque black (A:1) would destroy alpha for compositing (ggcanvas, DrawTexture).
 	loadOp := gputypes.LoadOpClear
-	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 1}
+	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 0}
 	if ws.hasPendingClear {
 		clearValue = ws.pendingClearColor
 		ws.hasPendingClear = false
