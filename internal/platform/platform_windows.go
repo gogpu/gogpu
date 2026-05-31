@@ -499,6 +499,12 @@ type windowsPlatform struct {
 	// Qt6/GTK4/SDL3/winit all use this pattern.
 	// Ring buffer (ADR-031): fixed capacity, zero allocs, drops oldest on overflow.
 	events *eventqueue.Queue[Event]
+
+	// Menu state — implementation in menu_windows.go.
+	// menuMu guards pendingMenu; applyMenu reads on the OS message thread.
+	menuMu      sync.Mutex
+	pendingMenu []MenuItem
+	hMenu       windows.Handle
 }
 
 // Global instance for window procedure callback
@@ -643,6 +649,13 @@ func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	w.platform = p
 	if p.primary == nil {
 		p.primary = w
+		// Apply any menu registered via SetApplicationMenu before the window existed.
+		p.menuMu.Lock()
+		hasPending := len(p.pendingMenu) > 0
+		p.menuMu.Unlock()
+		if hasPending {
+			p.applyMenu()
+		}
 	}
 	return w, nil
 }
@@ -2252,6 +2265,18 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmWakeUp:
 		// No-op: sole purpose is to unblock MsgWaitForMultipleObjectsEx in WaitEvents.
+		return 0
+
+	case wmCommand:
+		// HIWORD(wParam) == 0: menu notification (1 = accelerator, non-zero = control).
+		if (wParam>>16)&0xFFFF == 0 {
+			dispatchMenuCommand(uint16(wParam & 0xFFFF))
+		}
+		return 0
+
+	case wmRebuildMenu:
+		// Posted by SetApplicationMenu from any goroutine; rebuild here on OS thread.
+		p.applyMenu()
 		return 0
 
 	case wmDpiChanged:
