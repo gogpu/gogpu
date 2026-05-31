@@ -142,6 +142,21 @@ func (p *browserPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+// SetAppName is a no-op on browser — the page title is set via document.title.
+func (p *browserPlatform) SetAppName(_ string) {}
+
+// ShowOpenFileDialog is not yet implemented on browser.
+// Future: could use HTML <input type="file"> via syscall/js.
+func (p *browserPlatform) ShowOpenFileDialog(_ FileDialogOptions) ([]string, error) {
+	return nil, fmt.Errorf("file dialog: not yet implemented in browser")
+}
+
+// ShowSaveFileDialog is not yet implemented on browser.
+// Future: could use File System Access API (showSaveFilePicker) via syscall/js.
+func (p *browserPlatform) ShowSaveFileDialog(_ FileDialogOptions) (string, error) {
+	return "", fmt.Errorf("file dialog: not yet implemented in browser")
+}
+
 // Destroy is a no-op on browser.
 func (p *browserPlatform) Destroy() {}
 

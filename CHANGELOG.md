@@ -5,15 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.40.1] - 2026-05-31
-
-### Fixed
-
-- **DrawTexture default clear color** (BUG-RENDERER-001, discussion #276) — default clear changed from opaque black `{0,0,0,1}` to transparent black `{0,0,0,0}`, matching WebGPU spec and Rust wgpu `Color::default()`. Fixes ggcanvas transparency when compositing via `DrawTexture`/`RenderTo`.
+## [0.40.2] - 2026-05-31
 
 ### Added
 
-- **Native file dialogs** (ADR-036 Phase 1, #241, @lkmavi) — `ShowOpenFileDialog` / `ShowSaveFileDialog` for macOS (NSOpenPanel/NSSavePanel via ObjC runtime) and Windows (IFileOpenDialog COM). Linux stubs with descriptive error. UTType migration for macOS 12+.
+- **Linux file dialogs** (ADR-036 Phase 2, #241, @lkmavi) — xdg-desktop-portal D-Bus client (hand-written wire protocol, SASL EXTERNAL auth, ~1400 LOC) with zenity/kdialog subprocess fallback. Tested on X11 + Wayland (Ubuntu 26.04). D-Bus wire protocol extracted to `dbus_linux.go` for ADR-040 reuse. File dialogs now work on all three platforms.
+
+### Fixed
+
+- **Browser/WASM build** — added missing `SetAppName`, `ShowOpenFileDialog`, `ShowSaveFileDialog` stubs to `browserPlatform`. WASM build was broken since menu/dialog interface expansion.
 
 ## [0.40.0] - 2026-05-27
 
