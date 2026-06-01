@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] - 2026-06-01
+
+### Added
+
+- **Win32 native menu bar** (ADR-040 Phase 1, #282, @lkmavi) — `HMENU` via user32.dll, `WM_COMMAND` dispatch, thread-safe rebuild via `WM_APP+1`. Supports submenus, separators, disabled items, `RoleQuit` with proper ADR-026 lifecycle. Command IDs from 0x1000 (no systray collision). ~200 LOC + 370 LOC tests (19 tests).
+
+### Fixed
+
+- **Menu lint cleanup** — `sync.Map.Clear()` (Go 1.23+), gocritic truncateCmp fix in tests, uint16 limit comment.
+
 ## [0.40.2] - 2026-05-31
 
 ### Added
@@ -13,7 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Browser/WASM build** — added missing `SetAppName`, `ShowOpenFileDialog`, `ShowSaveFileDialog` stubs to `browserPlatform`. WASM build was broken since menu/dialog interface expansion.
+- **Browser/WASM build** — added missing `SetAppName`, `ShowOpenFileDialog`, `ShowSaveFileDialog` stubs to `browserPlatform`.
+
+## [0.40.1] - 2026-05-31
+
+### Added
+
+- **Native file dialogs** (ADR-036 Phase 1, #241, @lkmavi) — `ShowOpenFileDialog` / `ShowSaveFileDialog` for macOS (NSOpenPanel/NSSavePanel via ObjC runtime) and Windows (IFileOpenDialog COM). Linux stubs. UTType migration for macOS 12+.
+
+### Fixed
+
+- **DrawTexture default clear color** (BUG-RENDERER-001, discussion #276) — default clear changed from opaque black to transparent black.
 
 ## [0.40.0] - 2026-05-27
 

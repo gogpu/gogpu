@@ -686,15 +686,16 @@ Log levels across the ecosystem:
 The logger is stored atomically and is safe for concurrent use. Accelerators
 inherit the logger configuration when registered.
 
-## Platform Support
+## Platform Features
 
-| Platform | Status       | GPU Backends                   | Input |
-|----------|--------------|--------------------------------|-------|
-| Windows  | Full support | Vulkan, DX12, GLES, Software   | Keyboard, mouse, pointer lock |
-| macOS    | Full support | Metal, Software (in progress)  | Keyboard, mouse |
-| Linux X11 | Full support | Vulkan, GLES, Software (in progress) | Keyboard, mouse, pointer lock, multi-touch (XInput2) |
-| Linux Wayland | Full support | Vulkan, GLES | Keyboard, mouse, pointer lock (`zwp_pointer_constraints_v1`), CSD |
-| Web      | Planned      | WebGPU                         | — |
+| Feature | Windows | macOS | Linux X11 | Linux Wayland | Browser |
+|---------|:-------:|:-----:|:---------:|:-------------:|:-------:|
+| **GPU Backends** | Vulkan, DX12, GLES, Software | Metal, Software | Vulkan, GLES, Software | Vulkan, GLES | WebGPU |
+| **Input** | Keyboard, mouse, pointer lock | Keyboard, mouse | Keyboard, mouse, pointer lock | Keyboard, mouse, pointer lock, CSD | Planned |
+| **File Dialogs** | ✅ IFileOpenDialog COM | ✅ NSOpenPanel/NSSavePanel | ✅ D-Bus portal + zenity/kdialog | ✅ D-Bus portal + zenity/kdialog | Stub |
+| **Native Menus** | ✅ Win32 HMENU | ✅ NSMenu | No-op (Phase 2: D-Bus AppMenu) | No-op (Phase 2: D-Bus AppMenu) | — |
+| **Clipboard** | ✅ | ✅ | ✅ ICCCM | ✅ wl_data_device | ✅ Clipboard API |
+| **System Sounds** | ✅ winmm | ✅ NSSound | ✅ canberra/PulseAudio | ✅ canberra/PulseAudio | — |
 
 ## See Also
 

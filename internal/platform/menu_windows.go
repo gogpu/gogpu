@@ -43,6 +43,7 @@ func init() {
 // nextMenuCmdID allocates and returns the next command ID for a menu item.
 // Thread-safe via atomic increment. IDs begin at 0x1000 to avoid colliding
 // with the systray range 0x0001–0x0FFF when both subsystems run together.
+// Practical limit: ~61K items before uint16 wraps (astronomically beyond real usage).
 func nextMenuCmdID() uint16 {
 	// Add returns the post-increment value; subtract 1 to get the allocated slot.
 	return uint16(menuCmdIDCounter.Add(1) - 1)
@@ -86,10 +87,7 @@ func (p *windowsPlatform) applyMenu() {
 		procDestroyMenu.Call(uintptr(p.hMenu))
 		p.hMenu = 0
 	}
-	menuActions.Range(func(k, _ any) bool {
-		menuActions.Delete(k)
-		return true
-	})
+	menuActions.Clear()
 
 	hwnd := uintptr(0)
 	if p.primary != nil {
@@ -145,7 +143,7 @@ func appendMenuItem(hMenu uintptr, item MenuItem) {
 
 	if len(item.Submenu) > 0 {
 		subPopup := buildMenuPopup(item.Submenu)
-		title, _ := windows.UTF16PtrFromString(item.Title)
+		title, _ := windows.UTF16PtrFromString(item.Title) // only fails on NUL in string
 		flags := uintptr(mfPopup)
 		if item.Disabled {
 			flags |= mfGrayed
@@ -177,7 +175,7 @@ func appendMenuItem(hMenu uintptr, item MenuItem) {
 		menuActions.Store(id, item.Action)
 	}
 
-	title, _ := windows.UTF16PtrFromString(item.Title)
+	title, _ := windows.UTF16PtrFromString(item.Title) // only fails on NUL in string
 	procAppendMenuW.Call(hMenu, flags, uintptr(id), uintptr(unsafe.Pointer(title)))
 }
 

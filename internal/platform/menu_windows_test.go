@@ -19,10 +19,7 @@ func menuItemCount(hMenu uintptr) int {
 // clearMenuActions removes all entries from the package-level menuActions map.
 func clearMenuActions(t *testing.T) {
 	t.Helper()
-	menuActions.Range(func(k, _ any) bool {
-		menuActions.Delete(k)
-		return true
-	})
+	menuActions.Clear()
 }
 
 // --- Command ID allocation ---
@@ -223,7 +220,7 @@ func TestBuildMenuPopup_ActionRegistered(t *testing.T) {
 	after := menuCmdIDCounter.Load()
 
 	// Dispatch every ID allocated during the build and verify the action fires.
-	for id := uint16(before); id < uint16(after); id++ {
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe: counter range 0x1000–0xFFFF fits uint16
 		dispatchMenuCommand(id)
 	}
 	if !called {
@@ -246,7 +243,7 @@ func TestBuildMenuPopup_NoAction_NotRegistered(t *testing.T) {
 	defer procDestroyMenu.Call(hPopup)
 	after := menuCmdIDCounter.Load()
 
-	for id := uint16(before); id < uint16(after); id++ {
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe: counter range 0x1000–0xFFFF fits uint16
 		if _, ok := menuActions.Load(id); ok {
 			t.Errorf("action unexpectedly registered for item with no Action/Role (id=%#x)", id)
 		}
@@ -291,7 +288,7 @@ func TestBuildMenuPopup_RoleQuit_UserActionCalled(t *testing.T) {
 
 	// globalPlatform is nil in unit tests so WM_CLOSE is not posted, but the
 	// user-supplied action must still be called.
-	for id := uint16(before); id < uint16(after); id++ {
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe: counter range 0x1000–0xFFFF fits uint16
 		if fn, ok := menuActions.Load(id); ok {
 			fn.(func())()
 		}
@@ -317,7 +314,7 @@ func TestBuildMenuPopup_RoleQuit_NoUserAction_NoPanic(t *testing.T) {
 	after := menuCmdIDCounter.Load()
 
 	// Invoking the registered closure with nil globalPlatform must not panic.
-	for id := uint16(before); id < uint16(after); id++ {
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe: counter range 0x1000–0xFFFF fits uint16
 		if fn, ok := menuActions.Load(id); ok {
 			fn.(func())()
 		}
@@ -343,7 +340,7 @@ func TestBuildMenuPopup_RoleQuit_Registered(t *testing.T) {
 	after := menuCmdIDCounter.Load()
 
 	found := false
-	for id := uint16(before); id < uint16(after); id++ {
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe: counter range 0x1000–0xFFFF fits uint16
 		if _, ok := menuActions.Load(id); ok {
 			found = true
 		}
