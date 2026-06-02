@@ -12,23 +12,28 @@ import (
 
 // Win32 menu message and flag constants.
 const (
-	wmCommand     = 0x0111 // WM_COMMAND: HIWORD(wParam)==0 means menu, 1 means accelerator
-	wmRebuildMenu = 0x8001 // WM_APP+1: posted by SetApplicationMenu to trigger rebuild on OS thread
+	wmCommand       = 0x0111 // WM_COMMAND: HIWORD(wParam)==0 means menu, 1 means accelerator
+	wmRebuildMenu   = 0x8001 // WM_APP+1: posted by SetApplicationMenu to trigger rebuild on OS thread
+	wmInitMenuPopup = 0x0117 // WM_INITMENUPOPUP: fired before a popup becomes visible; used to sync Disabled state
 
 	mfSeparator = 0x0800 // MF_SEPARATOR
 	mfPopup     = 0x0010 // MF_POPUP: uIDNewItem is a submenu HMENU
 	mfGrayed    = 0x0001 // MF_GRAYED: disabled and grayed out
+	mfEnabled   = 0x0000 // MF_ENABLED: enable menu item (counterpart to mfGrayed)
+	mfByCommand = 0x0000 // MF_BYCOMMAND: item identified by command ID (default)
 )
 
 // Menu proc declarations; user32 DLL is already loaded in platform_windows.go.
 var (
-	procCreateMenu      = user32.NewProc("CreateMenu")
-	procCreatePopupMenu = user32.NewProc("CreatePopupMenu")
-	procAppendMenuW     = user32.NewProc("AppendMenuW")
-	procSetMenu         = user32.NewProc("SetMenu")
-	procDrawMenuBar     = user32.NewProc("DrawMenuBar")
-	procEnableMenuItem  = user32.NewProc("EnableMenuItem") // reserved for Phase 4 WM_INITMENUPOPUP
-	procDestroyMenu     = user32.NewProc("DestroyMenu")
+	procCreateMenu       = user32.NewProc("CreateMenu")
+	procCreatePopupMenu  = user32.NewProc("CreatePopupMenu")
+	procAppendMenuW      = user32.NewProc("AppendMenuW")
+	procSetMenu          = user32.NewProc("SetMenu")
+	procDrawMenuBar      = user32.NewProc("DrawMenuBar")
+	procEnableMenuItem   = user32.NewProc("EnableMenuItem")
+	procDestroyMenu      = user32.NewProc("DestroyMenu")
+	procGetMenuItemCount = user32.NewProc("GetMenuItemCount")
+	procGetMenuItemID    = user32.NewProc("GetMenuItemID")
 )
 
 // menuCmdIDCounter allocates uint16 command IDs for menu items.
@@ -51,6 +56,11 @@ func nextMenuCmdID() uint16 {
 
 // menuActions maps command ID → action callback for WM_COMMAND dispatch.
 var menuActions sync.Map // map[uint16]func()
+
+// menuItemDisabled maps command ID → Disabled flag for WM_INITMENUPOPUP sync.
+// Populated on menu build; cleared on rebuild. Lets EnableMenuItem calls in the
+// WM_INITMENUPOPUP handler reflect the latest Disabled state without a full rebuild.
+var menuItemDisabled sync.Map // map[uint16]bool
 
 // SetApplicationMenu implements PlatMenuManager.
 // Stores items under menuMu and posts wmRebuildMenu so wndProc can rebuild
@@ -82,12 +92,13 @@ func (p *windowsPlatform) applyMenu() {
 	items := p.pendingMenu
 	p.menuMu.Unlock()
 
-	// Destroy the previous HMENU and clear all registered actions.
+	// Destroy the previous HMENU and clear all registered callbacks and state.
 	if p.hMenu != 0 {
 		procDestroyMenu.Call(uintptr(p.hMenu))
 		p.hMenu = 0
 	}
 	menuActions.Clear()
+	menuItemDisabled.Clear()
 
 	hwnd := uintptr(0)
 	if p.primary != nil {
@@ -157,6 +168,7 @@ func appendMenuItem(hMenu uintptr, item MenuItem) {
 	if item.Disabled {
 		flags |= mfGrayed
 	}
+	menuItemDisabled.Store(id, item.Disabled)
 
 	if item.Role == MenuRoleQuit {
 		action := item.Action
@@ -185,6 +197,32 @@ func appendMenuItem(hMenu uintptr, item MenuItem) {
 func dispatchMenuCommand(id uint16) {
 	if fn, ok := menuActions.Load(id); ok {
 		fn.(func())()
+	}
+}
+
+// syncPopupEnabled iterates every item in hPopup and calls EnableMenuItem to
+// sync its enabled/disabled state from menuItemDisabled. Called from the
+// WM_INITMENUPOPUP handler on the OS message thread just before the popup
+// becomes visible, so Disabled flag changes made via SetApplicationMenu are
+// reflected without a full HMENU rebuild.
+func syncPopupEnabled(hPopup uintptr) {
+	nRaw, _, _ := procGetMenuItemCount.Call(hPopup)
+	count := int(int32(nRaw)) // Win32 returns -1 on error; int32 cast preserves sign
+	for i := 0; i < count; i++ {
+		cmdIDRaw, _, _ := procGetMenuItemID.Call(hPopup, uintptr(i))
+		if cmdIDRaw == 0xFFFFFFFF {
+			continue // separator or MF_POPUP submenu placeholder
+		}
+		id := uint16(cmdIDRaw)
+		val, ok := menuItemDisabled.Load(id)
+		if !ok {
+			continue
+		}
+		flags := uintptr(mfByCommand | mfEnabled)
+		if val.(bool) {
+			flags = uintptr(mfByCommand | mfGrayed)
+		}
+		procEnableMenuItem.Call(hPopup, uintptr(id), flags)
 	}
 }
 

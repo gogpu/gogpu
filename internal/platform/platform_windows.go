@@ -2280,6 +2280,14 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		p.applyMenu()
 		return 0
 
+	case wmInitMenuPopup:
+		// HIWORD(lParam) == 1 indicates the Window/system menu (Alt+Space) — skip it.
+		// For our menu bar popups, sync enabled/disabled state just before display.
+		if (lParam>>16)&0xFFFF == 0 {
+			syncPopupEnabled(wParam)
+		}
+		return 0
+
 	case wmDpiChanged:
 		// Window moved to a monitor with different DPI.
 		// lParam points to a RECT with the suggested new position/size.

@@ -6,14 +6,18 @@ import (
 	"testing"
 )
 
-// procGetMenuItemCount is declared here for test-only HMENU structure
-// verification. user32 is already loaded by platform_windows.go.
-var procGetMenuItemCount = user32.NewProc("GetMenuItemCount")
-
 // menuItemCount returns the number of items in an HMENU, or -1 on failure.
+// procGetMenuItemCount is declared in menu_windows.go.
 func menuItemCount(hMenu uintptr) int {
 	n, _, _ := procGetMenuItemCount.Call(hMenu)
 	return int(int32(n)) // Win32 returns -1 (0xFFFFFFFF) on error
+}
+
+// clearMenuState removes all entries from menuActions and menuItemDisabled.
+func clearMenuState(t *testing.T) {
+	t.Helper()
+	menuActions.Clear()
+	menuItemDisabled.Clear()
 }
 
 // clearMenuActions removes all entries from the package-level menuActions map.
@@ -362,4 +366,129 @@ func TestSetApplicationMenu_NilPrimary_NoPanic(t *testing.T) {
 	if n != 1 {
 		t.Errorf("pendingMenu length = %d, want 1", n)
 	}
+}
+
+// --- WM_INITMENUPOPUP: menuItemDisabled state ---
+
+func TestBuildMenuPopup_DisabledState_Stored(t *testing.T) {
+	t.Cleanup(func() { clearMenuState(t) })
+
+	items := []MenuItem{
+		{Title: "Cut", Action: func() {}},
+		{Title: "Paste", Disabled: true, Action: func() {}},
+	}
+
+	before := menuCmdIDCounter.Load()
+	hPopup := buildMenuPopup(items)
+	if hPopup == 0 {
+		t.Fatal("buildMenuPopup: returned NULL HMENU")
+	}
+	defer procDestroyMenu.Call(hPopup)
+	after := menuCmdIDCounter.Load()
+
+	var enabledCount, disabledCount int
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe: counter range 0x1000–0xFFFF fits uint16
+		val, ok := menuItemDisabled.Load(id)
+		if !ok {
+			continue
+		}
+		if val.(bool) {
+			disabledCount++
+		} else {
+			enabledCount++
+		}
+	}
+	if enabledCount != 1 {
+		t.Errorf("enabled items in menuItemDisabled = %d, want 1 (Cut)", enabledCount)
+	}
+	if disabledCount != 1 {
+		t.Errorf("disabled items in menuItemDisabled = %d, want 1 (Paste)", disabledCount)
+	}
+}
+
+func TestBuildMenuPopup_DisabledState_ClearedOnRebuild(t *testing.T) {
+	t.Cleanup(func() { clearMenuState(t) })
+
+	items := []MenuItem{{Title: "X", Disabled: true, Action: func() {}}}
+	before := menuCmdIDCounter.Load()
+	hPopup := buildMenuPopup(items)
+	if hPopup == 0 {
+		t.Fatal("buildMenuPopup: NULL HMENU")
+	}
+	defer procDestroyMenu.Call(hPopup)
+	after := menuCmdIDCounter.Load()
+
+	var found bool
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe
+		if _, ok := menuItemDisabled.Load(id); ok {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("disabled state not stored for item")
+	}
+
+	// Simulate applyMenu clearing state (as happens on a full rebuild).
+	menuItemDisabled.Clear()
+
+	for id := uint16(before); id < uint16(after); id++ { //nolint:gocritic // safe
+		if _, ok := menuItemDisabled.Load(id); ok {
+			t.Error("menuItemDisabled not cleared after rebuild")
+		}
+	}
+}
+
+// --- WM_INITMENUPOPUP: syncPopupEnabled ---
+
+// TestSyncPopupEnabled_NoPanic verifies syncPopupEnabled does not panic on a
+// valid HMENU containing enabled and disabled items.
+func TestSyncPopupEnabled_NoPanic(t *testing.T) {
+	t.Cleanup(func() { clearMenuState(t) })
+
+	items := []MenuItem{
+		{Title: "Open", Action: func() {}},
+		{Title: "Save", Disabled: true, Action: func() {}},
+		{Separator: true},
+		{Title: "Quit", Role: MenuRoleQuit},
+	}
+	hPopup := buildMenuPopup(items)
+	if hPopup == 0 {
+		t.Fatal("buildMenuPopup: NULL HMENU")
+	}
+	defer procDestroyMenu.Call(hPopup)
+
+	// syncPopupEnabled must not panic; it calls EnableMenuItem for leaf items.
+	syncPopupEnabled(hPopup)
+}
+
+// TestSyncPopupEnabled_EmptyPopup verifies syncPopupEnabled handles an HMENU
+// with zero items without panicking.
+func TestSyncPopupEnabled_EmptyPopup(t *testing.T) {
+	t.Cleanup(func() { clearMenuState(t) })
+
+	hPopup := buildMenuPopup(nil)
+	if hPopup == 0 {
+		t.Fatal("buildMenuPopup(nil): NULL HMENU")
+	}
+	defer procDestroyMenu.Call(hPopup)
+
+	syncPopupEnabled(hPopup) // must not panic
+}
+
+// TestSyncPopupEnabled_UnknownIDSkipped verifies that syncPopupEnabled silently
+// skips items whose cmdID is not in menuItemDisabled (e.g. items added externally).
+func TestSyncPopupEnabled_UnknownIDSkipped(t *testing.T) {
+	t.Cleanup(func() { clearMenuState(t) })
+
+	// Build a popup but then clear menuItemDisabled to simulate a stale state.
+	items := []MenuItem{{Title: "Undo", Action: func() {}}}
+	hPopup := buildMenuPopup(items)
+	if hPopup == 0 {
+		t.Fatal("buildMenuPopup: NULL HMENU")
+	}
+	defer procDestroyMenu.Call(hPopup)
+
+	menuItemDisabled.Clear() // all IDs now unknown
+
+	syncPopupEnabled(hPopup) // must not panic and must be a no-op
 }

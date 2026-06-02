@@ -122,6 +122,10 @@ type waylandPlatform struct {
 	// Primary window for backward-compatible single-window API.
 	primary         *waylandWindow
 	primaryWindowID WindowID
+
+	// menu manages the D-Bus AppMenu server (com.canonical.dbusmenu).
+	// Nil-safe; all methods no-op when DBUS_SESSION_BUS_ADDRESS is absent.
+	menu *linuxMenuState
 }
 
 // x11Platform wraps x11.Platform to implement the Platform interface.
@@ -133,6 +137,10 @@ type x11Platform struct {
 	// net.Conn (Go runtime netpoller vs kernel poll on dup'd fd).
 	wakeCh          chan struct{}
 	primaryWindowID WindowID
+
+	// menu manages the D-Bus AppMenu server (com.canonical.dbusmenu).
+	// Nil-safe; all methods no-op when DBUS_SESSION_BUS_ADDRESS is absent.
+	menu *linuxMenuState
 }
 
 // newPlatformManager returns a PlatformManager for Linux.
@@ -177,6 +185,7 @@ func newPlatformManager() PlatformManager {
 func (p *x11Platform) Init() error {
 	p.inner = x11.NewPlatform()
 	p.wakeCh = make(chan struct{}, 1)
+	p.menu = newLinuxMenuState()
 	return nil
 }
 
@@ -195,7 +204,13 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 	id := NewWindowID()
 	p.primaryWindowID = id
-	return &x11PlatformWindow{platform: p, id: id}, nil
+	win := &x11PlatformWindow{platform: p, id: id}
+	// Provide the window reference so role-based menu actions (Quit, Minimize, etc.)
+	// can call the correct PlatformWindow methods.
+	p.menu.window = win
+	_, xid := p.inner.GetHandle()
+	p.menu.attachWindow(uint32(xid))
+	return win, nil
 }
 
 // PollEvents processes pending X11 events.
@@ -316,6 +331,7 @@ func (p *x11Platform) SetAppName(name string) {}
 
 // Destroy closes all windows and releases resources.
 func (p *x11Platform) Destroy() {
+	p.menu.close()
 	p.inner.Destroy()
 }
 
@@ -513,6 +529,7 @@ func (p *waylandPlatform) Init() error {
 	if err := unix.Pipe2(p.wakePipe[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
 		return fmt.Errorf("wayland: wakeup pipe: %w", err)
 	}
+	p.menu = newLinuxMenuState()
 
 	// Create timerfd for key repeat (BUG-INPUT-006: GLFW/winit pattern).
 	// Integrated into unix.Poll — repeat events generated on main thread,
@@ -535,7 +552,12 @@ func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 	id := NewWindowID()
 	p.primaryWindowID = id
-	return &waylandPlatformWindow{platform: p, id: id}, nil
+	// Wayland has no X11 window ID; use 0. The AppMenu registrar on KDE
+	// Plasma Wayland associates the menu via the bus sender name instead.
+	win := &waylandPlatformWindow{platform: p, id: id}
+	p.menu.window = win
+	p.menu.attachWindow(0)
+	return win, nil
 }
 
 // initSingleConnection initializes using a single C libwayland connection.
@@ -2173,6 +2195,8 @@ func (p *waylandPlatform) FontScale() float32 { return detectFontScale() }
 
 // Destroy closes the window and releases resources.
 func (p *waylandPlatform) Destroy() {
+	p.menu.close()
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
