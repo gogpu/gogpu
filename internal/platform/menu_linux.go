@@ -31,6 +31,10 @@ const (
 	appMenuPath   = "/com/canonical/AppMenu/Registrar"
 	appMenuIface  = "com.canonical.AppMenu.Registrar"
 	menuObjPrefix = "/com/gogpu/menu/window/"
+
+	dbusMenuLayoutSig    = "u(ia{sv}av)" // GetLayout return signature
+	dbusMenuPropsSig     = "a(ia{sv})"   // GetGroupProperties return signature
+	dbusMenuEventClicked = "clicked"     // dbusmenu event ID for item activation
 )
 
 // menuRootID is the dbusmenu virtual root node ID (always 0, never displayed).
@@ -49,7 +53,7 @@ type menuNode struct {
 // Both x11Platform and waylandPlatform hold one instance.
 type linuxMenuState struct {
 	mu        sync.Mutex
-	rebuildMu sync.Mutex // serialises rebuildTree; prevents actions.Clear()+Store() interleave on concurrent set() calls
+	rebuildMu sync.Mutex // serializes rebuildTree; prevents actions.Clear()+Store() interleave on concurrent set() calls
 	items     []MenuItem // menu tree stored before window is ready
 	revision  uint32     // incremented on each SetApplicationMenu
 	root      *menuNode  // current dbusmenu ID tree; nil until first set()
@@ -61,7 +65,7 @@ type linuxMenuState struct {
 	started bool
 	stopCh  chan struct{}
 
-	writeMu sync.Mutex    // serialises all writes to the D-Bus connection
+	writeMu sync.Mutex    // serializes all writes to the D-Bus connection
 	serial  atomic.Uint32 // per-connection message serial; starts at 0x10000
 	actions sync.Map      // map[int32]func() — dispatched on Event("clicked")
 
@@ -241,83 +245,103 @@ func (m *linuxMenuState) rebuildTree(items []MenuItem) {
 	m.mu.Unlock()
 }
 
-// registerRoleActions walks the tree and registers synthesised actions for all
+// registerRoleActions walks the tree and registers platform actions for all
 // MenuRole values. Called after buildMenuNodes so that role-based items get
-// platform-level behaviour (close, minimize, etc.) in addition to any user
+// platform-level behavior (close, minimize, etc.) in addition to any user
 // Action that buildMenuNodes may have already stored.
-//
-// Linux role mapping:
-//   - Quit       → user Action (if any) + close primary window / os.Exit fallback
-//   - Close      → user Action + close window
-//   - Minimize   → user Action + minimize window
-//   - Zoom       → user Action + toggle maximize
-//   - FullScreen → user Action + toggle fullscreen
-//   - About, Preferences, Services, Hide, HideOthers, ShowAll, BringAllToFront →
-//     user Action only (no Linux-native equivalent; re-register to ensure dispatch)
 func (m *linuxMenuState) registerRoleActions(node *menuNode) {
 	if node.item.Role != MenuRoleNone {
-		ua := node.item.Action // user-supplied callback (may be nil)
-		w := m.window          // platform window (nil before CreateWindow)
-
-		switch node.item.Role {
-		case MenuRoleQuit:
-			m.actions.Store(node.id, func() {
-				if ua != nil {
-					ua()
-				}
-				if w != nil {
-					w.Close()
-				} else {
-					os.Exit(0)
-				}
-			})
-		case MenuRoleClose:
-			m.actions.Store(node.id, func() {
-				if ua != nil {
-					ua()
-				}
-				if w != nil {
-					w.Close()
-				}
-			})
-		case MenuRoleMinimize:
-			m.actions.Store(node.id, func() {
-				if ua != nil {
-					ua()
-				}
-				if w != nil {
-					w.Minimize()
-				}
-			})
-		case MenuRoleZoom:
-			m.actions.Store(node.id, func() {
-				if ua != nil {
-					ua()
-				}
-				if w != nil {
-					w.Maximize()
-				}
-			})
-		case MenuRoleFullScreen:
-			m.actions.Store(node.id, func() {
-				if ua != nil {
-					ua()
-				}
-				if w != nil {
-					w.SetFullscreen(!w.IsFullscreen())
-				}
-			})
-		default:
-			// About, Preferences, Services, Hide, HideOthers, ShowAll,
-			// BringAllToFront — dispatch user Action if provided.
-			if ua != nil {
-				m.actions.Store(node.id, ua)
-			}
+		if fn := buildRoleAction(node.item.Role, node.item.Action, m.window); fn != nil {
+			m.actions.Store(node.id, fn)
 		}
 	}
-
 	for _, child := range node.children {
 		m.registerRoleActions(child)
+	}
+}
+
+// buildRoleAction returns the platform action for a menu role.
+// ua is the user-supplied callback (may be nil); w is the platform window (may be nil).
+// Returns nil for roles that have no platform operation and no user Action.
+//
+// Role mapping:
+//   - Quit       → user Action + close window (os.Exit fallback when window is nil)
+//   - Close      → user Action + close window
+//   - Minimize   → user Action + minimize window
+//   - Zoom       → user Action + maximize window
+//   - FullScreen → user Action + toggle fullscreen
+//   - Others     → user Action only (About, Preferences, Hide, etc.)
+func buildRoleAction(role MenuRole, ua func(), w PlatformWindow) func() {
+	switch role {
+	case MenuRoleQuit:
+		return makeQuitAction(ua, w)
+	case MenuRoleClose:
+		return makeCloseAction(ua, w)
+	case MenuRoleMinimize:
+		return makeMinimizeAction(ua, w)
+	case MenuRoleZoom:
+		return makeZoomAction(ua, w)
+	case MenuRoleFullScreen:
+		return makeFullScreenAction(ua, w)
+	default:
+		return ua // About, Preferences, etc.; nil when user provided no Action
+	}
+}
+
+func makeQuitAction(ua func(), w PlatformWindow) func() {
+	return func() {
+		if ua != nil {
+			ua()
+		}
+		if w != nil {
+			w.Close()
+		} else {
+			os.Exit(0)
+		}
+	}
+}
+
+func makeCloseAction(ua func(), w PlatformWindow) func() {
+	return func() {
+		if ua != nil {
+			ua()
+		}
+		if w != nil {
+			w.Close()
+		}
+	}
+}
+
+func makeMinimizeAction(ua func(), w PlatformWindow) func() {
+	return func() {
+		if ua != nil {
+			ua()
+		}
+		if w != nil {
+			w.Minimize()
+		}
+	}
+}
+
+func makeZoomAction(ua func(), w PlatformWindow) func() {
+	return func() {
+		if ua != nil {
+			ua()
+		}
+		if w != nil {
+			w.Maximize()
+		}
+	}
+}
+
+func makeFullScreenAction(ua func(), w PlatformWindow) func() {
+	return func() {
+		if ua != nil {
+			ua()
+		}
+		if w != nil {
+			w.SetFullscreen(!w.IsFullscreen())
+		}
 	}
 }
 
@@ -430,7 +454,7 @@ func (m *linuxMenuState) handleGetLayout(args []byte) ([]byte, string) {
 	b := newMsgBuf(0)
 	b.u32(rev)
 	encodeMenuLayout(b, start, int(depth))
-	return b.data, "u(ia{sv}av)"
+	return b.data, dbusMenuLayoutSig
 }
 
 // handleGetGroupProperties decodes GetGroupProperties(ai ids, as propertyNames)
@@ -467,7 +491,7 @@ func (m *linuxMenuState) handleGetGroupProperties(args []byte) ([]byte, string) 
 		b.arrayEnd(plp, pcp)
 	}
 	b.arrayEnd(lp, cp)
-	return b.data, "a(ia{sv})"
+	return b.data, dbusMenuPropsSig
 }
 
 // handleAboutToShow returns (b false) — the menu layout is always current and
@@ -490,7 +514,7 @@ func (m *linuxMenuState) handleEvent(args []byte) {
 	if err != nil {
 		return
 	}
-	if eventID != "clicked" {
+	if eventID != dbusMenuEventClicked {
 		return
 	}
 	if fn, ok := m.actions.Load(int32(idRaw)); ok {
@@ -517,7 +541,7 @@ func (m *linuxMenuState) handleEventGroup(args []byte) ([]byte, string) {
 			_ = d.skipValue(vsig)
 			_, _ = d.readU32() // timestamp (u)
 
-			if eventID == "clicked" {
+			if eventID == dbusMenuEventClicked {
 				if fn, ok := m.actions.Load(int32(idRaw)); ok {
 					go fn.(func())()
 				}
@@ -607,7 +631,7 @@ func (m *linuxMenuState) nextSerial() uint32 {
 	return m.serial.Add(1)
 }
 
-// write sends raw bytes to the D-Bus connection, serialised across goroutines.
+// write sends raw bytes to the D-Bus connection, serialized across goroutines.
 func (m *linuxMenuState) write(conn *dbusConn, data []byte) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()

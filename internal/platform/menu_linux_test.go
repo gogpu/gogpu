@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gogpu/gpucontext"
 )
@@ -268,8 +269,8 @@ func TestHandleGetLayout_EmptyMenu(t *testing.T) {
 	m := newLinuxMenuState()
 	body, sig := m.handleGetLayout(makeGetLayoutArgs(0, -1))
 
-	if sig != "u(ia{sv}av)" {
-		t.Errorf("signature = %q, want %q", sig, "u(ia{sv}av)")
+	if sig != dbusMenuLayoutSig {
+		t.Errorf("signature = %q, want %q", sig, dbusMenuLayoutSig)
 	}
 	if len(body) == 0 {
 		t.Fatal("GetLayout empty menu: empty body")
@@ -291,8 +292,8 @@ func TestHandleGetLayout_AfterSet(t *testing.T) {
 	})
 
 	body, sig := m.handleGetLayout(makeGetLayoutArgs(0, -1))
-	if sig != "u(ia{sv}av)" {
-		t.Errorf("signature = %q, want %q", sig, "u(ia{sv}av)")
+	if sig != dbusMenuLayoutSig {
+		t.Errorf("signature = %q, want %q", sig, dbusMenuLayoutSig)
 	}
 
 	d := newMsgDecoder(body, 0)
@@ -343,34 +344,30 @@ func TestHandleAboutToShow_ReturnsFalse(t *testing.T) {
 
 func TestHandleEvent_ClickedDispatchesAction(t *testing.T) {
 	m := newLinuxMenuState()
-	var called bool
-	m.actions.Store(int32(42), func() { called = true })
+	done := make(chan struct{})
+	m.actions.Store(int32(42), func() { close(done) })
 
-	args := makeEventArgs(42, "clicked")
-	m.handleEvent(args)
+	m.handleEvent(makeEventArgs(42, dbusMenuEventClicked))
 
-	// The action is dispatched in a goroutine; wait briefly.
-	for i := 0; i < 100 && !called; i++ {
-		// spin at most 100 iterations without sleep — fast in practice
-		for j := 0; j < 1000; j++ {
-		}
-	}
-	if !called {
-		t.Error("handleEvent 'clicked': action not called")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Error("handleEvent 'clicked': action not called within 1s")
 	}
 }
 
 func TestHandleEvent_OtherEventNoAction(t *testing.T) {
 	m := newLinuxMenuState()
-	var called bool
-	m.actions.Store(int32(1), func() { called = true })
+	fired := make(chan struct{}, 1)
+	m.actions.Store(int32(1), func() { fired <- struct{}{} })
 
 	m.handleEvent(makeEventArgs(1, "hovered"))
-	// Give goroutine time to (not) fire.
-	for i := 0; i < 1000; i++ {
-	}
-	if called {
+
+	select {
+	case <-fired:
 		t.Error("handleEvent 'hovered': action must not be called")
+	case <-time.After(50 * time.Millisecond):
+		// correct: action was not invoked
 	}
 }
 
@@ -388,8 +385,8 @@ func TestHandleGetGroupProperties_KnownID(t *testing.T) {
 	args := makeGetGroupPropsArgs([]int32{1})
 	body, sig := m.handleGetGroupProperties(args)
 
-	if sig != "a(ia{sv})" {
-		t.Errorf("sig = %q, want %q", sig, "a(ia{sv})")
+	if sig != dbusMenuPropsSig {
+		t.Errorf("sig = %q, want %q", sig, dbusMenuPropsSig)
 	}
 	if !containsStr(string(body), "File") {
 		t.Error("GetGroupProperties missing 'File' label")
@@ -401,8 +398,8 @@ func TestHandleGetGroupProperties_UnknownIDSkipped(t *testing.T) {
 	args := makeGetGroupPropsArgs([]int32{99})
 	body, sig := m.handleGetGroupProperties(args)
 
-	if sig != "a(ia{sv})" {
-		t.Errorf("sig = %q, want %q", sig, "a(ia{sv})")
+	if sig != dbusMenuPropsSig {
+		t.Errorf("sig = %q, want %q", sig, dbusMenuPropsSig)
 	}
 	// Unknown ID → empty array; body must still be valid (non-zero for array length).
 	if len(body) < 4 {
@@ -429,18 +426,15 @@ func TestHandleEventGroup_Empty(t *testing.T) {
 
 func TestHandleEventGroup_ClickedDispatches(t *testing.T) {
 	m := newLinuxMenuState()
-	var called bool
-	m.actions.Store(int32(7), func() { called = true })
+	done := make(chan struct{})
+	m.actions.Store(int32(7), func() { close(done) })
 
-	args := makeEventGroupArgs([]eventGroupEntry{{id: 7, eventID: "clicked"}})
-	m.handleEventGroup(args)
+	m.handleEventGroup(makeEventGroupArgs([]eventGroupEntry{{id: 7, eventID: dbusMenuEventClicked}}))
 
-	for i := 0; i < 100 && !called; i++ {
-		for j := 0; j < 1000; j++ {
-		}
-	}
-	if !called {
-		t.Error("handleEventGroup 'clicked': action not called")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Error("handleEventGroup 'clicked': action not called within 1s")
 	}
 }
 
