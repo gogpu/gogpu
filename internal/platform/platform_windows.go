@@ -961,6 +961,7 @@ func (p *windowsPlatform) Destroy() {
 	for _, hwnd := range toDestroy {
 		procDestroyWindow.Call(uintptr(hwnd))
 	}
+	p.hMenu = 0
 	p.primary = nil
 	globalPlatform = nil
 }

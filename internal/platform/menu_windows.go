@@ -143,7 +143,7 @@ func appendMenuItem(hMenu uintptr, item MenuItem) {
 
 	if len(item.Submenu) > 0 {
 		subPopup := buildMenuPopup(item.Submenu)
-		title, _ := windows.UTF16PtrFromString(item.Title) // only fails on NUL in string
+		title, _ := windows.UTF16PtrFromString(item.Title) // NUL in title is not possible from user input
 		flags := uintptr(mfPopup)
 		if item.Disabled {
 			flags |= mfGrayed
@@ -175,7 +175,7 @@ func appendMenuItem(hMenu uintptr, item MenuItem) {
 		menuActions.Store(id, item.Action)
 	}
 
-	title, _ := windows.UTF16PtrFromString(item.Title) // only fails on NUL in string
+	title, _ := windows.UTF16PtrFromString(item.Title) // NUL in title is not possible from user input
 	procAppendMenuW.Call(hMenu, flags, uintptr(id), uintptr(unsafe.Pointer(title)))
 }
 
