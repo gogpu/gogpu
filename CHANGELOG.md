@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.2] - 2026-06-03
+
+### Fixed
+
+- **D-Bus flag bug** — `NO_REPLY_EXPECTED` was `0x02` (`NO_AUTO_START`), now correct `0x01`. Wrong flag could prevent AppMenu registrar from starting on socket-activated desktop environments.
+- **DRY refactor** — `dbusAssembleMsg` extracted as shared function in `dbus_linux.go`, eliminates duplication between file dialog and menu D-Bus code.
+- **`stopCh` shutdown logging** — `serve()` now distinguishes intentional shutdown from unexpected connection loss via `select` on `stopCh`.
+
 ## [0.41.1] - 2026-06-03
 
 ### Added
