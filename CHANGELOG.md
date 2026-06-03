@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.1] - 2026-06-03
+
+### Added
+
+- **Linux D-Bus AppMenu** (ADR-040 Phase 2, #282, @lkmavi) — native menu bar for KDE Plasma / Unity via `com.canonical.AppMenu.Registrar` + `com.canonical.dbusmenu`. Hand-written D-Bus server: GetLayout, Event/EventGroup dispatch, LayoutUpdated + ItemsPropertiesUpdated (smart signal routing for disabled-only changes). Tested on Fedora 44 ARM (dbus-broker). ~800 LOC + 1070 LOC tests (60 tests). **Native menus now work on all platforms.**
+
+### Fixed
+
+- **D-Bus error handling** — RegisterWindow reply now tracked (serial matching) with Info-level log on registrar rejection. Three silent `_ =` write discards replaced with `logger().Debug`. Dead `stopCh` field removed from `linuxMenuState`.
+- **D-Bus wire protocol** — `ErrorName` header field (code 4) now parsed in `dbusMsg` for proper METHOD_ERROR diagnostics.
+
 ## [0.41.0] - 2026-06-01
 
 ### Added

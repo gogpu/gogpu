@@ -52,6 +52,7 @@ const (
 	dbusFieldPath        byte = 1
 	dbusFieldInterface   byte = 2
 	dbusFieldMember      byte = 3
+	dbusFieldErrorName   byte = 4
 	dbusFieldReplySerial byte = 5
 	dbusFieldDest        byte = 6
 	dbusFieldSender      byte = 7
@@ -69,6 +70,7 @@ type dbusMsg struct {
 	Path      string
 	Interface string
 	Member    string
+	ErrorName string // ERROR_NAME header field (non-empty only for dbusMsgError)
 	Sender    string
 	Sig       string // body signature
 	Body      []byte
@@ -348,6 +350,8 @@ func dbusParseHdrFields(hdrData []byte, msg *dbusMsg) {
 				msg.Interface = s
 			case dbusFieldMember:
 				msg.Member = s
+			case dbusFieldErrorName:
+				msg.ErrorName = s
 			case dbusFieldSender:
 				msg.Sender = s
 			}

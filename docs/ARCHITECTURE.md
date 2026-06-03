@@ -693,7 +693,7 @@ inherit the logger configuration when registered.
 | **GPU Backends** | Vulkan, DX12, GLES, Software | Metal, Software | Vulkan, GLES, Software | Vulkan, GLES | WebGPU |
 | **Input** | Keyboard, mouse, pointer lock | Keyboard, mouse | Keyboard, mouse, pointer lock | Keyboard, mouse, pointer lock, CSD | Planned |
 | **File Dialogs** | ✅ IFileOpenDialog COM | ✅ NSOpenPanel/NSSavePanel | ✅ D-Bus portal + zenity/kdialog | ✅ D-Bus portal + zenity/kdialog | Stub |
-| **Native Menus** | ✅ Win32 HMENU | ✅ NSMenu | No-op (Phase 2: D-Bus AppMenu) | No-op (Phase 2: D-Bus AppMenu) | — |
+| **Native Menus** | ✅ Win32 HMENU | ✅ NSMenu | ✅ D-Bus AppMenu (KDE/Unity) | ✅ D-Bus AppMenu (KDE/Unity) | — |
 | **Clipboard** | ✅ | ✅ | ✅ ICCCM | ✅ wl_data_device | ✅ Clipboard API |
 | **System Sounds** | ✅ winmm | ✅ NSSound | ✅ canberra/PulseAudio | ✅ canberra/PulseAudio | — |
 

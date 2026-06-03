@@ -63,11 +63,11 @@ type linuxMenuState struct {
 	window  PlatformWindow // set by platform after CreateWindow; powers window-role actions
 
 	started bool
-	stopCh  chan struct{}
 
-	writeMu sync.Mutex    // serializes all writes to the D-Bus connection
-	serial  atomic.Uint32 // per-connection message serial; starts at 0x10000
-	actions sync.Map      // map[int32]func() — dispatched on Event("clicked")
+	writeMu        sync.Mutex    // serializes all writes to the D-Bus connection
+	serial         atomic.Uint32 // per-connection message serial; starts at 0x10000
+	registerSerial atomic.Uint32 // serial of the RegisterWindow call; consumed on reply
+	actions        sync.Map      // map[int32]func() — dispatched on Event("clicked")
 
 	conn *dbusConn // nil until tryStart succeeds
 }
@@ -120,7 +120,6 @@ func (m *linuxMenuState) tryStart() {
 
 	m.conn = conn
 	m.started = true
-	m.stopCh = make(chan struct{})
 	items := m.items
 	objPath := m.objPath
 	winID := m.winID
@@ -128,9 +127,11 @@ func (m *linuxMenuState) tryStart() {
 
 	logger().Info("AppMenu: D-Bus connected", "busName", conn.name, "winID", winID, "objPath", objPath)
 
-	if err := m.doRegisterWindow(conn, winID, objPath); err != nil {
+	regSerial, err := m.doRegisterWindow(conn, winID, objPath)
+	if err != nil {
 		logger().Info("AppMenu: RegisterWindow failed — menu bar may not appear", "err", err)
 	} else {
+		m.registerSerial.Store(regSerial)
 		logger().Info("AppMenu: RegisterWindow sent", "winID", winID, "objPath", objPath)
 	}
 
@@ -150,12 +151,10 @@ func (m *linuxMenuState) close() {
 		return
 	}
 	m.started = false
-	stopCh := m.stopCh
 	conn := m.conn
 	m.conn = nil
 	m.mu.Unlock()
 
-	close(stopCh)
 	if conn != nil {
 		conn.rw.Close()
 	}
@@ -382,7 +381,7 @@ func findNode(node *menuNode, id int32) *menuNode {
 // --- D-Bus server ---
 
 // serve reads incoming METHOD_CALL messages on our object path and dispatches
-// them. Exits when the connection closes or stopCh is closed.
+// them. Exits when the connection is closed by close().
 func (m *linuxMenuState) serve() {
 	m.mu.Lock()
 	conn := m.conn
@@ -394,6 +393,19 @@ func (m *linuxMenuState) serve() {
 		if err != nil {
 			return
 		}
+
+		// One-shot check for RegisterWindow reply.
+		if regSerial := m.registerSerial.Load(); regSerial != 0 && msg.ReplyTo == regSerial {
+			m.registerSerial.Store(0) // consume
+			if msg.Type == dbusMsgError {
+				logger().Info("AppMenu: RegisterWindow rejected by registrar — menu bar may not appear",
+					"errorName", msg.ErrorName)
+			} else {
+				logger().Debug("AppMenu: RegisterWindow accepted")
+			}
+			continue
+		}
+
 		if msg.Type != dbusMsgCall || msg.Path != objPath {
 			continue
 		}
@@ -644,7 +656,9 @@ func (m *linuxMenuState) write(conn *dbusConn, data []byte) error {
 // reply back to the caller — without it the daemon drops the message and the
 // caller times out waiting for a response.
 func (m *linuxMenuState) sendReturn(conn *dbusConn, msg *dbusMsg, sig string, body []byte) {
-	_ = m.write(conn, menuEncodeReturn(m.nextSerial(), msg.Serial, msg.Sender, sig, body))
+	if err := m.write(conn, menuEncodeReturn(m.nextSerial(), msg.Serial, msg.Sender, sig, body)); err != nil {
+		logger().Debug("AppMenu: write failed", "op", "sendReturn", "err", err)
+	}
 }
 
 // hasSameTreeStructure reports whether a and b have identical tree shape:
@@ -713,10 +727,12 @@ func buildItemsPropsBody(nodes []*menuNode) []byte {
 // signal for nodes whose Disabled flag changed. The DE updates individual items
 // without triggering a full LayoutUpdated reload, preventing menu flickering.
 func (m *linuxMenuState) emitItemsPropertiesUpdated(conn *dbusConn, objPath string, nodes []*menuNode) {
-	_ = m.write(conn, menuEncodeSignal(
+	if err := m.write(conn, menuEncodeSignal(
 		m.nextSerial(), objPath, dbusMenuIface,
 		"ItemsPropertiesUpdated", "a(ia{sv})a(ias)", buildItemsPropsBody(nodes),
-	))
+	)); err != nil {
+		logger().Debug("AppMenu: write failed", "op", "emitItemsPropertiesUpdated", "err", err)
+	}
 }
 
 // emitLayoutUpdated sends a com.canonical.dbusmenu.LayoutUpdated signal (ui)
@@ -725,17 +741,21 @@ func (m *linuxMenuState) emitLayoutUpdated(conn *dbusConn, objPath string, rev u
 	b := newMsgBuf(0)
 	b.u32(rev) // u: revision
 	b.u32(0)   // i: parent ID (0 = root changed)
-	_ = m.write(conn, menuEncodeSignal(m.nextSerial(), objPath, dbusMenuIface, "LayoutUpdated", "ui", b.data))
+	if err := m.write(conn, menuEncodeSignal(m.nextSerial(), objPath, dbusMenuIface, "LayoutUpdated", "ui", b.data)); err != nil {
+		logger().Debug("AppMenu: write failed", "op", "emitLayoutUpdated", "err", err)
+	}
 }
 
 // doRegisterWindow sends com.canonical.AppMenu.Registrar.RegisterWindow(u, o)
 // to associate our dbusmenu object path with the given X11 window ID.
-func (m *linuxMenuState) doRegisterWindow(conn *dbusConn, winID uint32, objPath string) error {
+// Returns the message serial used for the call so the caller can match the reply.
+func (m *linuxMenuState) doRegisterWindow(conn *dbusConn, winID uint32, objPath string) (uint32, error) {
 	b := newMsgBuf(0)
 	b.u32(winID)   // u: windowId (X11 XID; 0 on Wayland)
 	b.str(objPath) // o: menuObjectPath
-	raw := menuEncodeCall(m.nextSerial(), appMenuDest, appMenuPath, appMenuIface, "RegisterWindow", "uo", b.data)
-	return m.write(conn, raw)
+	serial := m.nextSerial()
+	raw := menuEncodeCall(serial, appMenuDest, appMenuPath, appMenuIface, "RegisterWindow", "uo", b.data)
+	return serial, m.write(conn, raw)
 }
 
 // menuEncodeReturn encodes a D-Bus METHOD_RETURN message.
