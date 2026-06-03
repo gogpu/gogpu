@@ -799,7 +799,6 @@ func menuEncodeSignal(serial uint32, path, iface, member, sig string, body []byt
 }
 
 // menuEncodeCall encodes a D-Bus METHOD_CALL message (used for RegisterWindow).
-// Flags are 0: we expect and handle a METHOD_RETURN in serve() to log success/rejection.
 func menuEncodeCall(serial uint32, dest, path, iface, member, sig string, body []byte) []byte {
 	hdr := newMsgBuf(16)
 	dbusWriteHdrField(hdr, dbusFieldPath, "o", func() { hdr.str(path) })
@@ -809,5 +808,5 @@ func menuEncodeCall(serial uint32, dest, path, iface, member, sig string, body [
 	if sig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(sig) })
 	}
-	return dbusAssembleMsg(dbusMsgCall, 0, serial, hdr.data, body)
+	return dbusAssembleMsg(dbusMsgCall, dbusFlagNoReplyExpected, serial, hdr.data, body)
 }
