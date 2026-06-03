@@ -503,7 +503,7 @@ func dbusAssembleMsg(msgType, flags byte, serial uint32, hdrBytes, body []byte) 
 	return out
 }
 
-// dbusEncodeMsg assembles a complete little-endian D-Bus message.
+// dbusEncodeMsg assembles a complete little-endian D-Bus METHOD_CALL message.
 // The fixed 16-byte header, variable header fields, 8-byte-boundary padding,
 // and body are concatenated into a single slice ready to write to the socket.
 func dbusEncodeMsg(msgType byte, serial uint32, dest, path, iface, member, bodySig string, body []byte) []byte {
