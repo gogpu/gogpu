@@ -479,6 +479,30 @@ func (b *msgBuf) arrayEnd(lenFieldPos, contentPos int) {
 	binary.LittleEndian.PutUint32(b.data[lenFieldPos:], uint32(len(b.data)-contentPos))
 }
 
+// dbusAssembleMsg assembles a complete little-endian D-Bus message from a
+// pre-built header-fields slice and a body. flags is written to byte 2 of the
+// fixed header (e.g. dbusFlagNoReplyExpected = 0x02; pass 0 when unused).
+// Used by both the generic D-Bus client (dbus_linux.go) and the dbusmenu
+// server (menu_linux.go) so the wire-encoding logic lives in exactly one place.
+func dbusAssembleMsg(msgType, flags byte, serial uint32, hdrBytes, body []byte) []byte {
+	var fixed [16]byte
+	fixed[0] = 'l' // little-endian
+	fixed[1] = msgType
+	fixed[2] = flags
+	fixed[3] = 1 // protocol version
+	binary.LittleEndian.PutUint32(fixed[4:], uint32(len(body)))
+	binary.LittleEndian.PutUint32(fixed[8:], serial)
+	binary.LittleEndian.PutUint32(fixed[12:], uint32(len(hdrBytes)))
+	totalHdr := 16 + len(hdrBytes)
+	padLen := (8 - totalHdr%8) % 8
+	out := make([]byte, 0, totalHdr+padLen+len(body))
+	out = append(out, fixed[:]...)
+	out = append(out, hdrBytes...)
+	out = append(out, make([]byte, padLen)...)
+	out = append(out, body...)
+	return out
+}
+
 // dbusEncodeMsg assembles a complete little-endian D-Bus message.
 // The fixed 16-byte header, variable header fields, 8-byte-boundary padding,
 // and body are concatenated into a single slice ready to write to the socket.
@@ -493,26 +517,7 @@ func dbusEncodeMsg(msgType byte, serial uint32, dest, path, iface, member, bodyS
 	if bodySig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(bodySig) })
 	}
-	hdrBytes := hdr.data
-
-	var fixed [16]byte
-	fixed[0] = 'l'
-	fixed[1] = msgType
-	fixed[2] = 0 // flags
-	fixed[3] = 1 // protocol version
-	binary.LittleEndian.PutUint32(fixed[4:], uint32(len(body)))
-	binary.LittleEndian.PutUint32(fixed[8:], serial)
-	binary.LittleEndian.PutUint32(fixed[12:], uint32(len(hdrBytes)))
-
-	totalHdr := 16 + len(hdrBytes)
-	padLen := (8 - totalHdr%8) % 8
-
-	out := make([]byte, 0, totalHdr+padLen+len(body))
-	out = append(out, fixed[:]...)
-	out = append(out, hdrBytes...)
-	out = append(out, make([]byte, padLen)...)
-	out = append(out, body...)
-	return out
+	return dbusAssembleMsg(msgType, 0, serial, hdr.data, body)
 }
 
 // dbusWriteHdrField writes one (yv) header field struct into b.

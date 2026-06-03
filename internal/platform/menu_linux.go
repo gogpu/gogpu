@@ -17,7 +17,6 @@
 package platform
 
 import (
-	"encoding/binary"
 	"os"
 	"strconv"
 	"sync"
@@ -34,7 +33,9 @@ const (
 
 	dbusMenuLayoutSig    = "u(ia{sv}av)" // GetLayout return signature
 	dbusMenuPropsSig     = "a(ia{sv})"   // GetGroupProperties return signature
-	dbusMenuEventClicked = "clicked"     // dbusmenu event ID for item activation
+	dbusMenuEventClicked = "clicked"      // dbusmenu event ID for item activation
+
+	dbusFlagNoReplyExpected byte = 0x02 // D-Bus message flag: sender does not expect a METHOD_RETURN
 )
 
 // menuRootID is the dbusmenu virtual root node ID (always 0, never displayed).
@@ -63,10 +64,11 @@ type linuxMenuState struct {
 	window  PlatformWindow // set by platform after CreateWindow; powers window-role actions
 
 	started bool
+	stopCh  chan struct{}
 
 	writeMu        sync.Mutex    // serializes all writes to the D-Bus connection
 	serial         atomic.Uint32 // per-connection message serial; starts at 0x10000
-	registerSerial atomic.Uint32 // serial of the RegisterWindow call; consumed on reply
+	registerSerial atomic.Uint32 // serial of the RegisterWindow call; consumed on first reply in serve()
 	actions        sync.Map      // map[int32]func() — dispatched on Event("clicked")
 
 	conn *dbusConn // nil until tryStart succeeds
@@ -120,6 +122,7 @@ func (m *linuxMenuState) tryStart() {
 
 	m.conn = conn
 	m.started = true
+	m.stopCh = make(chan struct{})
 	items := m.items
 	objPath := m.objPath
 	winID := m.winID
@@ -151,10 +154,12 @@ func (m *linuxMenuState) close() {
 		return
 	}
 	m.started = false
+	stopCh := m.stopCh
 	conn := m.conn
 	m.conn = nil
 	m.mu.Unlock()
 
+	close(stopCh)
 	if conn != nil {
 		conn.rw.Close()
 	}
@@ -381,20 +386,28 @@ func findNode(node *menuNode, id int32) *menuNode {
 // --- D-Bus server ---
 
 // serve reads incoming METHOD_CALL messages on our object path and dispatches
-// them. Exits when the connection is closed by close().
+// them. Exits when close() closes the connection. stopCh distinguishes an
+// intentional shutdown from an unexpected read error so only the latter is logged.
 func (m *linuxMenuState) serve() {
 	m.mu.Lock()
 	conn := m.conn
 	objPath := m.objPath
+	stopCh := m.stopCh
 	m.mu.Unlock()
 
 	for {
 		msg, err := conn.readMsg()
 		if err != nil {
+			select {
+			case <-stopCh:
+				// intentional shutdown — conn.rw.Close() was called by close()
+			default:
+				logger().Debug("AppMenu: D-Bus connection lost", "err", err)
+			}
 			return
 		}
 
-		// One-shot check for RegisterWindow reply.
+		// One-shot: consume the RegisterWindow reply to log success or rejection.
 		if regSerial := m.registerSerial.Load(); regSerial != 0 && msg.ReplyTo == regSerial {
 			m.registerSerial.Store(0) // consume
 			if msg.Type == dbusMsgError {
@@ -748,7 +761,7 @@ func (m *linuxMenuState) emitLayoutUpdated(conn *dbusConn, objPath string, rev u
 
 // doRegisterWindow sends com.canonical.AppMenu.Registrar.RegisterWindow(u, o)
 // to associate our dbusmenu object path with the given X11 window ID.
-// Returns the message serial used for the call so the caller can match the reply.
+// Returns the message serial used for the call so serve() can match the reply.
 func (m *linuxMenuState) doRegisterWindow(conn *dbusConn, winID uint32, objPath string) (uint32, error) {
 	b := newMsgBuf(0)
 	b.u32(winID)   // u: windowId (X11 XID; 0 on Wayland)
@@ -770,7 +783,7 @@ func menuEncodeReturn(serial, replySerial uint32, dest, sig string, body []byte)
 	if sig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(sig) })
 	}
-	return menuAssembleMsg(dbusMsgReturn, serial, hdr.data, body)
+	return dbusAssembleMsg(dbusMsgReturn, 0, serial, hdr.data, body)
 }
 
 // menuEncodeSignal encodes a D-Bus SIGNAL message.
@@ -782,10 +795,11 @@ func menuEncodeSignal(serial uint32, path, iface, member, sig string, body []byt
 	if sig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(sig) })
 	}
-	return menuAssembleMsg(dbusMsgSignal, serial, hdr.data, body)
+	return dbusAssembleMsg(dbusMsgSignal, 0, serial, hdr.data, body)
 }
 
 // menuEncodeCall encodes a D-Bus METHOD_CALL message (used for RegisterWindow).
+// Flags are 0: we expect and handle a METHOD_RETURN in serve() to log success/rejection.
 func menuEncodeCall(serial uint32, dest, path, iface, member, sig string, body []byte) []byte {
 	hdr := newMsgBuf(16)
 	dbusWriteHdrField(hdr, dbusFieldPath, "o", func() { hdr.str(path) })
@@ -795,25 +809,5 @@ func menuEncodeCall(serial uint32, dest, path, iface, member, sig string, body [
 	if sig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(sig) })
 	}
-	return menuAssembleMsg(dbusMsgCall, serial, hdr.data, body)
-}
-
-// menuAssembleMsg assembles fixed header, header fields, alignment padding, and
-// body into a single D-Bus message byte slice ready to write to the socket.
-func menuAssembleMsg(msgType byte, serial uint32, hdrBytes, body []byte) []byte {
-	var fixed [16]byte
-	fixed[0] = 'l' // little-endian
-	fixed[1] = msgType
-	fixed[3] = 1 // protocol version
-	binary.LittleEndian.PutUint32(fixed[4:], uint32(len(body)))
-	binary.LittleEndian.PutUint32(fixed[8:], serial)
-	binary.LittleEndian.PutUint32(fixed[12:], uint32(len(hdrBytes)))
-	totalHdr := 16 + len(hdrBytes)
-	padLen := (8 - totalHdr%8) % 8
-	out := make([]byte, 0, totalHdr+padLen+len(body))
-	out = append(out, fixed[:]...)
-	out = append(out, hdrBytes...)
-	out = append(out, make([]byte, padLen)...)
-	out = append(out, body...)
-	return out
+	return dbusAssembleMsg(dbusMsgCall, 0, serial, hdr.data, body)
 }

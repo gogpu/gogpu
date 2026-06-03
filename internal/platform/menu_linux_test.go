@@ -495,10 +495,10 @@ func TestMenuEncodeSignal_FixedHeader(t *testing.T) {
 	}
 }
 
-// --- menuAssembleMsg alignment ---
+// --- dbusAssembleMsg alignment ---
 
-func TestMenuAssembleMsg_8ByteAligned(t *testing.T) {
-	raw := menuAssembleMsg(dbusMsgReturn, 1, []byte{0xAA}, nil)
+func TestDbusAssembleMsg_8ByteAligned(t *testing.T) {
+	raw := dbusAssembleMsg(dbusMsgReturn, 0, 1, []byte{0xAA}, nil)
 	hdrArrayLen := binary.LittleEndian.Uint32(raw[12:16])
 	headerTotal := 16 + int(hdrArrayLen)
 	// Body must start on an 8-byte boundary.
