@@ -35,7 +35,7 @@ const (
 	dbusMenuPropsSig     = "a(ia{sv})"   // GetGroupProperties return signature
 	dbusMenuEventClicked = "clicked"     // dbusmenu event ID for item activation
 
-	dbusFlagNoReplyExpected byte = 0x02 // D-Bus message flag: sender does not expect a METHOD_RETURN
+	dbusFlagNoReplyExpected byte = 0x01 // D-Bus message flag: sender does not expect a METHOD_RETURN
 )
 
 // menuRootID is the dbusmenu virtual root node ID (always 0, never displayed).
