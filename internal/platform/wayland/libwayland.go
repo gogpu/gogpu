@@ -49,23 +49,28 @@ type LibwaylandHandle struct {
 	toplevelDecor uintptr // zxdg_toplevel_decoration_v1* proxy
 
 	// Function symbols
-	fnDisplayConnect unsafe.Pointer
-	fnDisplayDisconn unsafe.Pointer
-	fnDisplayFlush   unsafe.Pointer
-	fnProxyMarshal   unsafe.Pointer // wl_proxy_marshal_array_constructor
-	fnProxyMarshalV  unsafe.Pointer // wl_proxy_marshal_array_constructor_versioned
-	fnProxyDestroy   unsafe.Pointer
-	fnAddListener    unsafe.Pointer // wl_proxy_add_listener
-	fnRoundtrip      unsafe.Pointer // wl_display_roundtrip
-	fnDispatchPend   unsafe.Pointer // wl_display_dispatch_pending
-	fnPrepareRead    unsafe.Pointer // wl_display_prepare_read
-	fnReadEvents     unsafe.Pointer // wl_display_read_events
-	fnCancelRead     unsafe.Pointer // wl_display_cancel_read
-	fnGetFD          unsafe.Pointer // wl_display_get_fd
-	fnCreateQueue    unsafe.Pointer // wl_display_create_queue
-	fnDispatchQueueP unsafe.Pointer // wl_display_dispatch_queue_pending
-	fnProxySetQueue  unsafe.Pointer // wl_proxy_set_queue
-	fnMarshalArray   unsafe.Pointer // wl_proxy_marshal_array (no new_id)
+	fnDisplayConnect   unsafe.Pointer
+	fnDisplayDisconn   unsafe.Pointer
+	fnDisplayFlush     unsafe.Pointer
+	fnProxyMarshal     unsafe.Pointer // wl_proxy_marshal_array_constructor
+	fnProxyMarshalV    unsafe.Pointer // wl_proxy_marshal_array_constructor_versioned
+	fnProxyDestroy     unsafe.Pointer
+	fnAddListener      unsafe.Pointer // wl_proxy_add_listener
+	fnRoundtrip        unsafe.Pointer // wl_display_roundtrip
+	fnDispatchPend     unsafe.Pointer // wl_display_dispatch_pending
+	fnPrepareRead      unsafe.Pointer // wl_display_prepare_read
+	fnReadEvents       unsafe.Pointer // wl_display_read_events
+	fnCancelRead       unsafe.Pointer // wl_display_cancel_read
+	fnGetFD            unsafe.Pointer // wl_display_get_fd
+	fnCreateQueue      unsafe.Pointer // wl_display_create_queue
+	fnDispatchQueueP   unsafe.Pointer // wl_display_dispatch_queue_pending
+	fnProxySetQueue    unsafe.Pointer // wl_proxy_set_queue
+	fnMarshalArray     unsafe.Pointer // wl_proxy_marshal_array (no new_id)
+	fnCreateWrapper    unsafe.Pointer // wl_proxy_create_wrapper
+	fnWrapperDestroy   unsafe.Pointer // wl_proxy_wrapper_destroy
+	fnPrepareReadQueue unsafe.Pointer // wl_display_prepare_read_queue
+	fnDestroyQueue     unsafe.Pointer // wl_event_queue_destroy
+	fnRoundtripQueue   unsafe.Pointer // wl_display_roundtrip_queue
 
 	// displayMu serializes wl_display access between the main thread (event dispatch)
 	// and the render thread (Vulkan WSI present/acquire). libwayland docs state that
@@ -78,6 +83,13 @@ type LibwaylandHandle struct {
 	// Without this, Vulkan present can race ahead of the compositor mapping the surface,
 	// causing SIGSEGV in vkQueuePresentKHR (ADR-041 Phase 1).
 	initialConfigureReceived bool
+
+	// App event queue — ALL our Wayland objects (registry, compositor, surface,
+	// xdg, seat, pointer, keyboard, etc.) live on this queue. The default queue
+	// is left exclusively for Mesa Vulkan WSI's internal wl_buffer.release
+	// callbacks. This separation prevents our dispatch from firing Mesa's
+	// callbacks outside Mesa's expected context (ADR-041 Phase 4).
+	appQueue uintptr // wl_event_queue* for all our objects
 
 	// CSD objects (subsurfaces for client-side decorations)
 	subcompositor uintptr    // wl_subcompositor* proxy
@@ -163,21 +175,26 @@ type LibwaylandHandle struct {
 	touchInterface         unsafe.Pointer // &wl_touch_interface
 
 	// Call interfaces (goffi call descriptors, prepared once)
-	cifConnect     types.CallInterface
-	cifDisconn     types.CallInterface
-	cifFlush       types.CallInterface
-	cifMarshal     types.CallInterface
-	cifMarshalV    types.CallInterface
-	cifDestroy     types.CallInterface
-	cifAddListener types.CallInterface
-	cifRoundtrip   types.CallInterface
-	cifDispatchP   types.CallInterface // wl_display_dispatch_pending(display) -> int
-	cifPrepareRead types.CallInterface // wl_display_prepare_read(display) -> int
-	cifReadEvents  types.CallInterface // wl_display_read_events(display) -> int
-	cifCreateQueue types.CallInterface // wl_display_create_queue(display) -> queue*
-	cifDispatchQP  types.CallInterface // wl_display_dispatch_queue_pending(display, queue) -> int
-	cifSetQueue    types.CallInterface // wl_proxy_set_queue(proxy, queue) -> void
-	cifMarshalArr  types.CallInterface // wl_proxy_marshal_array(proxy, opcode, args) -> void
+	cifConnect        types.CallInterface
+	cifDisconn        types.CallInterface
+	cifFlush          types.CallInterface
+	cifMarshal        types.CallInterface
+	cifMarshalV       types.CallInterface
+	cifDestroy        types.CallInterface
+	cifAddListener    types.CallInterface
+	cifRoundtrip      types.CallInterface
+	cifDispatchP      types.CallInterface // wl_display_dispatch_pending(display) -> int
+	cifPrepareRead    types.CallInterface // wl_display_prepare_read(display) -> int
+	cifReadEvents     types.CallInterface // wl_display_read_events(display) -> int
+	cifCreateQueue    types.CallInterface // wl_display_create_queue(display) -> queue*
+	cifDispatchQP     types.CallInterface // wl_display_dispatch_queue_pending(display, queue) -> int
+	cifSetQueue       types.CallInterface // wl_proxy_set_queue(proxy, queue) -> void
+	cifMarshalArr     types.CallInterface // wl_proxy_marshal_array(proxy, opcode, args) -> void
+	cifCreateWrapper  types.CallInterface // wl_proxy_create_wrapper(proxy) -> proxy*
+	cifWrapperDestroy types.CallInterface // wl_proxy_wrapper_destroy(wrapper) -> void
+	cifPrepareReadQ   types.CallInterface // wl_display_prepare_read_queue(display, queue) -> int
+	cifDestroyQueue   types.CallInterface // wl_event_queue_destroy(queue) -> void
+	cifRoundtripQueue types.CallInterface // wl_display_roundtrip_queue(display, queue) -> int
 }
 
 // Display returns the wl_display* C pointer for Vulkan surface creation.
@@ -231,10 +248,47 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 	}
 	h.display = display
 
-	// Step 5: Get registry — wl_proxy_marshal_array_constructor(display, 1, [NULL], &wl_registry_interface)
-	// Opcode 1 = wl_display::get_registry. Arg: one new_id (NULL placeholder, constructor fills it).
-	registry, err := h.marshalConstructor(display, 1, h.registryInterface)
+	// Step 4b: Create app event queue — ALL our objects live here.
+	// The default queue is left exclusively for Mesa Vulkan WSI's internal
+	// wl_buffer.release callbacks. This prevents our dispatch from firing
+	// Mesa's callbacks outside Mesa's expected context (GLFW/SDL3 pattern,
+	// ADR-041 Phase 4).
+	var appQueue uintptr
+	queueArgs := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
+	ffi.CallFunction(&h.cifCreateQueue, h.fnCreateQueue, unsafe.Pointer(&appQueue), queueArgs[:])
+	if appQueue == 0 {
+		h.disconnectDisplay()
+		return nil, fmt.Errorf("wayland: wl_display_create_queue returned NULL")
+	}
+	h.appQueue = appQueue
+
+	// Step 4c: Create ephemeral display wrapper assigned to appQueue.
+	// wl_proxy_create_wrapper creates a lightweight proxy that inherits
+	// the wrapper's queue to all child objects created through it.
+	// This is the GLFW pattern: wrapper → get_registry → registry on appQueue
+	// → all registry.bind results on appQueue → all child objects on appQueue.
+	var displayWrapper uintptr
+	wrapperArgs := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
+	ffi.CallFunction(&h.cifCreateWrapper, h.fnCreateWrapper, unsafe.Pointer(&displayWrapper), wrapperArgs[:])
+	if displayWrapper == 0 {
+		h.destroyAppQueue()
+		h.disconnectDisplay()
+		return nil, fmt.Errorf("wayland: wl_proxy_create_wrapper returned NULL")
+	}
+	// Assign the wrapper to our app queue — children inherit this queue.
+	setQArgs := [2]unsafe.Pointer{unsafe.Pointer(&displayWrapper), unsafe.Pointer(&appQueue)}
+	ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, setQArgs[:])
+
+	// Step 5: Get registry THROUGH the wrapper so it inherits appQueue.
+	// Opcode 1 = wl_display::get_registry. Arg: one new_id (NULL placeholder).
+	registry, err := h.marshalConstructor(displayWrapper, 1, h.registryInterface)
+
+	// Destroy the wrapper — child objects (registry) retain the queue assignment.
+	destroyWrapperArgs := [1]unsafe.Pointer{unsafe.Pointer(&displayWrapper)}
+	ffi.CallFunction(&h.cifWrapperDestroy, h.fnWrapperDestroy, nil, destroyWrapperArgs[:])
+
 	if err != nil {
+		h.destroyAppQueue()
 		h.disconnectDisplay()
 		return nil, fmt.Errorf("wayland: failed to get registry: %w", err)
 	}
@@ -375,6 +429,9 @@ func (h *LibwaylandHandle) Close() {
 	_ = h.flush()
 	h.Roundtrip()
 
+	// Destroy app event queue after all objects are gone (ADR-041 Phase 4).
+	h.destroyAppQueue()
+
 	h.disconnectDisplay()
 }
 
@@ -401,6 +458,11 @@ func (h *LibwaylandHandle) resolveSymbols() error {
 		{"wl_display_dispatch_queue_pending", &h.fnDispatchQueueP},
 		{"wl_proxy_set_queue", &h.fnProxySetQueue},
 		{"wl_proxy_marshal_array", &h.fnMarshalArray},
+		{"wl_proxy_create_wrapper", &h.fnCreateWrapper},
+		{"wl_proxy_wrapper_destroy", &h.fnWrapperDestroy},
+		{"wl_display_prepare_read_queue", &h.fnPrepareReadQueue},
+		{"wl_event_queue_destroy", &h.fnDestroyQueue},
+		{"wl_display_roundtrip_queue", &h.fnRoundtripQueue},
 	}
 
 	for _, s := range syms {
@@ -488,6 +550,16 @@ func (h *LibwaylandHandle) prepareCIFs() error {
 		{"set_queue", &h.cifSetQueue, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr, ptr}},
 		// void wl_proxy_marshal_array(wl_proxy*, uint32_t opcode, union wl_argument*)
 		{"marshal_array", &h.cifMarshalArr, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr, types.UInt32TypeDescriptor, ptr}},
+		// wl_proxy* wl_proxy_create_wrapper(void* proxy)
+		{"create_wrapper", &h.cifCreateWrapper, ptr, []*types.TypeDescriptor{ptr}},
+		// void wl_proxy_wrapper_destroy(void* wrapper)
+		{"wrapper_destroy", &h.cifWrapperDestroy, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr}},
+		// int wl_display_prepare_read_queue(wl_display*, wl_event_queue*)
+		{"prepare_read_queue", &h.cifPrepareReadQ, i32, []*types.TypeDescriptor{ptr, ptr}},
+		// void wl_event_queue_destroy(wl_event_queue*)
+		{"destroy_queue", &h.cifDestroyQueue, types.VoidTypeDescriptor, []*types.TypeDescriptor{ptr}},
+		// int wl_display_roundtrip_queue(wl_display*, wl_event_queue*)
+		{"roundtrip_queue", &h.cifRoundtripQueue, i32, []*types.TypeDescriptor{ptr, ptr}},
 	}
 
 	for _, d := range cifDefs {
@@ -580,6 +652,16 @@ func (h *LibwaylandHandle) proxyDestroy(proxy uintptr) {
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&proxy)}
 	_ = ffi.CallFunction(&h.cifDestroy, h.fnProxyDestroy, nil, args[:])
+}
+
+// destroyAppQueue destroys the app event queue.
+func (h *LibwaylandHandle) destroyAppQueue() {
+	if h.appQueue == 0 || h.fnDestroyQueue == nil {
+		return
+	}
+	args := [1]unsafe.Pointer{unsafe.Pointer(&h.appQueue)}
+	ffi.CallFunction(&h.cifDestroyQueue, h.fnDestroyQueue, nil, args[:])
+	h.appQueue = 0
 }
 
 // disconnectDisplay calls wl_display_disconnect.

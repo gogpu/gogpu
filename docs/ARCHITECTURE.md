@@ -392,6 +392,10 @@ selection protocol), Wayland (wl_data_device). Wayland cursor shapes (12 shapes 
 wp_cursor_shape_manager_v1) shipped in v0.39.2. Wayland BlitPixels remains TODO.
 See `docs/dev/research/PLATFORM-IMPLEMENTATION-MATRIX.md` for full matrix.
 
+### Wayland Thread Safety (ADR-041)
+
+All app Wayland objects live on a custom `wl_event_queue` (separated from Mesa Vulkan WSI's default queue). `DispatchDefaultQueue` uses queue-specific `prepare_read_queue` + `dispatch_queue_pending`. CSD operations hold `displayMu`. Render thread present is covered by `DisplayLocker` interface. Enterprise pattern from GLFW/SDL3.
+
 ### Thread Safety
 
 Surface reconfiguration happens exclusively on the render thread.

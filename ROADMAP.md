@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.39.3
+## Current State: v0.41.4
 
 ✅ **Production-ready** with full feature set:
 - **Universal App Lifecycle** — RenderTarget, QuitOnLastWindowClosed, AppLifecycle enum (5 states), surface/lifecycle callbacks (ADR-026, Phases 1-3)
@@ -43,7 +43,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Runtime fullscreen** — `App.SetFullscreen(bool)`, `App.ToggleFullscreen()` on all platforms (ADR-018)
 - **Multi-window** — `App.NewWindow()` creates additional windows with shared GPU device (ADR-010)
 - **Damage-aware presentation** — `Context.SetDamageRects()` passes dirty regions to compositor (ADR-013)
-- Dual backend (Rust/Pure Go) — cross-platform (Windows, macOS, Linux, **Browser/WASM**)
+- **Triple-backend WebGPU** — Pure Go / Rust FFI / Browser WASM via build tags (ADR-038)
+- **Native file dialogs** — macOS NSPanel, Windows COM, Linux D-Bus + zenity/kdialog (ADR-036, @lkmavi)
+- **Native menus** — macOS NSMenu, Windows HMENU, Linux D-Bus AppMenu (ADR-040, @lkmavi)
+- **Wayland thread safety** — app event queue separation, CSD displayMu, configure gate (ADR-041, #292)
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)

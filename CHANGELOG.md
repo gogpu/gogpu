@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.4] - 2026-06-05
+
+### Fixed
+
+- **Wayland Vulkan: app event queue separation** (ADR-041 Phase 4, #292) — moved all app Wayland objects (compositor, surface, xdg_*, input) to a custom `wl_event_queue`. Default queue left for Mesa Vulkan WSI. `DispatchDefaultQueue` now uses `wl_display_prepare_read_queue` + `wl_display_dispatch_queue_pending` on the app queue only. Prevents our dispatch from firing Mesa's internal `wl_buffer.release` callbacks. Enterprise pattern from GLFW/SDL3.
+- **Wayland CSD thread safety** — `DispatchCSDEvents()` now holds `displayMu` to serialize CSD `wl_display_flush` with render thread Vulkan WSI calls.
+
+### Changed
+
+- **deps:** wgpu v0.29.1 → v0.29.4 (Wayland GLES wl_egl_window + Software wl_shm present + VK_ERROR_SURFACE_LOST handling), goffi v0.5.2 → v0.5.3
+
 ## [0.41.3] - 2026-06-05
 
 ### Fixed

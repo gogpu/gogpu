@@ -158,8 +158,12 @@ func (h *LibwaylandHandle) SetupToplevelListeners() error {
 	return h.addListener(h.xdgToplevel, uintptr(unsafe.Pointer(&inputToplevelListener[0])))
 }
 
-// DispatchDefaultQueue dispatches pending events on the default queue (non-blocking).
-// This handles xdg events, pointer, keyboard, touch — everything on the main display.
+// DispatchDefaultQueue dispatches pending events on our app queue (non-blocking).
+// Despite the legacy name, this dispatches the app queue (appQueue), NOT the
+// Wayland default queue. All our objects (registry, compositor, surface, xdg,
+// seat, pointer, keyboard) live on appQueue. The default queue is left
+// exclusively for Mesa Vulkan WSI's internal wl_buffer.release callbacks
+// (ADR-041 Phase 4, GLFW/SDL3 pattern).
 //
 // Holds displayMu for the duration of all wl_display operations to prevent races
 // with the render thread's Vulkan WSI calls (ADR-041 Phase 2).
@@ -171,11 +175,20 @@ func (h *LibwaylandHandle) DispatchDefaultQueue() error {
 		return err
 	}
 
-	// Non-blocking dispatch: prepare_read → read if data available → dispatch_pending.
+	// Non-blocking dispatch: prepare_read_queue → read if data available → dispatch_queue_pending.
+	// Using queue-specific variants ensures we never fire Mesa Vulkan WSI's
+	// internal callbacks (wl_buffer.release) which live on the default queue.
 	dispArgs := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
 
 	var prepResult int32
-	ffi.CallFunction(&h.cifPrepareRead, h.fnPrepareRead, unsafe.Pointer(&prepResult), dispArgs[:])
+	if h.appQueue != 0 {
+		// Queue-specific prepare_read: only locks for our app queue.
+		prepArgs := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.appQueue)}
+		ffi.CallFunction(&h.cifPrepareReadQ, h.fnPrepareReadQueue, unsafe.Pointer(&prepResult), prepArgs[:])
+	} else {
+		// Fallback: no app queue (should not happen in normal operation).
+		ffi.CallFunction(&h.cifPrepareRead, h.fnPrepareRead, unsafe.Pointer(&prepResult), dispArgs[:])
+	}
 
 	if prepResult == 0 {
 		// Successfully locked for reading — check if data available
@@ -184,14 +197,20 @@ func (h *LibwaylandHandle) DispatchDefaultQueue() error {
 			var readResult int32
 			ffi.CallFunction(&h.cifReadEvents, h.fnReadEvents, unsafe.Pointer(&readResult), dispArgs[:])
 		} else {
-			// No data — cancel read lock
+			// No data — cancel read lock.
+			// wl_display_cancel_read is NOT queue-specific (cancels the global read lock).
 			ffi.CallFunction(&h.cifPrepareRead, h.fnCancelRead, nil, dispArgs[:])
 		}
 	}
 
-	// Dispatch any events that were read (or already queued)
+	// Dispatch events on our app queue only (never touches default queue).
 	var dispResult int32
-	ffi.CallFunction(&h.cifDispatchP, h.fnDispatchPend, unsafe.Pointer(&dispResult), dispArgs[:])
+	if h.appQueue != 0 {
+		queueArgs := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.appQueue)}
+		ffi.CallFunction(&h.cifDispatchQP, h.fnDispatchQueueP, unsafe.Pointer(&dispResult), queueArgs[:])
+	} else {
+		ffi.CallFunction(&h.cifDispatchP, h.fnDispatchPend, unsafe.Pointer(&dispResult), dispArgs[:])
+	}
 
 	return nil
 }

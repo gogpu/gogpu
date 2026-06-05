@@ -219,6 +219,11 @@ func (h *LibwaylandHandle) DispatchCSDEvents() error {
 	if !h.csdActive {
 		return nil
 	}
+	// Hold displayMu to serialize CSD wl_display operations (flush, dispatch_queue_pending)
+	// with the render thread's Vulkan/GLES/Software WSI calls. Without this lock, CSD flush()
+	// races with any backend's internal wl_display_flush — causing SIGSEGV (ADR-041, #292).
+	h.displayMu.Lock()
+	defer h.displayMu.Unlock()
 	if err := h.flush(); err != nil {
 		return fmt.Errorf("csd dispatch: flush failed: %w", err)
 	}

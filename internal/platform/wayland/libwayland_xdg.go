@@ -436,14 +436,24 @@ func (h *LibwaylandHandle) addListener(proxy uintptr, listener uintptr) error {
 	return nil
 }
 
-// roundtrip calls wl_display_roundtrip(display).
-// This flushes, reads events, and dispatches them (including our configure callback).
+// roundtrip calls wl_display_roundtrip_queue(display, appQueue) if the app queue
+// is active, otherwise falls back to wl_display_roundtrip(display).
+// Using the queue-specific variant ensures roundtrip only dispatches our objects'
+// events, never Mesa Vulkan WSI's internal callbacks (ADR-041 Phase 4).
 func (h *LibwaylandHandle) roundtrip() error {
 	var result int32
-	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	_ = ffi.CallFunction(&h.cifRoundtrip, h.fnRoundtrip, unsafe.Pointer(&result), args[:])
-	if result < 0 {
-		return fmt.Errorf("wl_display_roundtrip failed: %d", result)
+	if h.appQueue != 0 {
+		args := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.appQueue)}
+		_ = ffi.CallFunction(&h.cifRoundtripQueue, h.fnRoundtripQueue, unsafe.Pointer(&result), args[:])
+		if result < 0 {
+			return fmt.Errorf("wl_display_roundtrip_queue failed: %d", result)
+		}
+	} else {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
+		_ = ffi.CallFunction(&h.cifRoundtrip, h.fnRoundtrip, unsafe.Pointer(&result), args[:])
+		if result < 0 {
+			return fmt.Errorf("wl_display_roundtrip failed: %d", result)
+		}
 	}
 	return nil
 }
