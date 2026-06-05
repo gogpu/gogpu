@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.3] - 2026-06-05
+
+### Fixed
+
+- **Wayland SIGSEGV in vkQueuePresentKHR** (ADR-041, #292) — two fixes:
+  - **Phase 1: Configure gate** — blocking `WaitForConfigure()` loop matching SDL3/winit pattern. xdg-shell spec requires `xdg_surface.configure` before first buffer attach. Loops roundtrips until received (bounded, 50 iterations max).
+  - **Phase 2: Display thread safety** — `displayMu` mutex serializes `wl_display` access between main thread (event dispatch) and render thread (Vulkan WSI present/acquire). `DisplayLocker` optional interface via type assertion — no-op on X11/Windows/macOS/WASM.
+  - Fixes crash on all Wayland compositors (GNOME, KDE, Sway) with any GPU vendor.
+
 ## [0.41.2] - 2026-06-03
 
 ### Fixed

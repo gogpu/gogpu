@@ -91,6 +91,23 @@ type RenderTarget struct {
 	frameStarted bool
 }
 
+// lockDisplay acquires the platform display lock if the window supports it.
+// On Wayland, this serializes wl_display access between the main thread
+// and the render thread. On other platforms this is a no-op.
+// ADR-041 Phase 2: Wayland wl_display thread safety.
+func lockDisplay(pw platform.PlatformWindow) {
+	if locker, ok := pw.(platform.DisplayLocker); ok {
+		locker.DisplayLock()
+	}
+}
+
+// unlockDisplay releases the platform display lock if the window supports it.
+func unlockDisplay(pw platform.PlatformWindow) {
+	if locker, ok := pw.(platform.DisplayLocker); ok {
+		locker.DisplayUnlock()
+	}
+}
+
 // Renderer manages the GPU rendering pipeline.
 // It holds shared GPU state (instance, adapter, device, pipelines) that is
 // independent of any specific window. Per-window state lives in RenderTarget
@@ -246,6 +263,13 @@ func (r *Renderer) initSurface(ws *RenderTarget) error {
 			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
 		}
 		ws.state = SurfaceConfigured
+	} else {
+		// Zero dimensions at init — common on Wayland before the compositor
+		// sends xdg_surface.configure with actual dimensions. Leave surface
+		// in SurfaceReady state; the first resize event will configure it
+		// with real dimensions (ADR-041 defense-in-depth).
+		slog.Debug("gogpu: initSurface skipping configure (zero dimensions)",
+			"width", width, "height", height)
 	}
 
 	return nil
@@ -424,7 +448,12 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	}
 
 	// Acquire the next surface texture via wgpu public API.
+	// On Wayland, vkAcquireNextImageKHR may touch wl_display internally.
+	// Lock display to prevent races with main thread's DispatchDefaultQueue
+	// (ADR-041 Phase 2).
+	lockDisplay(platWin)
 	surfaceTexture, _, err := ws.surface.GetCurrentTexture()
+	unlockDisplay(platWin)
 	if err != nil {
 		ws.recoverFromAcquireError(err, device, adapter)
 		return false
@@ -503,9 +532,16 @@ func (r *Renderer) pollSubmissions() {
 // present presents the surface texture to the screen, passing any
 // damage rects to the platform compositor. Damage rects are consumed
 // (set to nil) after presentation so they don't leak to the next frame.
+//
+// On Wayland, Vulkan WSI internally calls wl_surface_attach / wl_surface_commit /
+// wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
+// the main thread's DispatchDefaultQueue (ADR-041 Phase 2).
 func (ws *RenderTarget) present() {
 	if ws.currentSurfaceTexture != nil {
-		if err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects); err != nil {
+		lockDisplay(ws.platWindow)
+		err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects)
+		unlockDisplay(ws.platWindow)
+		if err != nil {
 			slog.Error("PRESENT ERROR", "err", err)
 		}
 		ws.damageRects = nil

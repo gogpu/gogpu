@@ -248,6 +248,25 @@ type PlatformWindow interface {
 	Destroy()
 }
 
+// DisplayLocker is an optional interface for platforms where the display
+// connection is shared between threads and requires explicit synchronization.
+// On Wayland, wl_display is NOT thread-safe — the main thread's event dispatch
+// and the render thread's Vulkan WSI calls (present, acquire) can corrupt
+// internal state if they run concurrently. Platforms that implement this
+// interface provide Lock/Unlock around critical wl_display operations.
+// Platforms that don't need display-level locking (X11, Win32, macOS, browser)
+// simply don't implement this interface — callers use type assertion.
+//
+// ADR-041 Phase 2: Wayland wl_display thread safety.
+type DisplayLocker interface {
+	// DisplayLock acquires the display mutex. Must be called by the render
+	// thread before Vulkan WSI operations (surface acquire, present).
+	DisplayLock()
+
+	// DisplayUnlock releases the display mutex.
+	DisplayUnlock()
+}
+
 type MenuRole int
 
 const (

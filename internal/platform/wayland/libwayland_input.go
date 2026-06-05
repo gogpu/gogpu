@@ -160,7 +160,13 @@ func (h *LibwaylandHandle) SetupToplevelListeners() error {
 
 // DispatchDefaultQueue dispatches pending events on the default queue (non-blocking).
 // This handles xdg events, pointer, keyboard, touch — everything on the main display.
+//
+// Holds displayMu for the duration of all wl_display operations to prevent races
+// with the render thread's Vulkan WSI calls (ADR-041 Phase 2).
 func (h *LibwaylandHandle) DispatchDefaultQueue() error {
+	h.displayMu.Lock()
+	defer h.displayMu.Unlock()
+
 	if err := h.flush(); err != nil {
 		return err
 	}

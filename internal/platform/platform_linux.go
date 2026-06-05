@@ -510,6 +510,22 @@ func (w *waylandPlatformWindow) Close() { w.platform.CloseWindow() }
 
 func (w *waylandPlatformWindow) SetModalFrameCallback(_ func()) {}
 
+// DisplayLock acquires the Wayland display mutex, serializing access to
+// wl_display between the main thread (event dispatch) and the render thread
+// (Vulkan WSI present/acquire). ADR-041 Phase 2.
+func (w *waylandPlatformWindow) DisplayLock() {
+	if w.platform.libwl != nil {
+		w.platform.libwl.DisplayLock()
+	}
+}
+
+// DisplayUnlock releases the Wayland display mutex.
+func (w *waylandPlatformWindow) DisplayUnlock() {
+	if w.platform.libwl != nil {
+		w.platform.libwl.DisplayUnlock()
+	}
+}
+
 func (w *waylandPlatformWindow) Destroy() {
 	// Destruction handled by platform.Destroy()
 }
@@ -644,7 +660,7 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		logger().Warn("xdg_toplevel listener setup failed", "err", err)
 	}
 
-	// Flush + roundtrip to process initial events
+	// Flush + roundtrip to process initial events (toplevel listeners, input, etc.)
 	if err := libwl.Flush(); err != nil {
 		libwl.Close()
 		_ = display.Close()
@@ -656,7 +672,13 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		return fmt.Errorf("wayland: roundtrip failed: %w", err)
 	}
 
-	p.primary.configured = true
+	// Mark configured only if the compositor actually sent xdg_surface.configure.
+	// WaitForConfigure in setupXdgRole blocks until configure arrives, so this
+	// should always be true. The check is defense-in-depth (ADR-041).
+	p.primary.configured = libwl.InitialConfigureReceived()
+	if !p.primary.configured {
+		logger().Warn("wayland: surface not configured after init, Vulkan present may fail")
+	}
 
 	// Detect env-based scale factor as fallback
 	p.envScaleFactor = detectEnvScaleFactor()

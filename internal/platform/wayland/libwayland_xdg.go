@@ -215,6 +215,9 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 	h.marshalVoid(h.xdgSurface, 4, serial)
 	slog.Debug("ack_configure sent", "serial", uint32(serial))
 
+	// Mark initial configure received — unblocks WaitForConfigure (ADR-041).
+	h.initialConfigureReceived = true
+
 	// Resize CSD subsurfaces AFTER ack_configure, BEFORE parent commit.
 	// Subsurfaces in sync mode have their state applied atomically with the parent commit.
 	// This is the GLFW pattern: ack_configure -> resizeWindow -> commit.
@@ -349,17 +352,20 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 		return fmt.Errorf("wayland: flush before roundtrip failed: %w", err)
 	}
 
-	// Set callback handle for the duration of roundtrip
+	// Set callback handle for the duration of roundtrip.
+	// Keep set for the window lifetime — needed for runtime xdg_surface.configure
+	// (maximize, resize) and xdg_wm_base.ping.
 	xdgCallbackHandle = h
 
-	// Roundtrip: processes initial configure event.
-	// The configure callback acks it, making the surface ready for buffers.
-	if err := h.roundtrip(); err != nil {
-		return fmt.Errorf("wayland: roundtrip for xdg configure failed: %w", err)
+	// Block until compositor sends xdg_surface.configure (ADR-041 configure gate).
+	// A single roundtrip is NOT guaranteed to deliver configure — the compositor
+	// may batch events or introduce delay. WaitForConfigure loops roundtrips
+	// until the configure callback fires and sets initialConfigureReceived.
+	slog.Debug("wayland: waiting for initial xdg_surface.configure")
+	if err := h.WaitForConfigure(); err != nil {
+		return fmt.Errorf("wayland: wait for xdg configure failed: %w", err)
 	}
-
-	// Keep xdgCallbackHandle set for the window lifetime.
-	// Needed for runtime xdg_surface.configure (maximize, resize) and xdg_wm_base.ping.
+	slog.Debug("wayland: initial configure complete")
 
 	// Second commit after configure ack (surface is now fully configured)
 	h.marshalVoid(h.surface, 6) // wl_surface::commit

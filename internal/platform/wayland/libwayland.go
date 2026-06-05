@@ -4,6 +4,7 @@ package wayland
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"unsafe"
 
@@ -65,6 +66,18 @@ type LibwaylandHandle struct {
 	fnDispatchQueueP unsafe.Pointer // wl_display_dispatch_queue_pending
 	fnProxySetQueue  unsafe.Pointer // wl_proxy_set_queue
 	fnMarshalArray   unsafe.Pointer // wl_proxy_marshal_array (no new_id)
+
+	// displayMu serializes wl_display access between the main thread (event dispatch)
+	// and the render thread (Vulkan WSI present/acquire). libwayland docs state that
+	// wl_display is NOT thread-safe — concurrent wl_display_flush (from Vulkan
+	// vkQueuePresentKHR) and wl_display_read_events (from DispatchDefaultQueue) can
+	// corrupt internal state. ADR-041 Phase 2.
+	displayMu sync.Mutex
+
+	// Configure gate — blocks until compositor sends initial xdg_surface.configure.
+	// Without this, Vulkan present can race ahead of the compositor mapping the surface,
+	// causing SIGSEGV in vkQueuePresentKHR (ADR-041 Phase 1).
+	initialConfigureReceived bool
 
 	// CSD objects (subsurfaces for client-side decorations)
 	subcompositor uintptr    // wl_subcompositor* proxy
@@ -172,6 +185,16 @@ func (h *LibwaylandHandle) Display() uintptr { return h.display }
 
 // Surface returns the wl_surface* C pointer for Vulkan surface creation.
 func (h *LibwaylandHandle) Surface() uintptr { return h.surface }
+
+// DisplayLock acquires the wl_display mutex. The render thread must hold this
+// lock around Vulkan WSI operations (present, acquire) that internally call
+// wl_surface_attach / wl_surface_commit / wl_display_flush. Without this lock,
+// the main thread's DispatchDefaultQueue can race with Vulkan WSI calls,
+// corrupting libwayland internal state (ADR-041 Phase 2).
+func (h *LibwaylandHandle) DisplayLock() { h.displayMu.Lock() }
+
+// DisplayUnlock releases the wl_display mutex.
+func (h *LibwaylandHandle) DisplayUnlock() { h.displayMu.Unlock() }
 
 // OpenLibwayland loads libwayland-client.so.0 and creates Vulkan-ready C pointers.
 // compositorName/Version and xdgWmBaseName/Version come from the pure Go Wayland
@@ -567,4 +590,39 @@ func (h *LibwaylandHandle) disconnectDisplay() {
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
 	_ = ffi.CallFunction(&h.cifDisconn, h.fnDisplayDisconn, nil, args[:])
 	h.display = 0
+}
+
+// WaitForConfigure performs blocking roundtrips until the compositor sends
+// the initial xdg_surface.configure event. Without this gate, Vulkan
+// presentation races ahead of surface mapping and crashes with SIGSEGV
+// in vkQueuePresentKHR (ADR-041).
+//
+// The xdg-shell spec requires the compositor to send configure after the
+// initial commit, but a single roundtrip is not guaranteed to deliver it
+// (compositor may batch events or delay). This loop is bounded: the
+// compositor MUST send configure eventually or the connection is broken.
+func (h *LibwaylandHandle) WaitForConfigure() error {
+	const maxRoundtrips = 50 // safety limit — compositor should respond in 1-3
+	for i := range maxRoundtrips {
+		if h.initialConfigureReceived {
+			slog.Debug("wayland: initial configure received", "roundtrips", i)
+			return nil
+		}
+		if err := h.roundtrip(); err != nil {
+			return fmt.Errorf("wayland: wait for configure: %w", err)
+		}
+	}
+	// If we exhausted retries, the compositor never sent configure.
+	// This should not happen with a conformant compositor, but proceeding
+	// without configure is better than hanging indefinitely.
+	slog.Warn("wayland: configure not received after max roundtrips, proceeding anyway",
+		"maxRoundtrips", maxRoundtrips)
+	return nil
+}
+
+// InitialConfigureReceived reports whether the compositor has sent the
+// initial xdg_surface.configure event. Used by the platform layer to
+// confirm that the surface is ready for Vulkan presentation.
+func (h *LibwaylandHandle) InitialConfigureReceived() bool {
+	return h.initialConfigureReceived
 }
