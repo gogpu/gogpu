@@ -578,6 +578,7 @@ func (s *stubWindow) Minimize()                                                 
 func (s *stubWindow) Maximize()                                                            { s.maximized = true }
 func (s *stubWindow) IsMaximized() bool                                                    { return s.maximized }
 func (s *stubWindow) Close()                                                               { s.closed = true }
+func (s *stubWindow) Show()                                                                {}
 func (s *stubWindow) SyncFrame()                                                           {}
 func (s *stubWindow) SetCursorMode(_ int)                                                  {}
 func (s *stubWindow) CursorMode() int                                                      { return 0 }

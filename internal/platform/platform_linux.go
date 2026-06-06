@@ -399,6 +399,12 @@ func (w *x11PlatformWindow) IsFullscreen() bool {
 
 func (w *x11PlatformWindow) Close() { w.platform.inner.CloseWindow() }
 
+func (w *x11PlatformWindow) Show() {
+	if err := w.platform.inner.MapWindow(); err != nil {
+		logger().Warn("x11: MapWindow failed in Show", "err", err)
+	}
+}
+
 // BlitPixels copies RGBA pixel data to the window using X11 PutImage.
 func (w *x11PlatformWindow) BlitPixels(pixels []byte, width, height int) error {
 	return w.platform.inner.BlitPixels(pixels, width, height)
@@ -507,6 +513,8 @@ func (w *waylandPlatformWindow) IsFullscreen() bool {
 }
 
 func (w *waylandPlatformWindow) Close() { w.platform.CloseWindow() }
+
+func (w *waylandPlatformWindow) Show() {}
 
 func (w *waylandPlatformWindow) SetModalFrameCallback(_ func()) {}
 

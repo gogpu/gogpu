@@ -376,12 +376,6 @@ func (p *Platform) Init(config Config) error {
 		_ = conn.SetMotifWMHints(window, hints, atoms)
 	}
 
-	// Map (show) the window
-	if err := conn.MapWindow(window); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("x11: failed to map window: %w", err)
-	}
-
 	// Get keyboard mapping (non-fatal - keyboard input may not work correctly without it)
 	keymap, _ := conn.GetKeyboardMapping()
 	p.keymap = keymap
@@ -1475,6 +1469,17 @@ func (p *Platform) PollEventTimeout(timeout time.Duration) (Event, error) {
 		return nil, ErrNotConnected
 	}
 	return p.conn.PollEventTimeout(timeout)
+}
+
+// MapWindow makes the primary window visible by sending MapWindow to the X server.
+// Called separately from Init to allow GPU initialization while hidden.
+func (p *Platform) MapWindow() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.primary == nil || p.conn == nil {
+		return fmt.Errorf("x11: no window to map")
+	}
+	return p.conn.MapWindow(p.primary.window)
 }
 
 // Destroy closes the window and releases resources.

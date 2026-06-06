@@ -418,6 +418,9 @@ func (w *browserWindow) IsMaximized() bool { return false }
 // Close marks the window as should-close. On browser, the user closes tabs directly.
 func (w *browserWindow) Close() { w.shouldClose = true }
 
+// Show is a no-op on browser -- the canvas is always visible.
+func (w *browserWindow) Show() {}
+
 // SyncFrame is a no-op — browser compositing is handled by requestAnimationFrame.
 func (w *browserWindow) SyncFrame() {}
 

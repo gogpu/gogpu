@@ -66,6 +66,7 @@ func (m *mockWindow) IsMaximized() bool    { return m.maximized }
 func (m *mockWindow) SetFullscreen(v bool) { m.fullscreen = v }
 func (m *mockWindow) IsFullscreen() bool   { return m.fullscreen }
 func (m *mockWindow) Close()               { m.closed = true }
+func (m *mockWindow) Show()                {}
 
 // mockManager implements platform.PlatformManager for testing.
 type mockManager struct {

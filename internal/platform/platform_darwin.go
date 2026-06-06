@@ -130,16 +130,6 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		w.surface = surface
 	}
 
-	// Show window - this makes the window visible and gives it valid dimensions
-	w.window.Show()
-
-	// Update surface size now that window is visible.
-	// This ensures CAMetalLayer has correct drawable dimensions
-	// and avoids "ignoring invalid setDrawableSize" warnings.
-	if w.surface != nil {
-		w.surface.UpdateSize()
-	}
-
 	p.mu.Lock()
 	p.windows = append(p.windows, w)
 	if p.primary == nil {
@@ -352,6 +342,25 @@ func (dw *darwinPlatformWindow) IsMaximized() bool {
 func (dw *darwinPlatformWindow) Close() {
 	if dw.window != nil {
 		dw.window.Close()
+	}
+}
+
+func (dw *darwinPlatformWindow) Show() {
+	if dw.window == nil {
+		return
+	}
+	dw.window.Show()
+	dw.platform.mu.RLock()
+	var surface *darwin.Surface
+	for _, w := range dw.platform.windows {
+		if w.id == dw.id {
+			surface = w.surface
+			break
+		}
+	}
+	dw.platform.mu.RUnlock()
+	if surface != nil {
+		surface.UpdateSize()
 	}
 }
 

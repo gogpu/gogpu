@@ -232,6 +232,11 @@ type PlatformWindow interface {
 	// Close requests the window to close.
 	Close()
 
+	// Show makes the window visible and gives it input focus.
+	// Called by App after GPU initialization to avoid black-screen flash.
+	// On Wayland and Browser this is a no-op (compositor controls visibility).
+	Show()
+
 	// SyncFrame synchronizes the rendered frame with the compositor.
 	SyncFrame()
 

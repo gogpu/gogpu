@@ -38,6 +38,7 @@ const (
 	idcArrow           = 32512
 	swShowNormal       = 1
 	swShow             = 5
+	swShowNA           = 8
 	swRestore          = 9
 	pmRemove           = 0x0001
 	wsOverlappedWindow = 0x00CF0000
@@ -294,6 +295,11 @@ var (
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
 	procGlobalFree       = kernel32.NewProc("GlobalFree")
+
+	// Window focus and activation
+	procBringWindowToTop    = user32.NewProc("BringWindowToTop")
+	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
+	procSetFocusW           = user32.NewProc("SetFocus")
 
 	// Mouse capture (for drag tracking across window boundaries)
 	procSetCapture     = user32.NewProc("SetCapture")
@@ -583,12 +589,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		return nil, fmt.Errorf("utf16 title: %w", err)
 	}
 
-	var style uintptr
-	if config.Frameless {
-		style = uintptr(wsOverlappedWindow) // hidden, show after DWM setup
-	} else {
-		style = uintptr(wsOverlappedWindow | wsVisible)
-	}
+	style := uintptr(wsOverlappedWindow)
 
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
@@ -632,8 +633,6 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		w.updateSize()
 	}
 
-	procShowWindow.Call(uintptr(w.hwnd), swShowNormal)
-	procUpdateWindow.Call(uintptr(w.hwnd))
 	w.updateSize()
 
 	return w, nil
@@ -793,6 +792,14 @@ func (w *win32Window) IsFullscreen() bool {
 
 func (w *win32Window) Close() {
 	procPostMessageW.Call(uintptr(w.hwnd), wmClose, 0, 0)
+}
+
+func (w *win32Window) Show() {
+	procShowWindow.Call(uintptr(w.hwnd), swShowNA)
+	procBringWindowToTop.Call(uintptr(w.hwnd))
+	procSetForegroundWindow.Call(uintptr(w.hwnd))
+	procSetFocusW.Call(uintptr(w.hwnd))
+	procUpdateWindow.Call(uintptr(w.hwnd))
 }
 
 func (w *win32Window) SyncFrame() {

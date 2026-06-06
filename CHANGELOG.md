@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.5] - 2026-06-06
+
+### Fixed
+
+- **Window creation: hidden-then-show pattern** — windows are now created hidden and shown only after GPU initialization completes. Eliminates three compounding Win32 bugs:
+  - `WM_SETFOCUS` lost during `CreateWindowExW` (window handle not registered yet — [Raymond Chen: "Saving the window handle too late"](https://devblogs.microsoft.com/oldnewthing/20191014-00/?p=102992))
+  - Black flash from `BLACK_BRUSH` background visible during GPU adapter/device init
+  - `ShowWindow(SW_SHOWNORMAL)` on already-visible window was a no-op for focus
+- **Win32: GLFW/Ebiten focus pattern** — `ShowWindow(SW_SHOWNA)` + `BringWindowToTop` + `SetForegroundWindow` + `SetFocus` after handle registration. Matches GLFW, Ebiten, SDL3, winit, Flutter.
+- **All platforms unified** — `Show()` added to internal `PlatformWindow` interface. Windows: deferred show + explicit focus. macOS: `Show()` extracted from `CreateWindow`. X11: `MapWindow` deferred from `Init()`. Wayland/Browser: no-op (compositor controls visibility).
+
+### Changed
+
+- **deps:** wgpu v0.29.4 → v0.29.6 (fence ordering fix, `Fence.Signal` returns error)
+
 ## [0.41.4] - 2026-06-05
 
 ### Fixed

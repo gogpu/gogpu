@@ -265,6 +265,8 @@ func (a *App) Run() error {
 		return err
 	}
 
+	platWindow.Show()
+
 	// Shutdown sequence (all on render thread for GPU safety):
 	// 1. WaitIdle — ensure all GPU work completes
 	// 2. DrainDeferredDestroys — release GC-enqueued resources

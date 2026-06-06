@@ -25,9 +25,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.41.4
+## Current State: v0.41.5
 
 ✅ **Production-ready** with full feature set:
+- **Hidden-then-show window creation** — GLFW/Ebiten/SDL3/Flutter pattern: window created hidden, shown after GPU init. Eliminates black flash and WM_SETFOCUS race on all platforms.
 - **Universal App Lifecycle** — RenderTarget, QuitOnLastWindowClosed, AppLifecycle enum (5 states), surface/lifecycle callbacks (ADR-026, Phases 1-3)
 - **macOS system menu** — `SetMenu()`, `SetCustomMenu()`, `MenuRole`, native menu bar (ADR-022, @lkmavi)
 - **Linux clipboard** — X11 ICCCM selection + Wayland wl_data_device (PLAT-009, ADR-037)

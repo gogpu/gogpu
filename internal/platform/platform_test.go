@@ -141,6 +141,7 @@ func (m *mockPlatformWindow) Minimize()                        {}
 func (m *mockPlatformWindow) Maximize()                        {}
 func (m *mockPlatformWindow) IsMaximized() bool                { return false }
 func (m *mockPlatformWindow) Close()                           {}
+func (m *mockPlatformWindow) Show()                            {}
 func (m *mockPlatformWindow) SetFullscreen(bool)               {}
 func (m *mockPlatformWindow) IsFullscreen() bool               { return false }
 func (m *mockPlatformWindow) SetModalFrameCallback(func())     {}
