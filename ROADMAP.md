@@ -47,7 +47,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Triple-backend WebGPU** — Pure Go / Rust FFI / Browser WASM via build tags (ADR-038)
 - **Native file dialogs** — macOS NSPanel, Windows COM, Linux D-Bus + zenity/kdialog (ADR-036, @lkmavi)
 - **Native menus** — macOS NSMenu, Windows HMENU, Linux D-Bus AppMenu (ADR-040, @lkmavi)
-- **Wayland thread safety** — app event queue separation, CSD displayMu, configure gate (ADR-041, #292)
+- **Wayland thread safety** — app event queue separation, CSD displayMu, configure gate, wl_shm eager init (ADR-041, #292)
 - **PlatformManager / PlatformWindow** — clean process-level / per-window split (Qt6 pattern)
 - Multi-thread architecture (Ebiten/Gio pattern)
 - Event-driven rendering with three-state model (0% CPU when idle)

@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **deps:** wgpu v0.29.4 → v0.29.6 (fence ordering fix, `Fence.Signal` returns error)
+- **deps:** wgpu v0.29.4 → v0.29.7 (fence ordering fix, `Fence.Signal` error return, Wayland SIGSEGV fix — `obtainWlShm` eager init in `Configure()`, gogpu#292)
 
 ## [0.41.4] - 2026-06-05
 
