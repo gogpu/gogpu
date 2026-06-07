@@ -109,7 +109,6 @@ jobs:
         files: ./coverage.txt
         flags: unittests
         name: codecov-gogpu
-        fail_ci_if_error: true
 
   # Linting
   lint:
