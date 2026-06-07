@@ -56,8 +56,15 @@ var clipboardInterfaces struct {
 	offerEvents  [1]cWlMessage // offer
 	deviceEvents [6]cWlMessage // data_offer, enter, leave, motion, drop, selection
 
-	// NULL types array (shared by all messages)
+	// NULL types array (shared by messages without new_id arguments)
 	nullTypes [8]uintptr
+
+	// dataOfferTypes: types array for data_device.data_offer event (signature "n").
+	// types[0] must point to wl_data_offer interface so that libwayland's
+	// create_proxies() assigns the correct interface to the new proxy.
+	// Without this, the proxy gets interface=NULL → SIGSEGV in queue_event
+	// at proxy->object.interface->event_count (offset 0x18 from NULL).
+	dataOfferTypes [1]uintptr
 }
 
 // initClipboardInterfaces constructs C-compatible interface descriptors
@@ -139,7 +146,12 @@ func initClipboardInterfaces() {
 
 		// wl_data_device events
 		// event 0: data_offer(id: new_id<wl_data_offer>), signature "n"
-		clipboardInterfaces.deviceEvents[0] = cWlMessage{cstr("data_offer\x00"), cstr("n\x00"), nt}
+		// types[0] MUST point to wl_data_offer interface — libwayland's create_proxies()
+		// reads it to set the new proxy's interface. NULL here → proxy with interface=NULL
+		// → SIGSEGV at proxy->object.interface->event_count (addr=0x18). See gogpu#292.
+		clipboardInterfaces.dataOfferTypes[0] = uintptr(unsafe.Pointer(&clipboardInterfaces.offer))
+		clipboardInterfaces.deviceEvents[0] = cWlMessage{cstr("data_offer\x00"), cstr("n\x00"),
+			uintptr(unsafe.Pointer(&clipboardInterfaces.dataOfferTypes[0]))}
 		// event 1: enter(serial, surface, x_fixed, y_fixed, id<data_offer>), signature "uoff?o"
 		clipboardInterfaces.deviceEvents[1] = cWlMessage{cstr("enter\x00"), cstr("uoff?o\x00"), nt}
 		// event 2: leave(), signature ""

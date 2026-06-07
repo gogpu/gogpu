@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.41.5] - 2026-06-06
+## [0.41.6] - 2026-06-07
 
 ### Fixed
 
@@ -16,9 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Win32: GLFW/Ebiten focus pattern** — `ShowWindow(SW_SHOWNA)` + `BringWindowToTop` + `SetForegroundWindow` + `SetFocus` after handle registration. Matches GLFW, Ebiten, SDL3, winit, Flutter.
 - **All platforms unified** — `Show()` added to internal `PlatformWindow` interface. Windows: deferred show + explicit focus. macOS: `Show()` extracted from `CreateWindow`. X11: `MapWindow` deferred from `Init()`. Wayland/Browser: no-op (compositor controls visibility).
 
+- **Wayland SIGSEGV fix (#292)** — `wl_data_device.data_offer` event created proxy with `interface=NULL` because `wl_message.types` array was all-NULL. libwayland's `create_proxies()` read `types[0]=NULL` → proxy with NULL interface → SIGSEGV at `proxy->object.interface->event_count` (offset 0x18). Fix: `dataOfferTypes[0]` points to `wl_data_offer` interface. Root cause found after 30+ research agents, WAYLAND_DEBUG tracing, strace analysis, and libwayland source audit.
+
 ### Changed
 
-- **deps:** wgpu v0.29.4 → v0.29.7 (fence ordering fix, `Fence.Signal` error return, Wayland SIGSEGV fix — `obtainWlShm` eager init in `Configure()`, gogpu#292)
+- **deps:** wgpu v0.29.4 → v0.29.9 (fence ordering, Fence.Signal error, Wayland eager init, display wrapper pattern, SHM triple-buffer freeze fix)
 
 ## [0.41.4] - 2026-06-05
 
