@@ -174,31 +174,47 @@ func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType,
 		vsync:      vsync,
 	}
 
-	// Phase 1: Create GPU device (independent of any window)
-	if err := r.initDevice(backendType, graphicsAPI); err != nil {
+	// Phase 1: Create GPU instance.
+	if err := r.initInstance(backendType, graphicsAPI); err != nil {
 		return nil, err
 	}
 
-	// Phase 2: Create surface for the primary window
-	if err := r.initSurface(r.primary); err != nil {
+	// Phase 2: For GLES, create the surface before adapter enumeration.
+	// EGL requires a window handle to build an EGL context; without one,
+	// EnumerateAdapters returns a zero-value Adapter (nil glCtx) that panics
+	// in Open. All other backends enumerate adapters without a surface (ADR-026).
+	var surfaceHint *wgpu.Surface
+	if graphicsAPI == types.GraphicsAPIGLES {
+		if err := r.createSurface(r.primary); err != nil {
+			return nil, err
+		}
+		surfaceHint = r.primary.surface
+	}
+
+	// Phase 3: Request adapter (with surface hint for GLES) and device.
+	if err := r.initAdapterDevice(surfaceHint); err != nil {
 		return nil, err
+	}
+
+	// Phase 4: Finish surface setup.
+	// For GLES the surface was created in Phase 2; only configure dimensions now.
+	// For all other backends, create and configure the surface here.
+	if graphicsAPI == types.GraphicsAPIGLES {
+		if err := r.configureSurface(r.primary); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := r.initSurface(r.primary); err != nil {
+			return nil, err
+		}
 	}
 
 	return r, nil
 }
 
-// initDevice creates the GPU instance, adapter, and device.
-// No window or surface needed — device is window-independent (ADR-026).
-func (r *Renderer) initDevice(_ types.BackendType, graphicsAPI types.GraphicsAPI) error {
-	// ADR-038: Rust/Native selection is now inside wgpu via build tags.
-	// gogpu always calls initNative which uses wgpu.CreateInstance().
-	// With -tags rust, wgpu internally redirects to go-webgpu/webgpu (wgpu-native).
-	return r.initNative(graphicsAPI)
-}
-
-// initNative initializes the GPU device using the pure Go wgpu path.
-// Device creation is independent of any window — follows ADR-026 universal lifecycle.
-func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
+// initInstance creates the wgpu Instance for the requested graphics API.
+// ADR-038: Rust/Native selection is handled inside wgpu via build tags.
+func (r *Renderer) initInstance(_ types.BackendType, graphicsAPI types.GraphicsAPI) error {
 	var backendVariant gputypes.Backend
 	r.backendName, backendVariant = native.BackendInfo(graphicsAPI)
 
@@ -214,18 +230,20 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create instance: %w", err)
 	}
+	r.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	return nil
+}
 
-	// Request adapter WITHOUT CompatibleSurface — device is window-independent.
-	// Vulkan/DX12: enumerates all adapters without surface.
-	// GLES: deferred enumeration not triggered without surface hint — core
-	// returns Software adapter. Actual GL context (hidden window, wgpu v0.28.6)
-	// is created lazily on render thread. Adapter name may show "Software"
-	// but GLES rendering uses real GPU via hidden window GL context.
-	// TODO(wgpu): core.RequestAdapter should trigger deferred GLES enumeration
-	// when hidden window exists, even without surface hint.
-	r.adapter, err = r.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
-		PowerPreference: r.powerPreference,
-	})
+// initAdapterDevice requests the adapter and creates the logical device.
+// surfaceHint is non-nil only for GLES: it feeds EnumerateAdapters so the
+// backend can return a real adapter backed by a live EGL context.
+func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
+	opts := &wgpu.RequestAdapterOptions{
+		PowerPreference:   r.powerPreference,
+		CompatibleSurface: surfaceHint,
+	}
+	var err error
+	r.adapter, err = r.instance.RequestAdapter(opts)
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
 	}
@@ -235,17 +253,13 @@ func (r *Renderer) initNative(graphicsAPI types.GraphicsAPI) error {
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request device: %w", err)
 	}
-
-	r.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 	return nil
 }
 
-// initSurface creates and configures a GPU surface for a window.
-// Called after initDevice — device must already exist.
-// Separated from device init per ADR-026: surfaces come and go, device is permanent.
-func (r *Renderer) initSurface(ws *RenderTarget) error {
+// createSurface creates the wgpu Surface from the window handles.
+// Does not configure dimensions — call configureSurface after device is ready.
+func (r *Renderer) createSurface(ws *RenderTarget) error {
 	displayHandle, windowHandle := ws.platWindow.GetHandle()
-
 	surface, err := r.instance.CreateSurface(displayHandle, windowHandle)
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to create surface: %w", err)
@@ -253,26 +267,36 @@ func (r *Renderer) initSurface(ws *RenderTarget) error {
 	ws.surface = surface
 	ws.state = SurfaceReady
 	ws.format = r.surfaceFormat
+	return nil
+}
 
+// configureSurface configures the surface with the current window dimensions.
+// Requires device and adapter to be initialized. Zero dimensions are skipped —
+// common on Wayland before the compositor sends xdg_surface.configure
+// (ADR-041 defense-in-depth); the first resize event completes configuration.
+func (r *Renderer) configureSurface(ws *RenderTarget) error {
 	width, height := ws.platWindow.PhysicalSize()
 	if width > 0 && height > 0 {
 		ws.width = uint32(width)   //nolint:gosec // G115: validated positive above
 		ws.height = uint32(height) //nolint:gosec // G115: validated positive above
-
 		if err := ws.configure(r.device, r.adapter); err != nil {
 			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
 		}
 		ws.state = SurfaceConfigured
 	} else {
-		// Zero dimensions at init — common on Wayland before the compositor
-		// sends xdg_surface.configure with actual dimensions. Leave surface
-		// in SurfaceReady state; the first resize event will configure it
-		// with real dimensions (ADR-041 defense-in-depth).
-		slog.Debug("gogpu: initSurface skipping configure (zero dimensions)",
+		slog.Debug("gogpu: configureSurface skipping (zero dimensions)",
 			"width", width, "height", height)
 	}
-
 	return nil
+}
+
+// initSurface creates and configures a GPU surface for a window.
+// Separated from device init per ADR-026: surfaces come and go, device is permanent.
+func (r *Renderer) initSurface(ws *RenderTarget) error {
+	if err := r.createSurface(ws); err != nil {
+		return err
+	}
+	return r.configureSurface(ws)
 }
 
 // configure configures the wgpu surface with current dimensions and format.
