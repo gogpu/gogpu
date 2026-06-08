@@ -149,18 +149,9 @@ func (DefaultCSDPainter) PaintBorder(buf []byte, width, height int, _ CSDEdge) {
 func (DefaultCSDPainter) HitTestTitleBar(x, y, width, height int) CSDHitResult {
 	btnW := defaultButtonWidth
 
-	// Resize grip at top edge
-	if y < defaultCornerSize {
-		if x < defaultCornerSize {
-			return CSDHitResizeNW
-		}
-		if x >= width-defaultCornerSize {
-			return CSDHitResizeNE
-		}
-		return CSDHitResizeN
-	}
-
-	// Control buttons (right-aligned)
+	// Control buttons take priority over resize grips (GNOME/libadwaita pattern).
+	// Clicking a button at the top edge of the title bar must close/minimize/maximize,
+	// not start a resize — otherwise users entering from outside the window get resize.
 	closeX := width - btnW
 	maxX := closeX - btnW
 	minX := maxX - btnW
@@ -173,6 +164,14 @@ func (DefaultCSDPainter) HitTestTitleBar(x, y, width, height int) CSDHitResult {
 	}
 	if x >= minX {
 		return CSDHitMinimize
+	}
+
+	// Resize grip at top edge (only in non-button area)
+	if y < defaultCornerSize {
+		if x < defaultCornerSize {
+			return CSDHitResizeNW
+		}
+		return CSDHitResizeN
 	}
 
 	return CSDHitCaption

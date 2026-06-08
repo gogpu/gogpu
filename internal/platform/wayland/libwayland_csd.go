@@ -229,9 +229,6 @@ func (h *LibwaylandHandle) DispatchCSDEvents() error {
 	}
 
 	// Dispatch CSD event queue (separate from default xdg queue).
-	if err := h.flush(); err != nil {
-		return fmt.Errorf("csd dispatch: flush failed: %w", err)
-	}
 	h.dispatchCSDQueue()
 
 	// Process pending repaint (deferred from goffi callbacks to avoid nested FFI).

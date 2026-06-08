@@ -733,16 +733,25 @@ func (a *App) renderFrameMultiThread() {
 	frames := make([]windowFrame, 0, len(a.windowManager.order))
 	for _, id := range a.windowManager.order {
 		w := a.windowManager.windows[id]
-		if w == nil || !w.visible || w.onDraw == nil {
+		if w == nil || !w.visible {
 			continue
 		}
 		pw, ph := w.platWindow.PhysicalSize()
 		if pw <= 0 || ph <= 0 {
 			continue // Minimized
 		}
+		onDraw := w.onDraw
+		if onDraw == nil {
+			// On Wayland (and for consistency everywhere) the compositor only
+			// shows the window after the first buffer commit via the GPU backend.
+			// Without an onDraw callback no frame is ever presented and the window
+			// stays invisible. Fall back to a black-clear so the surface is
+			// committed at least once on startup and on any subsequent invalidation.
+			onDraw = func(ctx *Context) { ctx.Clear(0, 0, 0, 1) }
+		}
 		frames = append(frames, windowFrame{
 			window: w,
-			onDraw: w.onDraw,
+			onDraw: onDraw,
 			scale:  w.platWindow.ScaleFactor(),
 			physW:  pw,
 			physH:  ph,

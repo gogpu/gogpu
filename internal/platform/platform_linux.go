@@ -606,10 +606,21 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	required := []string{
 		wayland.InterfaceWlCompositor,
 		wayland.InterfaceXdgWmBase,
+		wayland.InterfaceWlSeat,
 	}
 	if err := registry.WaitForGlobals(required, 5); err != nil {
 		_ = display.Close()
 		return fmt.Errorf("wayland: %w", err)
+	}
+
+	// One extra roundtrip to collect optional globals (decoration, subcompositor,
+	// cursor-shape, etc.) that may arrive slightly after the required ones.
+	// Without this, CSD seat setup intermittently fails because wl_seat is
+	// found by WaitForGlobals but optional globals that arrived in the same
+	// batch haven't been dispatched yet.
+	if err := display.Roundtrip(); err != nil {
+		_ = display.Close()
+		return fmt.Errorf("wayland: extra roundtrip failed: %w", err)
 	}
 
 	// Collect global names/versions for C-side binding
@@ -830,8 +841,18 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.pointerX = x
 			w.pointerY = y
 			w.pointerIn = true
+			lastCursor := w.currentCursor
 			w.currentCursor = -1 // invalidate cache — compositor resets cursor on enter
 			w.pointerMu.Unlock()
+
+			// Wayland requires the client to explicitly set the cursor after
+			// wl_pointer.enter; without this the pointer becomes invisible.
+			// Restore the last known shape, falling back to the default arrow (0).
+			// GLFW applies the same fix at wl_window.c:1322.
+			if lastCursor < 0 {
+				lastCursor = 0
+			}
+			p.SetCursor(lastCursor)
 
 			w.dispatchPointerEvent(gpucontext.PointerEvent{
 				Type:        gpucontext.PointerEnter,
@@ -2605,9 +2626,20 @@ func (p *x11Platform) ShowSaveFileDialog(opts FileDialogOptions) (string, error)
 }
 
 func (p *waylandPlatform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
+	// Cancel key repeat before blocking: ShowOpenFileDialog blocks the main
+	// thread, so the timerfd accumulates up to maxRepeatPerPoll (10) expirations.
+	// Without cancelling, processRepeatTimer fires all accumulated repeats after
+	// the dialog closes, re-triggering the caller's OnKeyPress handler N times.
+	// timerfd_settime with zero resets the accumulated count (Linux man page).
+	if p.primary != nil {
+		p.primary.cancelAllKeyRepeat()
+	}
 	return showOpenFileDialog(opts)
 }
 
 func (p *waylandPlatform) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
+	if p.primary != nil {
+		p.primary.cancelAllKeyRepeat()
+	}
 	return showSaveFileDialog(opts)
 }

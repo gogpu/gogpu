@@ -175,7 +175,7 @@ func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType,
 	}
 
 	// Phase 1: Create GPU instance.
-	if err := r.initInstance(backendType, graphicsAPI); err != nil {
+	if err := r.initInstance(graphicsAPI); err != nil {
 		return nil, err
 	}
 
@@ -214,7 +214,7 @@ func newRenderer(platWin platform.PlatformWindow, backendType types.BackendType,
 
 // initInstance creates the wgpu Instance for the requested graphics API.
 // ADR-038: Rust/Native selection is handled inside wgpu via build tags.
-func (r *Renderer) initInstance(_ types.BackendType, graphicsAPI types.GraphicsAPI) error {
+func (r *Renderer) initInstance(graphicsAPI types.GraphicsAPI) error {
 	var backendVariant gputypes.Backend
 	r.backendName, backendVariant = native.BackendInfo(graphicsAPI)
 
