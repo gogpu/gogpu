@@ -397,7 +397,7 @@ func cString(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
-	p := *(*unsafe.Pointer)(unsafe.Pointer(&ptr))
+	p := unsafe.Pointer(ptr) //nolint:govet // ObjC C string pointer, safe FFI usage
 	var length int
 	for *(*byte)(unsafe.Add(p, length)) != 0 {
 		length++

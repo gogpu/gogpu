@@ -10,6 +10,8 @@ require (
 	golang.org/x/sys v0.45.0
 )
 
+replace github.com/gogpu/wgpu => github.com/lkmavi/wgpu v0.0.0-20260608204626-7362577e873b
+
 require (
 	github.com/go-webgpu/webgpu v0.5.2 // indirect
 	github.com/gogpu/naga v0.17.14 // indirect

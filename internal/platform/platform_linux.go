@@ -870,8 +870,6 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 // Each secondary gets its own wl_display, wl_surface, and xdg_toplevel so the
 // compositor presents it as a separate window. Input (keyboard/pointer) is NOT
 // set up on secondary connections — it flows through the primary connection's seat.
-//
-//nolint:gocognit // mirrors initSingleConnection discovery flow; complexity is inherent
 func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandConn, error) {
 	// Discover Wayland globals via a short-lived pure-Go connection.
 	display, err := wayland.Connect()
@@ -2424,10 +2422,16 @@ func (p *waylandPlatform) PollEvents() Event {
 	}
 
 	// Dispatch and drain events from secondary connections.
+	// Deep-copy the slice so a concurrent Destroy() (which nils libwl) cannot
+	// race with DispatchDefaultQueue below.
 	p.secondaryMu.RLock()
-	secs := p.secondaries
+	secs := make([]*secondaryWaylandConn, len(p.secondaries))
+	copy(secs, p.secondaries)
 	p.secondaryMu.RUnlock()
 	for _, sec := range secs {
+		if sec.libwl == nil {
+			continue
+		}
 		if err := sec.libwl.DispatchDefaultQueue(); err != nil {
 			logger().Error("wayland secondary dispatch error", "id", sec.winID, "error", err)
 		}

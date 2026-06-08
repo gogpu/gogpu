@@ -142,14 +142,14 @@ func darwinBuildContentTypesArray(filters []FileTypeFilter) darwin.ID {
 // darwinNSStringToGo converts an ObjC NSString to a Go string.
 func darwinNSStringToGo(nsstr darwin.ID) string {
 	utf8Ptr := darwin.NSStringUTF8Ptr(nsstr)
-	if utf8Ptr == nil {
+	if utf8Ptr == 0 {
 		return ""
 	}
 	length := darwin.NSStringLength(nsstr)
 	if length == 0 {
 		return ""
 	}
-	data := unsafe.Slice((*byte)(utf8Ptr), length*4)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 	end := 0
 	for end < len(data) && data[end] != 0 {
 		end++

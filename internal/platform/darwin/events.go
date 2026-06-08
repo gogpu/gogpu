@@ -2,8 +2,6 @@
 
 package darwin
 
-import "unsafe"
-
 // EventHandler is called for each NSEvent during event polling.
 // Return true to dispatch the event to the application, false to consume it.
 type EventHandler func(event ID, eventType NSEventType) bool
@@ -197,11 +195,10 @@ func NSStringLength(nsstr ID) uint64 {
 
 // NSStringUTF8Ptr returns a pointer to the UTF-8 bytes of an NSString.
 // The pointer is only valid until the NSString is released or the autorelease pool is drained.
-func NSStringUTF8Ptr(nsstr ID) unsafe.Pointer {
+func NSStringUTF8Ptr(nsstr ID) uintptr {
 	if nsstr.IsNil() {
-		return nil
+		return 0
 	}
 	initSelectors()
-	p := nsstr.Send(selectors.UTF8String)
-	return *(*unsafe.Pointer)(unsafe.Pointer(&p))
+	return uintptr(nsstr.Send(selectors.UTF8String))
 }

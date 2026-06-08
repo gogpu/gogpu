@@ -716,7 +716,7 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 
 	// Get UTF-8 C string pointer
 	utf8Ptr := darwin.NSStringUTF8Ptr(nsstr)
-	if utf8Ptr == nil {
+	if utf8Ptr == 0 {
 		return
 	}
 
@@ -727,7 +727,7 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 	}
 
 	// Convert to Go byte slice (safe: pointer valid within this autorelease pool scope)
-	data := unsafe.Slice((*byte)(utf8Ptr), length*4)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Decode UTF-8 runes and push each non-control character to event queue.
 	// Stop at null terminator (UTF8String is a C string).
@@ -1194,7 +1194,7 @@ func (p *darwinPlatform) ClipboardRead() (string, error) {
 
 	// Convert NSString to Go string
 	utf8Ptr := darwin.NSStringUTF8Ptr(nsstr)
-	if utf8Ptr == nil {
+	if utf8Ptr == 0 {
 		return "", nil
 	}
 
@@ -1204,7 +1204,7 @@ func (p *darwinPlatform) ClipboardRead() (string, error) {
 	}
 
 	// Read UTF-8 bytes (length is character count; UTF-8 may use up to 4 bytes per char)
-	data := unsafe.Slice((*byte)(utf8Ptr), length*4)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual end of the C string
 	end := 0
@@ -1269,7 +1269,7 @@ func (p *darwinPlatform) DarkMode() bool {
 
 	// Get the UTF-8 string from the appearance name
 	utf8Ptr := darwin.NSStringUTF8Ptr(nameID)
-	if utf8Ptr == nil {
+	if utf8Ptr == 0 {
 		return false
 	}
 
@@ -1278,7 +1278,7 @@ func (p *darwinPlatform) DarkMode() bool {
 		return false
 	}
 
-	data := unsafe.Slice((*byte)(utf8Ptr), length*4)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(utf8Ptr)), length*4) //nolint:govet // ObjC UTF8String pointer, bounded by NSString length
 
 	// Find actual string end
 	end := 0
