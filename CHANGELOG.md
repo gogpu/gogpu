@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.7] - 2026-06-08
+
+### Fixed
+
+- **Wayland GLES init** (@lkmavi, #292) — renderer split into 4-phase init: `initInstance` → `createSurface` (GLES only) → `initAdapterDevice(surfaceHint)` → `configureSurface`. EGL requires surface before GL context; without surface hint, adapter had nil glCtx → crash. Follows ADR-026 universal lifecycle.
+- **Wayland invisible cursor** — `SetCursor(lastCursor)` in `OnPointerEnter` callback (GLFW `wl_window.c:1322` pattern). Wayland protocol requires client to set cursor after `wl_pointer.enter`.
+- **Wayland CSD seat timing** — `wl_seat` added to `WaitForGlobals` required list + extra `display.Roundtrip()` for optional late globals. Fixes intermittent "wl_seat not available" in CSD pointer setup.
+- **Wayland CSD hit-test priority** (@lkmavi) — control buttons (close/max/min) now take priority over resize grips at top edge (GNOME/libadwaita pattern).
+- **Wayland fallback onDraw** — windows without `OnDraw` callback get `Clear(0,0,0,1)` fallback so compositor receives first buffer commit and shows the window.
+- **KDE Plasma Wayland AppMenu** (@lkmavi) — `org_kde_kwin_appmenu` protocol: `set_address` binds D-Bus dbusmenu service to wl_surface. D-Bus `RegisterWindow` alone insufficient on KDE Wayland.
+- **D-Bus RegisterWindow flags** (@lkmavi) — flags changed from `NO_REPLY_EXPECTED` to `0` so registrar sends reply for logging. winID kept as 0 on Wayland (KDE matches by sender PID).
+- **File dialog key repeat** (@lkmavi) — `cancelAllKeyRepeat()` before blocking dialog prevents accumulated repeats after close.
+
+### Changed
+
+- **deps:** wgpu v0.29.9 → v0.29.12 (GLES Linux FFI pointer convention fix — 30+ GL calls corrected, EGL surfaceless/pbuffer, Wayland nativeDisplay fallback, @lkmavi wgpu#210/#213)
+
 ## [0.41.6] - 2026-06-07
 
 ### Fixed

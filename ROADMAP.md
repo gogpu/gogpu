@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.41.6
+## Current State: v0.41.7
 
 ✅ **Production-ready** with full feature set:
 - **Hidden-then-show window creation** — GLFW/Ebiten/SDL3/Flutter pattern: window created hidden, shown after GPU init. Eliminates black flash and WM_SETFOCUS race on all platforms.
