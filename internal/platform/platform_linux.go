@@ -576,11 +576,28 @@ func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 	id := NewWindowID()
 	p.primaryWindowID = id
-	// Wayland has no X11 window ID; use 0. The AppMenu registrar on KDE
-	// Plasma Wayland associates the menu via the bus sender name instead.
 	win := &waylandPlatformWindow{platform: p, id: id}
 	p.menu.window = win
 	p.menu.attachWindow(0)
+
+	// On KDE Plasma Wayland, D-Bus RegisterWindow alone is not enough to bind
+	// the menu to the window. KWin requires set_address on the org_kde_kwin_appmenu
+	// object so it can associate our dbusmenu service with this wl_surface.
+	if p.libwl != nil && p.libwl.HasKDEAppmenu() {
+		busName, objPath := p.menu.busNameAndPath()
+		if busName != "" {
+			p.libwl.SetKDEAppmenuAddress(busName, objPath)
+			if err := p.libwl.Flush(); err != nil {
+				logger().Warn("wayland: KDE appmenu flush failed", "err", err)
+			} else {
+				logger().Info("AppMenu: KDE appmenu address set via Wayland protocol",
+					"service", busName, "path", objPath)
+			}
+		} else {
+			logger().Debug("AppMenu: KDE appmenu protocol available but D-Bus not connected yet")
+		}
+	}
+
 	return win, nil
 }
 
@@ -760,6 +777,18 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 			logger().Warn("clipboard setup failed (copy/paste unavailable)", "err", err)
 		} else {
 			logger().Debug("clipboard protocol bound (wl_data_device_manager)")
+		}
+	}
+
+	// Bind org_kde_kwin_appmenu_manager for KDE global menus (optional).
+	// On KDE Plasma Wayland, set_address must be called on this object to associate
+	// our dbusmenu D-Bus service with the wl_surface; RegisterWindow alone is not enough.
+	kdeAppmenuGlobal := registry.GetGlobalByInterface(wayland.InterfaceOrgKdeKwinAppmenuManager)
+	if kdeAppmenuGlobal != nil {
+		if err := libwl.SetupKDEAppmenu(kdeAppmenuGlobal.Name, kdeAppmenuGlobal.Version); err != nil {
+			logger().Warn("KDE appmenu protocol setup failed (global menu may not appear)", "err", err)
+		} else {
+			logger().Debug("KDE appmenu protocol bound")
 		}
 	}
 

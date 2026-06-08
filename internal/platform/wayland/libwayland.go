@@ -149,6 +149,10 @@ type LibwaylandHandle struct {
 	cursorShapeDevice    uintptr // wp_cursor_shape_device_v1* for main pointer (or 0)
 	csdCursorShapeDevice uintptr // wp_cursor_shape_device_v1* for CSD pointer (or 0)
 
+	// KDE app menu (org_kde_kwin_appmenu, required for Wayland global menus on KDE Plasma)
+	kdeAppmenuMgr uintptr // org_kde_kwin_appmenu_manager* proxy (or 0)
+	kdeAppmenu    uintptr // org_kde_kwin_appmenu* per-surface proxy (or 0)
+
 	// Clipboard (wl_data_device_manager protocol)
 	clipboardMgr          uintptr    // wl_data_device_manager* proxy (or 0)
 	clipboardDevice       uintptr    // wl_data_device* proxy (or 0)
@@ -342,6 +346,9 @@ func (h *LibwaylandHandle) Close() {
 
 	// Destroy clipboard objects (before cursor shape, pointer constraints, and input)
 	h.DestroyClipboard()
+
+	// Destroy KDE appmenu object (before input cleanup)
+	h.DestroyKDEAppmenu()
 
 	// Destroy cursor shape objects (before pointer constraints and input)
 	h.DestroyCursorShapeDevices()

@@ -523,15 +523,15 @@ func TestDbusAssembleMsg_ZeroFlags(t *testing.T) {
 	}
 }
 
-// TestMenuEncodeCall_NoReplyExpected verifies that RegisterWindow calls carry
-// the NO_REPLY_EXPECTED flag so the D-Bus daemon does not wait for a reply.
-func TestMenuEncodeCall_NoReplyExpected(t *testing.T) {
+// TestMenuEncodeCall_NoFlags verifies that RegisterWindow calls have flags=0 so
+// the registrar sends a METHOD_RETURN or ERROR that serve() can log.
+func TestMenuEncodeCall_NoFlags(t *testing.T) {
 	raw := menuEncodeCall(1, "dest", "/path", "iface", "Method", "", nil)
 	if len(raw) < 3 {
 		t.Fatal("encoded call too short")
 	}
-	if raw[2] != dbusFlagNoReplyExpected {
-		t.Errorf("flags byte = %#x, want NO_REPLY_EXPECTED (%#x)", raw[2], dbusFlagNoReplyExpected)
+	if raw[2] != 0 {
+		t.Errorf("flags byte = %#x, want 0 (reply expected)", raw[2])
 	}
 }
 
@@ -727,6 +727,56 @@ func TestMenuSyntheticWinID_Stable(t *testing.T) {
 	b := menuSyntheticWinID()
 	if a != b {
 		t.Errorf("menuSyntheticWinID() not stable: %d != %d", a, b)
+	}
+}
+
+// --- linuxMenuState.attachWindow Wayland behaviour ---
+
+// TestAttachWindow_WaylandKeepsWinIDZero verifies that on a pure Wayland session
+// (winID=0) the registration winID stays 0 so KDE matches by D-Bus sender PID,
+// while the object path is non-empty and PID-based for uniqueness.
+func TestAttachWindow_WaylandKeepsWinIDZero(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+
+	m := newLinuxMenuState()
+	m.attachWindow(0) // Wayland: no X11 XID
+
+	m.mu.Lock()
+	wid := m.winID
+	path := m.objPath
+	m.mu.Unlock()
+
+	if wid != 0 {
+		t.Errorf("winID = %d, want 0 for Wayland (KDE matches by D-Bus sender PID)", wid)
+	}
+	if path == "" {
+		t.Error("objPath is empty, want PID-based path for uniqueness")
+	}
+	if path == menuObjPrefix+"0" {
+		t.Errorf("objPath = %q ends with /0 — should use PID, not zero", path)
+	}
+}
+
+// TestAttachWindow_X11PreservesXID verifies that on X11 the real XID is kept
+// as both the registration winID and the object path suffix.
+func TestAttachWindow_X11PreservesXID(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+
+	const xid uint32 = 0xDEAD
+	m := newLinuxMenuState()
+	m.attachWindow(xid)
+
+	m.mu.Lock()
+	wid := m.winID
+	path := m.objPath
+	m.mu.Unlock()
+
+	if wid != xid {
+		t.Errorf("winID = %d, want %d (X11 XID preserved)", wid, xid)
+	}
+	want := menuObjPrefix + "57005" // 0xDEAD = 57005
+	if path != want {
+		t.Errorf("objPath = %q, want %q", path, want)
 	}
 }
 

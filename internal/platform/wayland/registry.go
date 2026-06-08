@@ -38,6 +38,11 @@ const (
 	// Cursor shape protocol (wp_cursor_shape_manager_v1).
 	// Modern protocol for setting cursor shapes without loading xcursor themes.
 	InterfaceWpCursorShapeManagerV1 = "wp_cursor_shape_manager_v1"
+
+	// KDE-specific app menu protocol. Wayland clients use this to tell KWin
+	// which D-Bus service/path exposes their dbusmenu. Required for global
+	// menus on KDE Plasma Wayland (D-Bus RegisterWindow alone is insufficient).
+	InterfaceOrgKdeKwinAppmenuManager = "org_kde_kwin_appmenu_manager"
 )
 
 // Global represents a Wayland global interface advertised by the compositor.

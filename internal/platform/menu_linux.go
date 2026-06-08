@@ -85,20 +85,25 @@ func newLinuxMenuState() *linuxMenuState {
 // attachWindow is called after CreateWindow with the X11 window XID (or 0 for
 // Wayland). Starts the dbusmenu server goroutine if the session bus is reachable.
 //
-// On pure Wayland sessions where winID is 0, we use the process PID as a
-// synthetic window identifier so RegisterWindow produces a unique, non-zero
-// object path. KDE Plasma associates menus by bus name for Wayland clients,
-// so the numeric value only needs to be unique per process.
+// On Wayland (winID=0) we keep winID=0 for the RegisterWindow call so that KDE
+// Plasma uses its "match by D-Bus sender PID" path: the registrar calls
+// GetConnectionCredentials on the sender and finds the Wayland surface by PID.
+// Passing a non-zero synthetic PID value as the winID causes KDE to treat it as
+// an X11 XID lookup which always fails on a pure Wayland session.
+// The object path still uses the process PID for uniqueness.
 func (m *linuxMenuState) attachWindow(winID uint32) {
 	if !hasDBusSession() {
 		return
 	}
-	if winID == 0 {
-		winID = menuSyntheticWinID()
+	// pathID is used only for the D-Bus object path (must be non-zero and unique).
+	// winID is kept as-is for RegisterWindow: 0 on Wayland, real XID on X11.
+	pathID := winID
+	if pathID == 0 {
+		pathID = menuSyntheticWinID()
 	}
 	m.mu.Lock()
 	m.winID = winID
-	m.objPath = menuObjPrefix + strconv.FormatUint(uint64(winID), 10)
+	m.objPath = menuObjPrefix + strconv.FormatUint(uint64(pathID), 10)
 	m.mu.Unlock()
 	m.tryStart()
 }
@@ -640,6 +645,17 @@ func writeBoolProp(b *msgBuf, key string, value bool) {
 	b.variantBool(value) // v(b) value
 }
 
+// busNameAndPath returns the D-Bus unique bus name and dbusmenu object path
+// after a successful connection, or empty strings if not yet connected.
+func (m *linuxMenuState) busNameAndPath() (busName, objPath string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.conn == nil {
+		return "", ""
+	}
+	return m.conn.name, m.objPath
+}
+
 // menuSyntheticWinID returns a non-zero window identifier for Wayland sessions
 // where no X11 XID is available. Uses the lower 32 bits of the process PID,
 // which is unique per process and accepted by com.canonical.AppMenu.Registrar.
@@ -799,6 +815,8 @@ func menuEncodeSignal(serial uint32, path, iface, member, sig string, body []byt
 }
 
 // menuEncodeCall encodes a D-Bus METHOD_CALL message (used for RegisterWindow).
+// Flags are 0 (no NO_REPLY_EXPECTED) so the registrar sends a METHOD_RETURN or
+// ERROR that serve() can consume to log the registration result.
 func menuEncodeCall(serial uint32, dest, path, iface, member, sig string, body []byte) []byte {
 	hdr := newMsgBuf(16)
 	dbusWriteHdrField(hdr, dbusFieldPath, "o", func() { hdr.str(path) })
@@ -808,5 +826,5 @@ func menuEncodeCall(serial uint32, dest, path, iface, member, sig string, body [
 	if sig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(sig) })
 	}
-	return dbusAssembleMsg(dbusMsgCall, dbusFlagNoReplyExpected, serial, hdr.data, body)
+	return dbusAssembleMsg(dbusMsgCall, 0, serial, hdr.data, body)
 }
