@@ -730,7 +730,7 @@ func TestMenuSyntheticWinID_Stable(t *testing.T) {
 	}
 }
 
-// --- linuxMenuState.attachWindow Wayland behaviour ---
+// --- linuxMenuState.attachWindow Wayland behavior ---
 
 // TestAttachWindow_WaylandKeepsWinIDZero verifies that on a pure Wayland session
 // (winID=0) the registration winID stays 0 so KDE matches by D-Bus sender PID,

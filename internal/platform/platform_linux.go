@@ -604,7 +604,7 @@ func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 // initSingleConnection initializes using a single C libwayland connection.
 // Uses Pure Go wire protocol ONLY for registry global discovery, then
 // creates all objects on the C connection via goffi.
-func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:gocognit // Wayland init binds many protocol extensions sequentially
+func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:gocognit,maintidx // Wayland init binds many protocol extensions sequentially
 	// Step 1: Use Pure Go protocol to discover registry globals.
 	// This is lightweight (just reads global names/versions), then we disconnect.
 	display, err := wayland.Connect()
