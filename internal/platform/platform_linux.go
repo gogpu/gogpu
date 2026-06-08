@@ -2628,7 +2628,7 @@ func (p *x11Platform) ShowSaveFileDialog(opts FileDialogOptions) (string, error)
 func (p *waylandPlatform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
 	// Cancel key repeat before blocking: ShowOpenFileDialog blocks the main
 	// thread, so the timerfd accumulates up to maxRepeatPerPoll (10) expirations.
-	// Without cancelling, processRepeatTimer fires all accumulated repeats after
+	// Without canceling, processRepeatTimer fires all accumulated repeats after
 	// the dialog closes, re-triggering the caller's OnKeyPress handler N times.
 	// timerfd_settime with zero resets the accumulated count (Linux man page).
 	if p.primary != nil {

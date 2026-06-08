@@ -461,7 +461,7 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer, initErr = newRenderer(
-			platWindow, a.config.Backend, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
+			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
 		)
 	})
 	if initErr != nil {
