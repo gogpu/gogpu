@@ -351,6 +351,10 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		}
 	})
 
+	// Show the window now that the GPU surface is ready — mirrors the primary
+	// window path in app.go where Show() is called after GPU init.
+	platWindow.Show()
+
 	// Allocate internal ID
 	internalID := a.windowManager.allocate()
 

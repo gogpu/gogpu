@@ -197,15 +197,21 @@ func initXdgInterfaces() {
 	})
 }
 
-// xdgCallbackHandle is set during setupXdgRole to allow callbacks to access the handle.
-// Safe because roundtrip is synchronous (callback fires on the same Go thread).
-var xdgCallbackHandle *LibwaylandHandle
+// xdgHandlesMu guards the two maps below, which route xdg callbacks to the
+// correct LibwaylandHandle when multiple windows are open simultaneously.
+var (
+	xdgHandlesMu    sync.Mutex
+	xdgSurfaceHndls = make(map[uintptr]*LibwaylandHandle) // wl_surface proxy → handle
+	xdgWmBaseHndls  = make(map[uintptr]*LibwaylandHandle) // xdg_wm_base proxy → handle
+)
 
 // xdgSurfaceConfigureCb handles xdg_surface.configure(data, xdg_surface, serial).
 // Called from C via goffi trampoline during wl_display_dispatch.
 // Acks the configure event so the compositor maps the surface.
 func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
-	h := xdgCallbackHandle
+	xdgHandlesMu.Lock()
+	h := xdgSurfaceHndls[xdgSurface]
+	xdgHandlesMu.Unlock()
 	if h == nil {
 		return
 	}
@@ -264,7 +270,9 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 // xdgWmBasePingCb handles xdg_wm_base.ping(data, xdg_wm_base, serial).
 // Responds with pong to keep the connection alive.
 func xdgWmBasePingCb(data, wmBase, serial uintptr) {
-	h := xdgCallbackHandle
+	xdgHandlesMu.Lock()
+	h := xdgWmBaseHndls[wmBase]
+	xdgHandlesMu.Unlock()
 	if h == nil {
 		return
 	}
@@ -352,10 +360,12 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 		return fmt.Errorf("wayland: flush before roundtrip failed: %w", err)
 	}
 
-	// Set callback handle for the duration of roundtrip.
-	// Keep set for the window lifetime — needed for runtime xdg_surface.configure
-	// (maximize, resize) and xdg_wm_base.ping.
-	xdgCallbackHandle = h
+	// Register this handle in the per-proxy maps so callbacks route to the right
+	// LibwaylandHandle when multiple windows (connections) are open.
+	xdgHandlesMu.Lock()
+	xdgSurfaceHndls[h.xdgSurface] = h
+	xdgWmBaseHndls[h.xdgWmBase] = h
+	xdgHandlesMu.Unlock()
 
 	// Block until compositor sends xdg_surface.configure (ADR-041 configure gate).
 	// A single roundtrip is NOT guaranteed to deliver configure — the compositor
@@ -560,6 +570,15 @@ func (h *LibwaylandHandle) InputSeat() uintptr {
 // Flush sends all buffered requests to the compositor.
 func (h *LibwaylandHandle) Flush() error {
 	return h.flush()
+}
+
+// UnregisterXdgProxies removes this handle from the per-proxy xdg callback maps.
+// Must be called before Close() to prevent stale map entries.
+func (h *LibwaylandHandle) UnregisterXdgProxies() {
+	xdgHandlesMu.Lock()
+	delete(xdgSurfaceHndls, h.xdgSurface)
+	delete(xdgWmBaseHndls, h.xdgWmBase)
+	xdgHandlesMu.Unlock()
 }
 
 // Roundtrip performs a blocking roundtrip to the compositor.

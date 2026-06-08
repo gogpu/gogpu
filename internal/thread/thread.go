@@ -58,33 +58,55 @@ func New() *Thread {
 	return t
 }
 
+// threadResult carries a value or a panic across a goroutine boundary.
+type threadResult struct {
+	val   any
+	panic any
+}
+
 // Call executes f on the thread and waits for completion.
-// Returns the result from f.
+// Returns the result from f. Any panic from f is re-panicked on the caller.
 func (t *Thread) Call(f func() any) any {
 	if !t.running.Load() {
 		return nil
 	}
 
-	done := make(chan any, 1)
+	done := make(chan threadResult, 1)
 	t.funcs <- func() {
-		done <- f()
+		var r threadResult
+		func() {
+			defer func() { r.panic = recover() }()
+			r.val = f()
+		}()
+		done <- r
 	}
-	return <-done
+	r := <-done
+	if r.panic != nil {
+		panic(r.panic)
+	}
+	return r.val
 }
 
 // CallVoid executes f on the thread and waits for completion.
-// Use when no return value is needed.
+// Any panic from f is re-panicked on the caller.
 func (t *Thread) CallVoid(f func()) {
 	if !t.running.Load() {
 		return
 	}
 
-	done := make(chan struct{})
+	done := make(chan threadResult, 1)
 	t.funcs <- func() {
-		f()
-		close(done)
+		var r threadResult
+		func() {
+			defer func() { r.panic = recover() }()
+			f()
+		}()
+		done <- r
 	}
-	<-done
+	r := <-done
+	if r.panic != nil {
+		panic(r.panic)
+	}
 }
 
 // CallAsync executes f on the thread without waiting.

@@ -344,6 +344,10 @@ func (h *LibwaylandHandle) Close() {
 		return
 	}
 
+	// Remove from per-proxy callback maps before destroying proxies.
+	h.UnregisterXdgProxies()
+	h.UnregisterToplevel()
+
 	// Destroy clipboard objects (before cursor shape, pointer constraints, and input)
 	h.DestroyClipboard()
 

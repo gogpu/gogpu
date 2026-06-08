@@ -149,12 +149,19 @@ func (h *LibwaylandHandle) SetupInput(seatName, seatVersion uint32) error {
 }
 
 // SetupToplevelListeners adds configure and close listeners on the xdg_toplevel.
-// Must be called after setupXdgRole.
+// Must be called after setupXdgRole. Registers this handle in the per-toplevel
+// map so callbacks can route to the correct window regardless of how many
+// LibwaylandHandle instances are active.
 func (h *LibwaylandHandle) SetupToplevelListeners() error {
 	if h.xdgToplevel == 0 {
 		return nil
 	}
 	initInputToplevelListeners()
+
+	toplevelHandlesMu.Lock()
+	toplevelHandles[h.xdgToplevel] = h
+	toplevelHandlesMu.Unlock()
+
 	return h.addListener(h.xdgToplevel, uintptr(unsafe.Pointer(&inputToplevelListener[0])))
 }
 
@@ -220,13 +227,41 @@ func (h *LibwaylandHandle) GetDisplayFD() int {
 	return h.getDisplayFD()
 }
 
-// --- Global callback handle for input events ---
+// --- Global callback handle for pointer/keyboard/touch input events ---
 
 var inputCallbackHandle *LibwaylandHandle
 
 // SetAsInputHandler sets this handle as the active input callback target.
+// Only call for the primary window; secondary windows share the primary's seat.
 func (h *LibwaylandHandle) SetAsInputHandler() {
 	inputCallbackHandle = h
+}
+
+// --- Per-toplevel handle map for configure/close callbacks ---
+// Keyed by xdg_toplevel proxy pointer (unique per LibwaylandHandle) so that
+// both primary and secondary windows can have independent configure/close routing.
+
+var (
+	toplevelHandlesMu sync.Mutex
+	toplevelHandles   = make(map[uintptr]*LibwaylandHandle)
+)
+
+// SetToplevelCallbacks sets configure and close callbacks for this handle
+// via the per-toplevel map instead of the global inputCallbackHandle.
+// Use for secondary windows so they do not override primary pointer/keyboard routing.
+func (h *LibwaylandHandle) SetToplevelCallbacks(onConfigure func(int32, int32, bool), onClose func()) {
+	h.inputCallbacks = &InputCallbacks{
+		OnConfigure: onConfigure,
+		OnClose:     onClose,
+	}
+}
+
+// UnregisterToplevel removes this handle from the per-toplevel callback map.
+// Call before Close() to prevent stale entries.
+func (h *LibwaylandHandle) UnregisterToplevel() {
+	toplevelHandlesMu.Lock()
+	delete(toplevelHandles, h.xdgToplevel)
+	toplevelHandlesMu.Unlock()
 }
 
 // --- Seat callbacks ---
@@ -533,7 +568,9 @@ func initInputToplevelListeners() {
 // Each element is a uint32 xdg_toplevel_state enum value.
 func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 	slog.Debug("xdg_toplevel.configure", "width", int32(width), "height", int32(height))
-	h := inputCallbackHandle
+	toplevelHandlesMu.Lock()
+	h := toplevelHandles[toplevel]
+	toplevelHandlesMu.Unlock()
 	if h == nil || h.inputCallbacks == nil {
 		return
 	}
@@ -565,7 +602,9 @@ func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 
 // inputToplevelCloseCb: void(data, xdg_toplevel)
 func inputToplevelCloseCb(data, toplevel uintptr) {
-	h := inputCallbackHandle
+	toplevelHandlesMu.Lock()
+	h := toplevelHandles[toplevel]
+	toplevelHandlesMu.Unlock()
 	if h == nil || h.inputCallbacks == nil {
 		return
 	}

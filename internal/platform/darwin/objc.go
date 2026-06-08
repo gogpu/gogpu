@@ -917,8 +917,10 @@ func (id ID) GetPoint(sel SEL) NSPoint {
 		unsafe.Pointer(&argBox.sel),
 	}
 
-	// Result buffer for the struct
-	var result [2]float64
+	// Result buffer sized to [4]float64 because goffi's handleHFAReturn always
+	// casts rvalue to *[4]float64 regardless of the actual element count, and
+	// Go 1.26's checkptr (enabled by -race) rejects a smaller allocation.
+	var result [4]float64
 	err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
@@ -1354,8 +1356,6 @@ func SetAssociatedObject(object ID, key unsafe.Pointer, value unsafe.Pointer, po
 }
 
 // GetAssociatedObject retrieves the associated object for the given key.
-//
-//nolint:govet // intentional use of unsafe.Pointer
 func GetAssociatedObject(object ID, key unsafe.Pointer) unsafe.Pointer {
 	if object == 0 {
 		return nil
@@ -1388,5 +1388,5 @@ func GetAssociatedObject(object ID, key unsafe.Pointer) unsafe.Pointer {
 		unsafe.Pointer(&keyVal),
 	}
 	_ = ffi.CallFunction(cif, objcRT.objcGetAssociatedObjectFn, unsafe.Pointer(&ret), args)
-	return unsafe.Pointer(ret)
+	return *(*unsafe.Pointer)(unsafe.Pointer(&ret))
 }
