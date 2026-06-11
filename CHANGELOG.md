@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.8] - 2026-06-11
+
+### Changed
+
+- **deps:** wgpu v0.29.12 → v0.29.13 (GLES enterprise parity: GLSL version propagation, WindowBit-only EGL config tier, runtime binding fallback GL<4.2, compute barrier, lazy VAO, MSAA validation)
+- **deps:** naga v0.17.13 → v0.17.14
+
 ## [0.41.7] - 2026-06-08
 
 ### Fixed
