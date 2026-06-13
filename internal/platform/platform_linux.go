@@ -906,6 +906,10 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 		decorName = dg.Name
 		decorVersion = dg.Version
 	}
+	// decorName/decorVersion enable SSD (server-side decorations) on the secondary window.
+	// CSD (client-side decorations) for secondary windows is deferred: each CSD window
+	// requires its own subsurface tree and per-window pointer routing, which adds
+	// significant complexity relative to the primary window path.
 
 	libwl, err := wayland.OpenLibwayland(
 		compGlobal.Name, compGlobal.Version,
@@ -2559,6 +2563,10 @@ func (p *waylandPlatform) WaitEvents() {
 
 	// Add secondary connection FDs so WaitEvents unblocks when a secondary window
 	// receives compositor events (resize, close, etc.).
+	// Safety: secs copies the slice header (pointer+len) under RLock. Iteration
+	// happens after RUnlock, which is safe because WaitEvents and all secondary
+	// creation/destruction run on the same main thread — no concurrent mutation
+	// can occur while we iterate.
 	p.secondaryMu.RLock()
 	secs := p.secondaries
 	p.secondaryMu.RUnlock()
