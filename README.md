@@ -25,7 +25,7 @@
 
 ## Overview
 
-**GoGPU** is a Pure Go GPU application framework — windowing, input, lifecycle management, and platform abstraction for GPU-accelerated applications. Part of the [GoGPU ecosystem](https://github.com/gogpu) (1.1M+ LOC across 15 repositories).
+**gogpu** is the application framework of the [GoGPU ecosystem](https://github.com/gogpu) — windowing, input, lifecycle management, and platform abstraction for GPU-accelerated applications. Part of a 1.1M+ LOC Pure Go ecosystem across 15 repositories.
 
 Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU package with three backends: Pure Go (default), Rust FFI (`-tags rust`), and Browser WASM.
 
