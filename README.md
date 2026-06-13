@@ -25,7 +25,9 @@
 
 ## Overview
 
-**GoGPU** is a GPU computing framework for Go that provides a high-level API for graphics and compute operations. Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU package with three backends: Pure Go (default), Rust FFI (`-tags rust`), and Browser WASM.
+**GoGPU** is a Pure Go GPU application framework — windowing, input, lifecycle management, and platform abstraction for GPU-accelerated applications. Part of the [GoGPU ecosystem](https://github.com/gogpu) (1.1M+ LOC across 15 repositories).
+
+Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU package with three backends: Pure Go (default), Rust FFI (`-tags rust`), and Browser WASM.
 
 ### Key Features
 
@@ -134,7 +136,7 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
     WithGraphicsAPI(gogpu.GraphicsAPIGLES))
 
 // Software backend — no GPU required, always available
-// Windows: renders to screen via GDI. Linux/macOS: headless.
+// Renders to screen (GDI, X11, Wayland SHM, macOS) or headless (CI/testing)
 app := gogpu.NewApp(gogpu.DefaultConfig().
     WithGraphicsAPI(gogpu.GraphicsAPISoftware))
 ```
@@ -557,11 +559,12 @@ User Application
        │
        ├─────────────────┐
        ▼                 ▼
-┌─────────────┐  ┌─────────────┐
-│  gogpu/wgpu │  │  Platform   │
-│ (Pure Go    │  │  Windowing  │
-│  WebGPU)    │  │ Win32/Cocoa │
-└──────┬──────┘  └─────────────┘
+┌─────────────┐  ┌──────────────────┐
+│  gogpu/wgpu │  │     Platform     │
+│ (Pure Go    │  │    Windowing     │
+│  WebGPU)    │  │ Win32/Cocoa/X11  │
+└──────┬──────┘  │ Wayland/Browser  │
+       │         └──────────────────┘
        │
  ┌─────┴─────┬─────┬─────┬─────────┐
  ▼           ▼     ▼     ▼         ▼
@@ -575,14 +578,15 @@ Vulkan     DX12  Metal  GLES   Software
 | `gogpu` (root) | App, Config, Context, Renderer, Texture |
 | `gpu/` | Backend selection (HAL-based) |
 | `gpu/types/` | BackendType, GraphicsAPI enums |
-| `gpu/backend/rust/` | Rust backend via wgpu-native FFI (opt-in, `-tags rust`) |
-| `gpu/backend/native/` | HAL backend creation (Vulkan/Metal selection) |
+| `gpu/backend/native/` | HAL backend creation (Vulkan/Metal/DX12/GLES/Software selection) |
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
 | `window/` | Window configuration |
 | `input/` | Keyboard and mouse input |
 | `sound/` | Platform system sounds (Click, Alert, Error, Warning, Success) |
-| `internal/platform/` | Platform-specific windowing |
+| `internal/platform/` | Platform-specific windowing (Win32, Cocoa, X11, Wayland, Browser) |
 | `internal/thread/` | Multi-thread rendering (RenderLoop) |
+
+> **Rust backend:** Rust/wgpu-native selection lives inside [gogpu/wgpu](https://github.com/gogpu/wgpu) via build tags (ADR-038). Build with `-tags rust` and install wgpu-native: `go run github.com/go-webgpu/webgpu/cmd/setup@latest`
 
 ---
 
@@ -621,15 +625,26 @@ Native system window tabbing supported via `Config.WithTabbingMode(gogpu.Tabbing
 
 | Project | Description |
 |---------|-------------|
-| **gogpu/gogpu** | **GPU framework (this repo)** |
-| [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces (DeviceProvider, WindowProvider, PlatformProvider, EventSource) |
+| **gogpu/gogpu** | **Application framework — windowing, input, lifecycle (this repo)** |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation (Vulkan, Metal, DX12, GLES, Software) |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL → SPIR-V, MSL, GLSL, HLSL, DXIL) |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics — Skia-inspired rasterizer, GPU SDF, LCD ClearType |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit — 22+ widgets, 4 themes ([awesome-go](https://github.com/avelino/awesome-go)) |
+| [gogpu/g3d](https://github.com/gogpu/g3d) | 3D rendering engine — PBR, scene graph, GLTF |
+| [gogpu/compose](https://github.com/gogpu/compose) | Multi-process composition (Unix socket, LZ4, hot-plug) |
+| [gogpu/audio](https://github.com/gogpu/audio) | Pure Go audio engine — WASAPI, WAV, Mixer |
+| [gogpu/systray](https://github.com/gogpu/systray) | System tray — Windows, macOS, Linux, dark mode |
+| [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces (DeviceProvider, WindowProvider, EventSource) |
 | [gogpu/gputypes](https://github.com/gogpu/gputypes) | Shared WebGPU types (TextureFormat, BufferUsage, Limits) |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
-| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics library |
-| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit (planned) |
-| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | wgpu-native FFI bindings |
-| [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library |
+| [go-webgpu/goffi](https://github.com/go-webgpu/goffi) | Pure Go FFI library (no CGO) |
+| [go-webgpu/webgpu](https://github.com/go-webgpu/webgpu) | wgpu-native FFI bindings (Rust backend) |
+
+### Used By
+
+| Project | Description |
+|---------|-------------|
+| [born-ml/born](https://github.com/born-ml/born) | Pure Go ML framework — GPU-accelerated training and inference |
+| [ironwail-go](https://github.com/darkliquid/ironwail-go) | Quake 1 engine running on GoGPU Vulkan |
 
 ---
 
@@ -680,7 +695,7 @@ go test ./...
 | Contributor | Contributions |
 |-------------|---------------|
 | [@ppoage](https://github.com/ppoage) | macOS ARM64 (Apple Silicon) support — 3 merged PRs across gogpu, wgpu, and naga with ~3,500 lines of code. Made Metal backend work on M1/M4 |
-| [@lkmavi](https://github.com/lkmavi) | macOS native window tabbing (`NSWindow.tabbingMode`) — Config API, selectors, multi-window propagation, example |
+| [@lkmavi](https://github.com/lkmavi) | Star contributor — GLES Linux FFI fix (30+ GL calls), 4-phase renderer init, KDE Plasma AppMenu protocol, CSD cursor/hit-test, multiwindow Wayland fix, macOS native tabbing, native file dialogs + menus (all platforms). 10+ PRs across wgpu + gogpu |
 | [@sverrehu](https://github.com/sverrehu) | X11 remote display auth fix — found `.Xauthority` binary address mismatch ([#203](https://github.com/gogpu/gogpu/issues/203)), confirmed fix. macOS key event fix ([#194](https://github.com/gogpu/gogpu/issues/194)) |
 | [@JanGordon](https://github.com/JanGordon) | Documentation fix (wgpu) |
 
@@ -696,6 +711,8 @@ go test ./...
 | [@cyberbeast](https://github.com/cyberbeast) · Sandesh Gade | macOS Tahoe debugger — thorough Metal backend debugging on Apple M2 Max with detailed diagnostics |
 | [@crsolver](https://github.com/crsolver) | UI architecture advisor — significant input on the UI toolkit RFC with 8+ discussion comments |
 | [@neurlang](https://github.com/neurlang) | Wayland expert — author of [neurlang/wayland](https://github.com/neurlang/wayland), provided expert consultation on Wayland protocol issues |
+| [@z46-dev](https://github.com/z46-dev) · Evan Parker | Wayland champion — AMD Radeon RADV tester, filed [#292](https://github.com/gogpu/gogpu/issues/292) (Wayland SIGSEGV) and [#300](https://github.com/gogpu/gogpu/issues/300) (CSD geometry). Confirmed Software + Vulkan + GLES on native Linux |
+| [@omer316](https://github.com/omer316) | Pop!_OS tester — detailed Wayland traces for [#292](https://github.com/gogpu/gogpu/issues/292), confirmed fixes across all backends. First to ask about [sponsorship](https://opencollective.com/gogpu) |
 
 ### Early Adopters
 

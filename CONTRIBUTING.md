@@ -193,19 +193,21 @@ type(scope): description
 ```
 gogpu/
 ├── gpu/                    # GPU abstraction layer
-│   ├── backend.go          # Backend interface
-│   ├── types/              # WebGPU types
+│   ├── types/              # BackendType, GraphicsAPI enums
 │   └── backend/
-│       ├── rust/           # Rust backend (wgpu-native)
-│       └── native/         # Pure Go backend (gogpu/wgpu)
-├── internal/platform/      # Platform-specific code
-│   ├── windows/            # Win32
-│   ├── darwin/             # macOS Cocoa
-│   ├── wayland/            # Linux Wayland
-│   └── x11/                # Linux X11
-├── gmath/                  # Math primitives
+│       └── native/         # HAL backend creation (Vulkan/Metal/DX12/GLES/Software)
+├── internal/platform/      # Platform-specific windowing
+│   ├── platform_windows.go # Win32
+│   ├── platform_darwin.go  # macOS Cocoa
+│   ├── platform_linux.go   # X11 + Wayland
+│   ├── platform_browser.go # Browser/WASM
+│   ├── darwin/             # Objective-C runtime via goffi
+│   ├── wayland/            # libwayland-client FFI, CSD, xdg-shell, input
+│   └── x11/               # Pure Go X11 wire protocol
+├── gmath/                  # Vec2, Vec3, Vec4, Mat4, Color
 ├── window/                 # Window configuration
-├── input/                  # Input types
+├── input/                  # Keyboard and mouse input
+├── sound/                  # Platform system sounds
 ├── examples/               # Example applications
 └── scripts/                # Build/release scripts
 ```
@@ -214,12 +216,13 @@ gogpu/
 
 ## Platform Support
 
-| Platform | Windowing | Pure Go Backend | Status |
-|----------|-----------|-----------------|--------|
-| Windows | Win32 | Vulkan | Production |
-| Linux X11 | X11 | Vulkan | Community Testing |
-| Linux Wayland | Wayland | Vulkan | Community Testing |
-| macOS | Cocoa | Metal | Community Testing |
+| Platform | Windowing | GPU Backends | Status |
+|----------|-----------|-------------|--------|
+| Windows | Win32 | Vulkan, DX12, GLES, Software | Production |
+| Linux X11 | X11 (Pure Go wire protocol) | Vulkan, GLES, Software | Production |
+| Linux Wayland | Wayland (libwayland FFI) | Vulkan, GLES, Software | Production |
+| macOS | Cocoa (goffi ObjC runtime) | Metal, Software | Production |
+| Browser | WASM (syscall/js) | WebGPU | Production |
 
 ---
 
@@ -234,7 +237,7 @@ go test ./...
 ### Run Specific Package
 
 ```bash
-go test -v ./gpu/backend/gpu/...
+go test -v ./internal/platform/...
 ```
 
 ### Run with Race Detector
@@ -253,10 +256,12 @@ bash scripts/pre-release-check.sh
 
 ## Areas Where We Need Help
 
-- **Platform Testing** — Test on Linux X11, Wayland, macOS
-- **DX12 Backend** — Windows DirectX 12 implementation
+- **Platform Testing** — Test on Linux Wayland (GNOME, KDE, sway), macOS, Windows DX12/GLES
+- **GLES Testing** — Different GPU vendors (AMD, NVIDIA, Intel) and driver versions
 - **Documentation** — Examples, tutorials, API docs
-- **Performance** — Profiling, optimization
+- **Cursor Fallback** — `wl_pointer.set_cursor` with libwayland-cursor for compositors without `wp_cursor_shape_v1` (ADR-043)
+- **CSD Geometry** — Maximize/fullscreen decoration handling (#300)
+- **Performance** — Profiling, benchmarks, optimization
 
 ---
 

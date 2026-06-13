@@ -20,12 +20,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 1. **Pure Go** — No CGO, easy cross-compilation, single binary deployment
 2. **WebGPU-First** — Follow W3C WebGPU specification
-3. **Dual Backend** — Rust (wgpu-native) or Pure Go (gogpu/wgpu)
+3. **Triple Backend** — Pure Go (default), Rust FFI (`-tags rust`), Browser WASM (ADR-038)
 4. **Enterprise-Ready** — Production-grade error handling and patterns
 
 ---
 
-## Current State: v0.41.7
+## Current State: v0.41.9
 
 ✅ **Production-ready** with full feature set:
 - **Hidden-then-show window creation** — GLFW/Ebiten/SDL3/Flutter pattern: window created hidden, shown after GPU init. Eliminates black flash and WM_SETFOCUS race on all platforms.
