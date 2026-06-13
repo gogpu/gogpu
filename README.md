@@ -18,6 +18,7 @@
   <a href="https://github.com/gogpu/gogpu/releases"><img src="https://img.shields.io/github/v/release/gogpu/gogpu" alt="Latest Release"></a>
   <a href="https://github.com/gogpu/gogpu"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
   <a href="https://github.com/gogpu/gogpu/stargazers"><img src="https://img.shields.io/github/stars/gogpu/gogpu?style=flat&labelColor=555&color=yellow" alt="Stars"></a>
+  <a href="https://opencollective.com/gogpu"><img src="https://opencollective.com/gogpu/all/badge.svg?label=financial+contributors" alt="Financial Contributors on Open Collective"></a>
 </p>
 
 ---
@@ -709,6 +710,20 @@ These developers tested GoGPU on Day 1 — when nothing worked and every platfor
 - [@adamsanclemente](https://github.com/adamsanclemente) — Found transform rendering bug in gg
 - [@beikege](https://github.com/beikege) — Touch input advocacy, UI toolkit feedback
 - [@joeblew999](https://github.com/joeblew999) — WASM/browser platform interest
+
+---
+
+## Sponsors
+
+GoGPU is an independent open-source project. Development is sustained by contributors and sponsors.
+
+<a href="https://opencollective.com/gogpu"><img src="https://opencollective.com/gogpu/sponsors.svg?width=890&button=false" alt="Sponsors"></a>
+
+### Backers
+
+<a href="https://opencollective.com/gogpu"><img src="https://opencollective.com/gogpu/backers.svg?width=890&button=false" alt="Backers"></a>
+
+<a href="https://opencollective.com/gogpu"><img src="https://img.shields.io/badge/Sponsor-Open%20Collective-7FADF2?logo=opencollective" alt="Sponsor on Open Collective"></a>
 
 ---
 
