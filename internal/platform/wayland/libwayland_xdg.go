@@ -197,12 +197,13 @@ func initXdgInterfaces() {
 	})
 }
 
-// xdgHandlesMu guards the two maps below, which route xdg callbacks to the
+// xdgHandlesMu guards the maps below, which route xdg callbacks to the
 // correct LibwaylandHandle when multiple windows are open simultaneously.
 var (
-	xdgHandlesMu    sync.Mutex
-	xdgSurfaceHndls = make(map[uintptr]*LibwaylandHandle) // wl_surface proxy → handle
-	xdgWmBaseHndls  = make(map[uintptr]*LibwaylandHandle) // xdg_wm_base proxy → handle
+	xdgHandlesMu       sync.Mutex
+	xdgSurfaceHndls    = make(map[uintptr]*LibwaylandHandle) // wl_surface proxy → handle
+	xdgWmBaseHndls     = make(map[uintptr]*LibwaylandHandle) // xdg_wm_base proxy → handle
+	toplevelDecorHndls = make(map[uintptr]*LibwaylandHandle) // zxdg_toplevel_decoration_v1* proxy → handle
 )
 
 // xdgSurfaceConfigureCb handles xdg_surface.configure(data, xdg_surface, serial).
@@ -229,15 +230,21 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 	// This is the GLFW pattern: ack_configure -> resizeWindow -> commit.
 	if h.csdPendingResize {
 		h.csdPendingResize = false
-		h.csdPendingRepaint = false // resize already repaints all surfaces
+		// Clear csdPendingRepaint AFTER ResizeCSD: state-change-triggered resizes
+		// (same dimensions, different maximize/fullscreen state) set csdPendingRepaint=true
+		// in inputToplevelConfigureCb so ResizeCSD bypasses its early-return guard.
+		// Clearing before the call would drop that signal and skip the hide/show logic
+		// (issue #300).
 		h.ResizeCSD(h.csdPendingResizeW, h.csdPendingResizeH)
+		h.csdPendingRepaint = false
 	}
 
 	// Window geometry per state (winit/libdecor enterprise pattern):
-	//   Normal:     (0, 0, contentW, contentH) — title bar outside geometry
+	//   Normal:     (0, 0, contentW, contentH) — title bar outside geometry (CSD standard)
 	//   Maximize:   (0, -tbH, contentW, contentH+tbH) — title bar inside geometry via negative offset
 	//   Fullscreen: (0, 0, configW, configH) — no decorations, full area
 	if h.csdActive && h.csdContentW > 0 {
+		tbH := h.csdPainter.TitleBarHeight()
 		geoX := int32(0)
 		geoY := int32(0)
 		geoW := h.csdContentW
@@ -246,7 +253,6 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 			geoW = h.configuredW
 			geoH = h.configuredH
 		} else if h.csdState.Maximized {
-			tbH := h.csdPainter.TitleBarHeight()
 			geoY = -int32(tbH)
 			geoH = h.csdContentH + tbH
 		}
@@ -287,16 +293,33 @@ func xdgWmBasePingCb(data, wmBase, serial uintptr) {
 // Listener arrays (package-level, must outlive the proxy).
 // Each is an array of function pointers, one per event.
 var (
-	xdgSurfaceListener [1]uintptr // [0] = configure callback
-	xdgWmBaseListener  [1]uintptr // [0] = ping callback
-	listenersOnce      sync.Once
+	xdgSurfaceListener  [1]uintptr // [0] = configure callback
+	xdgWmBaseListener   [1]uintptr // [0] = ping callback
+	toplevelDecorListener [1]uintptr // [0] = configure callback
+	listenersOnce       sync.Once
 )
 
 func initXdgListeners() {
 	listenersOnce.Do(func() {
 		xdgSurfaceListener[0] = ffi.NewCallback(xdgSurfaceConfigureCb)
 		xdgWmBaseListener[0] = ffi.NewCallback(xdgWmBasePingCb)
+		toplevelDecorListener[0] = ffi.NewCallback(decorConfigureCb)
 	})
+}
+
+// decorConfigureCb handles zxdg_toplevel_decoration_v1.configure(data, decor, mode).
+// Called before xdg_surface.configure when the compositor sets the decoration mode.
+// mode: 1 = CLIENT_SIDE (app must draw CSD), 2 = SERVER_SIDE (compositor draws SSD).
+// KDE Plasma may honor the SERVER_SIDE request or override to CLIENT_SIDE; without
+// this listener the app never knows the compositor rejected SSD.
+func decorConfigureCb(data, decoration, mode uintptr) {
+	xdgHandlesMu.Lock()
+	h := toplevelDecorHndls[decoration]
+	xdgHandlesMu.Unlock()
+	if h != nil {
+		h.decorMode = uint32(mode)
+		slog.Debug("zxdg_toplevel_decoration.configure", "mode", mode)
+	}
 }
 
 // setupXdgRole gives the C wl_surface an xdg_toplevel role.
@@ -369,6 +392,9 @@ func (h *LibwaylandHandle) setupXdgRole(xdgName, xdgVersion, decorName, decorVer
 	xdgHandlesMu.Lock()
 	xdgSurfaceHndls[h.xdgSurface] = h
 	xdgWmBaseHndls[h.xdgWmBase] = h
+	if h.toplevelDecor != 0 {
+		toplevelDecorHndls[h.toplevelDecor] = h
+	}
 	xdgHandlesMu.Unlock()
 
 	// Block until compositor sends xdg_surface.configure (ADR-041 configure gate).
@@ -473,8 +499,10 @@ func (h *LibwaylandHandle) roundtrip() error {
 }
 
 // setupDecorations binds zxdg_decoration_manager_v1 and requests server-side
-// decorations for the C xdg_toplevel. Non-fatal: if binding fails, the window
-// simply won't have compositor-drawn decorations.
+// decorations for the C xdg_toplevel. Registers a listener so that
+// decorConfigureCb records the compositor's actual mode (SERVER_SIDE or
+// CLIENT_SIDE) into h.decorMode — callers check DecorationMode() after
+// WaitForConfigure to decide whether CSD is needed.
 func (h *LibwaylandHandle) setupDecorations(decorName, decorVersion uint32) {
 	version := decorVersion
 	if version > 1 {
@@ -494,8 +522,22 @@ func (h *LibwaylandHandle) setupDecorations(decorName, decorVersion uint32) {
 	}
 	h.toplevelDecor = decoration
 
+	// Register configure listener BEFORE set_mode so we don't miss the event.
+	// The compositor sends configure before xdg_surface.configure, so it arrives
+	// within the same WaitForConfigure roundtrip batch.
+	initXdgListeners()
+	_ = h.addListener(decoration, uintptr(unsafe.Pointer(&toplevelDecorListener[0])))
+
 	// set_mode(SERVER_SIDE=2): opcode 1, signature "u"
 	h.marshalVoid(decoration, 1, 2)
+}
+
+// DecorationMode returns the decoration mode agreed by the compositor.
+// 0 = protocol not available or configure not yet received (treat as CLIENT_SIDE).
+// 1 = CLIENT_SIDE (app must draw CSD).
+// 2 = SERVER_SIDE (compositor draws decorations; CSD not needed).
+func (h *LibwaylandHandle) DecorationMode() uint32 {
+	return h.decorMode
 }
 
 // SetTitle sets the window title on the C xdg_toplevel.
@@ -582,6 +624,7 @@ func (h *LibwaylandHandle) UnregisterXdgProxies() {
 	xdgHandlesMu.Lock()
 	delete(xdgSurfaceHndls, h.xdgSurface)
 	delete(xdgWmBaseHndls, h.xdgWmBase)
+	delete(toplevelDecorHndls, h.toplevelDecor)
 	xdgHandlesMu.Unlock()
 }
 

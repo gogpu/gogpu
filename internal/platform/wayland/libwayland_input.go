@@ -583,13 +583,30 @@ func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 		if h.csdActive {
 			maximized := wlArrayContainsUint32(states, 1)  // xdg_toplevel_state::maximized
 			fullscreen := wlArrayContainsUint32(states, 2) // xdg_toplevel_state::fullscreen
+			stateChanged := false
 			if h.csdState.Maximized != maximized {
 				h.csdState.Maximized = maximized
 				h.csdPendingRepaint = true
+				stateChanged = true
 			}
 			if h.csdState.Fullscreen != fullscreen {
 				h.csdState.Fullscreen = fullscreen
 				h.csdPendingRepaint = true
+				stateChanged = true
+			}
+			if h.csdState.Focused != activated {
+				h.csdState.Focused = activated
+				h.csdPendingRepaint = true
+			}
+
+			// Force CSD resize on state change even when dimensions don't change
+			// (e.g. maximize→fullscreen at same screen resolution). Without this,
+			// OnConfigure sees no size delta and skips SetPendingCSDResize, leaving
+			// the title bar visible in fullscreen (issue #300).
+			if stateChanged && h.csdContentW > 0 && !h.csdPendingResize {
+				h.csdPendingResize = true
+				h.csdPendingResizeW = h.csdContentW
+				h.csdPendingResizeH = h.csdContentH
 			}
 		}
 	}

@@ -84,6 +84,11 @@ type LibwaylandHandle struct {
 	// causing SIGSEGV in vkQueuePresentKHR (ADR-041 Phase 1).
 	initialConfigureReceived bool
 
+	// decorMode holds the mode from zxdg_toplevel_decoration_v1.configure.
+	// 0=unset (never received), 1=CLIENT_SIDE (app must draw CSD), 2=SERVER_SIDE.
+	// KDE Plasma may respond CLIENT_SIDE even after we request SERVER_SIDE.
+	decorMode uint32
+
 	// App event queue — ALL our Wayland objects (registry, compositor, surface,
 	// xdg, seat, pointer, keyboard, etc.) live on this queue. The default queue
 	// is left exclusively for Mesa Vulkan WSI's internal wl_buffer.release

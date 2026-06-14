@@ -150,7 +150,8 @@ func (h *LibwaylandHandle) SetupCSD(subcompName, subcompVersion, shmName, shmVer
 		h.marshalVoid(surf, 6)                                                         // commit
 	}
 
-	// Set window geometry so compositor knows content area (excludes CSD borders).
+	// Set window geometry to content area only (libdecor/GLFW/winit enterprise pattern).
+	// CSD decorations extend outside this region via negative subsurface offsets.
 	h.marshalVoid(h.xdgSurface, 3, 0, 0, uintptr(uint32(contentW)), uintptr(uint32(contentH)))
 
 	// Commit parent surface (subsurfaces apply atomically in sync mode)
@@ -506,10 +507,12 @@ func (h *LibwaylandHandle) repaintCSDTitleBar() {
 // ResizeCSD updates all 4 CSD subsurface buffers and positions when the
 // content area dimensions change (maximize, restore, interactive resize).
 //
-// GLFW pattern: surfaces and subsurfaces are NEVER destroyed (only on window
-// close). This preserves pointer state and avoids stale coordinates after
-// maximize→restore transitions. All 4 decorations remain visible at all times,
-// including when maximized (title bar + borders at screen edges).
+// GLFW pattern: surfaces and subsurfaces are NEVER destroyed on hide (only on
+// window close). Hiding attaches a null buffer and releases SHM memory; the
+// surface object stays alive so the null state is applied atomically by the
+// parent commit that follows. Destroying before the parent commit discards the
+// pending null state, leaving the previous frame visible for one compositor
+// cycle (the artifact reported in issue #300).
 //
 // Called from xdgSurfaceConfigureCb after ack_configure and before the parent
 // surface commit. Subsurfaces in sync mode cache their commits until parent commit.
@@ -531,8 +534,8 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 
 	// Subsurface layout per window state (winit/SCTK + GTK4 enterprise pattern):
 	//   Normal:     title bar at (-bW, -tbH), all 4 borders visible
-	//   Maximize:   title bar at (0, -tbH), side/bottom borders destroyed
-	//   Fullscreen: ALL decorations destroyed (title bar + borders)
+	//   Maximize:   title bar at (0, -tbH), borders null-attached (hidden)
+	//   Fullscreen: ALL decorations null-attached (hidden, including title bar)
 	fullscreen := h.csdState.Fullscreen
 	maximized := h.csdState.Maximized
 	specs := [4]struct {
@@ -555,10 +558,9 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 
 	state := h.csdState
 
-	// Determine which decorations should be destroyed.
-	// Fullscreen: destroy ALL (including title bar) — enterprise consensus.
-	// Maximize: destroy borders only, keep title bar — winit/GTK4 pattern.
-	shouldDestroy := func(i int) bool {
+	// Fullscreen: hide ALL decorations. Maximize: hide borders only, keep title bar.
+	// Surfaces stay alive — see docstring for why null-attach beats destroy.
+	shouldHide := func(i int) bool {
 		if fullscreen {
 			return true
 		}
@@ -566,33 +568,34 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 	}
 
 	for i, spec := range specs {
-		if shouldDestroy(i) && h.csdSurfaces[i] != 0 {
-			if h.csdBuffers[i] != 0 {
-				h.marshalVoid(h.csdBuffers[i], 0)
-				h.csdBuffers[i] = 0
+		if shouldHide(i) {
+			if h.csdSurfaces[i] != 0 {
+				h.marshalVoid(h.csdSurfaces[i], 1, 0, 0, 0) // wl_surface.attach(null, 0, 0)
+				h.marshalVoid(h.csdSurfaces[i], 6)           // wl_surface.commit (cached, sync mode)
+				// Release SHM resources — not needed while hidden; recreated on restore.
+				if h.csdBuffers[i] != 0 {
+					h.marshalVoid(h.csdBuffers[i], 0)
+					h.csdBuffers[i] = 0
+				}
+				if h.csdPools[i] != 0 {
+					h.marshalVoid(h.csdPools[i], 1)
+					h.csdPools[i] = 0
+				}
+				if h.csdData[i] != nil {
+					unix.Munmap(h.csdData[i])
+					h.csdData[i] = nil
+				}
+				if h.csdFDs[i] >= 0 {
+					unix.Close(h.csdFDs[i])
+					h.csdFDs[i] = -1
+				}
+				h.csdSizes[i] = [2]int{0, 0}
+				// csdSurfaces[i] and csdSubsurf[i] intentionally kept alive.
 			}
-			if h.csdPools[i] != 0 {
-				h.marshalVoid(h.csdPools[i], 1)
-				h.csdPools[i] = 0
-			}
-			if h.csdData[i] != nil {
-				unix.Munmap(h.csdData[i])
-				h.csdData[i] = nil
-			}
-			if h.csdFDs[i] >= 0 {
-				unix.Close(h.csdFDs[i])
-				h.csdFDs[i] = -1
-			}
-			h.csdSizes[i] = [2]int{0, 0}
-			h.marshalVoid(h.csdSubsurf[i], 0)
-			h.csdSubsurf[i] = 0
-			h.marshalVoid(h.csdSurfaces[i], 0)
-			h.csdSurfaces[i] = 0
 			continue
 		}
 
-		// Recreate surface+subsurface after maximize→restore or fullscreen→restore.
-		if !shouldDestroy(i) && h.csdSurfaces[i] == 0 {
+		if h.csdSurfaces[i] == 0 {
 			surf, err := h.marshalConstructor(h.compositor, 0, h.surfaceInterface)
 			if err != nil {
 				slog.Warn("CSD restore: create surface failed", "edge", i, "err", err)
@@ -617,7 +620,6 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 			continue
 		}
 
-		// Update SHM buffer only if dimensions changed.
 		oldW, oldH := h.csdSizes[i][0], h.csdSizes[i][1]
 		if h.csdBuffers[i] == 0 || oldW != spec.w || oldH != spec.h {
 			h.resizeCSDEdge(i, spec.w, spec.h, state)

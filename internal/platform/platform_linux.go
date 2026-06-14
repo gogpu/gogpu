@@ -852,8 +852,15 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		}
 	}
 
-	// Activate CSD if SSD was not available and window is not frameless
-	if decorGlobal == nil && !config.Frameless {
+	// Activate CSD if SSD was not negotiated and window is not frameless.
+	// Two cases require CSD:
+	//   1. zxdg_decoration_manager_v1 not advertised (GNOME, wlroots default) — no SSD protocol.
+	//   2. Protocol exists but compositor responded CLIENT_SIDE (KDE Plasma may do this even
+	//      after we request SERVER_SIDE). mode==0 (configure never received) is also safe to
+	//      treat as CLIENT_SIDE — falls back to CSD.
+	const decorModeServerSide = 2
+	needCSD := decorGlobal == nil || libwl.DecorationMode() != decorModeServerSide
+	if needCSD && !config.Frameless {
 		if err := p.initCSD(config); err != nil {
 			logger().Warn("CSD initialization failed, running without decorations", "err", err)
 		}

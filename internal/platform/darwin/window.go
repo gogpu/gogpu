@@ -332,11 +332,13 @@ func (w *Window) SetMetalLayer(layer ID) {
 		return
 	}
 
-	// Enable layer backing
-	w.contentView.SendBool(selectors.setWantsLayer, true)
-
-	// Set the layer
+	// Layer-hosting mode: setLayer: FIRST, then setWantsLayer:YES.
+	// Apple docs require this exact order to enter layer-hosting mode.
+	// Reversing the order creates layer-backed mode where AppKit manages
+	// the layer lifecycle — on macOS 15+ this causes the Metal content
+	// to composite above the title bar, making it invisible.
 	w.contentView.SendPtr(selectors.setLayer, layer.Ptr())
+	w.contentView.SendBool(selectors.setWantsLayer, true)
 
 	w.metalLayer = layer
 }
