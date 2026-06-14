@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.12] - 2026-06-15
+
+### Fixed
+
+- **Wayland CSD GNOME artifact** (@lkmavi, #300) — null-attach instead of surface destroy for atomic hide/show via parent commit (fixes one-frame artifact on GNOME)
+- **macOS invisible title bar** (@lkmavi) — `setLayer:` before `setWantsLayer:YES` for layer-hosting mode (macOS 15+ compositing fix)
+- **KDE SSD detection** (@lkmavi) — `zxdg_toplevel_decoration_v1.configure` listener for compositor decoration mode response
+- **CSD state transitions at same resolution** (@lkmavi, #300) — forced `csdPendingResize` on maximize↔fullscreen at same screen size
+- **CSD focused state sync** (@lkmavi) — title bar repaint on focus change
+
+### Changed
+
+- **deps:** golang.org/x/sys v0.45.0 → v0.46.0
+- **lint:** removed unused nolint directive in darwin/objc.go
+
 ## [0.41.11] - 2026-06-14
 
 ### Fixed

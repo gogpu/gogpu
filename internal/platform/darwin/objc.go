@@ -1357,7 +1357,6 @@ func SetAssociatedObject(object ID, key unsafe.Pointer, value unsafe.Pointer, po
 
 // GetAssociatedObject retrieves the associated object for the given key.
 //
-//nolint:govet // intentional use of unsafe.Pointer
 func GetAssociatedObject(object ID, key unsafe.Pointer) unsafe.Pointer {
 	if object == 0 {
 		return nil
