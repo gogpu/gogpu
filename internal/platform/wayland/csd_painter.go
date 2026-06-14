@@ -39,12 +39,13 @@ type CSDButtonState struct {
 
 // CSDState holds the current decoration state for painting.
 type CSDState struct {
-	Title     string
-	Focused   bool
-	Maximized bool
-	Close     CSDButtonState
-	Maximize  CSDButtonState
-	Minimize  CSDButtonState
+	Title      string
+	Focused    bool
+	Maximized  bool
+	Fullscreen bool
+	Close      CSDButtonState
+	Maximize   CSDButtonState
+	Minimize   CSDButtonState
 }
 
 // CSDPainter renders CSD decoration pixels into ARGB8888 buffers.

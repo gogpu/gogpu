@@ -192,6 +192,11 @@ func (h *LibwaylandHandle) IsMaximized() bool {
 	return h.csdState.Maximized
 }
 
+// IsFullscreen returns true if the window is currently fullscreen.
+func (h *LibwaylandHandle) IsFullscreen() bool {
+	return h.csdState.Fullscreen
+}
+
 // CSDBorders returns the CSD border dimensions: titleBarHeight, borderWidth.
 // Used to subtract CSD borders from configure dimensions (GLFW pattern).
 func (h *LibwaylandHandle) CSDBorders() (titleBarH, borderW int) {
@@ -508,11 +513,12 @@ func (h *LibwaylandHandle) repaintCSDTitleBar() {
 //
 // Called from xdgSurfaceConfigureCb after ack_configure and before the parent
 // surface commit. Subsurfaces in sync mode cache their commits until parent commit.
-func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit // CSD resize with maximize/restore transitions
+func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit // CSD resize with maximize/restore/fullscreen transitions
 	if !h.csdActive || h.csdPainter == nil {
 		return
 	}
-	if contentW == h.csdContentW && contentH == h.csdContentH {
+	sizeChanged := contentW != h.csdContentW || contentH != h.csdContentH
+	if !sizeChanged && !h.csdPendingRepaint {
 		return
 	}
 
@@ -523,10 +529,11 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 	bW := h.csdPainter.BorderWidth()
 	totalW := contentW + bW*2
 
-	// Dimensions and positions for each subsurface.
-	// On maximize: title bar at (0,0) inside window, borders resize to screen edges.
-	// Content starts below title bar. All decorations visible (GLFW pattern).
-	// On normal: title bar above content at (-bW, -tbH), borders around content.
+	// Subsurface layout per window state (winit/SCTK + GTK4 enterprise pattern):
+	//   Normal:     title bar at (-bW, -tbH), all 4 borders visible
+	//   Maximize:   title bar at (0, -tbH), side/bottom borders destroyed
+	//   Fullscreen: ALL decorations destroyed (title bar + borders)
+	fullscreen := h.csdState.Fullscreen
 	maximized := h.csdState.Maximized
 	specs := [4]struct {
 		w, h int
@@ -537,34 +544,29 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 		{bW, contentH, int32(contentW), 0},        // right border
 		{totalW, bW, -int32(bW), int32(contentH)}, // bottom border
 	}
-	if maximized {
-		// Title bar at (0,0) inside window, full content width.
-		// Borders at screen edges around content area.
+	if maximized && !fullscreen {
+		// Title bar at (0, -tbH) — above content, no side borders.
+		// Content starts at (0,0). Geometry includes title bar via negative offset.
 		specs[0] = struct {
 			w, h int
 			x, y int32
-		}{contentW, tbH, 0, 0}
-		specs[1] = struct {
-			w, h int
-			x, y int32
-		}{bW, contentH, -int32(bW), int32(tbH)}
-		specs[2] = struct {
-			w, h int
-			x, y int32
-		}{bW, contentH, int32(contentW), int32(tbH)}
-		specs[3] = struct {
-			w, h int
-			x, y int32
-		}{contentW, bW, 0, int32(tbH + contentH)}
+		}{contentW, tbH, 0, -int32(tbH)}
 	}
 
 	state := h.csdState
 
+	// Determine which decorations should be destroyed.
+	// Fullscreen: destroy ALL (including title bar) — enterprise consensus.
+	// Maximize: destroy borders only, keep title bar — winit/GTK4 pattern.
+	shouldDestroy := func(i int) bool {
+		if fullscreen {
+			return true
+		}
+		return maximized && i != csdTop
+	}
+
 	for i, spec := range specs {
-		// For borders (not title bar) on maximize: destroy surface+subsurface
-		// to clear ghost pixels on WSLg. Recreate on restore.
-		// Title bar (i==csdTop) is NEVER destroyed — pointer state preserved for buttons.
-		if maximized && i != csdTop && h.csdSurfaces[i] != 0 {
+		if shouldDestroy(i) && h.csdSurfaces[i] != 0 {
 			if h.csdBuffers[i] != 0 {
 				h.marshalVoid(h.csdBuffers[i], 0)
 				h.csdBuffers[i] = 0
@@ -589,8 +591,8 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 			continue
 		}
 
-		// Recreate border surface+subsurface after maximize→restore.
-		if !maximized && i != csdTop && h.csdSurfaces[i] == 0 {
+		// Recreate surface+subsurface after maximize→restore or fullscreen→restore.
+		if !shouldDestroy(i) && h.csdSurfaces[i] == 0 {
 			surf, err := h.marshalConstructor(h.compositor, 0, h.surfaceInterface)
 			if err != nil {
 				slog.Warn("CSD restore: create surface failed", "edge", i, "err", err)

@@ -1448,13 +1448,14 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				newWidth := int(width)
 				newHeight := int(height)
 
-				// Geometry = content area (0, 0, contentW, contentH).
-				// Configure matches geometry → content size directly.
-				// On maximize: compositor sends full screen size, but we need room
-				// for the title bar inside the screen. Subtract only tbH.
+				// Content size from configure dimensions (winit/GTK4 enterprise pattern):
+				//   Normal:     configure = content size (geometry at 0,0)
+				//   Maximize:   configure = geometry size, subtract tbH for content
+				//   Fullscreen: configure = full screen, no subtraction (all CSD hidden)
 				vulkanW := newWidth
 				vulkanH := newHeight
-				if isMaximized && p.libwl != nil && p.libwl.CSDActive() {
+				isFullscreen := p.libwl != nil && p.libwl.CSDActive() && p.libwl.IsFullscreen()
+				if !isFullscreen && isMaximized && p.libwl != nil && p.libwl.CSDActive() {
 					tbH, _ := p.libwl.CSDBorders()
 					vulkanH = newHeight - tbH
 					if vulkanH < 1 {

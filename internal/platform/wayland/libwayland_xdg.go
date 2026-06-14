@@ -233,22 +233,26 @@ func xdgSurfaceConfigureCb(data, xdgSurface, serial uintptr) {
 		h.ResizeCSD(h.csdPendingResizeW, h.csdPendingResizeH)
 	}
 
-	// Set window geometry = content area (0, 0, contentW, contentH).
-	// CSD subsurfaces are OUTSIDE geometry (title bar at negative offset, borders at edges).
-	// Configure events match geometry → content size directly, NO border subtraction.
-	// Negative origin (-bW, -tbH) causes resize jump on WSLg — avoid it.
+	// Window geometry per state (winit/libdecor enterprise pattern):
+	//   Normal:     (0, 0, contentW, contentH) — title bar outside geometry
+	//   Maximize:   (0, -tbH, contentW, contentH+tbH) — title bar inside geometry via negative offset
+	//   Fullscreen: (0, 0, configW, configH) — no decorations, full area
 	if h.csdActive && h.csdContentW > 0 {
+		geoX := int32(0)
 		geoY := int32(0)
+		geoW := h.csdContentW
 		geoH := h.csdContentH
-		if h.csdState.Maximized {
-			// On maximize: title bar at (0,0) inside window. Geometry must include
-			// title bar area so compositor positions window with title bar visible.
+		if h.csdState.Fullscreen {
+			geoW = h.configuredW
+			geoH = h.configuredH
+		} else if h.csdState.Maximized {
 			tbH := h.csdPainter.TitleBarHeight()
+			geoY = -int32(tbH)
 			geoH = h.csdContentH + tbH
 		}
-		slog.Debug("set_window_geometry CSD", "x", 0, "y", geoY, "w", h.csdContentW, "h", geoH)
-		h.marshalVoid(h.xdgSurface, 3, 0, uintptr(uint32(geoY)),
-			uintptr(uint32(h.csdContentW)), uintptr(uint32(geoH)))
+		slog.Debug("set_window_geometry CSD", "x", geoX, "y", geoY, "w", geoW, "h", geoH)
+		h.marshalVoid(h.xdgSurface, 3, uintptr(uint32(geoX)), uintptr(uint32(geoY)),
+			uintptr(uint32(geoW)), uintptr(uint32(geoH)))
 	} else if h.configuredW > 0 && h.configuredH > 0 {
 		slog.Debug("set_window_geometry non-CSD", "w", h.configuredW, "h", h.configuredH)
 		h.marshalVoid(h.xdgSurface, 3, 0, 0,

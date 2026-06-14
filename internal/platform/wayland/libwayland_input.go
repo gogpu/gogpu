@@ -575,15 +575,20 @@ func inputToplevelConfigureCb(data, toplevel, width, height, states uintptr) {
 		return
 	}
 
-	// Parse states array for maximized (1) and activated (4) states.
+	// Parse states array for maximized (1), fullscreen (2), and activated (4).
 	// wl_array layout on 64-bit: { uint64 size, uint64 alloc, uintptr data }
 	var activated bool
 	if states != 0 {
 		activated = wlArrayContainsUint32(states, 4) // xdg_toplevel_state::activated
 		if h.csdActive {
-			maximized := wlArrayContainsUint32(states, 1) // xdg_toplevel_state::maximized
+			maximized := wlArrayContainsUint32(states, 1)  // xdg_toplevel_state::maximized
+			fullscreen := wlArrayContainsUint32(states, 2) // xdg_toplevel_state::fullscreen
 			if h.csdState.Maximized != maximized {
 				h.csdState.Maximized = maximized
+				h.csdPendingRepaint = true
+			}
+			if h.csdState.Fullscreen != fullscreen {
+				h.csdState.Fullscreen = fullscreen
 				h.csdPendingRepaint = true
 			}
 		}
