@@ -571,7 +571,7 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 		if shouldHide(i) {
 			if h.csdSurfaces[i] != 0 {
 				h.marshalVoid(h.csdSurfaces[i], 1, 0, 0, 0) // wl_surface.attach(null, 0, 0)
-				h.marshalVoid(h.csdSurfaces[i], 6)           // wl_surface.commit (cached, sync mode)
+				h.marshalVoid(h.csdSurfaces[i], 6)          // wl_surface.commit (cached, sync mode)
 				// Release SHM resources — not needed while hidden; recreated on restore.
 				if h.csdBuffers[i] != 0 {
 					h.marshalVoid(h.csdBuffers[i], 0)

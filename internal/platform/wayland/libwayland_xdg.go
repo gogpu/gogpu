@@ -293,10 +293,10 @@ func xdgWmBasePingCb(data, wmBase, serial uintptr) {
 // Listener arrays (package-level, must outlive the proxy).
 // Each is an array of function pointers, one per event.
 var (
-	xdgSurfaceListener  [1]uintptr // [0] = configure callback
-	xdgWmBaseListener   [1]uintptr // [0] = ping callback
+	xdgSurfaceListener    [1]uintptr // [0] = configure callback
+	xdgWmBaseListener     [1]uintptr // [0] = ping callback
 	toplevelDecorListener [1]uintptr // [0] = configure callback
-	listenersOnce       sync.Once
+	listenersOnce         sync.Once
 )
 
 func initXdgListeners() {
