@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.10] - 2026-06-14
+
+### Fixed
+
+- **Wayland multiwindow** (@lkmavi, #292) — 4 bugs fixed:
+  - macOS: `Show()` not called for secondary windows (v0.41.5 regression)
+  - Wayland: global callback handles overwritten by second window → per-proxy maps (`xdgSurfaceHndls`, `xdgWmBaseHndls`, `toplevelHandles`)
+  - Wayland: closing one window closed both → independent connections per secondary window
+  - Wayland: `WaitEvents` didn't poll secondary connection FDs
+- **Thread panic propagation** (@lkmavi) — `Call`/`CallVoid` re-panic on caller instead of silent goroutine death
+- **macOS GetPoint buffer** (@lkmavi) — `[2]float64` → `[4]float64` for goffi HFA return (Go 1.26 checkptr with `-race`)
+
+### Changed
+
+- **docs:** enterprise README/CONTRIBUTING/ROADMAP/SECURITY update, Open Collective sponsorship badges, GoGPU (ecosystem) vs gogpu (library) naming
+
 ## [0.41.9] - 2026-06-11
 
 ### Changed
