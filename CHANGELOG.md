@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.11] - 2026-06-14
+
+### Fixed
+
+- **Wayland CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed based on enterprise research (GTK4, winit/SCTK, SDL3/libdecor, GLFW consensus):
+  - Title bar at `(0, -tbH)` on maximize instead of `(0, 0)` — no longer covers Vulkan content (winit AdwaitaFrame pattern)
+  - Fullscreen state parsed from `xdg_toplevel` states (value 2) — was missing entirely
+  - ALL decorations destroyed on fullscreen, recreated on restore (unanimous enterprise pattern)
+  - `set_window_geometry` uses negative offset on maximize: `(0, -tbH, W, H+tbH)` (winit/libdecor pattern)
+  - `ResizeCSD` triggers on state change even without size change (fullscreen↔maximize at same resolution)
+
 ## [0.41.10] - 2026-06-14
 
 ### Fixed
