@@ -1,4 +1,5 @@
 //go:build !darwin && !windows
+
 package platform
 
 // SystemScaleFactor returns the primary display DPI scale factor.
