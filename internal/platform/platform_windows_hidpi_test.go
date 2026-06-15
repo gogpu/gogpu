@@ -34,7 +34,7 @@ func TestWin32Size_Layout(t *testing.T) {
 	// cx at offset 0, cy at offset 4 (little-endian).
 	s.cx = 0x11223344
 	s.cy = 0x55667788
-	raw := (*[8]byte)(unsafe.Pointer(&s)) //nolint:govet // layout test
+	raw := (*[8]byte)(unsafe.Pointer(&s))
 	if raw[0] != 0x44 || raw[1] != 0x33 || raw[2] != 0x22 || raw[3] != 0x11 {
 		t.Errorf("cx not at byte offset 0")
 	}
