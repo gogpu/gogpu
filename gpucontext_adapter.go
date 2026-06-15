@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu"
 )
 
 // gpuContextAdapter bridges gogpu to gpucontext.DeviceProvider interface.
@@ -23,22 +24,21 @@ type gpuContextAdapter struct {
 	app      *App
 }
 
-// Device returns the underlying *wgpu.Device as gpucontext.Device.
-// Consumers should type-assert to *wgpu.Device for full API access.
+// Device returns the underlying *wgpu.Device as gpucontext.Device opaque handle.
+// Consumers extract via wgpu.DeviceFromHandle(dev).
 func (a *gpuContextAdapter) Device() gpucontext.Device {
 	if a.renderer == nil || a.renderer.device == nil {
-		return nil
+		return gpucontext.Device{}
 	}
-	return a.renderer.device
+	return wgpu.DeviceToHandle(a.renderer.device)
 }
 
-// Queue returns the underlying *wgpu.Queue as gpucontext.Queue.
-// Consumers should type-assert to *wgpu.Queue for full API access.
+// Queue returns the underlying *wgpu.Queue as gpucontext.Queue opaque handle.
 func (a *gpuContextAdapter) Queue() gpucontext.Queue {
 	if a.renderer == nil || a.renderer.device == nil {
-		return nil
+		return gpucontext.Queue{}
 	}
-	return a.renderer.device.Queue()
+	return wgpu.QueueToHandle(a.renderer.device.Queue())
 }
 
 // SurfaceFormat returns the preferred texture format for the surface.
@@ -49,13 +49,12 @@ func (a *gpuContextAdapter) SurfaceFormat() gputypes.TextureFormat {
 	return mapTextureFormat(a.renderer.primary.format)
 }
 
-// Adapter returns the GPU adapter as gpucontext.Adapter.
-// Consumers should type-assert to *wgpu.Adapter for full API access.
+// Adapter returns the GPU adapter as gpucontext.Adapter opaque handle.
 func (a *gpuContextAdapter) Adapter() gpucontext.Adapter {
 	if a.renderer == nil || a.renderer.adapter == nil {
-		return nil
+		return gpucontext.Adapter{}
 	}
-	return a.renderer.adapter
+	return wgpu.AdapterToHandle(a.renderer.adapter)
 }
 
 // AdapterInfo returns GPU adapter metadata for render mode decisions.

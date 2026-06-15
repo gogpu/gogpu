@@ -33,26 +33,23 @@ func TestGPUContextAdapterMethods(t *testing.T) {
 	adapter := &gpuContextAdapter{renderer: renderer}
 
 	t.Run("Device", func(t *testing.T) {
-		// Device returns nil when renderer.device is nil.
 		device := adapter.Device()
-		if device != nil {
-			t.Error("Device() should return nil when renderer.device is nil")
+		if !device.IsNil() {
+			t.Error("Device() should return nil handle when renderer.device is nil")
 		}
 	})
 
 	t.Run("Queue", func(t *testing.T) {
-		// Queue returns nil when renderer.device is nil.
 		queue := adapter.Queue()
-		if queue != nil {
-			t.Error("Queue() should return nil when renderer.device is nil")
+		if !queue.IsNil() {
+			t.Error("Queue() should return nil handle when renderer.device is nil")
 		}
 	})
 
 	t.Run("Adapter", func(t *testing.T) {
-		// Adapter returns nil when renderer.adapter is nil.
 		adpt := adapter.Adapter()
-		if adpt != nil {
-			t.Error("Adapter() should return nil when renderer.adapter is nil")
+		if !adpt.IsNil() {
+			t.Error("Adapter() should return nil handle when renderer.adapter is nil")
 		}
 	})
 
@@ -69,20 +66,20 @@ func TestGPUContextAdapterNilRenderer(t *testing.T) {
 	adapter := &gpuContextAdapter{renderer: nil}
 
 	t.Run("Device", func(t *testing.T) {
-		if adapter.Device() != nil {
-			t.Error("Device() should return nil with nil renderer")
+		if !adapter.Device().IsNil() {
+			t.Error("Device() should return nil handle with nil renderer")
 		}
 	})
 
 	t.Run("Queue", func(t *testing.T) {
-		if adapter.Queue() != nil {
-			t.Error("Queue() should return nil with nil renderer")
+		if !adapter.Queue().IsNil() {
+			t.Error("Queue() should return nil handle with nil renderer")
 		}
 	})
 
 	t.Run("Adapter", func(t *testing.T) {
-		if adapter.Adapter() != nil {
-			t.Error("Adapter() should return nil with nil renderer")
+		if !adapter.Adapter().IsNil() {
+			t.Error("Adapter() should return nil handle with nil renderer")
 		}
 	})
 

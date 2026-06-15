@@ -70,9 +70,9 @@ func main() {
 		// Print device info once
 		if !printed {
 			fmt.Println("=== gpucontext.DeviceProvider Info ===")
-			fmt.Printf("Device: %T (non-nil: %v)\n", provider.Device(), provider.Device() != nil)
-			fmt.Printf("Queue: %T (non-nil: %v)\n", provider.Queue(), provider.Queue() != nil)
-			fmt.Printf("Adapter: %T (non-nil: %v)\n", provider.Adapter(), provider.Adapter() != nil)
+			fmt.Printf("Device: %v (non-nil: %v)\n", provider.Device().Pointer(), !provider.Device().IsNil())
+			fmt.Printf("Queue: %v (non-nil: %v)\n", provider.Queue().Pointer(), !provider.Queue().IsNil())
+			fmt.Printf("Adapter: %v (non-nil: %v)\n", provider.Adapter().Pointer(), !provider.Adapter().IsNil())
 			fmt.Printf("SurfaceFormat: %v\n", provider.SurfaceFormat())
 			fmt.Println("======================================")
 			fmt.Println()

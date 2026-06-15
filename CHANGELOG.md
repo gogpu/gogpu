@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-06-15
+
+### Changed
+
+- **GPU handles: struct tokens (BREAKING)** — gpucontext v0.21.0 + wgpu v0.30.1. Device/Queue/Adapter changed from interfaces to opaque struct tokens (`unsafe.Pointer`, reflect.Value pattern). Zero `unsafe` in gogpu — all via `wgpu.DeviceToHandle()`/`wgpu.AdapterToHandle()` helpers. 8 bytes, zero alloc, GC-safe, compile-time type distinct.
+- **deps:** gpucontext v0.20.0 → v0.21.0 (struct tokens), wgpu v0.29.16 → v0.30.1 (unified API + helpers)
+
 ## [0.41.15] - 2026-06-15
 
 ### Changed
