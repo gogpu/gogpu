@@ -6,11 +6,11 @@ require (
 	github.com/go-webgpu/goffi v0.5.3
 	github.com/gogpu/gpucontext v0.19.0
 	github.com/gogpu/gputypes v0.5.0
-	github.com/gogpu/wgpu v0.29.14
+	github.com/gogpu/wgpu v0.29.15
 	golang.org/x/sys v0.46.0
 )
 
 require (
 	github.com/go-webgpu/webgpu v0.5.2 // indirect
-	github.com/gogpu/naga v0.17.14 // indirect
+	github.com/gogpu/naga v0.17.15 // indirect
 )

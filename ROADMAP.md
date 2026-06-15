@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.41.12
+## Current State: v0.41.13
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -131,45 +131,36 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ## Upcoming
 
-### v0.27.x — Platform Polish
+### v0.42.x — HiDPI Enterprise Fix (#306, ADR-044)
 
-- [x] Mouse grab / pointer lock — Win32 + X11 (v0.27.0)
-- [x] Wayland pointer lock — `zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1` (v0.27.1, #175)
-- [x] Adapter power preference — `Config.PowerPreference` + `GOGPU_POWER_PREFERENCE` env var (v0.27.1, #176)
-- [x] X11 event loop fix — dual-poller race with `ContinuousRender(false)` (v0.27.1, #178)
-- [x] macOS software backend blit fix — `setNeedsDisplay:` after `setContents:` (v0.27.1, #172)
-- [x] Software backend double-blit fix (v0.27.1)
-- [ ] CSD resize cursor shapes (FEAT-CSD-CURSOR-001)
-- [ ] CSD resize click jump fix (BUG-CSD-002)
-- [ ] Adapter.GetInfo() API
-- [ ] RenderTo method for offscreen rendering
+Windows DPI-aware window creation. Unified pre-scale + verify pattern (Qt6/SDL3/winit research).
 
-### v0.29.0 — Damage-Aware Presentation
+- [x] macOS ScaleFactor three-tier resolution (PR #313, @lkmavi)
+- [ ] Windows `AdjustWindowRectExForDpi` + `MonitorFromPoint` pre-scale (ADR-044, @lkmavi)
+- [ ] Windows `WM_GETDPISCALEDSIZE` handler for multi-monitor transitions
+- [ ] Windows `PlatScaleProvider` + `SystemScaleFactor()` (PR #313 pattern)
+- [ ] `Config.Width`/`Config.Height` docs: "pixels" → "logical points (DIP)"
 
-- [x] `Context.SetDamageRects()` — pass dirty regions to platform compositor (v0.29.0, ADR-013)
-- [x] `ContextRenderTarget.SetDamageRects()` — adapter for ggcanvas integration (v0.29.0)
-- [x] `Texture.TextureView()` — `gpucontext.TextureView` for duck-typed access (v0.29.0)
-- [x] wgpu v0.26.2 — damage-aware `PresentWithDamage` on all backends (v0.29.0)
+### v0.42.x — API Cleanup (#311)
 
-### v0.28.0 — Multi-Window ([RFC #167](https://github.com/orgs/gogpu/discussions/167))
+Enterprise API audit: unexport internals, remove dead code, fix documentation.
 
-- [x] Multi-window architecture (ADR-010, 7 framework studies) (v0.28.0)
-- [x] PlatformManager + PlatformWindow split (v0.28.0)
-- [x] Renderer split: shared GPU + per-window windowSurface (v0.28.0)
-- [x] Monotonic WindowID, WindowManager with Go map registry (v0.28.0)
-- [x] Per-window callbacks (onDraw, onResize, onClose) (v0.28.0)
-- [x] VSync: primary window Fifo, secondary Immediate (v0.28.0)
-- [x] Multi-window frame loop with activeSurface() dispatch (v0.28.0)
-- [x] App.NewWindow() + real window creation + GPU surface (v0.28.0)
-- [x] EventFocus on all platforms — Win32, X11, Wayland, macOS (v0.28.1)
-- [x] WindowID on all events for multi-window routing (v0.28.1)
-- [x] Centralized input dispatch — all input through PollEvents() with WindowID (ADR-021, v0.32.1)
-- [x] Per-window input callbacks — SetOnKeyPress, SetOnPointer, SetOnScroll, etc. (v0.32.1)
-- [x] Close-as-request — `SetOnClose(func() bool)` rejection, ID pool, `OnAnyWindowClosed` (ADR-022, v0.34.2, @lkmavi)
-- [x] macOS window delegate — `GoGPUWindowDelegate` with `windowShouldClose:`, per-window event routing (ADR-022 Phase 2, @lkmavi)
-- [ ] VSync mode switching on focus change (surface reconfigure)
-- [ ] Window types: Normal, Dialog, Tool, Popup with parent-child
-- [ ] Unified platform package structure (REFACTOR-PLATFORM-001)
+- [ ] Unexport 7 internal types: SurfaceState, RenderTarget, WindowManager, PlatformWindowCloser, AnimationController, Invalidator, GestureRecognizer
+- [ ] Remove dead `gogpu.DeviceProvider` interface (replaced by `gpucontext.DeviceProvider`)
+- [ ] Replace type aliases `FileDialogOptions`/`FileTypeFilter` with real types
+- [ ] Rewrite `doc.go` (says "macOS: Planned" — fully supported since v0.21.0)
+- [ ] Deprecate `Config.Backend` + `WithBackend()` (obsolete per ADR-038 build tags)
+- [ ] `App.SetTitle()` — platform layer ready, expose in public API
+
+### v0.43.x — Wayland Cursor Fallback (ADR-043)
+
+- [ ] libwayland-cursor.so via goffi — 4 functions for cursor image loading
+- [ ] Fallback chain: wp_cursor_shape_v1 → libwayland-cursor → embedded defaults
+
+### Ecosystem Dependencies (#312)
+
+- [ ] Cascade wgpu v0.29.15 + naga v0.17.15 → gg → ui → g3d
+- [ ] Sync x/sys v0.46.0, goffi v0.5.3 across systray, audio
 
 ### Universal App Lifecycle (ADR-026)
 
