@@ -68,6 +68,14 @@ func (m *mockWindow) IsFullscreen() bool   { return m.fullscreen }
 func (m *mockWindow) Close()               { m.closed = true }
 func (m *mockWindow) Show()                {}
 
+// mockScaleManager wraps mockManager and implements platform.PlatScaleProvider.
+type mockScaleManager struct {
+	mockManager
+	scaleFactor float64
+}
+
+func (m *mockScaleManager) ScaleFactor() float64 { return m.scaleFactor }
+
 // mockManager implements platform.PlatformManager for testing.
 type mockManager struct {
 	clipboardText  string
@@ -201,6 +209,25 @@ func TestPlatformProviderNilPlatform(t *testing.T) {
 		sl := app.SubpixelLayout()
 		if sl != gpucontext.SubpixelNone {
 			t.Errorf("SubpixelLayout() = %v, want SubpixelNone", sl)
+		}
+	})
+}
+
+// TestScaleFactorResolution verifies three-tier ScaleFactor resolution:
+// platWindow → PlatScaleProvider → SystemScaleFactor.
+func TestScaleFactorResolution(t *testing.T) {
+	t.Run("manager implements PlatScaleProvider", func(t *testing.T) {
+		app := &App{manager: &mockScaleManager{scaleFactor: 1.5}}
+		if sf := app.ScaleFactor(); sf != 1.5 {
+			t.Errorf("ScaleFactor() = %f, want 1.5", sf)
+		}
+	})
+
+	t.Run("manager without PlatScaleProvider falls back to SystemScaleFactor", func(t *testing.T) {
+		app := &App{manager: &mockManager{}}
+		want := platform.SystemScaleFactor()
+		if sf := app.ScaleFactor(); sf != want {
+			t.Errorf("ScaleFactor() = %f, want SystemScaleFactor()=%f", sf, want)
 		}
 	})
 }
