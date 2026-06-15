@@ -185,6 +185,7 @@ linters:
           - gocyclo
           - cyclop
           - gocognit
+          - nestif
           - godot
           - revive
           - gosec
