@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.41.13
+## Current State: v0.41.14
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -136,10 +136,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 Windows DPI-aware window creation. Unified pre-scale + verify pattern (Qt6/SDL3/winit research).
 
 - [x] macOS ScaleFactor three-tier resolution (PR #313, @lkmavi)
-- [ ] Windows `AdjustWindowRectExForDpi` + `MonitorFromPoint` pre-scale (ADR-044, @lkmavi)
-- [ ] Windows `WM_GETDPISCALEDSIZE` handler for multi-monitor transitions
-- [ ] Windows `PlatScaleProvider` + `SystemScaleFactor()` (PR #313 pattern)
+- [x] Windows pre-scale + verify + WM_GETDPISCALEDSIZE + PlatScaleProvider (PR #314, @lkmavi, ADR-044)
+- [x] macOS physical-size tracking + windowDidChangeScreen delegate (PR #316, @lkmavi)
 - [ ] `Config.Width`/`Config.Height` docs: "pixels" → "logical points (DIP)"
+- [ ] @TimLai666 verification on AMD Radeon 890M, Windows 11, 200%
 
 ### v0.42.x — API Cleanup (#311)
 

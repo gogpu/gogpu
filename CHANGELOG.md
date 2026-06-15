@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.14] - 2026-06-15
+
+### Fixed
+
+- **Windows HiDPI** (@lkmavi, #306, ADR-044) — unified pre-scale + verify pattern (enterprise research: Qt6, Chromium, winit, SDL3):
+  - `MonitorFromPoint` + `GetDpiForMonitor` (shcore.dll) for pre-HWND DPI query
+  - `AdjustWindowRectExForDpi` for DPI-aware window frame (fallback to `AdjustWindowRectEx` on pre-Win10 1607)
+  - Pre-scaled `CreateWindowExW` — window correct from first frame on primary monitor
+  - Post-create verify — `GetDpiForWindow` → `SetWindowPos` if different-DPI monitor
+  - `WM_GETDPISCALEDSIZE` handler for smooth multi-monitor transitions (Qt6 pattern)
+  - `PlatScaleProvider` + `SystemScaleFactor()` on Windows
+- **macOS HiDPI** (@lkmavi, #306) — physical-size tracking for Retina↔1× multi-monitor transitions:
+  - `physW`/`physH` tracking on `darwinWindow` — catches scale changes when logical size unchanged
+  - `windowDidChangeScreen:` delegate — NSNotification when window moves to different-DPI display
+  - `WakeEventLoop()` for prompt resize detection after display transition
+
 ## [0.41.13] - 2026-06-15
 
 ### Changed
