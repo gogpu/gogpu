@@ -38,8 +38,6 @@ func main() {
 		scale := dc.ScaleFactor()
 		pw, ph := dc.FramebufferSize()
 
-		sizeChanged := pw > 0 && ph > 0 && (pw != lastPW || ph != lastPH)
-		if sizeChanged {
 			if texLow != nil {
 				texLow.Destroy()
 			}
