@@ -38,6 +38,11 @@ type Window struct {
 	visible     bool
 	delegate    ID
 	onClose     func() bool
+
+	// screenChangedCh receives a signal when the window moves to a display
+	// with a different backing scale factor (windowDidChangeScreen: delegate).
+	// Capacity 1: rapid transitions are coalesced; consumer need not be realtime.
+	screenChangedCh chan struct{}
 }
 
 // NewWindow creates a new window with the given configuration.
@@ -46,8 +51,9 @@ func NewWindow(config WindowConfig) (*Window, error) {
 	initClasses()
 
 	w := &Window{
-		width:  config.Width,
-		height: config.Height,
+		width:           config.Width,
+		height:          config.Height,
+		screenChangedCh: make(chan struct{}, 1),
 	}
 
 	// Calculate style mask
@@ -576,4 +582,11 @@ func (w *Window) SetOnClose(fn func() bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.onClose = fn
+}
+
+// ScreenChangedCh returns a receive-only channel that is signaled when the
+// window moves to a display with a different backing scale factor.
+// The channel has capacity 1; multiple rapid transitions are coalesced.
+func (w *Window) ScreenChangedCh() <-chan struct{} {
+	return w.screenChangedCh
 }

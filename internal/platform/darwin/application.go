@@ -358,6 +358,14 @@ func createApplicationDefinedEvent() ID {
 	return ID(result)
 }
 
+// WakeEventLoop posts an empty event to unblock WaitEventsWithHandler.
+// Safe to call from any goroutine or ObjC delegate callback.
+func WakeEventLoop() {
+	if app != nil {
+		app.PostEmptyEvent()
+	}
+}
+
 // WaitEventsWithHandler blocks until at least one event is available,
 // then processes all pending events using the provided handler.
 // This combines the blocking behavior of WaitEvents with the handler

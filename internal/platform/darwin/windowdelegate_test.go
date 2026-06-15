@@ -200,6 +200,54 @@ func TestWindowDelegateLifecycle(t *testing.T) {
 	})
 }
 
+// TestWindowDelegateRespondsToWindowDidChangeScreen verifies that the delegate
+// class registers windowDidChangeScreen: for prompt display-transition detection.
+func TestWindowDelegateRespondsToWindowDidChangeScreen(t *testing.T) {
+	runOnMainThread(t, func() {
+		cls, err := platformdarwin.WindowDelegateClass()
+		if err != nil {
+			t.Fatalf("WindowDelegateClass() error: %v", err)
+		}
+
+		selResponds := platformdarwin.RegisterSelector("instancesRespondToSelector:")
+		selScreenChanged := platformdarwin.RegisterSelector("windowDidChangeScreen:")
+
+		result := platformdarwin.ID(cls).SendPtr(selResponds, uintptr(selScreenChanged))
+		if result == 0 {
+			t.Error("GoGPUWindowDelegate does not respond to windowDidChangeScreen:")
+		}
+	})
+}
+
+// TestWindowScreenChangedCh verifies that ScreenChangedCh returns a valid,
+// initially-empty channel on a newly created window.
+func TestWindowScreenChangedCh(t *testing.T) {
+	runOnMainThread(t, func() {
+		config := platformdarwin.WindowConfig{
+			Title:     "screen-changed-ch test",
+			Width:     400,
+			Height:    300,
+			Resizable: false,
+		}
+		win, err := platformdarwin.NewWindow(config)
+		if err != nil {
+			t.Fatalf("NewWindow error: %v", err)
+		}
+		defer win.Destroy()
+
+		ch := win.ScreenChangedCh()
+		if ch == nil {
+			t.Fatal("ScreenChangedCh returned nil")
+		}
+
+		select {
+		case <-ch:
+			t.Error("ScreenChangedCh should be empty on a freshly created window")
+		default:
+		}
+	})
+}
+
 // TestWindowDelegateCreationFailure verifies that CreateWindowDelegate
 // returns an error when given a nil window.
 func TestWindowDelegateCreationNilWindow(t *testing.T) {

@@ -44,6 +44,12 @@ type darwinWindow struct {
 	// Last known scale factor for change detection in PrepareFrame.
 	lastScale float64
 
+	// Physical framebuffer dimensions (device pixels) for cross-DPI change detection.
+	// Zero-initialized so the first pollEvents call always emits EventResize with
+	// the actual physical size, signaling the real display DPI to the app.
+	physW int
+	physH int
+
 	// Focus tracking: last known key window status for change detection.
 	lastKeyWindow bool
 	focusInited   bool // true after first pollEvents call
@@ -461,25 +467,40 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 		w.events.Push(Event{WindowID: w.id, Type: EventClose})
 	}
 
-	// Check for resize — queue if size changed.
+	// Check for resize — queue if logical OR physical size changed.
 	// RETINA-002: Do NOT call w.surface.Resize() here. PollEvents runs on the
 	// main thread while the render thread operates on wgpu surface. Surface
 	// reconfiguration is handled by the render thread via RequestResize.
+	//
+	// Physical-size tracking (physW/physH) catches Retina↔1× transitions
+	// where logical dims are unchanged but the framebuffer resolution changes.
 	if w.window != nil {
-		oldWidth, oldHeight := w.config.Width, w.config.Height
-		w.window.UpdateSize()
-		newWidth, newHeight := w.window.Size() // logical points
+		// Drain the screen-change signal from windowDidChangeScreen:.
+		// The signal already woke WaitEvents; draining resets the channel
+		// for the next display transition.
+		select {
+		case <-w.window.ScreenChangedCh():
+		default:
+		}
 
-		if newWidth != oldWidth || newHeight != oldHeight {
+		oldWidth, oldHeight := w.config.Width, w.config.Height
+		oldPhysW, oldPhysH := w.physW, w.physH
+
+		w.window.UpdateSize()
+		newWidth, newHeight := w.window.Size()
+		newPhysW, newPhysH := w.window.FramebufferSize()
+
+		if newWidth != oldWidth || newHeight != oldHeight || newPhysW != oldPhysW || newPhysH != oldPhysH {
 			w.config.Width = newWidth
 			w.config.Height = newHeight
-			physW, physH := w.window.FramebufferSize()
+			w.physW = newPhysW
+			w.physH = newPhysH
 			w.events.Push(Event{
 				Type:           EventResize,
 				Width:          newWidth,
 				Height:         newHeight,
-				PhysicalWidth:  physW,
-				PhysicalHeight: physH,
+				PhysicalWidth:  newPhysW,
+				PhysicalHeight: newPhysH,
 			})
 		}
 	}
@@ -816,7 +837,7 @@ func (w *darwinWindow) queueEvent(event Event) {
 	w.events.Push(event)
 }
 
-// checkResize checks for window size changes and queues a resize event.
+// checkResize checks for logical or physical size changes and queues EventResize.
 // RETINA-002: Does NOT call w.surface.Resize(). Surface reconfiguration
 // is handled by the render thread via RequestResize to avoid race conditions.
 // Must be called with w.eventMu held.
@@ -826,21 +847,24 @@ func (w *darwinWindow) checkResize() {
 	}
 
 	oldWidth, oldHeight := w.config.Width, w.config.Height
-	w.window.UpdateSize()
-	newWidth, newHeight := w.window.Size() // logical points
+	oldPhysW, oldPhysH := w.physW, w.physH
 
-	if newWidth != oldWidth || newHeight != oldHeight {
+	w.window.UpdateSize()
+	newWidth, newHeight := w.window.Size()
+	newPhysW, newPhysH := w.window.FramebufferSize()
+
+	if newWidth != oldWidth || newHeight != oldHeight || newPhysW != oldPhysW || newPhysH != oldPhysH {
 		w.config.Width = newWidth
 		w.config.Height = newHeight
-
-		physW, physH := w.window.FramebufferSize()
+		w.physW = newPhysW
+		w.physH = newPhysH
 
 		w.queueEvent(Event{
 			Type:           EventResize,
 			Width:          newWidth,
 			Height:         newHeight,
-			PhysicalWidth:  physW,
-			PhysicalHeight: physH,
+			PhysicalWidth:  newPhysW,
+			PhysicalHeight: newPhysH,
 		})
 	}
 }

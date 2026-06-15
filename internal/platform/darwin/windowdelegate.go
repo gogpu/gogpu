@@ -55,6 +55,26 @@ func registerWindowDelegateClass() (Class, error) {
 		},
 	)
 	ClassAddMethod(cls, selectors.windowShouldClose, shouldCloseIMP, "B@:@")
+
+	// windowDidChangeScreen: fires when the window moves to a display with
+	// a different backing scale factor (e.g. Retina ↔ 1× transition).
+	// Signal the per-window channel and wake the event loop so that the
+	// physical-size check in pollEvents/checkResize runs promptly.
+	screenChangedIMP := ffi.NewCallback(
+		func(self, sel, notification uintptr) uintptr {
+			win := getWindowFromDelegate(ID(self))
+			if win != nil {
+				select {
+				case win.screenChangedCh <- struct{}{}:
+				default:
+				}
+				WakeEventLoop()
+			}
+			return 0
+		},
+	)
+	ClassAddMethod(cls, selectors.windowDidChangeScreen, screenChangedIMP, "v@:@")
+
 	RegisterClassPair(cls)
 	return cls, nil
 }
