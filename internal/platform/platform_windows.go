@@ -205,8 +205,15 @@ const (
 	smCXPaddedBorder        = 92 // SM_CXPADDEDBORDERWIDTH
 	monitorDefaultToNearest = 2  // MONITOR_DEFAULTTONEAREST
 
-	// DPI change message (Windows 8.1+)
-	wmDpiChanged = 0x02E0 // WM_DPICHANGED
+	// DPI change messages
+	wmDpiChanged       = 0x02E0 // WM_DPICHANGED
+	wmGetDpiScaledSize = 0x02E4 // WM_GETDPISCALEDSIZE (Windows 10 1703+)
+
+	// MonitorFromPoint flags
+	monitorDefaultToPrimary = 1 // MONITOR_DEFAULTTOPRIMARY
+
+	// GetDpiForMonitor type
+	mdtEffectiveDpi = 0 // MDT_EFFECTIVE_DPI
 
 	// Focus messages
 	wmSetFocus    = 0x0007 // WM_SETFOCUS
@@ -284,6 +291,13 @@ var (
 	procGetDpiForWindow               = user32.NewProc("GetDpiForWindow")
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
 	procSetProcessDPIAware            = user32.NewProc("SetProcessDPIAware")
+	procMonitorFromPoint              = user32.NewProc("MonitorFromPoint")
+	procAdjustWindowRectExForDpi      = user32.NewProc("AdjustWindowRectExForDpi") // Win10 1607+
+	procAdjustWindowRectEx            = user32.NewProc("AdjustWindowRectEx")       // fallback
+
+	// shcore.dll: GetDpiForMonitor (Windows 8.1+)
+	shcore               = windows.NewLazyDLL("shcore.dll")
+	procGetDpiForMonitor = shcore.NewProc("GetDpiForMonitor")
 
 	// Clipboard
 	procOpenClipboard    = user32.NewProc("OpenClipboard")
@@ -440,6 +454,11 @@ type monitorInfo struct {
 	dwFlags   uint32
 }
 
+// win32Size is the Win32 SIZE structure used by WM_GETDPISCALEDSIZE.
+type win32Size struct {
+	cx, cy int32
+}
+
 // win32Window holds all per-window state for a single Win32 window.
 // Implements both per-window methods on windowsPlatform (legacy Platform)
 // and the PlatformWindow interface (multi-window PlatformManager).
@@ -576,6 +595,58 @@ func (p *windowsPlatform) initProcess() error {
 	return nil
 }
 
+// monitorDpiFromPoint returns the effective DPI for the monitor at (x, y).
+// Pass usePrimary=true (and any x, y) to query the primary monitor.
+// Returns 96 as a safe fallback when the shcore API is unavailable (pre-Win8.1).
+func monitorDpiFromPoint(x, y int32, usePrimary bool) uint32 {
+	var ptPacked uintptr
+	var flag uintptr
+	if usePrimary {
+		flag = monitorDefaultToPrimary
+		// ptPacked stays 0 — position is ignored with DEFAULTTOPRIMARY
+	} else {
+		// Pack POINT{x, y} into a single uintptr (x64: struct fits in one register).
+		ptPacked = uintptr(uint32(x)) | (uintptr(uint32(y)) << 32)
+		flag = monitorDefaultToNearest
+	}
+	monitor, _, _ := procMonitorFromPoint.Call(ptPacked, flag)
+	if monitor == 0 {
+		return 96
+	}
+	if err := procGetDpiForMonitor.Find(); err != nil {
+		return 96 // shcore.dll not available (pre-Win8.1)
+	}
+	var dpiX, dpiY uint32
+	hr, _, _ := procGetDpiForMonitor.Call(
+		monitor,
+		mdtEffectiveDpi,
+		uintptr(unsafe.Pointer(&dpiX)),
+		uintptr(unsafe.Pointer(&dpiY)))
+	if hr != 0 || dpiX == 0 {
+		return 96
+	}
+	return dpiX
+}
+
+// adjustWindowRectForDpi adjusts r (initially client rect) to include the window frame
+// at the given DPI. Falls back to AdjustWindowRectEx on pre-Win10 1607 systems.
+func adjustWindowRectForDpi(r *rect, style uintptr, dpi uint32) {
+	if err := procAdjustWindowRectExForDpi.Find(); err == nil {
+		procAdjustWindowRectExForDpi.Call(
+			uintptr(unsafe.Pointer(r)),
+			style,
+			0, // bMenu = FALSE
+			0, // dwExStyle = 0
+			uintptr(dpi))
+	} else {
+		procAdjustWindowRectEx.Call(
+			uintptr(unsafe.Pointer(r)),
+			style,
+			0, // bMenu = FALSE
+			0) // dwExStyle = 0
+	}
+}
+
 // createWindowWin32 creates a new Win32 HWND window from the given config.
 // Shared between PlatformManager.CreateWindow and the legacy Init(config).
 func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error) {
@@ -591,6 +662,23 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 	style := uintptr(wsOverlappedWindow)
 
+	// Best-guess DPI before HWND exists (SDL3 hybrid pattern).
+	// Position is CW_USEDEFAULT → query primary monitor.
+	guessDpi := monitorDpiFromPoint(0, 0, true)
+	guessScale := float64(guessDpi) / 96.0
+
+	// Scale logical → physical and include window frame.
+	outerRect := rect{
+		left:   0,
+		top:    0,
+		right:  int32(float64(config.Width) * guessScale),
+		bottom: int32(float64(config.Height) * guessScale),
+	}
+	adjustWindowRectForDpi(&outerRect, style, guessDpi)
+	physW := outerRect.right - outerRect.left
+	physH := outerRect.bottom - outerRect.top
+
+	// Create window with pre-scaled outer dimensions.
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
@@ -598,14 +686,33 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		style,
 		uintptr(cwUseDefault),
 		uintptr(cwUseDefault),
-		uintptr(config.Width),
-		uintptr(config.Height),
+		uintptr(physW),
+		uintptr(physH),
 		0, 0,
 		uintptr(p.hinstance),
 		0,
 	)
 	if hwnd == 0 {
 		return nil, fmt.Errorf("CreateWindowExW failed")
+	}
+
+	// Post-create verify — if the window landed on a monitor with a
+	// different DPI than our guess, recalculate and reposition.
+	actualDpi, _, _ := procGetDpiForWindow.Call(hwnd)
+	if actualDpi != 0 && uint32(actualDpi) != guessDpi {
+		actualScale := float64(actualDpi) / 96.0
+		fixRect := rect{
+			left:   0,
+			top:    0,
+			right:  int32(float64(config.Width) * actualScale),
+			bottom: int32(float64(config.Height) * actualScale),
+		}
+		adjustWindowRectForDpi(&fixRect, style, uint32(actualDpi))
+		fixW := fixRect.right - fixRect.left
+		fixH := fixRect.bottom - fixRect.top
+		procSetWindowPos.Call(hwnd, 0, 0, 0,
+			uintptr(fixW), uintptr(fixH),
+			swpNoMove|swpNoZOrder|swpNoActivate)
 	}
 
 	w := &win32Window{
@@ -993,10 +1100,13 @@ func (p *windowsPlatform) WakeUp() {
 	procPostMessageW.Call(uintptr(p.primary.hwnd), uintptr(wmWakeUp), 0, 0)
 }
 
-// ScaleFactor returns the DPI scale factor.
-// 1.0 = 96 DPI (standard), 1.25 = 120 DPI, 1.5 = 144 DPI, 2.0 = 192 DPI.
+// ScaleFactor returns the DPI scale factor for the primary window, or the primary
+// monitor DPI when called before window creation (satisfies PlatScaleProvider).
 func (p *windowsPlatform) ScaleFactor() float64 {
-	return p.primary.scaleFactor()
+	if p.primary != nil {
+		return p.primary.scaleFactor()
+	}
+	return float64(monitorDpiFromPoint(0, 0, true)) / 96.0
 }
 
 func (p *windowsPlatform) PrepareFrame() PrepareFrameResult {
@@ -2294,6 +2404,26 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			syncPopupEnabled(wParam)
 		}
 		return 0
+
+	case wmGetDpiScaledSize:
+		// Tell Windows the correct outer window size at the new DPI before WM_DPICHANGED fires.
+		// This prevents Windows from using stale frame metrics during multi-monitor transitions.
+		// SDL3 (SDL_windowswindow.c) and GLFW (win32_window.c) both implement this message.
+		newDpi := uint32(wParam)
+		sizeOut := (*win32Size)(unsafe.Pointer(lParam)) //nolint:govet // lParam is SIZE*
+		logW, logH := w.LogicalSize()
+		scale := float64(newDpi) / 96.0
+		outerRect := rect{
+			left:   0,
+			top:    0,
+			right:  int32(float64(logW) * scale),
+			bottom: int32(float64(logH) * scale),
+		}
+		curStyle, _, _ := procGetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle)
+		adjustWindowRectForDpi(&outerRect, curStyle, newDpi)
+		sizeOut.cx = outerRect.right - outerRect.left
+		sizeOut.cy = outerRect.bottom - outerRect.top
+		return 1 // TRUE: we computed the size
 
 	case wmDpiChanged:
 		// Window moved to a monitor with different DPI.
