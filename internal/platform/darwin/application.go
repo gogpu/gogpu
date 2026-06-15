@@ -89,6 +89,27 @@ func (a *Application) Init() error {
 	return nil
 }
 
+// MainScreenScaleFactor returns the backing scale factor of the primary display.
+// Queries [NSScreen mainScreen].backingScaleFactor directly, bypassing
+// NSApplication and window lifecycle — safe to call at any point in the
+// process lifetime, including before Init(). This mirrors the approach used
+// by Flutter (FlutterViewController) and GLFW (cocoa_monitor.m).
+//
+// Returns 2.0 on Retina displays, 1.0 on standard density displays.
+func MainScreenScaleFactor() float64 {
+	initSelectors()
+	initClasses()
+	screen := classes.NSScreen.Send(selectors.mainScreen)
+	if screen.IsNil() {
+		return 1.0
+	}
+	scale := screen.GetDouble(selectors.backingScaleFactor)
+	if scale <= 0 {
+		return 1.0
+	}
+	return scale
+}
+
 // SetAppName sets the name of the application that will
 // be displayed in the About, Quit and other menus.
 func (a *Application) SetAppName(name string) {

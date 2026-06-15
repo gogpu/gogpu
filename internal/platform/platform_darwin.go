@@ -70,6 +70,21 @@ func newPlatformManager() PlatformManager {
 	return &darwinPlatform{}
 }
 
+// ScaleFactor implements PlatScaleProvider.
+// Returns the primary window's backing scale factor when a window exists;
+// otherwise queries [NSScreen mainScreen].backingScaleFactor directly.
+// This mirrors the Flutter/GLFW pattern: the main screen DPI is available
+// from process start, before NSApplication or any window is created.
+func (p *darwinPlatform) ScaleFactor() float64 {
+	p.mu.RLock()
+	pw := p.primary
+	p.mu.RUnlock()
+	if pw != nil && pw.window != nil {
+		return pw.window.BackingScaleFactor()
+	}
+	return darwin.MainScreenScaleFactor()
+}
+
 // --- PlatformManager implementation on darwinPlatform ---
 
 // Init initializes the macOS platform subsystem (process-level, no window).

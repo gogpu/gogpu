@@ -290,6 +290,16 @@ const (
 	MenuRoleBringAllToFront
 )
 
+// PlatScaleProvider is an optional interface for platforms that can report the
+// primary display DPI scale factor before a window is created. Callers use a
+// type assertion: if sp, ok := manager.(PlatScaleProvider); ok { ... }
+//
+// On macOS this is implemented via [NSScreen mainScreen].backingScaleFactor,
+// which is available before NSApplication initialization (Flutter/GLFW pattern).
+type PlatScaleProvider interface {
+	ScaleFactor() float64
+}
+
 // PlatMenuManager is an optional interface for platforms that support
 // native application menus (macOS). Platforms that don't support menus
 // simply don't implement this interface.

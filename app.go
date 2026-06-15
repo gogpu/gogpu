@@ -912,11 +912,23 @@ func (a *App) PhysicalSize() (width, height int) {
 // ScaleFactor returns the DPI scale factor.
 // 1.0 = standard (96 DPI on Windows, 72 on macOS), 2.0 = Retina/HiDPI.
 // Implements gpucontext.WindowProvider.
+//
+// Three-tier resolution (Flutter/GLFW pattern):
+//  1. platWindow — most accurate, reflects the window's actual screen.
+//  2. manager (PlatScaleProvider) — available after Run() starts, before
+//     the first window is shown.
+//  3. platform.SystemScaleFactor() — available before Run() on supported
+//     platforms (macOS: [NSScreen mainScreen].backingScaleFactor).
 func (a *App) ScaleFactor() float64 {
 	if a.platWindow != nil {
 		return a.platWindow.ScaleFactor()
 	}
-	return 1.0
+	if a.manager != nil {
+		if sp, ok := a.manager.(platform.PlatScaleProvider); ok {
+			return sp.ScaleFactor()
+		}
+	}
+	return platform.SystemScaleFactor()
 }
 
 // ClipboardRead reads text content from the system clipboard.

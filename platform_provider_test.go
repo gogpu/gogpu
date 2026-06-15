@@ -132,9 +132,16 @@ func TestWindowProviderNilPlatform(t *testing.T) {
 	})
 
 	t.Run("ScaleFactor", func(t *testing.T) {
+		// Before Run(), ScaleFactor() resolves via platform.SystemScaleFactor()
+		// which queries [NSScreen mainScreen].backingScaleFactor on macOS.
+		// The result must be a valid positive scale, not a hardcoded 1.0.
 		sf := app.ScaleFactor()
-		if sf != 1.0 {
-			t.Errorf("ScaleFactor() = %f, want 1.0", sf)
+		want := platform.SystemScaleFactor()
+		if sf != want {
+			t.Errorf("ScaleFactor() = %f, want SystemScaleFactor()=%f", sf, want)
+		}
+		if sf <= 0 {
+			t.Errorf("ScaleFactor() = %f, want > 0", sf)
 		}
 	})
 
