@@ -734,7 +734,7 @@ These developers tested GoGPU on Day 1 — when nothing worked and every platfor
 
 GoGPU is free and open source. Development is supported by our sponsors.
 
-🥇 **First Sponsor:** [Inkflow](https://opencollective.com/inkflow) — thank you for believing in the project from the start!
+🥇 **First Sponsor:** [Inkflow](https://opencollective.com/inkflow) ([@omer316](https://github.com/omer316)) — the person who asked "is there a way to support this project?" and then became the answer!
 
 <a href="https://opencollective.com/gogpu#sponsor"><img src="https://opencollective.com/gogpu/sponsors.svg?avatarHeight=60&width=600" /></a>
 

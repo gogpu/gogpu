@@ -8,7 +8,7 @@ GoGPU is free and open source. Development is supported by these amazing sponsor
 
 ## 🥇 First Sponsor
 
-**[Inkflow](https://opencollective.com/inkflow)** — our very first financial contributor. Thank you for believing in the project from the start!
+**[Inkflow](https://opencollective.com/inkflow)** ([@omer316](https://github.com/omer316)) — our very first financial contributor. The person who asked "is there a way to support this project?" and then became the answer. Thank you for believing in GoGPU from the start!
 
 ---
 
