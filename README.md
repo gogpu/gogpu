@@ -744,6 +744,20 @@ GoGPU is an independent open-source project. Development is sustained by contrib
 
 ---
 
+## Sponsors
+
+GoGPU is free and open source. Development is supported by our sponsors.
+
+🥇 **First Sponsor:** [Inkflow](https://opencollective.com/inkflow) — thank you for believing in the project from the start!
+
+<a href="https://opencollective.com/gogpu#backer"><img src="https://opencollective.com/gogpu/backers.svg?avatarHeight=36&width=600" /></a>
+
+<a href="https://opencollective.com/gogpu/donate"><img src="https://opencollective.com/gogpu/donate/button@2x.png?color=blue" width="200" /></a>
+
+[See all sponsors](SPONSORS.md) | [Become a sponsor](https://opencollective.com/gogpu)
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
