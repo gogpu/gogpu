@@ -732,23 +732,11 @@ These developers tested GoGPU on Day 1 — when nothing worked and every platfor
 
 ## Sponsors
 
-GoGPU is an independent open-source project. Development is sustained by contributors and sponsors.
-
-<a href="https://opencollective.com/gogpu"><img src="https://opencollective.com/gogpu/sponsors.svg?width=890&button=false" alt="Sponsors"></a>
-
-### Backers
-
-<a href="https://opencollective.com/gogpu"><img src="https://opencollective.com/gogpu/backers.svg?width=890&button=false" alt="Backers"></a>
-
-<a href="https://opencollective.com/gogpu"><img src="https://img.shields.io/badge/Sponsor-Open%20Collective-7FADF2?logo=opencollective" alt="Sponsor on Open Collective"></a>
-
----
-
-## Sponsors
-
 GoGPU is free and open source. Development is supported by our sponsors.
 
 🥇 **First Sponsor:** [Inkflow](https://opencollective.com/inkflow) — thank you for believing in the project from the start!
+
+<a href="https://opencollective.com/gogpu#sponsor"><img src="https://opencollective.com/gogpu/sponsors.svg?avatarHeight=60&width=600" /></a>
 
 <a href="https://opencollective.com/gogpu#backer"><img src="https://opencollective.com/gogpu/backers.svg?avatarHeight=36&width=600" /></a>
 
