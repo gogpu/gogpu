@@ -27,6 +27,8 @@ Planned: Android (ANativeWindow) and iOS (CAMetalLayer) platform support.
 | **systray** | `github.com/gogpu/systray` | System tray (Win32/macOS/Linux) |
 | **audio** | `github.com/gogpu/audio` | Audio engine (WASAPI/CoreAudio/PulseAudio) |
 | **g3d** | `github.com/gogpu/g3d` | 3D rendering, scene graph, PBR |
+| **compose** | `github.com/gogpu/compose` | Multi-process composition (Unix socket IPC, LZ4) |
+| **editor** | `github.com/gogpu/editor` | Text/Code editor widget (GPU-accelerated, early dev) |
 
 ## Which Package Do I Need?
 
