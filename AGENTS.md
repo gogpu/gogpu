@@ -250,5 +250,7 @@ When working with multiple ecosystem packages, always check the target repo's AG
 ## Links
 
 - GitHub: https://github.com/gogpu
-- Open Collective: https://opencollective.com/gogpu
 - Documentation: https://pkg.go.dev/github.com/gogpu/gogpu
+- Sponsors: [SPONSORS.md](SPONSORS.md)
+- Open Collective: https://opencollective.com/gogpu
+- LLM docs index: [llms.txt](llms.txt)

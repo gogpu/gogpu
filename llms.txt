@@ -1,0 +1,38 @@
+# GoGPU — Pure Go GPU Computing Ecosystem
+
+> Think Flutter or Qt, but Pure Go with zero CGO. Full stack from shader compilation to GUI widgets. 1.1M+ lines of code across 15 repositories.
+
+## Getting Started
+
+- [README](https://github.com/gogpu/gogpu/blob/main/README.md): Human-readable project overview, installation, features
+- [AGENTS.md](https://github.com/gogpu/gogpu/blob/main/AGENTS.md): AI agent instructions — ecosystem map, quick start, search commands
+- [SPONSORS.md](https://github.com/gogpu/gogpu/blob/main/SPONSORS.md): Project sponsors and how to support development
+
+## Documentation
+
+- [gogpu API](https://pkg.go.dev/github.com/gogpu/gogpu): App framework, windowing, input, lifecycle
+- [gg API](https://pkg.go.dev/github.com/gogpu/gg): 2D graphics, text, paths, images
+- [ui API](https://pkg.go.dev/github.com/gogpu/ui): GUI toolkit, 22+ widgets, Material 3 / Fluent / Cupertino
+- [wgpu API](https://pkg.go.dev/github.com/gogpu/wgpu): WebGPU implementation (Vulkan/Metal/DX12/GLES/Software)
+- [naga API](https://pkg.go.dev/github.com/gogpu/naga): Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL)
+- [gpucontext API](https://pkg.go.dev/github.com/gogpu/gpucontext): Shared interfaces (DeviceProvider, EventSource)
+- [gputypes API](https://pkg.go.dev/github.com/gogpu/gputypes): WebGPU type definitions
+
+## Optional
+
+- [g3d API](https://pkg.go.dev/github.com/gogpu/g3d): 3D rendering, scene graph, PBR materials
+- [systray API](https://pkg.go.dev/github.com/gogpu/systray): System tray (Win32/macOS/Linux)
+- [audio API](https://pkg.go.dev/github.com/gogpu/audio): Audio engine (WASAPI/CoreAudio/PulseAudio)
+- [compose API](https://pkg.go.dev/github.com/gogpu/compose): Multi-process composition (Unix socket IPC)
+
+## Examples
+
+- [gogpu examples](https://github.com/gogpu/gogpu/tree/main/examples): Window, triangle, particles, HiDPI
+- [gg examples](https://github.com/gogpu/gg/tree/main/examples): 2D drawing, GPU integration, gallery
+- [ui examples](https://github.com/gogpu/ui/tree/main/examples): Hello, gallery, task manager
+
+## Community
+
+- [GitHub Organization](https://github.com/gogpu)
+- [Discussions](https://github.com/gogpu/gogpu/discussions)
+- [Open Collective](https://opencollective.com/gogpu)
