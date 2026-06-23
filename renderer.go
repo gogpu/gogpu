@@ -1208,6 +1208,16 @@ func (r *Renderer) Destroy() {
 		r.adapter.Release()
 		r.adapter = nil
 	}
+	// NOTE: the Vulkan instance is released separately via ReleaseInstance so
+	// the X11 Display* can be closed while the driver (ICD) is still loaded.
+	// On X11/NVIDIA, releasing the instance unloads the ICD; XCloseDisplay then
+	// jumps into the driver's freed XESetCloseDisplay hook and SIGSEGVs.
+}
+
+// ReleaseInstance releases the Vulkan instance. Split from Destroy so callers
+// can close platform display handles (X11 XCloseDisplay) before the instance —
+// and thus the driver ICD — is unloaded. Safe to call after Destroy; idempotent.
+func (r *Renderer) ReleaseInstance() {
 	if r.instance != nil {
 		r.instance.Release()
 		r.instance = nil

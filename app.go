@@ -255,24 +255,30 @@ func (a *App) Run() error {
 	if err != nil {
 		return err
 	}
-	defer a.manager.Destroy()
-	defer platWindow.Destroy()
-
 	a.renderLoop = thread.NewRenderLoop()
-	defer a.renderLoop.Stop()
 
 	if err := a.initRenderer(platWindow); err != nil {
+		a.renderLoop.Stop()
+		a.manager.Destroy()
 		return err
 	}
 
 	platWindow.Show()
 
-	// Shutdown sequence (all on render thread for GPU safety):
-	// 1. WaitIdle — ensure all GPU work completes
-	// 2. DrainDeferredDestroys — release GC-enqueued resources
-	// 3. tracker.CloseAll() — auto-tracked resources (LIFO)
-	// 4. onClose callback — manual cleanup (legacy pattern)
-	// 5. Renderer.Destroy() — release GPU device
+	// Shutdown sequence — order matters on X11/NVIDIA (see step 4 below).
+	// All GPU steps run on the render thread for thread safety.
+	// 1. WaitForGPU / DrainDeferredDestroys / tracker.CloseAll / onClose
+	// 2. Renderer.Destroy()     — release GPU surface/device/adapter (NOT instance)
+	// 3. platWindow + manager   — close the OS window and the X11 Display
+	// 4. Renderer.ReleaseInstance() — unload the Vulkan driver (ICD) LAST
+	// 5. renderLoop.Stop()      — stop the render thread last of all
+	//
+	// Step 3 must precede step 4: the X11 close path is manager.Destroy()
+	// (x11PlatformWindow.Destroy is a no-op — teardown is on the platform).
+	// XCloseDisplay invokes the NVIDIA driver's XESetCloseDisplay hook; if the
+	// Vulkan instance — and thus the ICD — was already released, that hook
+	// points into unloaded code and SIGSEGVs. Close the display while the ICD
+	// is still loaded, release the instance afterwards.
 	defer func() {
 		a.renderLoop.RunOnRenderThreadVoid(func() {
 			a.renderer.WaitForGPU()
@@ -287,6 +293,12 @@ func (a *App) Run() error {
 		a.renderLoop.RunOnRenderThreadVoid(func() {
 			a.renderer.Destroy()
 		})
+		platWindow.Destroy()
+		a.manager.Destroy()
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.ReleaseInstance()
+		})
+		a.renderLoop.Stop()
 	}()
 
 	a.registerPrimaryWindow(platWindow)
