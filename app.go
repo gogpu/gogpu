@@ -259,6 +259,7 @@ func (a *App) Run() error {
 
 	if err := a.initRenderer(platWindow); err != nil {
 		a.renderLoop.Stop()
+		platWindow.Destroy()
 		a.manager.Destroy()
 		return err
 	}

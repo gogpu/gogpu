@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.2] - 2026-06-23
+
+### Fixed
+
+- **X11/NVIDIA shutdown SIGSEGV** (@samyfodil, #332) — reorder teardown so X11 `XCloseDisplay` runs before Vulkan instance release. NVIDIA ICD registers `XESetCloseDisplay` hook; releasing the instance first unloads the hook code, causing SIGSEGV on every shutdown. Split `Renderer.ReleaseInstance()` from `Destroy()` for correct ordering.
+- **initRenderer error path** — ensure `platWindow.Destroy()` is called on renderer init failure (prevents window handle leak on Windows)
+
 ## [0.42.1] - 2026-06-21
 
 ### Changed
