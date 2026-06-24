@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.3] - 2026-06-24
+
+### Fixed
+
+- **macOS live resize blank square** (@lkmavi, #335) — `CAMetalLayer.contentsGravity = "resize"` stretches last frame to fill expanded area (Chrome/Safari pattern). Eager surface reconfigure in `beginFrame` when physical size changes, before `nextDrawable` acquire — eliminates 1-frame lag
+- **`SetTitle` no-op on macOS/X11/Wayland** (@lkmavi, #335) — wired existing stubs to platform implementations: macOS `darwin.Window.SetTitle` (already implemented, not called), X11 `SetWindowTitle` via `_NET_WM_NAME`, Wayland `libwl.SetTitle` + Flush. Added `App.SetTitle(string)` / `App.Title() string`
+- **Focus not exposed on App** (@lkmavi, #335) — focus events already flowed through all platforms to `eventSourceAdapter` but lacked App-level API. Added `App.OnFocus(func(bool))` / `App.HasFocus() bool`
+- **`Config.WithResizable(bool)` missing** (@lkmavi, #335) — the only Config field without a `With*` setter
+- **`AppLifecycle.String()` unknown state** (@lkmavi, #335) — `fmt.Sprintf("AppLifecycle(%d)")` per Go stdlib convention (was `"Unknown lifecycle"`)
+- **Window size constraints** (@lkmavi, #336) — `App.SetMinSize(w, h)` / `App.SetMaxSize(w, h)` + `Config.WithMinSize` / `Config.WithMaxSize`. 0×0 clears constraint. All platforms: macOS `NSWindow setMinSize:/setMaxSize:`, Windows `WM_GETMINMAXINFO`, X11 ICCCM `WM_NORMAL_HINTS` (`XSizeHints`), Wayland `xdg_toplevel set_min_size/set_max_size`
+- **Menu separator convenience** (@lkmavi, #335) — `NewSeparator()` / `(*Menu).AddSeparator()` (was only `MenuItem{Separator: true}`)
+- **Error sentinels** (@lkmavi, #335) — `ErrWindowClosed`, `ErrDeviceLost` (distinct from transient `ErrSurfaceLost`)
+
 ## [0.42.2] - 2026-06-23
 
 ### Fixed
