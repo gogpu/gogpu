@@ -859,8 +859,14 @@ func (a *App) renderFrameMultiThread() {
 			frame.onDraw(ctx)
 
 			// End frame only if beginFrame was actually called (lazy acquire fired).
-			if ws.frameStarted {
-				a.renderer.endFrameForSurface(ws)
+			// If present found the surface outdated, it reconfigured the swapchain;
+			// re-render once at the new size so the frame isn't dropped to black.
+			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+				ws.prepareLazyAcquire()
+				frame.onDraw(newContextForSurface(a.renderer, ws, frame.scale))
+				if ws.frameStarted {
+					a.renderer.endFrameForSurface(ws) // single retry; next frame handles any further churn
+				}
 			}
 			ws.resetLazyState()
 			a.renderer.currentSurface = nil

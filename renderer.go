@@ -545,10 +545,13 @@ func (r *Renderer) EndFrame() {
 // endFrameForSurface flushes, presents, and releases frame resources for a
 // specific RenderTarget. Used by the multi-window frame loop. Unlike EndFrame,
 // it does NOT poll submissions -- the caller polls once after all windows.
-func (r *Renderer) endFrameForSurface(ws *RenderTarget) {
+// Returns true when present() reconfigured an outdated surface and the frame
+// should be re-rendered (see present).
+func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	ws.flushClear(r.device, r)
-	ws.present()
+	reconfigured := ws.present()
 	ws.releaseFrame()
+	return reconfigured
 }
 
 // pollSubmissions performs non-blocking submission tracking: frees GPU resources
@@ -565,16 +568,38 @@ func (r *Renderer) pollSubmissions() {
 // On Wayland, Vulkan WSI internally calls wl_surface_attach / wl_surface_commit /
 // wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
 // the main thread's DispatchDefaultQueue (ADR-041 Phase 2).
-func (ws *RenderTarget) present() {
-	if ws.currentSurfaceTexture != nil {
-		lockDisplay(ws.platWindow)
-		err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects)
-		unlockDisplay(ws.platWindow)
-		if err != nil {
-			slog.Error("PRESENT ERROR", "err", err)
-		}
-		ws.damageRects = nil
+//
+// Returns true when the surface was outdated (resize/DPI/monitor change) and
+// was successfully reconfigured — the caller should re-render this frame so the
+// resized surface shows content instead of a dropped (black) frame.
+func (ws *RenderTarget) present() (reconfigured bool) {
+	if ws.currentSurfaceTexture == nil {
+		return false
 	}
+	lockDisplay(ws.platWindow)
+	err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects)
+	unlockDisplay(ws.platWindow)
+	ws.damageRects = nil
+	if err == nil {
+		return false
+	}
+	// Mirror recoverFromAcquireError: outdated is an expected, recoverable
+	// event (resize/DPI/monitor change), not an error. Reconfigure and signal
+	// the caller to re-render so the new swapchain shows content immediately.
+	if errors.Is(err, wgpu.ErrSurfaceOutdated) {
+		slog.Debug("gogpu: surface outdated on present, reconfiguring", "width", ws.width, "height", ws.height)
+		if ws.width > 0 && ws.height > 0 {
+			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
+				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
+				ws.state = SurfaceLost
+				return false
+			}
+			return true
+		}
+		return false
+	}
+	slog.Error("PRESENT ERROR", "err", err)
+	return false
 }
 
 // prepareLazyAcquire resets per-frame state for deferred beginFrame.
