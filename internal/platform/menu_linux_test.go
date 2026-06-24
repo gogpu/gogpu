@@ -568,6 +568,8 @@ func (s *stubWindow) PrepareFrame() PrepareFrameResult                          
 func (s *stubWindow) InSizeMove() bool                                                     { return false }
 func (s *stubWindow) ShouldClose() bool                                                    { return s.closed }
 func (s *stubWindow) SetTitle(_ string)                                                    {}
+func (s *stubWindow) SetMinSize(_, _ int)                                                  {}
+func (s *stubWindow) SetMaxSize(_, _ int)                                                  {}
 func (s *stubWindow) SetCursor(_ int)                                                      {}
 func (s *stubWindow) SetFrameless(_ bool)                                                  {}
 func (s *stubWindow) IsFrameless() bool                                                    { return false }
