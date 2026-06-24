@@ -51,6 +51,7 @@ const (
 	EventTypePointerEnter
 	EventTypePointerLeave
 	EventTypeScroll
+	EventTypeExpose
 )
 
 // PlatformEvent represents a platform event.
@@ -899,8 +900,10 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		}
 
 	case *ExposeEvent:
-		// Could trigger redraw, but for now we just ignore
-		// The main render loop should handle this
+		// The window has no background pixmap (CWBackPixmap=None in CreateWindow),
+		// so the X server won't repaint exposed regions — we must. Request a redraw.
+		// Bursts of Expose coalesce upstream (RequestRedraw just sets a flag).
+		return PlatformEvent{Type: EventTypeExpose}
 
 	case *MapNotifyEvent:
 		w.eventMu.Lock()

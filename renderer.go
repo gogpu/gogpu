@@ -538,6 +538,8 @@ func (r *Renderer) EndFrame() {
 		r.pollSubmissions()
 		return
 	}
+	// Outdated-reconfigure recovery is left to the next BeginFrame/EndFrame —
+	// this manual path has no retained draw callback to replay.
 	r.endFrameForSurface(r.primary)
 	r.pollSubmissions()
 }
@@ -545,8 +547,7 @@ func (r *Renderer) EndFrame() {
 // endFrameForSurface flushes, presents, and releases frame resources for a
 // specific RenderTarget. Used by the multi-window frame loop. Unlike EndFrame,
 // it does NOT poll submissions -- the caller polls once after all windows.
-// Returns true when present() reconfigured an outdated surface and the frame
-// should be re-rendered (see present).
+// Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	ws.flushClear(r.device, r)
 	reconfigured := ws.present()
@@ -569,9 +570,7 @@ func (r *Renderer) pollSubmissions() {
 // wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
 // the main thread's DispatchDefaultQueue (ADR-041 Phase 2).
 //
-// Returns true when the surface was outdated (resize/DPI/monitor change) and
-// was successfully reconfigured — the caller should re-render this frame so the
-// resized surface shows content instead of a dropped (black) frame.
+// Returns true if the surface was outdated and reconfigured — caller re-renders.
 func (ws *RenderTarget) present() (reconfigured bool) {
 	if ws.currentSurfaceTexture == nil {
 		return false
@@ -583,9 +582,8 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 	if err == nil {
 		return false
 	}
-	// Mirror recoverFromAcquireError: outdated is an expected, recoverable
-	// event (resize/DPI/monitor change), not an error. Reconfigure and signal
-	// the caller to re-render so the new swapchain shows content immediately.
+	// Mirror recoverFromAcquireError: outdated is expected (resize/DPI/monitor),
+	// not an error — reconfigure and signal the caller to re-render.
 	if errors.Is(err, wgpu.ErrSurfaceOutdated) {
 		slog.Debug("gogpu: surface outdated on present, reconfiguring", "width", ws.width, "height", ws.height)
 		if ws.width > 0 && ws.height > 0 {

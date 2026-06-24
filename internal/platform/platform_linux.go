@@ -279,6 +279,8 @@ func (p *x11Platform) PollEvents() Event {
 		return Event{Type: EventPointerLeave, Pointer: event.Pointer}
 	case x11.EventTypeScroll:
 		return Event{Type: EventScroll, Scroll: event.Scroll}
+	case x11.EventTypeExpose:
+		return Event{Type: EventExpose, WindowID: p.primaryWindowID}
 	default:
 		return Event{Type: EventNone}
 	}

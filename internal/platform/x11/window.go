@@ -28,12 +28,10 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 	// Generate window ID
 	windowID := c.GenerateID()
 
-	// Set up window attributes.
-	// Background pixmap None (not a black BackPixel): the X server must NOT clear
-	// the window to a solid color on resize. A black BackPixel makes the server
-	// paint the newly-exposed area black before the GPU repaints it, which shows
-	// up as black flicker while dragging/resizing. None leaves old pixels until
-	// the swapchain presents the new frame (GLFW/SDL/Chromium pattern).
+	// Background pixmap None, not a black BackPixel: a black BackPixel makes the X
+	// server paint newly-exposed areas black on resize before the GPU repaints
+	// (black flicker). None leaves the background untouched — we repaint on resize
+	// and Expose. GLFW/SDL/Chromium pattern.
 	valueMask := uint32(CWBackPixmap | CWEventMask)
 
 	// Event mask - listen for common events

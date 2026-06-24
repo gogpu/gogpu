@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **X11 black flicker on resize** (@samyfodil, #342) — the window was created with a black
   `CWBackPixel`, so the X server painted newly-exposed areas black on every resize before
   the GPU repainted. Use background pixmap `None` instead (X11 default; GLFW/SDL/Chromium
-  pattern) so old pixels persist until the swapchain presents the new frame.
+  pattern) so the server no longer fills the window black; `Expose` events now request a
+  redraw so revealed regions repaint instead of staying undefined.
 
 ## [0.42.5] - 2026-06-24
 

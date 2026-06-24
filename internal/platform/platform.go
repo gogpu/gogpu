@@ -74,6 +74,7 @@ const (
 	EventPointerEnter
 	EventPointerLeave
 	EventScroll
+	EventExpose
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.
