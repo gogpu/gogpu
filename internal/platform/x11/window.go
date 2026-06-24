@@ -374,6 +374,61 @@ const (
 	RevertToParent      = 2
 )
 
+// WMSizeHints holds the size constraint flags and values for WM_NORMAL_HINTS.
+// Fields follow the ICCCM XSizeHints wire layout (18 × CARD32 = 72 bytes).
+type WMSizeHints struct {
+	// PMinSize and PMaxSize flag bits.
+	Flags     uint32
+	_         [4]uint32 // obsolete x, y, width, height
+	MinWidth  uint32
+	MinHeight uint32
+	MaxWidth  uint32
+	MaxHeight uint32
+	_         [6]uint32 // width_inc, height_inc, min/max aspect, base size
+	WinGrav   uint32
+}
+
+const (
+	wmSizeHintsPMinSize = 1 << 4 // ICCCM PMinSize flag
+	wmSizeHintsPMaxSize = 1 << 5 // ICCCM PMaxSize flag
+)
+
+// SetWMSizeHints sets WM_NORMAL_HINTS on the window to apply min/max size constraints.
+// Pass 0 for a value to clear that constraint (its flag bit will not be set).
+func (c *Connection) SetWMSizeHints(window ResourceID, minW, minH, maxW, maxH int) error {
+	var h WMSizeHints
+	if minW > 0 || minH > 0 {
+		h.Flags |= wmSizeHintsPMinSize
+		h.MinWidth = uint32(minW)
+		h.MinHeight = uint32(minH)
+	}
+	if maxW > 0 || maxH > 0 {
+		h.Flags |= wmSizeHintsPMaxSize
+		h.MaxWidth = uint32(maxW)
+		h.MaxHeight = uint32(maxH)
+	}
+
+	// 18 × 4 bytes = 72 bytes.
+	data := make([]byte, 72)
+	bo := c.byteOrder
+	e := NewEncoder(bo)
+	e.PutUint32(h.Flags)
+	for range 4 {
+		e.PutUint32(0) // obsolete
+	}
+	e.PutUint32(h.MinWidth)
+	e.PutUint32(h.MinHeight)
+	e.PutUint32(h.MaxWidth)
+	e.PutUint32(h.MaxHeight)
+	for range 6 {
+		e.PutUint32(0) // inc, aspect, base
+	}
+	e.PutUint32(h.WinGrav)
+	copy(data, e.Bytes())
+
+	return c.ChangeProperty(window, AtomWMNormalHints, AtomWMSizeHints, 32, PropModeReplace, data)
+}
+
 // MotifWMHints structure for setting window decorations.
 type MotifWMHints struct {
 	Flags       uint32

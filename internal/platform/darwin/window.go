@@ -578,6 +578,40 @@ func (w *Window) IsFullScreen() bool {
 	return mask&uintptr(NSWindowStyleMaskFullScreen) != 0
 }
 
+// SetMinSize sets the minimum window frame size in logical points.
+// Use 0 for both to remove the minimum constraint (system default).
+func (w *Window) SetMinSize(width, height float64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	w.nsWindow.SendSize(selectors.setMinSize, MakeSize(CGFloat(width), CGFloat(height)))
+}
+
+// SetMaxSize sets the maximum window frame size in logical points.
+// Use 0 for both to remove the maximum constraint (use a very large value).
+func (w *Window) SetMaxSize(width, height float64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	var size NSSize
+	if width == 0 && height == 0 {
+		// CGFloat max ≈ 3.4e38 — effectively unconstrained
+		const cgFloatMax = CGFloat(3.40282346638528859811704183484516925440e+38)
+		size = MakeSize(cgFloatMax, cgFloatMax)
+	} else {
+		size = MakeSize(CGFloat(width), CGFloat(height))
+	}
+	w.nsWindow.SendSize(selectors.setMaxSize, size)
+}
+
 func (w *Window) SetOnClose(fn func() bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

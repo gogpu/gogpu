@@ -1071,3 +1071,64 @@ func TestAppOnFocusCallback(t *testing.T) {
 		t.Errorf("focus sequence = %v, want [true false true]", got)
 	}
 }
+
+func TestAppSetMinSize(t *testing.T) {
+	mock := &mockWindow{}
+	app := &App{config: DefaultConfig(), platWindow: mock}
+
+	app.SetMinSize(400, 300)
+
+	if app.config.MinWidth != 400 || app.config.MinHeight != 300 {
+		t.Errorf("config: MinWidth=%d MinHeight=%d, want 400x300", app.config.MinWidth, app.config.MinHeight)
+	}
+	if mock.minWidth != 400 || mock.minHeight != 300 {
+		t.Errorf("platform: minWidth=%d minHeight=%d, want 400x300", mock.minWidth, mock.minHeight)
+	}
+
+	// clear constraint
+	app.SetMinSize(0, 0)
+	if app.config.MinWidth != 0 || app.config.MinHeight != 0 {
+		t.Error("SetMinSize(0,0) should clear constraint in config")
+	}
+	if mock.minWidth != 0 || mock.minHeight != 0 {
+		t.Error("SetMinSize(0,0) should clear constraint on platform")
+	}
+}
+
+func TestAppSetMaxSize(t *testing.T) {
+	mock := &mockWindow{}
+	app := &App{config: DefaultConfig(), platWindow: mock}
+
+	app.SetMaxSize(1280, 720)
+
+	if app.config.MaxWidth != 1280 || app.config.MaxHeight != 720 {
+		t.Errorf("config: MaxWidth=%d MaxHeight=%d, want 1280x720", app.config.MaxWidth, app.config.MaxHeight)
+	}
+	if mock.maxWidth != 1280 || mock.maxHeight != 720 {
+		t.Errorf("platform: maxWidth=%d maxHeight=%d, want 1280x720", mock.maxWidth, mock.maxHeight)
+	}
+
+	// clear constraint
+	app.SetMaxSize(0, 0)
+	if app.config.MaxWidth != 0 || app.config.MaxHeight != 0 {
+		t.Error("SetMaxSize(0,0) should clear constraint in config")
+	}
+	if mock.maxWidth != 0 || mock.maxHeight != 0 {
+		t.Error("SetMaxSize(0,0) should clear constraint on platform")
+	}
+}
+
+func TestAppSetMinMaxSizeNilPlatform(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	// Must not panic when platWindow is nil
+	app.SetMinSize(200, 100)
+	app.SetMaxSize(1920, 1080)
+
+	if app.config.MinWidth != 200 || app.config.MinHeight != 100 {
+		t.Errorf("config MinSize = %dx%d, want 200x100", app.config.MinWidth, app.config.MinHeight)
+	}
+	if app.config.MaxWidth != 1920 || app.config.MaxHeight != 1080 {
+		t.Errorf("config MaxSize = %dx%d, want 1920x1080", app.config.MaxWidth, app.config.MaxHeight)
+	}
+}

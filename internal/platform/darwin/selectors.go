@@ -178,6 +178,10 @@ var selectors struct {
 	// TabbingMode
 	setTabbingMode       SEL
 	setTabbingIdentifier SEL
+
+	// Window size constraints
+	setMinSize SEL
+	setMaxSize SEL
 }
 
 // classes holds cached class references.
@@ -376,6 +380,10 @@ func initSelectors() {
 			"accessibilityDisplayShouldReduceMotion")
 		selectors.accessibilityDisplayShouldIncreaseContrast = RegisterSelector(
 			"accessibilityDisplayShouldIncreaseContrast")
+
+		// Window size constraints
+		selectors.setMinSize = RegisterSelector("setMinSize:")
+		selectors.setMaxSize = RegisterSelector("setMaxSize:")
 	})
 }
 

@@ -22,6 +22,7 @@ const (
 	wmPaint            = 0x000F
 	wmEraseBkgnd       = 0x0014
 	wmSize             = 0x0005
+	wmGetMinMaxInfo    = 0x0024
 	wmClose            = 0x0010
 	wmSetCursor        = 0x0020
 	wmEnterSizeMove    = 0x0231 // Start of resize/move modal loop
@@ -390,6 +391,15 @@ type point struct {
 	x, y int32
 }
 
+// MINMAXINFO is the Win32 MINMAXINFO structure (WM_GETMINMAXINFO lParam).
+type minMaxInfo struct {
+	ptReserved     point
+	ptMaxSize      point
+	ptMaxPosition  point
+	ptMinTrackSize point
+	ptMaxTrackSize point
+}
+
 // pointerInfo is the Win32 POINTER_INFO structure.
 type pointerInfo struct {
 	pointerType           uint32
@@ -504,6 +514,12 @@ type win32Window struct {
 	cursorCenterX int32 // window center in screen coords (for warp-back)
 	cursorCenterY int32
 	cursorHidden  bool // tracks ShowCursor balance
+
+	// Window size constraints in logical pixels (0 = unconstrained)
+	minWidth  int
+	minHeight int
+	maxWidth  int
+	maxHeight int
 }
 
 // windowsPlatform implements Platform for Windows.
@@ -753,6 +769,10 @@ func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 	w.id = NewWindowID()
 	w.platform = p
+	w.minWidth = config.MinWidth
+	w.minHeight = config.MinHeight
+	w.maxWidth = config.MaxWidth
+	w.maxHeight = config.MaxHeight
 	if p.primary == nil {
 		p.primary = w
 		// Apply any menu registered via SetApplicationMenu before the window existed.
@@ -795,6 +815,20 @@ func (w *win32Window) SetTitle(title string) {
 		procSetWindowTextW := user32.NewProc("SetWindowTextW")
 		procSetWindowTextW.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(titlePtr)))
 	}
+}
+
+func (w *win32Window) SetMinSize(width, height int) {
+	w.sizeMu.Lock()
+	w.minWidth = width
+	w.minHeight = height
+	w.sizeMu.Unlock()
+}
+
+func (w *win32Window) SetMaxSize(width, height int) {
+	w.sizeMu.Lock()
+	w.maxWidth = width
+	w.maxHeight = height
+	w.sizeMu.Unlock()
 }
 
 func (w *win32Window) SetCursor(cursorID int) {
@@ -2269,6 +2303,27 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	case wmClose:
 		w.shouldClose = true
 		p.queueEvent(Event{Type: EventClose, WindowID: w.id})
+		return 0
+
+	case wmGetMinMaxInfo:
+		mmi := (*minMaxInfo)(unsafe.Pointer(lParam)) //nolint:govet // lParam is MINMAXINFO*
+		// Let DefWindowProc fill defaults first.
+		procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		w.sizeMu.RLock()
+		minW, minH, maxW, maxH := w.minWidth, w.minHeight, w.maxWidth, w.maxHeight
+		w.sizeMu.RUnlock()
+		if minW > 0 {
+			mmi.ptMinTrackSize.x = int32(minW)
+		}
+		if minH > 0 {
+			mmi.ptMinTrackSize.y = int32(minH)
+		}
+		if maxW > 0 {
+			mmi.ptMaxTrackSize.x = int32(maxW)
+		}
+		if maxH > 0 {
+			mmi.ptMaxTrackSize.y = int32(maxH)
+		}
 		return 0
 
 	case wmNCUAHDrawCaption, wmNCUAHDrawFrame:

@@ -158,12 +158,21 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 	p.mu.Unlock()
 
-	return &darwinPlatformWindow{
+	dw := &darwinPlatformWindow{
 		platform:  p,
 		id:        id,
 		window:    w.window,
 		frameless: config.Frameless,
-	}, nil
+	}
+
+	if config.MinWidth > 0 || config.MinHeight > 0 {
+		dw.SetMinSize(config.MinWidth, config.MinHeight)
+	}
+	if config.MaxWidth > 0 || config.MaxHeight > 0 {
+		dw.SetMaxSize(config.MaxWidth, config.MaxHeight)
+	}
+
+	return dw, nil
 }
 
 // PollEvents processes pending macOS events.
@@ -288,6 +297,18 @@ func (dw *darwinPlatformWindow) InSizeMove() bool { return false }
 func (dw *darwinPlatformWindow) SetTitle(title string) {
 	if dw.window != nil {
 		dw.window.SetTitle(title)
+	}
+}
+
+func (dw *darwinPlatformWindow) SetMinSize(width, height int) {
+	if dw.window != nil {
+		dw.window.SetMinSize(float64(width), float64(height))
+	}
+}
+
+func (dw *darwinPlatformWindow) SetMaxSize(width, height int) {
+	if dw.window != nil {
+		dw.window.SetMaxSize(float64(width), float64(height))
 	}
 }
 

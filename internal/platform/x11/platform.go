@@ -28,6 +28,10 @@ type Config struct {
 	Resizable  bool
 	Fullscreen bool
 	Frameless  bool
+	MinWidth   int // 0 = no minimum constraint
+	MinHeight  int // 0 = no minimum constraint
+	MaxWidth   int // 0 = no maximum constraint
+	MaxHeight  int // 0 = no maximum constraint
 }
 
 // EventType represents the type of platform event.
@@ -374,6 +378,11 @@ func (p *Platform) Init(config Config) error {
 		}
 		// Non-fatal, some WMs don't support Motif hints
 		_ = conn.SetMotifWMHints(window, hints, atoms)
+	}
+
+	// Apply initial min/max size constraints (non-fatal).
+	if config.MinWidth > 0 || config.MinHeight > 0 || config.MaxWidth > 0 || config.MaxHeight > 0 {
+		_ = conn.SetWMSizeHints(window, config.MinWidth, config.MinHeight, config.MaxWidth, config.MaxHeight)
 	}
 
 	// Get keyboard mapping (non-fatal - keyboard input may not work correctly without it)
@@ -1488,6 +1497,20 @@ func (p *Platform) SetTitle(title string) {
 		return
 	}
 	_ = p.conn.SetWindowTitle(p.primary.window, title, p.atoms)
+}
+
+func (p *Platform) SetMinSize(width, height int) {
+	if p.primary == nil || p.conn == nil {
+		return
+	}
+	_ = p.conn.SetWMSizeHints(p.primary.window, width, height, 0, 0)
+}
+
+func (p *Platform) SetMaxSize(width, height int) {
+	if p.primary == nil || p.conn == nil {
+		return
+	}
+	_ = p.conn.SetWMSizeHints(p.primary.window, 0, 0, width, height)
 }
 
 // Destroy closes the window and releases resources.

@@ -368,6 +368,52 @@ func TestConfigWithResizable(t *testing.T) {
 	}
 }
 
+func TestConfigWithMinSize(t *testing.T) {
+	cfg := DefaultConfig().WithMinSize(200, 150)
+	if cfg.MinWidth != 200 {
+		t.Errorf("MinWidth = %d, want 200", cfg.MinWidth)
+	}
+	if cfg.MinHeight != 150 {
+		t.Errorf("MinHeight = %d, want 150", cfg.MinHeight)
+	}
+
+	// clear
+	cfg2 := cfg.WithMinSize(0, 0)
+	if cfg2.MinWidth != 0 || cfg2.MinHeight != 0 {
+		t.Errorf("WithMinSize(0,0): want 0x0, got %dx%d", cfg2.MinWidth, cfg2.MinHeight)
+	}
+
+	// immutability
+	original := DefaultConfig()
+	_ = original.WithMinSize(100, 100)
+	if original.MinWidth != 0 || original.MinHeight != 0 {
+		t.Error("WithMinSize mutated original Config")
+	}
+}
+
+func TestConfigWithMaxSize(t *testing.T) {
+	cfg := DefaultConfig().WithMaxSize(1920, 1080)
+	if cfg.MaxWidth != 1920 {
+		t.Errorf("MaxWidth = %d, want 1920", cfg.MaxWidth)
+	}
+	if cfg.MaxHeight != 1080 {
+		t.Errorf("MaxHeight = %d, want 1080", cfg.MaxHeight)
+	}
+
+	// clear
+	cfg2 := cfg.WithMaxSize(0, 0)
+	if cfg2.MaxWidth != 0 || cfg2.MaxHeight != 0 {
+		t.Errorf("WithMaxSize(0,0): want 0x0, got %dx%d", cfg2.MaxWidth, cfg2.MaxHeight)
+	}
+
+	// immutability
+	original := DefaultConfig()
+	_ = original.WithMaxSize(800, 600)
+	if original.MaxWidth != 0 || original.MaxHeight != 0 {
+		t.Error("WithMaxSize mutated original Config")
+	}
+}
+
 func TestConfigTabbing(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.TabbingMode != TabbingDisallowed {

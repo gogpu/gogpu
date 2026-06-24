@@ -212,6 +212,10 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 		Resizable:  config.Resizable,
 		Fullscreen: config.Fullscreen,
 		Frameless:  config.Frameless,
+		MinWidth:   config.MinWidth,
+		MinHeight:  config.MinHeight,
+		MaxWidth:   config.MaxWidth,
+		MaxHeight:  config.MaxHeight,
 	}
 	if err := p.inner.Init(x11Config); err != nil {
 		return nil, err
@@ -372,6 +376,8 @@ func (w *x11PlatformWindow) ScaleFactor() float64           { return w.platform.
 func (w *x11PlatformWindow) ShouldClose() bool              { return w.platform.inner.ShouldClose() }
 func (w *x11PlatformWindow) InSizeMove() bool               { return false }
 func (w *x11PlatformWindow) SetTitle(title string)          { w.platform.inner.SetTitle(title) }
+func (w *x11PlatformWindow) SetMinSize(width, height int)   { w.platform.inner.SetMinSize(width, height) }
+func (w *x11PlatformWindow) SetMaxSize(width, height int)   { w.platform.inner.SetMaxSize(width, height) }
 func (w *x11PlatformWindow) SetCursor(cursorID int)         { w.platform.inner.SetCursor(cursorID) }
 func (w *x11PlatformWindow) SetCursorMode(mode int)         { w.platform.inner.SetCursorMode(mode) }
 func (w *x11PlatformWindow) CursorMode() int                { return w.platform.inner.GetCursorMode() }
@@ -492,6 +498,20 @@ func (w *waylandPlatformWindow) InSizeMove() bool { return false }
 func (w *waylandPlatformWindow) SetTitle(title string) {
 	if w.platform.libwl != nil {
 		w.platform.libwl.SetTitle(title)
+		_ = w.platform.libwl.Flush()
+	}
+}
+
+func (w *waylandPlatformWindow) SetMinSize(width, height int) {
+	if w.platform.libwl != nil {
+		w.platform.libwl.SetMinSize(int32(width), int32(height))
+		_ = w.platform.libwl.Flush()
+	}
+}
+
+func (w *waylandPlatformWindow) SetMaxSize(width, height int) {
+	if w.platform.libwl != nil {
+		w.platform.libwl.SetMaxSize(int32(width), int32(height))
 		_ = w.platform.libwl.Flush()
 	}
 }
@@ -743,6 +763,13 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	if !config.Resizable {
 		libwl.SetMinSize(int32(config.Width), int32(config.Height))
 		libwl.SetMaxSize(int32(config.Width), int32(config.Height))
+	} else {
+		if config.MinWidth > 0 || config.MinHeight > 0 {
+			libwl.SetMinSize(int32(config.MinWidth), int32(config.MinHeight))
+		}
+		if config.MaxWidth > 0 || config.MaxHeight > 0 {
+			libwl.SetMaxSize(int32(config.MaxWidth), int32(config.MaxHeight))
+		}
 	}
 
 	// Set fullscreen if requested
@@ -935,6 +962,13 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 	if !config.Resizable {
 		libwl.SetMinSize(int32(config.Width), int32(config.Height))
 		libwl.SetMaxSize(int32(config.Width), int32(config.Height))
+	} else {
+		if config.MinWidth > 0 || config.MinHeight > 0 {
+			libwl.SetMinSize(int32(config.MinWidth), int32(config.MinHeight))
+		}
+		if config.MaxWidth > 0 || config.MaxHeight > 0 {
+			libwl.SetMaxSize(int32(config.MaxWidth), int32(config.MaxHeight))
+		}
 	}
 	if config.Fullscreen {
 		libwl.SetFullscreen()

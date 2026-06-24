@@ -100,6 +100,18 @@ type Config struct {
 
 	// AppName is the application name (displayed in menus).
 	AppName string
+
+	// MinWidth is the minimum window width in logical pixels (0 = no constraint).
+	MinWidth int
+
+	// MinHeight is the minimum window height in logical pixels (0 = no constraint).
+	MinHeight int
+
+	// MaxWidth is the maximum window width in logical pixels (0 = no constraint).
+	MaxWidth int
+
+	// MaxHeight is the maximum window height in logical pixels (0 = no constraint).
+	MaxHeight int
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -292,6 +304,22 @@ func (c Config) WithTabbingIdentifier(id string) Config {
 // WithAppName sets the application name.
 func (c Config) WithAppName(name string) Config {
 	c.AppName = name
+	return c
+}
+
+// WithMinSize returns a copy with the minimum window size set in logical pixels.
+// Use 0 for both dimensions to clear any minimum constraint.
+func (c Config) WithMinSize(width, height int) Config {
+	c.MinWidth = width
+	c.MinHeight = height
+	return c
+}
+
+// WithMaxSize returns a copy with the maximum window size set in logical pixels.
+// Use 0 for both dimensions to clear any maximum constraint.
+func (c Config) WithMaxSize(width, height int) Config {
+	c.MaxWidth = width
+	c.MaxHeight = height
 	return c
 }
 

@@ -228,6 +228,26 @@ func (a *App) HasFocus() bool {
 	return a.focused
 }
 
+// SetMinSize sets the minimum window size in logical pixels at runtime.
+// Use 0 for both dimensions to remove the minimum constraint.
+func (a *App) SetMinSize(width, height int) {
+	a.config.MinWidth = width
+	a.config.MinHeight = height
+	if a.platWindow != nil {
+		a.platWindow.SetMinSize(width, height)
+	}
+}
+
+// SetMaxSize sets the maximum window size in logical pixels at runtime.
+// Use 0 for both dimensions to remove the maximum constraint.
+func (a *App) SetMaxSize(width, height int) {
+	a.config.MaxWidth = width
+	a.config.MaxHeight = height
+	if a.platWindow != nil {
+		a.platWindow.SetMaxSize(width, height)
+	}
+}
+
 // TrackResource registers an io.Closer for automatic cleanup during shutdown.
 // Tracked resources are closed in LIFO (reverse) order after WaitIdle and
 // before the renderer is destroyed, so the GPU device is still alive.
@@ -456,6 +476,10 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Resizable:  a.config.Resizable,
 		Fullscreen: a.config.Fullscreen,
 		Frameless:  a.config.Frameless,
+		MinWidth:   a.config.MinWidth,
+		MinHeight:  a.config.MinHeight,
+		MaxWidth:   a.config.MaxWidth,
+		MaxHeight:  a.config.MaxHeight,
 	})
 	if err != nil {
 		return nil, err

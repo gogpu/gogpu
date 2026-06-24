@@ -27,6 +27,10 @@ type Config struct {
 	Frameless         bool
 	TabbingMode       int
 	TabbingIdentifier string
+	MinWidth          int // 0 = no minimum constraint
+	MinHeight         int // 0 = no minimum constraint
+	MaxWidth          int // 0 = no maximum constraint
+	MaxHeight         int // 0 = no maximum constraint
 }
 
 // Event represents a platform event.
@@ -197,6 +201,14 @@ type PlatformWindow interface {
 
 	// SetTitle changes the window title.
 	SetTitle(title string)
+
+	// SetMinSize sets the minimum window size in logical pixels.
+	// Use 0 for a dimension to remove that minimum constraint.
+	SetMinSize(width, height int)
+
+	// SetMaxSize sets the maximum window size in logical pixels.
+	// Use 0 for a dimension to remove that maximum constraint.
+	SetMaxSize(width, height int)
 
 	// SetCursor changes the mouse cursor shape.
 	SetCursor(cursorID int)

@@ -25,6 +25,12 @@ type mockWindow struct {
 	closed          bool
 	hitTestCallback func(float64, float64) gpucontext.HitTestResult
 	closeFn         func() bool
+
+	// Size constraints
+	minWidth  int
+	minHeight int
+	maxWidth  int
+	maxHeight int
 }
 
 func (m *mockWindow) ID() platform.WindowID   { return m.windowID }
@@ -40,6 +46,8 @@ func (m *mockWindow) PhysicalSize() (int, int) {
 func (m *mockWindow) GetHandle() (uintptr, uintptr) { return 0, 0 }
 func (m *mockWindow) InSizeMove() bool              { return false }
 func (m *mockWindow) SetTitle(_ string)             {}
+func (m *mockWindow) SetMinSize(w, h int)           { m.minWidth = w; m.minHeight = h }
+func (m *mockWindow) SetMaxSize(w, h int)           { m.maxWidth = w; m.maxHeight = h }
 func (m *mockWindow) SetModalFrameCallback(func())  {}
 func (m *mockWindow) Destroy()                      {}
 func (m *mockWindow) ScaleFactor() float64          { return m.scaleFactor }

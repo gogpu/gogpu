@@ -382,6 +382,12 @@ func (w *browserWindow) SetCursor(cursorID int) {
 	w.canvas.Get("style").Set("cursor", css)
 }
 
+// SetMinSize is a no-op on browser — window sizing is controlled by the page.
+func (w *browserWindow) SetMinSize(_, _ int) {}
+
+// SetMaxSize is a no-op on browser — window sizing is controlled by the page.
+func (w *browserWindow) SetMaxSize(_, _ int) {}
+
 // SetFrameless is a no-op on browser — there's no OS window chrome.
 func (w *browserWindow) SetFrameless(_ bool) {}
 
