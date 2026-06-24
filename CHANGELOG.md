@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Surface-outdated on present** (@samyfodil, #NNN) — `present()` now reconfigures the
+- **Surface-outdated on present** (@samyfodil, #342) — `present()` now reconfigures the
   surface on `wgpu.ErrSurfaceOutdated` (resize/DPI/monitor change) and logs at Debug,
   matching the acquire path (`recoverFromAcquireError`), instead of logging a spurious
   ERROR with no recovery. After reconfiguring, the frame is re-rendered once at the new
   size so resize no longer drops to a blank frame.
-- **X11 black flicker on resize** (@samyfodil, #NNN) — the window was created with a black
+- **X11 black flicker on resize** (@samyfodil, #342) — the window was created with a black
   `CWBackPixel`, so the X server painted newly-exposed areas black on every resize before
   the GPU repainted. Use background pixmap `None` instead (X11 default; GLFW/SDL/Chromium
   pattern) so old pixels persist until the swapchain presents the new frame.
