@@ -419,8 +419,80 @@ func TestDetectSubpixelLayout(t *testing.T) {
 	// Test 3: No fontconfig, no HiDPI → default None (ADR-047: safe for unknown displays)
 	os.Setenv("XDG_CONFIG_HOME", "/nonexistent")
 	os.Setenv("HOME", "/nonexistent")
+	os.Unsetenv("GOGPU_SUBPIXEL_LAYOUT")
 	got = detectSubpixelLayout()
 	if got != gpucontext.SubpixelNone {
 		t.Errorf("detectSubpixelLayout() default = %v, want SubpixelNone", got)
+	}
+}
+
+func TestParseSubpixelEnvVar(t *testing.T) {
+	saved := os.Getenv("GOGPU_SUBPIXEL_LAYOUT")
+	defer os.Setenv("GOGPU_SUBPIXEL_LAYOUT", saved)
+
+	tests := []struct {
+		env    string
+		want   gpucontext.SubpixelLayout
+		wantOK bool
+	}{
+		{"rgb", gpucontext.SubpixelRGB, true},
+		{"bgr", gpucontext.SubpixelBGR, true},
+		{"vrgb", gpucontext.SubpixelVRGB, true},
+		{"vbgr", gpucontext.SubpixelVBGR, true},
+		{"none", gpucontext.SubpixelNone, true},
+		{"RGB", gpucontext.SubpixelRGB, true},
+		{"", gpucontext.SubpixelNone, false},
+		{"invalid", gpucontext.SubpixelNone, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.env, func(t *testing.T) {
+			os.Setenv("GOGPU_SUBPIXEL_LAYOUT", tt.env)
+			got, ok := parseSubpixelEnvVar()
+			if ok != tt.wantOK {
+				t.Errorf("parseSubpixelEnvVar(%q) ok = %v, want %v", tt.env, ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Errorf("parseSubpixelEnvVar(%q) = %v, want %v", tt.env, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectSubpixelLayoutEnvOverride(t *testing.T) {
+	saved := os.Getenv("GOGPU_SUBPIXEL_LAYOUT")
+	savedGDK := os.Getenv("GDK_SCALE")
+	defer func() {
+		os.Setenv("GOGPU_SUBPIXEL_LAYOUT", saved)
+		os.Setenv("GDK_SCALE", savedGDK)
+	}()
+
+	os.Setenv("GDK_SCALE", "2")
+	os.Setenv("GOGPU_SUBPIXEL_LAYOUT", "bgr")
+	got := detectSubpixelLayout()
+	if got != gpucontext.SubpixelBGR {
+		t.Errorf("env override should beat HiDPI: got %v, want SubpixelBGR", got)
+	}
+}
+
+func TestWlOutputSubpixelToLayout(t *testing.T) {
+	tests := []struct {
+		subpixel int32
+		want     gpucontext.SubpixelLayout
+		wantOK   bool
+	}{
+		{0, gpucontext.SubpixelNone, false},  // unknown
+		{1, gpucontext.SubpixelNone, true},   // none
+		{2, gpucontext.SubpixelRGB, true},    // horizontal_rgb
+		{3, gpucontext.SubpixelBGR, true},    // horizontal_bgr
+		{4, gpucontext.SubpixelVRGB, true},   // vertical_rgb
+		{5, gpucontext.SubpixelVBGR, true},   // vertical_bgr
+		{99, gpucontext.SubpixelNone, false}, // out of range
+	}
+	for _, tt := range tests {
+		got, ok := wlOutputSubpixelToLayout(tt.subpixel)
+		if ok != tt.wantOK || got != tt.want {
+			t.Errorf("wlOutputSubpixelToLayout(%d) = (%v, %v), want (%v, %v)",
+				tt.subpixel, got, ok, tt.want, tt.wantOK)
+		}
 	}
 }

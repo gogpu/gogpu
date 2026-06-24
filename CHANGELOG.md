@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.5] - 2026-06-24
+
+### Fixed
+
+- **Wayland `wl_output.subpixel` wired to detection chain** (#338) — bind `wl_output` via Pure Go registry during init, roundtrip for geometry event, read compositor-reported subpixel layout (EDID-based). Detection order now: env var → `wl_output.geometry` → fontconfig → None. Matches Qt6 pattern (hardware source primary, config fallback). v0.42.4 parsed but did not wire the value.
+
 ## [0.42.4] - 2026-06-24
 
 ### Fixed

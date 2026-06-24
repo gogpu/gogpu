@@ -129,6 +129,10 @@ type waylandPlatform struct {
 	// Scale factor from environment variables (fallback)
 	envScaleFactor float64
 
+	// Subpixel layout from wl_output.geometry event (ADR-047)
+	outputSubpixel    int32
+	hasOutputSubpixel bool
+
 	// Primary window for backward-compatible single-window API.
 	primary         *waylandWindow
 	primaryWindowID WindowID
@@ -724,6 +728,19 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	if err := display.Roundtrip(); err != nil {
 		_ = display.Close()
 		return fmt.Errorf("wayland: extra roundtrip failed: %w", err)
+	}
+
+	// Bind wl_output via Pure Go to get subpixel layout from geometry event (ADR-047).
+	// wl_output is optional — display works without it, but subpixel detection degrades.
+	if outputGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlOutput); outputGlobal != nil {
+		outputID, err := registry.BindOutput(outputGlobal.Name, min(outputGlobal.Version, 4))
+		if err == nil {
+			output := wayland.NewWlOutput(display, outputID)
+			if rtErr := display.Roundtrip(); rtErr == nil {
+				p.outputSubpixel = output.Subpixel()
+				p.hasOutputSubpixel = true
+			}
+		}
 	}
 
 	// Collect global names/versions for C-side binding
@@ -2520,10 +2537,35 @@ func (p *waylandPlatform) ClipboardWrite(text string) error {
 }
 
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
-// Detection order (ADR-047): env var → fontconfig → None.
-// TODO: read wl_output.geometry subpixel field when output binding is wired (ADR-047 Phase 2).
+// Detection order (ADR-047): env var → wl_output.geometry → fontconfig → None.
 func (p *waylandPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
+	if layout, ok := parseSubpixelEnvVar(); ok {
+		return layout
+	}
+	if p.hasOutputSubpixel {
+		if layout, ok := wlOutputSubpixelToLayout(p.outputSubpixel); ok {
+			return layout
+		}
+	}
 	return detectSubpixelLayout()
+}
+
+// wlOutputSubpixelToLayout maps wl_output_subpixel enum to gpucontext.SubpixelLayout.
+func wlOutputSubpixelToLayout(subpixel int32) (gpucontext.SubpixelLayout, bool) {
+	switch subpixel {
+	case 2: // horizontal_rgb
+		return gpucontext.SubpixelRGB, true
+	case 3: // horizontal_bgr
+		return gpucontext.SubpixelBGR, true
+	case 4: // vertical_rgb
+		return gpucontext.SubpixelVRGB, true
+	case 5: // vertical_bgr
+		return gpucontext.SubpixelVBGR, true
+	case 1: // none
+		return gpucontext.SubpixelNone, true
+	default: // 0 = unknown
+		return gpucontext.SubpixelNone, false
+	}
 }
 
 // DarkMode returns true if the system dark mode is active.
