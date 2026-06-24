@@ -218,9 +218,8 @@ func (a *App) Title() string {
 // OnFocus registers a callback invoked when the window gains or loses focus.
 // The callback receives true when the window becomes focused, false when it loses focus.
 func (a *App) OnFocus(fn func(focused bool)) *App {
-	if a.eventSource != nil {
-		a.eventSource.OnFocus(fn)
-	}
+	_ = a.EventSource() // ensure eventSource is initialized
+	a.eventSource.OnFocus(fn)
 	return a
 }
 

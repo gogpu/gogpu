@@ -999,3 +999,75 @@ func TestApp_WindowCloseEvent_OnClosePanic(t *testing.T) {
 		t.Error("app should still be running after panicking onClose")
 	}
 }
+
+func TestAppSetTitle(t *testing.T) {
+	app := &App{
+		config:     DefaultConfig(),
+		platWindow: &mockWindow{},
+	}
+
+	app.SetTitle("New Title")
+
+	if app.config.Title != "New Title" {
+		t.Errorf("config.Title = %q, want %q", app.config.Title, "New Title")
+	}
+}
+
+func TestAppTitle(t *testing.T) {
+	cfg := DefaultConfig().WithTitle("My App")
+	app := NewApp(cfg)
+
+	if app.Title() != "My App" {
+		t.Errorf("Title() = %q, want %q", app.Title(), "My App")
+	}
+
+	app.SetTitle("Updated")
+	if app.Title() != "Updated" {
+		t.Errorf("Title() after SetTitle = %q, want %q", app.Title(), "Updated")
+	}
+}
+
+func TestAppOnFocusChaining(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	result := app.OnFocus(func(bool) {})
+	if result != app {
+		t.Error("OnFocus should return the same App for chaining")
+	}
+	if app.eventSource == nil {
+		t.Error("OnFocus should initialize eventSource")
+	}
+}
+
+func TestAppHasFocus(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	if app.HasFocus() {
+		t.Error("HasFocus() = true before any focus event, want false")
+	}
+
+	app.focused = true
+	if !app.HasFocus() {
+		t.Error("HasFocus() = false after setting focused, want true")
+	}
+}
+
+func TestAppOnFocusCallback(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	var got []bool
+	app.OnFocus(func(focused bool) {
+		got = append(got, focused)
+	})
+
+	app.eventSource.dispatchFocus(true)
+	app.eventSource.dispatchFocus(false)
+	app.eventSource.dispatchFocus(true)
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 focus events, got %d", len(got))
+	}
+	if got[0] != true || got[1] != false || got[2] != true {
+		t.Errorf("focus sequence = %v, want [true false true]", got)
+	}
+}

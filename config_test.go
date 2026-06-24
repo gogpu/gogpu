@@ -351,6 +351,23 @@ func TestWithGraphicsAPIOverridesEnv(t *testing.T) {
 	}
 }
 
+func TestConfigWithResizable(t *testing.T) {
+	cfg := DefaultConfig().WithResizable(false)
+	if cfg.Resizable {
+		t.Error("WithResizable(false): Resizable = true, want false")
+	}
+	cfg = cfg.WithResizable(true)
+	if !cfg.Resizable {
+		t.Error("WithResizable(true): Resizable = false, want true")
+	}
+
+	original := DefaultConfig()
+	_ = original.WithResizable(false)
+	if !original.Resizable {
+		t.Error("WithResizable mutated original Config, want immutable")
+	}
+}
+
 func TestConfigTabbing(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.TabbingMode != TabbingDisallowed {

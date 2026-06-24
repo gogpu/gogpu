@@ -56,6 +56,38 @@ func (m *mockMenuManager) ShowSaveFileDialog(platform.FileDialogOptions) (string
 	return "", nil
 }
 
+func TestNewSeparator(t *testing.T) {
+	sep := NewSeparator()
+	if !sep.Separator {
+		t.Error("NewSeparator().Separator = false, want true")
+	}
+	if sep.Title != "" || sep.Action != nil {
+		t.Errorf("NewSeparator() should have no title or action, got %+v", sep)
+	}
+}
+
+func TestMenuAddSeparator(t *testing.T) {
+	menu := NewMenu()
+	result := menu.AddSeparator()
+	if result != menu {
+		t.Error("AddSeparator should return the same menu for chaining")
+	}
+	if len(menu.Items) != 1 {
+		t.Fatalf("expected 1 item after AddSeparator, got %d", len(menu.Items))
+	}
+	if !menu.Items[0].Separator {
+		t.Error("AddSeparator item: Separator = false, want true")
+	}
+
+	menu.AddItem(MenuItem{Title: "File"}).AddSeparator().AddItem(MenuItem{Title: "Edit"})
+	if len(menu.Items) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(menu.Items))
+	}
+	if !menu.Items[2].Separator {
+		t.Error("middle separator: Separator = false, want true")
+	}
+}
+
 // TestNewMenu checks that NewMenu is not nil and that the menu is empty.
 func TestNewMenu(t *testing.T) {
 	menu := NewMenuWithTitle("Test")
