@@ -10,6 +10,10 @@
 # Logs
 *.log
 
+# Test coverage output
+cover.out
+*.coverprofile
+
 # Private dev docs (not committed)
 docs/dev/
 
