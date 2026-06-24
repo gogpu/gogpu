@@ -310,8 +310,9 @@ type WlOutput struct {
 	display *Display
 	id      ObjectID
 
-	mu    sync.Mutex
-	scale int32
+	mu       sync.Mutex
+	scale    int32
+	subpixel int32 // wl_output_subpixel enum from geometry event (0=unknown,1=none,2=h_rgb,3=h_bgr,4=v_rgb,5=v_bgr)
 
 	// Event handlers
 	onScale func(scale int32)
@@ -352,17 +353,53 @@ func (o *WlOutput) SetScaleHandler(handler func(scale int32)) {
 	o.onScale = handler
 }
 
+// Subpixel returns the subpixel arrangement reported by the compositor.
+// Values: 0=unknown, 1=none, 2=horizontal_rgb, 3=horizontal_bgr, 4=vertical_rgb, 5=vertical_bgr.
+func (o *WlOutput) Subpixel() int32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.subpixel
+}
+
 // dispatch handles wl_output events.
 func (o *WlOutput) dispatch(msg *Message) error {
 	switch msg.Opcode {
 	case outputEventScale:
 		return o.handleScale(msg)
-	case outputEventGeometry, outputEventMode, outputEventDone:
-		// Ignore other events for now
+	case outputEventGeometry:
+		return o.handleGeometry(msg)
+	case outputEventMode, outputEventDone:
 		return nil
 	default:
 		return nil
 	}
+}
+
+// handleGeometry extracts the subpixel field from the geometry event.
+// Wire format: x(int) y(int) phys_w(int) phys_h(int) subpixel(int) make(string) model(string) transform(int)
+func (o *WlOutput) handleGeometry(msg *Message) error {
+	decoder := NewDecoder(msg.Args)
+	if _, err := decoder.Int32(); err != nil { // x
+		return err
+	}
+	if _, err := decoder.Int32(); err != nil { // y
+		return err
+	}
+	if _, err := decoder.Int32(); err != nil { // physical_width
+		return err
+	}
+	if _, err := decoder.Int32(); err != nil { // physical_height
+		return err
+	}
+	subpixel, err := decoder.Int32()
+	if err != nil {
+		return err
+	}
+
+	o.mu.Lock()
+	o.subpixel = subpixel
+	o.mu.Unlock()
+	return nil
 }
 
 func (o *WlOutput) handleScale(msg *Message) error {

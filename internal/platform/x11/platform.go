@@ -613,12 +613,12 @@ func (p *Platform) SubpixelLayout() gpucontext.SubpixelLayout {
 
 	rootWindow := p.conn.RootWindow()
 	if rootWindow == 0 {
-		return gpucontext.SubpixelRGB
+		return gpucontext.SubpixelNone
 	}
 
 	data, _, _, err := p.conn.GetProperty(rootWindow, AtomResourceManager, Atom(0), 0, 8192, false)
 	if err != nil || len(data) == 0 {
-		return gpucontext.SubpixelRGB
+		return gpucontext.SubpixelNone
 	}
 
 	return parseXftRGBA(string(data))
@@ -627,7 +627,7 @@ func (p *Platform) SubpixelLayout() gpucontext.SubpixelLayout {
 // parseXftRGBA parses the Xft.rgba value from an X RESOURCE_MANAGER string.
 // The string contains lines like "Xft.rgba:\trgb" or "Xft.rgba: bgr".
 // Valid values: "rgb", "bgr", "vrgb", "vbgr", "none".
-// Returns SubpixelRGB if Xft.rgba is not found (most common LCD default).
+// Returns SubpixelNone if Xft.rgba is not found (safe default for unknown displays, ADR-047).
 func parseXftRGBA(resources string) gpucontext.SubpixelLayout {
 	for _, line := range strings.Split(resources, "\n") {
 		line = strings.TrimSpace(line)
@@ -648,11 +648,11 @@ func parseXftRGBA(resources string) gpucontext.SubpixelLayout {
 		case "none":
 			return gpucontext.SubpixelNone
 		default:
-			return gpucontext.SubpixelRGB
+			return gpucontext.SubpixelNone
 		}
 	}
-	// Xft.rgba not set — default to RGB (most common LCD layout).
-	return gpucontext.SubpixelRGB
+	// Xft.rgba not set — safe default for unknown displays (ADR-047).
+	return gpucontext.SubpixelNone
 }
 
 // initXkbcommon loads libxkbcommon and creates a keymap.

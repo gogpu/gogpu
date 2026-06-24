@@ -135,12 +135,12 @@ func TestParseXftRGBA(t *testing.T) {
 		{
 			name:      "no Xft.rgba present",
 			resources: "Xft.antialias:\t1\nXft.hinting:\t1\n",
-			want:      gpucontext.SubpixelRGB, // default
+			want:      gpucontext.SubpixelNone, // safe default (ADR-047)
 		},
 		{
 			name:      "empty string",
 			resources: "",
-			want:      gpucontext.SubpixelRGB, // default
+			want:      gpucontext.SubpixelNone, // safe default (ADR-047)
 		},
 		{
 			name:      "uppercase RGB",
@@ -153,9 +153,9 @@ func TestParseXftRGBA(t *testing.T) {
 			want:      gpucontext.SubpixelBGR,
 		},
 		{
-			name:      "unknown value defaults to RGB",
+			name:      "unknown value defaults to None",
 			resources: "Xft.rgba:\tunknown\n",
-			want:      gpucontext.SubpixelRGB,
+			want:      gpucontext.SubpixelNone,
 		},
 		{
 			name:      "no trailing newline",

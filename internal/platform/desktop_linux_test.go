@@ -416,11 +416,11 @@ func TestDetectSubpixelLayout(t *testing.T) {
 		t.Errorf("detectSubpixelLayout() with fontconfig bgr = %v, want SubpixelBGR", got)
 	}
 
-	// Test 3: No fontconfig, no HiDPI → default RGB
+	// Test 3: No fontconfig, no HiDPI → default None (ADR-047: safe for unknown displays)
 	os.Setenv("XDG_CONFIG_HOME", "/nonexistent")
 	os.Setenv("HOME", "/nonexistent")
 	got = detectSubpixelLayout()
-	if got != gpucontext.SubpixelRGB {
-		t.Errorf("detectSubpixelLayout() default = %v, want SubpixelRGB", got)
+	if got != gpucontext.SubpixelNone {
+		t.Errorf("detectSubpixelLayout() default = %v, want SubpixelNone", got)
 	}
 }

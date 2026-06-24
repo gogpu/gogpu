@@ -17,6 +17,16 @@ const (
 	envQTScaleFactor = "QT_SCALE_FACTOR"
 )
 
+// Subpixel layout string identifiers shared by env var parser, fontconfig parser,
+// and X11 Xft.rgba parser.
+const (
+	subpixelValueRGB  = "rgb"
+	subpixelValueBGR  = "bgr"
+	subpixelValueVRGB = "vrgb"
+	subpixelValueVBGR = "vbgr"
+	subpixelValueNone = "none"
+)
+
 // detectDarkMode checks environment variables and desktop settings to determine
 // if dark mode is active. Works for GNOME, KDE, and other freedesktop desktops.
 //
@@ -91,29 +101,49 @@ func detectReduceMotion() bool {
 // variables and fontconfig settings. Used as a fallback for Wayland
 // (which cannot read X resources) and when X11 RESOURCE_MANAGER is unavailable.
 //
-// Detection order:
-//  1. GDK_SCALE / QT_SCALE_FACTOR >= 2 → SubpixelNone (HiDPI, subpixels too small)
-//  2. Fontconfig config files (~/.config/fontconfig/fonts.conf or /etc/fonts/local.conf)
-//     <match><edit name="rgba"><const>rgb</const></edit></match>
-//  3. Default to SubpixelRGB (most common LCD arrangement)
+// Detection order (ADR-047):
+//  1. GOGPU_SUBPIXEL_LAYOUT env var override
+//  2. GDK_SCALE / QT_SCALE_FACTOR >= 2 → SubpixelNone (HiDPI, subpixels too small)
+//  3. Fontconfig config files (~/.config/fontconfig/fonts.conf or /etc/fonts/local.conf)
+//  4. Default to SubpixelNone (safe — grayscale AA on unknown displays)
 func detectSubpixelLayout() gpucontext.SubpixelLayout {
-	// HiDPI displays should use grayscale AA — subpixels are too small to matter.
+	if layout, ok := parseSubpixelEnvVar(); ok {
+		return layout
+	}
+
 	if isHiDPI() {
 		return gpucontext.SubpixelNone
 	}
 
-	// Check fontconfig user config (~/.config/fontconfig/fonts.conf)
 	if layout, ok := parseFontconfigRGBA(userFontconfigPath()); ok {
 		return layout
 	}
 
-	// Check fontconfig system config
 	if layout, ok := parseFontconfigRGBA("/etc/fonts/local.conf"); ok {
 		return layout
 	}
 
-	// Default: RGB is the most common subpixel arrangement for LCDs.
-	return gpucontext.SubpixelRGB
+	return gpucontext.SubpixelNone
+}
+
+// parseSubpixelEnvVar reads GOGPU_SUBPIXEL_LAYOUT env var.
+// Valid values: rgb, bgr, vrgb, vbgr, none.
+func parseSubpixelEnvVar() (gpucontext.SubpixelLayout, bool) {
+	v := strings.ToLower(os.Getenv("GOGPU_SUBPIXEL_LAYOUT"))
+	switch v {
+	case subpixelValueRGB:
+		return gpucontext.SubpixelRGB, true
+	case subpixelValueBGR:
+		return gpucontext.SubpixelBGR, true
+	case subpixelValueVRGB:
+		return gpucontext.SubpixelVRGB, true
+	case subpixelValueVBGR:
+		return gpucontext.SubpixelVBGR, true
+	case subpixelValueNone:
+		return gpucontext.SubpixelNone, true
+	default:
+		return gpucontext.SubpixelNone, false
+	}
 }
 
 // isHiDPI returns true if environment variables indicate HiDPI (scale >= 2.0).
@@ -177,15 +207,15 @@ func parseFontconfigRGBA(path string) (gpucontext.SubpixelLayout, bool) {
 
 	value := strings.TrimSpace(rest[:constEnd])
 	switch strings.ToLower(value) {
-	case "rgb":
+	case subpixelValueRGB:
 		return gpucontext.SubpixelRGB, true
-	case "bgr":
+	case subpixelValueBGR:
 		return gpucontext.SubpixelBGR, true
-	case "vrgb":
+	case subpixelValueVRGB:
 		return gpucontext.SubpixelVRGB, true
-	case "vbgr":
+	case subpixelValueVBGR:
 		return gpucontext.SubpixelVBGR, true
-	case "none":
+	case subpixelValueNone:
 		return gpucontext.SubpixelNone, true
 	default:
 		return gpucontext.SubpixelNone, false

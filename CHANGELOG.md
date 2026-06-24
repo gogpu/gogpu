@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.4] - 2026-06-24
+
+### Fixed
+
+- **Subpixel layout detection defaults to RGB on unknown displays** (#338) — changed default from SubpixelRGB to SubpixelNone (grayscale AA) on both Wayland and X11. Prevents color fringing on BGR/unknown monitors. Added `GOGPU_SUBPIXEL_LAYOUT` env var override (values: `rgb`, `bgr`, `vrgb`, `vbgr`, `none`). Wayland `wl_output.geometry` subpixel field now parsed and stored (wiring to detection chain in follow-up). X11: fixed nil fallback and all "no data" defaults to SubpixelNone.
+
 ## [0.42.3] - 2026-06-24
 
 ### Fixed

@@ -327,10 +327,13 @@ func (p *x11Platform) ClipboardWrite(text string) error {
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
 // Delegates to the X11 platform which reads Xft.rgba from RESOURCE_MANAGER.
 func (p *x11Platform) SubpixelLayout() gpucontext.SubpixelLayout {
+	if layout, ok := parseSubpixelEnvVar(); ok {
+		return layout
+	}
 	if p.inner != nil {
 		return p.inner.SubpixelLayout()
 	}
-	return gpucontext.SubpixelRGB
+	return gpucontext.SubpixelNone
 }
 
 // DarkMode returns true if the system dark mode is active.
@@ -2517,7 +2520,8 @@ func (p *waylandPlatform) ClipboardWrite(text string) error {
 }
 
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
-// Wayland does not expose X resources, so this falls back to fontconfig detection.
+// Detection order (ADR-047): env var → fontconfig → None.
+// TODO: read wl_output.geometry subpixel field when output binding is wired (ADR-047 Phase 2).
 func (p *waylandPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return detectSubpixelLayout()
 }
