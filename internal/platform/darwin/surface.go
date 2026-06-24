@@ -151,7 +151,7 @@ func (l *MetalLayer) SetAutoresizingMask(mask uint) {
 }
 
 // SetContentsGravity sets how the layer's content is positioned within its bounds.
-// Use "topLeft" (kCAGravityTopLeft) to prevent stretching during resize.
+// Use "resize" (kCAGravityResize) to stretch existing content to fill the layer during live resize.
 func (l *MetalLayer) SetContentsGravity(gravity string) {
 	if l == nil || l.id.IsNil() {
 		return
