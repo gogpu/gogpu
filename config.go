@@ -295,6 +295,14 @@ func (c Config) WithAppName(name string) Config {
 	return c
 }
 
+// WithResizable enables or disables window resizing.
+// When true (default): user can resize the window by dragging its edges.
+// When false: window size is fixed at the values set by WithSize.
+func (c Config) WithResizable(resizable bool) Config {
+	c.Resizable = resizable
+	return c
+}
+
 // Re-export backend types for convenience.
 const (
 	BackendAuto   = types.BackendAuto

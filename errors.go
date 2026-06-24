@@ -15,4 +15,12 @@ var (
 
 	// ErrSurfaceLost is returned when the rendering surface is lost.
 	ErrSurfaceLost = errors.New("gogpu: surface lost")
+
+	// ErrWindowClosed is returned when an operation is attempted on a closed window.
+	ErrWindowClosed = errors.New("gogpu: window closed")
+
+	// ErrDeviceLost is returned when the GPU device is lost and cannot recover.
+	// Unlike ErrSurfaceLost (transient, surface-level), device loss requires
+	// full re-initialization of the renderer.
+	ErrDeviceLost = errors.New("gogpu: GPU device lost")
 )

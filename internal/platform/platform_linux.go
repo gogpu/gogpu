@@ -371,7 +371,7 @@ func (w *x11PlatformWindow) PhysicalSize() (int, int)       { return w.platform.
 func (w *x11PlatformWindow) ScaleFactor() float64           { return w.platform.inner.ScaleFactor() }
 func (w *x11PlatformWindow) ShouldClose() bool              { return w.platform.inner.ShouldClose() }
 func (w *x11PlatformWindow) InSizeMove() bool               { return false }
-func (w *x11PlatformWindow) SetTitle(_ string)              {}
+func (w *x11PlatformWindow) SetTitle(title string)          { w.platform.inner.SetTitle(title) }
 func (w *x11PlatformWindow) SetCursor(cursorID int)         { w.platform.inner.SetCursor(cursorID) }
 func (w *x11PlatformWindow) SetCursorMode(mode int)         { w.platform.inner.SetCursorMode(mode) }
 func (w *x11PlatformWindow) CursorMode() int                { return w.platform.inner.GetCursorMode() }
@@ -489,8 +489,11 @@ func (w *waylandPlatformWindow) ShouldClose() bool {
 }
 
 func (w *waylandPlatformWindow) InSizeMove() bool { return false }
-func (w *waylandPlatformWindow) SetTitle(_ string) {
-	// TODO: libwl.SetTitle for runtime title change
+func (w *waylandPlatformWindow) SetTitle(title string) {
+	if w.platform.libwl != nil {
+		w.platform.libwl.SetTitle(title)
+		_ = w.platform.libwl.Flush()
+	}
 }
 
 func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {

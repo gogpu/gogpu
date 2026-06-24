@@ -284,8 +284,12 @@ func (dw *darwinPlatformWindow) ShouldClose() bool {
 	return false
 }
 
-func (dw *darwinPlatformWindow) InSizeMove() bool  { return false }
-func (dw *darwinPlatformWindow) SetTitle(_ string) {}
+func (dw *darwinPlatformWindow) InSizeMove() bool { return false }
+func (dw *darwinPlatformWindow) SetTitle(title string) {
+	if dw.window != nil {
+		dw.window.SetTitle(title)
+	}
+}
 
 func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
 	if dw.window == nil {

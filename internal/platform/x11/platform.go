@@ -1482,6 +1482,14 @@ func (p *Platform) MapWindow() error {
 	return p.conn.MapWindow(p.primary.window)
 }
 
+// SetTitle changes the window title at runtime.
+func (p *Platform) SetTitle(title string) {
+	if p.primary == nil || p.conn == nil {
+		return
+	}
+	_ = p.conn.SetWindowTitle(p.primary.window, title, p.atoms)
+}
+
 // Destroy closes the window and releases resources.
 func (p *Platform) Destroy() {
 	p.mu.Lock()

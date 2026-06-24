@@ -32,7 +32,7 @@ func TestAppLifecycle_String(t *testing.T) {
 		{AppSuspending, "Suspending"},
 		{AppSuspended, "Suspended"},
 		{AppResuming, "Resuming"},
-		{AppLifecycle(99), "Unknown lifecycle"},
+		{AppLifecycle(99), "AppLifecycle(99)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {

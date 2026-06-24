@@ -52,6 +52,7 @@ type App struct {
 
 	// State
 	running                bool
+	focused                bool         // true when the window has keyboard focus
 	lifecycle              AppLifecycle // ADR-026 universal lifecycle state
 	quitOnLastWindowClosed bool         // default true — exit when last window closes
 	lastFrame              time.Time
@@ -199,6 +200,33 @@ func (a *App) OnClose(fn func()) *App {
 func (a *App) OnAnyWindowClosed(fn func(WindowID)) *App {
 	a.onAnyWindowClosed = fn
 	return a
+}
+
+// SetTitle changes the window title at runtime.
+func (a *App) SetTitle(title string) {
+	a.config.Title = title
+	if a.platWindow != nil {
+		a.platWindow.SetTitle(title)
+	}
+}
+
+// Title returns the current window title.
+func (a *App) Title() string {
+	return a.config.Title
+}
+
+// OnFocus registers a callback invoked when the window gains or loses focus.
+// The callback receives true when the window becomes focused, false when it loses focus.
+func (a *App) OnFocus(fn func(focused bool)) *App {
+	if a.eventSource != nil {
+		a.eventSource.OnFocus(fn)
+	}
+	return a
+}
+
+// HasFocus reports whether the window currently has keyboard focus.
+func (a *App) HasFocus() bool {
+	return a.focused
 }
 
 // TrackResource registers an io.Closer for automatic cleanup during shutdown.
@@ -576,6 +604,7 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 	case platform.EventClose:
 		a.windowCloseEvent(event)
 	case platform.EventFocus:
+		a.focused = event.Focused
 		if event.Focused {
 			if w := a.windowManager.getByPlatformID(event.WindowID); w != nil {
 				a.windowManager.setFocus(w.id)

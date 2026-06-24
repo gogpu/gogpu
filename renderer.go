@@ -464,7 +464,12 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	// (e.g., CAMetalLayer.contentsScale on macOS for HiDPI/multi-monitor).
 	if platWin != nil {
 		result := platWin.PrepareFrame()
-		if result.ScaleChanged && result.PhysicalWidth > 0 && result.PhysicalHeight > 0 {
+		// Reconfigure when the physical surface dimensions changed — covers both
+		// Retina scale transitions (ScaleChanged) and live resize (size mismatch).
+		// Acting here, before nextDrawable, eliminates the 1-frame blank square
+		// that appears when CAMetalLayer grows before the wgpu surface catches up.
+		if result.PhysicalWidth > 0 && result.PhysicalHeight > 0 &&
+			(result.PhysicalWidth != ws.width || result.PhysicalHeight != ws.height) {
 			ws.width = result.PhysicalWidth
 			ws.height = result.PhysicalHeight
 			_ = ws.configure(device, adapter)

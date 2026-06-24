@@ -1,5 +1,7 @@
 package gogpu
 
+import "fmt"
+
 // AppLifecycle represents the application lifecycle state (ADR-026).
 //
 // Desktop apps transition: AppIdle → AppRunning → (exit).
@@ -38,6 +40,6 @@ func (s AppLifecycle) String() string {
 	case AppResuming:
 		return "Resuming"
 	default:
-		return "Unknown lifecycle"
+		return fmt.Sprintf("AppLifecycle(%d)", int(s))
 	}
 }

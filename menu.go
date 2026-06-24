@@ -53,6 +53,16 @@ func (m *Menu) AddItem(item MenuItem) *Menu {
 	return m
 }
 
+// NewSeparator returns a menu separator item.
+func NewSeparator() MenuItem {
+	return MenuItem{Separator: true}
+}
+
+// AddSeparator appends a separator to the menu and returns the menu for chaining.
+func (m *Menu) AddSeparator() *Menu {
+	return m.AddItem(MenuItem{Separator: true})
+}
+
 // SystemMenu identifies a standard macOS menu that can be extended.
 type SystemMenu int
 
