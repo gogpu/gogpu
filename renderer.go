@@ -596,6 +596,11 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 		}
 		return false
 	}
+	if errors.Is(err, wgpu.ErrSurfaceLost) {
+		slog.Error("gogpu: surface lost on present", "err", err)
+		ws.state = SurfaceLost
+		return false
+	}
 	slog.Error("PRESENT ERROR", "err", err)
 	return false
 }

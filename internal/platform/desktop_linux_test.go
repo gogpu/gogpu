@@ -474,6 +474,23 @@ func TestDetectSubpixelLayoutEnvOverride(t *testing.T) {
 	}
 }
 
+func TestQueryFcMatchParsesOutput(t *testing.T) {
+	layout, ok := queryFcMatch()
+	if !ok {
+		t.Skip("fc-match not available on this system")
+	}
+	valid := map[gpucontext.SubpixelLayout]bool{
+		gpucontext.SubpixelNone: true,
+		gpucontext.SubpixelRGB:  true,
+		gpucontext.SubpixelBGR:  true,
+		gpucontext.SubpixelVRGB: true,
+		gpucontext.SubpixelVBGR: true,
+	}
+	if !valid[layout] {
+		t.Errorf("queryFcMatch() = %v, want a valid SubpixelLayout", layout)
+	}
+}
+
 func TestWlOutputSubpixelToLayout(t *testing.T) {
 	tests := []struct {
 		subpixel int32

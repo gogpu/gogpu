@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.42.6] - 2026-06-24
+## [0.42.6] - 2026-06-25
 
 ### Fixed
 
@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the GPU repainted. Use background pixmap `None` instead (X11 default; GLFW/SDL/Chromium
   pattern) so the server no longer fills the window black; `Expose` events now request a
   redraw so revealed regions repaint instead of staying undefined.
+- **`ErrSurfaceLost` handling in present** (#338) — `present()` now mirrors `recoverFromAcquireError` for `ErrSurfaceLost` (sets `SurfaceLost` state), completing symmetric error handling between acquire and present paths.
+- **`fc-match` subprocess fallback for subpixel detection** (#338) — resolves full fontconfig chain including distro defaults in `/etc/fonts/conf.d/`. 2-second timeout, no-op if fc-match not installed. Detection chain (ADR-047): env var → wl_output.geometry → HiDPI → fontconfig files → fc-match → SubpixelNone.
+
+### Changed
+
+- **deps:** wgpu v0.30.2 → v0.30.3 (SPIR-V tanh + integer clamp, @amery)
 
 ## [0.42.5] - 2026-06-24
 

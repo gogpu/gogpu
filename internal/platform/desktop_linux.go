@@ -3,10 +3,13 @@
 package platform
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogpu/gpucontext"
 )
@@ -105,7 +108,8 @@ func detectReduceMotion() bool {
 //  1. GOGPU_SUBPIXEL_LAYOUT env var override
 //  2. GDK_SCALE / QT_SCALE_FACTOR >= 2 → SubpixelNone (HiDPI, subpixels too small)
 //  3. Fontconfig config files (~/.config/fontconfig/fonts.conf or /etc/fonts/local.conf)
-//  4. Default to SubpixelNone (safe — grayscale AA on unknown displays)
+//  4. fc-match subprocess — resolves full fontconfig chain including distro defaults
+//  5. Default to SubpixelNone (safe — grayscale AA on unknown displays)
 func detectSubpixelLayout() gpucontext.SubpixelLayout {
 	if layout, ok := parseSubpixelEnvVar(); ok {
 		return layout
@@ -123,7 +127,40 @@ func detectSubpixelLayout() gpucontext.SubpixelLayout {
 		return layout
 	}
 
+	if layout, ok := queryFcMatch(); ok {
+		return layout
+	}
+
 	return gpucontext.SubpixelNone
+}
+
+// queryFcMatch runs fc-match to resolve the full fontconfig chain.
+// Catches distro-level configs in /etc/fonts/conf.d/ that file parsing misses.
+// Returns false if fc-match is not installed or fails.
+func queryFcMatch() (gpucontext.SubpixelLayout, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "fc-match", "--format=%{rgba}\n").Output()
+	if err != nil {
+		return gpucontext.SubpixelNone, false
+	}
+
+	value := strings.TrimSpace(strings.ToLower(string(out)))
+	switch value {
+	case subpixelValueRGB:
+		return gpucontext.SubpixelRGB, true
+	case subpixelValueBGR:
+		return gpucontext.SubpixelBGR, true
+	case subpixelValueVRGB:
+		return gpucontext.SubpixelVRGB, true
+	case subpixelValueVBGR:
+		return gpucontext.SubpixelVBGR, true
+	case subpixelValueNone:
+		return gpucontext.SubpixelNone, true
+	default:
+		return gpucontext.SubpixelNone, false
+	}
 }
 
 // parseSubpixelEnvVar reads GOGPU_SUBPIXEL_LAYOUT env var.
