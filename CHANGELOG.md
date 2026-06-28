@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.11] - 2026-06-28
+
+### Added
+
+- **Golden tests + RenderToImage** (@lkmavi, #347) — headless GPU rendering infrastructure. `Renderer.RenderToImage(w, h, draw)` renders to offscreen texture and reads back as `*image.RGBA`. Golden tests compare 9 example scenes pixel-by-pixel against reference PNGs with configurable threshold. `-update-golden` flag generates references. Skips automatically without GPU.
+
 ## [0.42.10] - 2026-06-28
 
 ### Fixed

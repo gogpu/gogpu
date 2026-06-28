@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.42.9
+## Current State: v0.42.11
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -79,6 +79,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.42.11** | 2026-06-28 | **Golden tests + RenderToImage** (@lkmavi) — headless GPU rendering, 9 example scenes, pixel-by-pixel comparison |
+| **v0.42.10** | 2026-06-28 | **RG16 bug fix** — migrate to gputypes.BlockCopySize (87 formats, Rust parity). deps: gputypes v0.5.1, wgpu v0.30.7 |
 | **v0.42.9** | 2026-06-28 | **Wayland frame callback gating** (ui#152, BUG-WL-006) — `wl_surface.frame` 3-state machine (winit pattern) via C libwayland FFI. Fixes CSD desync during animation. ADR-049. |
 | **v0.42.8** | 2026-06-25 | **deps:** wgpu v0.30.5 — Software backend text rendering fix (@samyfodil) |
 | **v0.42.7** | 2026-06-25 | **deps:** wgpu v0.30.4 — Metal stencil state translation fix |
