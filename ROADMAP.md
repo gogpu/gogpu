@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.42.1
+## Current State: v0.42.9
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -79,6 +79,14 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.42.9** | 2026-06-28 | **Wayland frame callback gating** (ui#152, BUG-WL-006) — `wl_surface.frame` 3-state machine (winit pattern) via C libwayland FFI. Fixes CSD desync during animation. ADR-049. |
+| **v0.42.8** | 2026-06-25 | **deps:** wgpu v0.30.5 — Software backend text rendering fix (@samyfodil) |
+| **v0.42.7** | 2026-06-25 | **deps:** wgpu v0.30.4 — Metal stencil state translation fix |
+| **v0.42.6** | 2026-06-25 | **Surface-outdated on present** (@samyfodil, #342) — present() recovery + X11 resize flicker fix (CWBackPixmap=None). **fc-match** fallback for subpixel detection. **ErrSurfaceLost** symmetric handling. |
+| **v0.42.5** | 2026-06-24 | **wl_output.subpixel wired** (#338) — bind wl_output via Pure Go registry, read compositor EDID data |
+| **v0.42.4** | 2026-06-24 | **Subpixel default None** (#338) — changed from RGB to None on Wayland+X11. `GOGPU_SUBPIXEL_LAYOUT` env var. ADR-047. |
+| **v0.42.3** | 2026-06-24 | **macOS live resize** + **API polish** (@lkmavi, #335 #336) — contentsGravity, SetTitle (3 platforms), OnFocus/HasFocus, SetMinSize/SetMaxSize (4 platforms), WithResizable, NewSeparator, error sentinels |
+| **v0.42.2** | 2026-06-23 | **X11/NVIDIA SIGSEGV** (@samyfodil, #332) — reorder teardown: XCloseDisplay before vkDestroyInstance. Split ReleaseInstance from Destroy. |
 | **v0.39.3** | 2026-05-26 | **Linux clipboard** (PLAT-009, ADR-037) — X11 ICCCM selection + Wayland data_device. ClipboardRead/Write work on all Linux platforms. deps: wgpu v0.28.8. |
 | **v0.39.2** | 2026-05-25 | **Wayland cursor shapes** (wp_cursor_shape_manager_v1, 12 shapes + CSD resize cursors) + **platform fixes** — damage_buffer (#272), Activated→EventFocus (#273), DPI MouseLeave (#271), X11 HitTest (#270), dispatchFocus (BUG-FOCUS-001) |
 | **v0.39.1** | 2026-05-22 | **AppLifecycle enum + callbacks** (ADR-026 Phase 3 complete) — AppLifecycle (5 states), OnSurfaceAvailable/Destroyed, OnResumed/Suspended/MemoryWarning |
