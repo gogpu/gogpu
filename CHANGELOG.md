@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-06-29
+
+### Changed
+
+- **Event-driven rendering by default** — `DefaultConfig()` now sets `ContinuousRender: false` (was `true`). Applications render only on events or `RequestRedraw()` — 0% CPU when idle. Games and animations should use `WithContinuousRender(true)` explicitly. Follows winit 0.29 precedent (`ControlFlow::Poll` → `Wait`). Enterprise refs: Flutter, Qt, GTK4, Iced — all enforce event-driven for UI entry points.
+
 ## [0.42.11] - 2026-06-28
 
 ### Added

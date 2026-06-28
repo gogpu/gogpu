@@ -446,7 +446,7 @@ The main loop uses a three-state model for optimal power efficiency:
 │       │                                                 │
 │       │ RequestRedraw()                                 │
 │       ▼                                                 │
-│  ┌──────────┐    ContinuousRender=true                  │
+│  ┌──────────┐    WithContinuousRender(true)             │
 │  │ ONE FRAME│ ──────────────────────►┌───────────────┐  │
 │  │  render  │                        │  CONTINUOUS   │  │
 │  │  + idle  │                        │  game loop    │  │
@@ -460,7 +460,7 @@ The main loop uses a three-state model for optimal power efficiency:
 |-------|---------|----------|-----|
 | **IDLE** | No animations, no invalidation | Blocks on `platform.WaitEvents()` | 0% |
 | **ANIMATING** | `StartAnimation()` token active | Renders at VSync rate | ~2-5% |
-| **CONTINUOUS** | `ContinuousRender=true` | Renders every frame | ~100% |
+| **CONTINUOUS** | `WithContinuousRender(true)` | Renders every frame | ~100% |
 
 ### Key Components
 

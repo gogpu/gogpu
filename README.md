@@ -417,12 +417,11 @@ GoGPU uses a three-state rendering model for optimal power efficiency:
 |-------|-----------|-----------|---------|
 | **Idle** | No activity | 0% (blocks on OS events) | <1ms wakeup |
 | **Animating** | Active animation tokens | VSync (~60fps) | Smooth |
-| **Continuous** | `ContinuousRender=true` | 100% (game loop) | Immediate |
+| **Continuous** | `WithContinuousRender(true)` | 100% (game loop) | Immediate |
 
 ```go
-// Event-driven mode (default for UI apps)
-app := gogpu.NewApp(gogpu.DefaultConfig().
-    WithContinuousRender(false))
+// Event-driven mode (default — 0% CPU when idle)
+app := gogpu.NewApp(gogpu.DefaultConfig())
 
 // Start animation — renders at VSync while token is alive
 token := app.StartAnimation()

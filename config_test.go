@@ -36,8 +36,8 @@ func TestDefaultConfigValues(t *testing.T) {
 	if cfg.GraphicsAPI != types.GraphicsAPIAuto {
 		t.Errorf("GraphicsAPI = %v, want GraphicsAPIAuto", cfg.GraphicsAPI)
 	}
-	if !cfg.ContinuousRender {
-		t.Error("ContinuousRender = false, want true")
+	if cfg.ContinuousRender {
+		t.Error("ContinuousRender = true, want false")
 	}
 	if cfg.Frameless {
 		t.Error("Frameless = true, want false")
@@ -242,9 +242,9 @@ func TestConfigImmutability(t *testing.T) {
 		t.Errorf("Original GraphicsAPI was mutated to %v, want GraphicsAPIAuto", original.GraphicsAPI)
 	}
 
-	_ = original.WithContinuousRender(false)
-	if !original.ContinuousRender {
-		t.Error("Original ContinuousRender was mutated to false, want true")
+	_ = original.WithContinuousRender(true)
+	if original.ContinuousRender {
+		t.Error("Original ContinuousRender was mutated to true, want false")
 	}
 
 	_ = original.WithFrameless(true)

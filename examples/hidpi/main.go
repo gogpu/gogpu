@@ -13,8 +13,7 @@ import (
 func main() {
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("HiDPI — logical res → physical res (cycles every 2s)").
-		WithSize(800, 600).
-		WithContinuousRender(false))
+		WithSize(800, 600))
 
 	fmt.Printf("ScaleFactor before Run: %.1f\n", app.ScaleFactor())
 

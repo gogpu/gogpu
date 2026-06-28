@@ -66,8 +66,9 @@ type Config struct {
 
 	// ContinuousRender enables continuous rendering (game loop style).
 	// When false (default), renders only when RequestRedraw() is called
-	// or when events occur (resize, input, etc.) - more power efficient.
-	// When true, renders every frame at VSync rate - suitable for games/animations.
+	// or when events occur (resize, input, etc.) — power efficient for UI apps.
+	// When true, renders every frame at VSync rate — suitable for games/animations.
+	// Use WithContinuousRender(true) for game loops.
 	ContinuousRender bool
 
 	// Frameless removes the OS window chrome (title bar, borders).
@@ -115,8 +116,8 @@ type Config struct {
 }
 
 // DefaultConfig returns a sensible default configuration.
-// By default, uses continuous rendering (game loop style).
-// For power-efficient UI apps, use WithContinuousRender(false).
+// By default, uses event-driven rendering (0% CPU when idle).
+// For game loops, use WithContinuousRender(true).
 //
 // The graphics API can be overridden via the GOGPU_GRAPHICS_API environment variable:
 //
@@ -147,7 +148,7 @@ func DefaultConfig() Config {
 		Height:           600,
 		Resizable:        true,
 		VSync:            true,
-		ContinuousRender: true,
+		ContinuousRender: false,
 		GraphicsAPI:      graphicsAPIFromEnv(),
 		PowerPreference:  powerPreferenceFromEnv(),
 		RenderMode:       renderModeFromEnv(),
@@ -239,8 +240,8 @@ func (c Config) WithVSync(vsync bool) Config {
 }
 
 // WithContinuousRender sets the rendering mode.
-// When true (default): renders every frame at VSync rate - for games/animations.
-// When false: renders only on RequestRedraw() or events - power efficient for UI.
+// When true: renders every frame at VSync rate — for games/animations.
+// When false (default): renders only on RequestRedraw() or events — power efficient.
 func (c Config) WithContinuousRender(continuous bool) Config {
 	c.ContinuousRender = continuous
 	return c
