@@ -50,6 +50,21 @@ func goldenExamplePath(name string) string {
 	return filepath.Join(goldenExamplesDir(), name+".png")
 }
 
+// goldenDirHasPNGs reports whether testdata/golden/examples/ contains at least
+// one *.png file. Used to skip tests early before touching the GPU.
+func goldenDirHasPNGs() bool {
+	entries, err := os.ReadDir(goldenExamplesDir())
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".png" {
+			return true
+		}
+	}
+	return false
+}
+
 // newHeadlessRenderer initializes a Renderer without a window or display.
 // The renderer has a GPU device but no surface — it can only render via
 // RenderToImage. Skips the test if no GPU adapter is available.
@@ -269,6 +284,14 @@ func goldenScenes() []goldenScene {
 // TestGolden_Examples renders each example scene and either writes or compares
 // the output PNG in testdata/golden/examples/.
 func TestGolden_Examples(t *testing.T) {
+	// In comparison mode, skip early (before any GPU init) if no reference PNGs
+	// have been committed yet. Golden files are generated on Windows; on other
+	// platforms the directory is empty until that step is done, and attempting
+	// headless GPU init crashes on some backends (e.g. Metal on macOS CI).
+	if !*updateGolden && !goldenDirHasPNGs() {
+		t.Skipf("no golden PNGs in %s — generate them first with -update-golden on a reference machine", goldenExamplesDir())
+	}
+
 	r := newHeadlessRenderer(t)
 	defer r.Destroy()
 
