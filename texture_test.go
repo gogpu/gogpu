@@ -267,9 +267,12 @@ func TestBytesPerPixel(t *testing.T) {
 		{"BGRA8UnormSrgb", gputypes.TextureFormatBGRA8UnormSrgb, 4},
 		{"R8Unorm", gputypes.TextureFormatR8Unorm, 1},
 		{"R16Float", gputypes.TextureFormatR16Float, 2},
+		{"RG16Float", gputypes.TextureFormatRG16Float, 4},
 		{"R32Float", gputypes.TextureFormatR32Float, 4},
+		{"RGBA16Float", gputypes.TextureFormatRGBA16Float, 8},
 		{"RG32Float", gputypes.TextureFormatRG32Float, 8},
 		{"RGBA32Float", gputypes.TextureFormatRGBA32Float, 16},
+		{"unknown", gputypes.TextureFormat(9999), 0},
 	}
 
 	for _, tt := range tests {
@@ -280,46 +283,6 @@ func TestBytesPerPixel(t *testing.T) {
 				t.Errorf("BytesPerPixel() = %d, want %d", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestBytesPerPixelForFormat(t *testing.T) {
-	// Test the internal function directly
-	tests := []struct {
-		format gputypes.TextureFormat
-		want   int
-	}{
-		{gputypes.TextureFormatRGBA8Snorm, 4},
-		{gputypes.TextureFormatRGBA8Uint, 4},
-		{gputypes.TextureFormatRGBA8Sint, 4},
-		{gputypes.TextureFormatR8Snorm, 1},
-		{gputypes.TextureFormatR8Uint, 1},
-		{gputypes.TextureFormatR8Sint, 1},
-		{gputypes.TextureFormatRG8Unorm, 2},
-		{gputypes.TextureFormatRG8Snorm, 2},
-		{gputypes.TextureFormatRG16Float, 8},
-		{gputypes.TextureFormatRGBA16Float, 8},
-		{gputypes.TextureFormatR32Uint, 4},
-		{gputypes.TextureFormatR32Sint, 4},
-		{gputypes.TextureFormatRG32Uint, 8},
-		{gputypes.TextureFormatRG32Sint, 8},
-		{gputypes.TextureFormatRGBA32Uint, 16},
-		{gputypes.TextureFormatRGBA32Sint, 16},
-	}
-
-	for _, tt := range tests {
-		got := bytesPerPixelForFormat(tt.format)
-		if got != tt.want {
-			t.Errorf("bytesPerPixelForFormat(%v) = %d, want %d", tt.format, got, tt.want)
-		}
-	}
-}
-
-func TestBytesPerPixelUnknownFormat(t *testing.T) {
-	// Unknown format should return 0
-	got := bytesPerPixelForFormat(gputypes.TextureFormat(9999))
-	if got != 0 {
-		t.Errorf("bytesPerPixelForFormat(unknown) = %d, want 0", got)
 	}
 }
 

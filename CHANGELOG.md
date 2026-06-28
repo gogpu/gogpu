@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.10] - 2026-06-28
+
+### Fixed
+
+- **RG16 texture format size bug** (FEAT-GPUTYPES-001) — `RG16Uint/Sint/Float` returned 8 bytes instead of 4 (grouped with RGBA16 in switch). Migrated `bytesPerPixelForFormat()` to `gputypes.TextureFormat.BlockCopySize()` — canonical source of truth verified against Rust wgpu-types (87 formats). Deleted local switch table.
+
+### Changed
+
+- **deps:** gputypes v0.5.0 → v0.5.1 (BlockCopySize), wgpu v0.30.5 → v0.30.7 (format-aware copy/clear + GLES LockOSThread flaky fix)
+
 ## [0.42.9] - 2026-06-28
 
 ### Fixed

@@ -54,12 +54,12 @@ func BenchmarkDefaultTextureOptions(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// bytesPerPixelForFormat benchmarks
+// BlockCopySize benchmarks
 // ---------------------------------------------------------------------------
 
-// BenchmarkBytesPerPixelForFormat measures texture format lookup cost,
-// called during texture updates (UpdateData, UpdateRegion).
-func BenchmarkBytesPerPixelForFormat(b *testing.B) {
+// BenchmarkBlockCopySize measures texture format lookup cost via
+// gputypes.TextureFormat.BlockCopySize() (canonical source of truth).
+func BenchmarkBlockCopySize(b *testing.B) {
 	formats := []struct {
 		name   string
 		format gputypes.TextureFormat
@@ -74,9 +74,9 @@ func BenchmarkBytesPerPixelForFormat(b *testing.B) {
 	for _, f := range formats {
 		b.Run(f.name, func(b *testing.B) {
 			b.ReportAllocs()
-			var result int
+			var result uint32
 			for b.Loop() {
-				result = bytesPerPixelForFormat(f.format)
+				result = f.format.BlockCopySize()
 			}
 			runtime.KeepAlive(result)
 		})

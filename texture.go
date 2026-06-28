@@ -121,57 +121,11 @@ func (t *Texture) Sampler() *wgpu.Sampler {
 }
 
 // BytesPerPixel returns the number of bytes per pixel for the texture format.
-// Returns 4 for RGBA8/BGRA8 formats (the most common), 0 for unknown formats.
+// Delegates to gputypes.TextureFormat.BlockCopySize() — the canonical source
+// of truth for format sizes (verified against Rust wgpu-types).
+// Returns 0 for unknown or implementation-defined formats.
 func (t *Texture) BytesPerPixel() int {
-	return bytesPerPixelForFormat(t.format)
-}
-
-// bytesPerPixelForFormat returns bytes per pixel for a given texture format.
-func bytesPerPixelForFormat(format gputypes.TextureFormat) int {
-	switch format {
-	case gputypes.TextureFormatRGBA8Unorm,
-		gputypes.TextureFormatRGBA8UnormSrgb,
-		gputypes.TextureFormatRGBA8Snorm,
-		gputypes.TextureFormatRGBA8Uint,
-		gputypes.TextureFormatRGBA8Sint,
-		gputypes.TextureFormatBGRA8Unorm,
-		gputypes.TextureFormatBGRA8UnormSrgb:
-		return 4
-	case gputypes.TextureFormatR8Unorm,
-		gputypes.TextureFormatR8Snorm,
-		gputypes.TextureFormatR8Uint,
-		gputypes.TextureFormatR8Sint:
-		return 1
-	case gputypes.TextureFormatR16Uint,
-		gputypes.TextureFormatR16Sint,
-		gputypes.TextureFormatR16Float,
-		gputypes.TextureFormatRG8Unorm,
-		gputypes.TextureFormatRG8Snorm,
-		gputypes.TextureFormatRG8Uint,
-		gputypes.TextureFormatRG8Sint:
-		return 2
-	case gputypes.TextureFormatRG16Uint,
-		gputypes.TextureFormatRG16Sint,
-		gputypes.TextureFormatRG16Float,
-		gputypes.TextureFormatRGBA16Uint,
-		gputypes.TextureFormatRGBA16Sint,
-		gputypes.TextureFormatRGBA16Float:
-		return 8
-	case gputypes.TextureFormatR32Uint,
-		gputypes.TextureFormatR32Sint,
-		gputypes.TextureFormatR32Float:
-		return 4
-	case gputypes.TextureFormatRG32Uint,
-		gputypes.TextureFormatRG32Sint,
-		gputypes.TextureFormatRG32Float:
-		return 8
-	case gputypes.TextureFormatRGBA32Uint,
-		gputypes.TextureFormatRGBA32Sint,
-		gputypes.TextureFormatRGBA32Float:
-		return 16
-	default:
-		return 0
-	}
+	return int(t.format.BlockCopySize())
 }
 
 // Destroy releases all GPU resources associated with this texture.
