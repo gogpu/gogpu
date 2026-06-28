@@ -1157,6 +1157,9 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 	if r.device == nil {
 		return nil, errors.New("gogpu: RenderToImage: device not initialized")
 	}
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("gogpu: RenderToImage: invalid size %dx%d", width, height)
+	}
 
 	// Use the renderer's surface format so existing pipelines (triangle, texquad)
 	// share their ColorTargetState.Format without needing re-creation.
@@ -1164,7 +1167,7 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 
 	offscreen, err := r.device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "RenderToImage",
-		Size:          wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1},
+		Size:          wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1}, //nolint:gosec // G115: validated positive above
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     wgpu.TextureDimension2D,
@@ -1186,8 +1189,8 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 	prevPrimary := r.primary
 	synthetic := &RenderTarget{
 		renderer:     r,
-		width:        uint32(width),
-		height:       uint32(height),
+		width:        uint32(width),  //nolint:gosec // G115: validated positive above
+		height:       uint32(height), //nolint:gosec // G115: validated positive above
 		format:       texFmt,
 		currentView:  view,
 		frameStarted: true,
@@ -1201,14 +1204,19 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 
 	r.primary = prevPrimary
 
-	// Copy texture → staging buffer for CPU readback.
+	return r.renderToImageReadback(offscreen, texFmt, width, height)
+}
+
+// renderToImageReadback copies an off-screen texture to CPU memory and returns
+// the pixels as *image.RGBA. Extracted from RenderToImage for funlen compliance.
+func (r *Renderer) renderToImageReadback(offscreen *wgpu.Texture, texFmt gputypes.TextureFormat, width, height int) (*image.RGBA, error) {
 	// wgpu requires BytesPerRow to be a multiple of 256.
 	const rowAlign = 256
-	rowBytes := uint32(width) * 4
+	rowBytes := uint32(width) * 4 //nolint:gosec // G115: validated positive in RenderToImage
 	if rem := rowBytes % rowAlign; rem != 0 {
 		rowBytes += rowAlign - rem
 	}
-	bufSize := uint64(rowBytes) * uint64(height)
+	bufSize := uint64(rowBytes) * uint64(height) //nolint:gosec // G115: validated positive in RenderToImage
 
 	stagingBuf, err := r.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "RenderToImage-staging",
@@ -1237,9 +1245,9 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 			BufferLayout: wgpu.ImageDataLayout{
 				Offset:       0,
 				BytesPerRow:  rowBytes,
-				RowsPerImage: uint32(height),
+				RowsPerImage: uint32(height), //nolint:gosec // G115: validated positive in RenderToImage
 			},
-			Size: wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1},
+			Size: wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1}, //nolint:gosec // G115: validated positive in RenderToImage
 		},
 	})
 
@@ -1286,10 +1294,7 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 				img.Pix[dst+2] = raw[src+0] // B ← red slot
 				img.Pix[dst+3] = raw[src+3] // A
 			} else {
-				img.Pix[dst+0] = raw[src+0]
-				img.Pix[dst+1] = raw[src+1]
-				img.Pix[dst+2] = raw[src+2]
-				img.Pix[dst+3] = raw[src+3]
+				copy(img.Pix[dst:dst+4], raw[src:src+4])
 			}
 		}
 	}

@@ -50,7 +50,7 @@ func goldenExamplePath(name string) string {
 	return filepath.Join(goldenExamplesDir(), name+".png")
 }
 
-// newHeadlessRenderer initialises a Renderer without a window or display.
+// newHeadlessRenderer initializes a Renderer without a window or display.
 // The renderer has a GPU device but no surface — it can only render via
 // RenderToImage. Skips the test if no GPU adapter is available.
 func newHeadlessRenderer(t *testing.T) *Renderer {
@@ -130,7 +130,7 @@ func goldenScenes() []goldenScene {
 			Name:      "lifecycle-blue",
 			Width:     800,
 			Height:    600,
-			Threshold: 0.0, // solid colour — must be pixel-perfect
+			Threshold: 0.0, // solid color — must be pixel-perfect
 			Draw: func(dc *Context) {
 				dc.Clear(0.15, 0.25, 0.65, 1.0)
 			},
@@ -399,7 +399,7 @@ func absDiffU8(a, b uint8) uint8 {
 // visual inspection when a golden comparison fails.
 func saveDebugImages(t *testing.T, name string, got, want *image.RGBA) {
 	t.Helper()
-	dir := filepath.Join("tmp")
+	dir := "tmp"
 	_ = os.MkdirAll(dir, 0o755)
 
 	savePNG(t, filepath.Join(dir, fmt.Sprintf("golden_got_%s.png", name)), got)
