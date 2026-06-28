@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.9] - 2026-06-28
+
+### Fixed
+
+- **Wayland frame callback gating** (ui#152, BUG-WL-006) — add `wl_surface.frame` callback to gate animation frames on Wayland. Without this, the render loop outran the compositor's presentation rate, causing visible CSD desync during animation (visible on camera, not in screen recordings). Implements winit 3-state machine (None/Requested/Received) via C libwayland FFI. `GOGPU_WAYLAND_FRAME_CALLBACK=0` env var to disable for debugging. Enterprise refs: winit `state.rs:273`, SDL3 `SDL_waylandwindow.c:2968`, Gio `os_wayland.go:1779`.
+
 ## [0.42.8] - 2026-06-25
 
 ### Changed

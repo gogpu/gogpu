@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
@@ -88,6 +89,14 @@ type LibwaylandHandle struct {
 	// 0=unset (never received), 1=CLIENT_SIDE (app must draw CSD), 2=SERVER_SIDE.
 	// KDE Plasma may respond CLIENT_SIDE even after we request SERVER_SIDE.
 	decorMode uint32
+
+	// Frame callback gating (FRAME-001 / BUG-WL-006, winit 3-state pattern).
+	// Prevents render loop from outrunning the compositor's presentation rate.
+	// 0=None, 1=Requested, 2=Received. Atomic — no mutex needed for reads.
+	frameCallbackState int32
+	// frameCallbackReady is set to true when the compositor fires done.
+	// Consumed by ConsumeFrameCallbackReady to trigger RequestRedraw.
+	frameCallbackReady atomic.Bool
 
 	// App event queue — ALL our Wayland objects (registry, compositor, surface,
 	// xdg, seat, pointer, keyboard, etc.) live on this queue. The default queue

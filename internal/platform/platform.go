@@ -285,6 +285,24 @@ type DisplayLocker interface {
 	DisplayUnlock()
 }
 
+// FrameGater is an optional interface for platforms that implement compositor
+// frame callback gating. On Wayland, the compositor controls presentation
+// timing via wl_surface.frame callbacks. Without gating, the render loop can
+// submit frames faster than the compositor can composite them, causing visible
+// tearing with CSD subsurfaces (BUG-WL-006).
+//
+// Platforms that don't need frame gating (X11, Win32, macOS, browser) simply
+// don't implement this interface — callers use type assertion.
+//
+// FRAME-001: Wayland frame callback gating (winit 3-state pattern).
+type FrameGater interface {
+	// FrameCallbackReady reports whether the compositor has acknowledged the
+	// previous frame and the render loop may submit a new one. Returns true
+	// when no frame callback is pending (initial state) or when the compositor
+	// has fired the done event. Returns false while waiting for the compositor.
+	FrameCallbackReady() bool
+}
+
 type MenuRole int
 
 const (

@@ -546,7 +546,15 @@ func (w *waylandPlatformWindow) CursorMode() int {
 	return w.platform.CursorMode()
 }
 
-func (w *waylandPlatformWindow) SyncFrame() {}
+// SyncFrame on Wayland requests the next frame callback from the compositor.
+// Called after present on the render thread. The frame callback gates the
+// next render: FrameCallbackReady() returns false until the compositor fires
+// the done event (FRAME-001 / BUG-WL-006, winit pattern).
+func (w *waylandPlatformWindow) SyncFrame() {
+	if w.platform.libwl != nil && wayland.FrameCallbackEnabled() {
+		w.platform.libwl.RequestFrameCallback()
+	}
+}
 
 func (w *waylandPlatformWindow) SetFrameless(frameless bool) {
 	w.platform.SetFrameless(frameless)
@@ -592,6 +600,17 @@ func (w *waylandPlatformWindow) DisplayUnlock() {
 	if w.platform.libwl != nil {
 		w.platform.libwl.DisplayUnlock()
 	}
+}
+
+// FrameCallbackReady implements FrameGater for Wayland frame callback gating.
+// Returns true when the compositor has acknowledged the previous frame (or no
+// callback is pending). Returns false while waiting for the compositor's done
+// event (FRAME-001 / BUG-WL-006, winit 3-state pattern).
+func (w *waylandPlatformWindow) FrameCallbackReady() bool {
+	if w.platform.libwl == nil || !wayland.FrameCallbackEnabled() {
+		return true // Not initialized or gating disabled
+	}
+	return w.platform.libwl.FrameCallbackReady()
 }
 
 func (w *waylandPlatformWindow) Destroy() {
@@ -2484,6 +2503,14 @@ func (p *waylandPlatform) PollEvents() Event {
 			if err := p.libwl.DispatchCSDEvents(); err != nil {
 				logger().Error("CSD dispatch error", "error", err)
 			}
+		}
+
+		// FRAME-001: Check if the compositor acked our frame callback.
+		// If so, queue an expose event to trigger a redraw. This ensures
+		// the render loop does not skip the next frame when in IDLE mode
+		// (where WaitEvents blocks until an event arrives).
+		if wayland.FrameCallbackEnabled() && p.libwl.ConsumeFrameCallbackReady() {
+			w.queueEvent(Event{Type: EventExpose, WindowID: p.primaryWindowID})
 		}
 	}
 

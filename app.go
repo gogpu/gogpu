@@ -422,8 +422,9 @@ func (a *App) Run() error {
 		// OnDraw: CONTINUOUS = every VSync (games), otherwise only when dirty.
 		// ANIMATING mode: onUpdate runs every tick, OnDraw only on RequestRedraw.
 		// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
-		if continuousRender || invalidated {
+		if (continuousRender || invalidated) && a.frameCallbackReady() {
 			a.renderFrameMultiThread()
+			a.platWindow.SyncFrame()
 		}
 	}
 
@@ -945,6 +946,18 @@ func (a *App) SetAppName(name string) {
 // The main loop will exit after completing the current frame.
 func (a *App) Quit() {
 	a.running = false
+}
+
+// frameCallbackReady checks if the platform allows rendering this frame.
+// On Wayland, the compositor controls presentation timing via wl_surface.frame
+// callbacks — if the compositor hasn't acked the previous frame, rendering is
+// skipped to prevent outrunning the compositor's presentation rate (FRAME-001).
+// On all other platforms, this always returns true.
+func (a *App) frameCallbackReady() bool {
+	if fg, ok := a.platWindow.(platform.FrameGater); ok {
+		return fg.FrameCallbackReady()
+	}
+	return true
 }
 
 // RequestRedraw requests a frame redraw.
