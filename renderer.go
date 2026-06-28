@@ -553,7 +553,9 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
-	ws.platWindow.SyncFrame()
+	if ws.platWindow != nil {
+		ws.platWindow.SyncFrame()
+	}
 	reconfigured := ws.present()
 	ws.releaseFrame()
 	return reconfigured
