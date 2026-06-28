@@ -1153,6 +1153,9 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 // without re-creation.
 //
 // Not safe for concurrent use with the same renderer instance.
+//
+// TODO: expose server-side / headless image generation via App or Context so
+// callers outside this package can use it without reaching into Renderer.
 func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image.RGBA, error) {
 	if r.device == nil {
 		return nil, errors.New("gogpu: RenderToImage: device not initialized")
@@ -1183,6 +1186,7 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 	if err != nil {
 		return nil, fmt.Errorf("gogpu: RenderToImage: create view: %w", err)
 	}
+	defer view.Release()
 
 	// Inject a synthetic RenderTarget so all draw methods write to our
 	// off-screen view instead of a window surface.
