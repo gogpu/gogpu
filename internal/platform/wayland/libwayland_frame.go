@@ -177,11 +177,19 @@ func (h *LibwaylandHandle) RequestFrameCallback() {
 		return
 	}
 
-	// Commit the surface so the compositor processes the frame request.
-	// wl_surface.commit = opcode 6.
-	h.marshalVoid(h.surface, 6)
+	// wl_surface.frame is double-buffered (Wayland spec: "The frame request
+	// will take effect on the next wl_surface.commit"). Since RequestFrameCallback
+	// is called AFTER Vulkan present (which already committed the surface),
+	// we need an explicit commit to activate the pending frame callback.
+	// Without it, the callback never fires — the next present is gated by
+	// this very callback (chicken-and-egg).
+	// Note: winit/SDL3/Gio avoid this by calling frame() BEFORE present.
+	h.marshalVoid(h.surface, 6) // wl_surface.commit = opcode 6
 
-	// Flush to ensure the request reaches the compositor immediately.
+	// Flush so the frame request + commit reach the compositor without waiting
+	// for the next event loop iteration. Without this, requests sit in the
+	// client buffer until the next wl_display_flush, delaying the callback
+	// by up to one vsync cycle.
 	if err := h.flush(); err != nil {
 		slog.Warn("wayland: flush after frame request failed", "err", err)
 	}
