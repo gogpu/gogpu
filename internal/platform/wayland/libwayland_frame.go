@@ -178,21 +178,15 @@ func (h *LibwaylandHandle) RequestFrameCallback() {
 	}
 
 	// wl_surface.frame is double-buffered (Wayland spec: "The frame request
-	// will take effect on the next wl_surface.commit"). Since RequestFrameCallback
-	// is called AFTER Vulkan present (which already committed the surface),
-	// we need an explicit commit to activate the pending frame callback.
-	// Without it, the callback never fires — the next present is gated by
-	// this very callback (chicken-and-egg).
-	// Note: winit/SDL3/Gio avoid this by calling frame() BEFORE present.
-	h.marshalVoid(h.surface, 6) // wl_surface.commit = opcode 6
-
-	// Flush so the frame request + commit reach the compositor without waiting
-	// for the next event loop iteration. Without this, requests sit in the
-	// client buffer until the next wl_display_flush, delaying the callback
-	// by up to one vsync cycle.
-	if err := h.flush(); err != nil {
-		slog.Warn("wayland: flush after frame request failed", "err", err)
-	}
+	// will take effect on the next wl_surface.commit"). RequestFrameCallback
+	// is called BEFORE Vulkan present (winit pre_present_notify pattern), so
+	// the present's internal wl_surface.commit activates the frame callback
+	// atomically with the buffer swap. No explicit commit or flush needed.
+	//
+	// Enterprise refs: winit calls frame() in pre_present_notify BEFORE
+	// swap_buffers; SDL3 calls wl_surface_frame in surface_frame_done
+	// BEFORE the next eglSwapBuffers; Gio calls wl_surface_frame BEFORE
+	// the frame event that triggers rendering + present.
 
 	// Transition: None|Received → Requested
 	atomic.StoreInt32(&h.frameCallbackState, FrameCallbackRequested)

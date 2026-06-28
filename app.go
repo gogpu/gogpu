@@ -424,7 +424,6 @@ func (a *App) Run() error {
 		// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
 		if (continuousRender || invalidated) && a.frameCallbackReady() {
 			a.renderFrameMultiThread()
-			a.platWindow.SyncFrame()
 		}
 	}
 

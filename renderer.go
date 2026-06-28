@@ -550,6 +550,10 @@ func (r *Renderer) EndFrame() {
 // Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	ws.flushClear(r.device, r)
+	// Request frame callback BEFORE present (winit pre_present_notify pattern).
+	// Wayland spec: "The frame request will take effect on the next commit."
+	// The present's internal wl_surface.commit activates it atomically.
+	ws.platWindow.SyncFrame()
 	reconfigured := ws.present()
 	ws.releaseFrame()
 	return reconfigured
