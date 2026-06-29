@@ -46,7 +46,7 @@ type CSDState struct {
 	Close          CSDButtonState
 	Maximize       CSDButtonState
 	Minimize       CSDButtonState
-	TitleAlignment int // 0 = left (default), 1 = center, 2 = right
+	TitleAlignment int // 0 = center (default), 1 = left, 2 = right — matches gogpu.HeaderAlignment constants
 }
 
 // CSDPainter renders CSD decoration pixels into ARGB8888 buffers.

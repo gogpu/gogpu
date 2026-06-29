@@ -962,7 +962,7 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 // Each secondary gets its own wl_display, wl_surface, and xdg_toplevel so the
 // compositor presents it as a separate window. Input (keyboard/pointer) is NOT
 // set up on secondary connections — it flows through the primary connection's seat.
-func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandConn, error) { //nolint:gocognit,maintidx // secondary window setup mirrors primary; splitting would scatter related logic
+func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandConn, error) { //nolint:gocognit,maintidx // configure callback has unavoidable branching for maximize/fullscreen/CSD resize
 	// Discover Wayland globals via a short-lived pure-Go connection.
 	display, err := wayland.Connect()
 	if err != nil {
@@ -1122,39 +1122,7 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 	const decorModeServerSide = 2
 	needCSD := decorName == 0 || libwl.DecorationMode() != decorModeServerSide
 	if needCSD && !config.Frameless {
-		subcompGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSubcompositor)
-		shmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlShm)
-		if subcompGlobal != nil && shmGlobal != nil {
-			if csGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpCursorShapeManagerV1); csGlobal != nil {
-				if err := sec.libwl.SetupCursorShape(csGlobal.Name, csGlobal.Version); err != nil {
-					logger().Warn("secondary CSD cursor shape setup failed", "err", err)
-				}
-			}
-			var seatName, seatVersion uint32
-			if sg := registry.GetGlobalByInterface(wayland.InterfaceWlSeat); sg != nil {
-				seatName = sg.Name
-				seatVersion = sg.Version
-			}
-			if csdErr := sec.libwl.SetupCSD(
-				subcompGlobal.Name, subcompGlobal.Version,
-				shmGlobal.Name, shmGlobal.Version,
-				seatName, seatVersion,
-				config.Width, config.Height,
-				config.Title,
-				nil, // DefaultCSDPainter
-				func() {
-					logger().Info("secondary CSD close button pressed", "id", sec.winID)
-					w := &sec.state
-					w.eventMu.Lock()
-					w.shouldClose = true
-					w.eventMu.Unlock()
-					w.events.Push(Event{Type: EventClose, WindowID: sec.winID})
-					p.WakeUp()
-				},
-			); csdErr != nil {
-				logger().Warn("secondary window CSD initialization failed", "err", csdErr)
-			}
-		}
+		p.setupSecondaryCSD(registry, sec, config)
 	}
 
 	if err := libwl.Flush(); err != nil {
@@ -1179,6 +1147,46 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 		"surface", fmt.Sprintf("%#x", libwl.Surface()))
 
 	return sec, nil
+}
+
+// setupSecondaryCSD attempts client-side decoration on a secondary window.
+// Called when SSD was not negotiated. Errors are logged as warnings — a
+// secondary window without CSD still renders; it just lacks a title bar.
+func (p *waylandPlatform) setupSecondaryCSD(registry *wayland.Registry, sec *secondaryWaylandConn, config Config) {
+	subcompGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSubcompositor)
+	shmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlShm)
+	if subcompGlobal == nil || shmGlobal == nil {
+		return
+	}
+	if csGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpCursorShapeManagerV1); csGlobal != nil {
+		if err := sec.libwl.SetupCursorShape(csGlobal.Name, csGlobal.Version); err != nil {
+			logger().Warn("secondary CSD cursor shape setup failed", "err", err)
+		}
+	}
+	var seatName, seatVersion uint32
+	if sg := registry.GetGlobalByInterface(wayland.InterfaceWlSeat); sg != nil {
+		seatName = sg.Name
+		seatVersion = sg.Version
+	}
+	if err := sec.libwl.SetupCSD(
+		subcompGlobal.Name, subcompGlobal.Version,
+		shmGlobal.Name, shmGlobal.Version,
+		seatName, seatVersion,
+		config.Width, config.Height,
+		config.Title,
+		nil, // DefaultCSDPainter
+		func() {
+			logger().Info("secondary CSD close button pressed", "id", sec.winID)
+			w := &sec.state
+			w.eventMu.Lock()
+			w.shouldClose = true
+			w.eventMu.Unlock()
+			w.events.Push(Event{Type: EventClose, WindowID: sec.winID})
+			p.WakeUp()
+		},
+	); err != nil {
+		logger().Warn("secondary window CSD initialization failed", "err", err)
+	}
 }
 
 // initCSD initializes Client-Side Decorations when SSD is unavailable.

@@ -332,6 +332,7 @@ func (dw *darwinPlatformWindow) SetHeaderAlignment(alignment int) {
 		dw.window.SetHeaderAlignment(alignment)
 	}
 }
+
 func (dw *darwinPlatformWindow) SetTitle(title string) {
 	if dw.window != nil {
 		dw.window.SetTitle(title)
