@@ -33,6 +33,9 @@ type Window struct {
 	surface    *RenderTarget
 	platWindow platform.PlatformWindow // underlying platform window
 
+	// Header configuration
+	headerAlignment HeaderAlignment
+
 	// Per-window callbacks
 	onDraw       func(*Context)
 	onResize     func(int, int)
@@ -360,13 +363,16 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 
 	// Create Window and register in WindowManager.
 	w := &Window{
-		id:         internalID,
-		platformID: platWindow.ID(),
-		config:     config,
-		surface:    ws,
-		platWindow: platWindow,
-		visible:    true,
+		id:              internalID,
+		platformID:      platWindow.ID(),
+		config:          config,
+		surface:         ws,
+		platWindow:      platWindow,
+		headerAlignment: config.HeaderAlignment,
+		visible:         true,
 	}
+
+	applyHeaderAlignment(platWindow, config.HeaderAlignment)
 	a.windowManager.add(w)
 
 	// Request a redraw so the new window gets its first frame.

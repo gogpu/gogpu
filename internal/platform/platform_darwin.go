@@ -293,7 +293,32 @@ func (dw *darwinPlatformWindow) ShouldClose() bool {
 	return false
 }
 
-func (dw *darwinPlatformWindow) InSizeMove() bool { return false }
+// InSizeMove returns true while the user is dragging a resize handle.
+// Mirrors the Win32 WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE semantics: when true,
+// the app-level event loop suppresses resize events so the GPU surface is not
+// reconfigured on every mouse-move tick. A final resize fires on release.
+func (dw *darwinPlatformWindow) InSizeMove() bool {
+	if dw.window != nil {
+		return dw.window.InLiveResize()
+	}
+	return false
+}
+
+// SetLiveResizeHook implements platform.LiveResizeRenderer for macOS.
+// The hook is invoked on every windowDidResize: notification so the app layer
+// can reconfigure the GPU surface and render a frame during live resize.
+func (dw *darwinPlatformWindow) SetLiveResizeHook(fn func()) {
+	if dw.window != nil {
+		dw.window.SetLiveResizeHook(fn)
+	}
+}
+
+// SetHeaderAlignment implements platform.HeaderAligner for macOS.
+func (dw *darwinPlatformWindow) SetHeaderAlignment(alignment int) {
+	if dw.window != nil {
+		dw.window.SetHeaderAlignment(alignment)
+	}
+}
 func (dw *darwinPlatformWindow) SetTitle(title string) {
 	if dw.window != nil {
 		dw.window.SetTitle(title)

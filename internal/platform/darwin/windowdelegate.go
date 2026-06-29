@@ -75,6 +75,48 @@ func registerWindowDelegateClass() (Class, error) {
 	)
 	ClassAddMethod(cls, selectors.windowDidChangeScreen, screenChangedIMP, "v@:@")
 
+	// windowDidResize: fires after each resize step, including during AppKit's
+	// live-resize modal loop (inside sendEvent:) where our outer event loop is
+	// blocked. Only invoke the hook while InLiveResize is true — this limits
+	// the render trigger to user-drag resize and avoids spurious calls during
+	// programmatic frame changes and window setup.
+	didResizeIMP := ffi.NewCallback(
+		func(self, sel, notification uintptr) uintptr {
+			if win := getWindowFromDelegate(ID(self)); win != nil && win.InLiveResize() {
+				if hook := win.liveResizeHookValue(); hook != nil {
+					hook()
+				}
+			}
+			return 0
+		},
+	)
+	ClassAddMethod(cls, selectors.windowDidResize, didResizeIMP, "v@:@")
+
+	// windowWillStartLiveResize: fires when the user begins dragging a resize handle.
+	// Mark the window as in-resize so the app-level event filter can suppress
+	// intermediate resize events until the user releases the mouse.
+	willStartLiveResizeIMP := ffi.NewCallback(
+		func(self, sel, notification uintptr) uintptr {
+			if win := getWindowFromDelegate(ID(self)); win != nil {
+				win.StartLiveResize()
+			}
+			return 0
+		},
+	)
+	ClassAddMethod(cls, selectors.windowWillStartLiveResize, willStartLiveResizeIMP, "v@:@")
+
+	// windowDidEndLiveResize: fires when the user releases the resize handle.
+	// Clear the flag and wake the event loop so a final EventResize is emitted.
+	didEndLiveResizeIMP := ffi.NewCallback(
+		func(self, sel, notification uintptr) uintptr {
+			if win := getWindowFromDelegate(ID(self)); win != nil {
+				win.EndLiveResize()
+			}
+			return 0
+		},
+	)
+	ClassAddMethod(cls, selectors.windowDidEndLiveResize, didEndLiveResizeIMP, "v@:@")
+
 	RegisterClassPair(cls)
 	return cls, nil
 }

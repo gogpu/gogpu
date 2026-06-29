@@ -102,6 +102,13 @@ type Config struct {
 	// AppName is the application name (displayed in menus).
 	AppName string
 
+	// HeaderAlignment controls the position of the title in the OS header bar.
+	// HeaderAlignCenter (default): centers the title (standard macOS behavior).
+	// HeaderAlignLeft / HeaderAlignRight: on macOS, enables a full-size content
+	// view with a transparent title bar so GPU-rendered content fills the header.
+	// No-op on Windows and Linux where title position is not OS-configurable.
+	HeaderAlignment HeaderAlignment
+
 	// MinWidth is the minimum window width in logical pixels (0 = no constraint).
 	MinWidth int
 
@@ -321,6 +328,13 @@ func (c Config) WithMinSize(width, height int) Config {
 func (c Config) WithMaxSize(width, height int) Config {
 	c.MaxWidth = width
 	c.MaxHeight = height
+	return c
+}
+
+// WithHeaderAlignment sets the title alignment in the window header bar.
+// See Config.HeaderAlignment for platform-specific behavior.
+func (c Config) WithHeaderAlignment(alignment HeaderAlignment) Config {
+	c.HeaderAlignment = alignment
 	return c
 }
 

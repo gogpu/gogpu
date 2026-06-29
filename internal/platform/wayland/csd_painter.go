@@ -39,13 +39,14 @@ type CSDButtonState struct {
 
 // CSDState holds the current decoration state for painting.
 type CSDState struct {
-	Title      string
-	Focused    bool
-	Maximized  bool
-	Fullscreen bool
-	Close      CSDButtonState
-	Maximize   CSDButtonState
-	Minimize   CSDButtonState
+	Title          string
+	Focused        bool
+	Maximized      bool
+	Fullscreen     bool
+	Close          CSDButtonState
+	Maximize       CSDButtonState
+	Minimize       CSDButtonState
+	TitleAlignment int // 0 = left (default), 1 = center, 2 = right
 }
 
 // CSDPainter renders CSD decoration pixels into ARGB8888 buffers.
@@ -139,8 +140,37 @@ func (DefaultCSDPainter) PaintTitleBar(buf []byte, width, height int, state CSDS
 		drawCloseIcon(buf, width, closeX, 0, btnW, height, colorIconFg)
 	}
 
-	// Title text — bitmap font, left-padded, vertically centered.
-	drawText(buf, width, 12, height, state.Title, colorIconFg, minX)
+	// Title text — bitmap font, vertically centered; x position follows alignment.
+	const (
+		leftPad  = 12
+		rightPad = 12
+		glyphW   = 7
+	)
+	var titleX int
+	var runeCount int
+	for range state.Title {
+		runeCount++
+	}
+	textW := runeCount * glyphW
+	switch state.TitleAlignment {
+	case 0: // HeaderAlignCenter — center in full window width, not just button-free area
+		titleX = (width - textW) / 2
+		if titleX < leftPad {
+			titleX = leftPad
+		}
+		if titleX+textW > minX-rightPad {
+			// Narrow window: fall back to left edge to avoid button overlap
+			titleX = leftPad
+		}
+	case 2: // HeaderAlignRight
+		titleX = minX - rightPad - textW
+		if titleX < leftPad {
+			titleX = leftPad
+		}
+	default: // HeaderAlignLeft (1) and fallback
+		titleX = leftPad
+	}
+	drawText(buf, width, titleX, height, state.Title, colorIconFg, minX)
 }
 
 func (DefaultCSDPainter) PaintBorder(buf []byte, width, height int, _ CSDEdge) {
@@ -285,13 +315,17 @@ func drawText(buf []byte, stride, x, titleH int, text string, color [4]byte, max
 	}
 
 	cx := x
-	for i := 0; i < len(text); i++ {
-		ch := text[i]
+	for _, r := range text {
 		if cx+glyphW > maxX {
 			break // stop before button area
 		}
-		if ch < 32 || ch > 126 {
-			ch = '?' // replace non-printable
+		var ch byte
+		if r >= 32 && r <= 126 {
+			ch = byte(r)
+		} else if r == '–' || r == '—' { // en dash, em dash → hyphen
+			ch = '-'
+		} else {
+			ch = '?' // replace other non-ASCII with visible placeholder
 		}
 		glyph := bitmapFont[ch-32]
 		for row := 0; row < glyphH; row++ {

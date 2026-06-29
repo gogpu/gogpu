@@ -5,6 +5,7 @@ package darwin
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -43,6 +44,22 @@ type Window struct {
 	// with a different backing scale factor (windowDidChangeScreen: delegate).
 	// Capacity 1: rapid transitions are coalesced; consumer need not be realtime.
 	screenChangedCh chan struct{}
+
+	// inLiveResize is true while the user is dragging a resize handle.
+	// Set/cleared by the windowWillStartLiveResize:/windowDidEndLiveResize: delegate.
+	// Atomic so the render thread can safely read it without holding mu.
+	inLiveResize atomic.Bool
+
+	// Header alignment state.
+	alignment      int // 0=center, 1=left, 2=right
+	cachedTitle    string
+	titleTextField ID // NSTextField injected into the traffic-light button container for center/right alignment; 0 when inactive
+
+	// liveResizeHook, if non-nil, is called on every windowDidResize: notification
+	// (including notifications fired during AppKit's live-resize modal loop).
+	// Used by the app layer to render a frame while the event loop is blocked.
+	// Read/written under mu.
+	liveResizeHook func()
 }
 
 // NewWindow creates a new window with the given configuration.
@@ -95,6 +112,7 @@ func NewWindow(config WindowConfig) (*Window, error) {
 
 	// Set window title
 	if config.Title != "" {
+		w.cachedTitle = config.Title
 		title := NewNSString(config.Title)
 		if title != nil {
 			nsWindow.SendPtr(selectors.setTitle, title.ID().Ptr())
@@ -204,9 +222,14 @@ func (w *Window) SetTitle(title string) {
 		return
 	}
 
+	w.cachedTitle = title
 	nsTitle := NewNSString(title)
 	if nsTitle != nil {
 		w.nsWindow.SendPtr(selectors.setTitle, nsTitle.ID().Ptr())
+		// Keep the injected text field in sync when right-alignment is active.
+		if !w.titleTextField.IsNil() {
+			w.titleTextField.SendPtr(selectors.setStringValue, nsTitle.ID().Ptr())
+		}
 		nsTitle.Release()
 	}
 }
@@ -485,6 +508,195 @@ func (w *Window) Zoom() {
 	}
 
 	w.nsWindow.SendPtr(selectors.zoom, 0)
+}
+
+// InLiveResize returns true while the user is dragging a resize handle.
+// Thread-safe; reads an atomic flag set by the NSWindowDelegate callbacks.
+func (w *Window) InLiveResize() bool {
+	return w.inLiveResize.Load()
+}
+
+// StartLiveResize marks the beginning of a live resize operation.
+// Called by the windowWillStartLiveResize: NSWindowDelegate method.
+func (w *Window) StartLiveResize() {
+	w.inLiveResize.Store(true)
+}
+
+// EndLiveResize marks the end of a live resize operation and wakes the event
+// loop so a final EventResize is emitted with the settled dimensions.
+// Called by the windowDidEndLiveResize: NSWindowDelegate method.
+func (w *Window) EndLiveResize() {
+	w.inLiveResize.Store(false)
+	WakeEventLoop()
+}
+
+// SetLiveResizeHook installs a callback that fires on every windowDidResize:
+// notification, including those generated inside AppKit's live-resize modal loop.
+// The hook should trigger a render frame so the GPU surface stays in sync during
+// resize and macOS does not stretch the old frame to fill the new window size.
+func (w *Window) SetLiveResizeHook(fn func()) {
+	w.mu.Lock()
+	w.liveResizeHook = fn
+	w.mu.Unlock()
+}
+
+// liveResizeHookValue returns the current hook under mu.
+func (w *Window) liveResizeHookValue() func() {
+	w.mu.Lock()
+	fn := w.liveResizeHook
+	w.mu.Unlock()
+	return fn
+}
+
+// NSTextAlignment values used when injecting a custom title NSTextField.
+const (
+	nsTextAlignmentLeft   = 0
+	nsTextAlignmentCenter = 1
+	nsTextAlignmentRight  = 2
+)
+
+// SetHeaderAlignment adjusts the native title bar to reflect the requested
+// alignment. alignment values: 0 = center (default), 1 = left, 2 = right.
+//
+// Left:   FullSizeContentView + transparent title bar; native title stays visible
+// and macOS positions it after the traffic-light buttons (left side).
+// Right:  FullSizeContentView + transparent title bar; native title is hidden and
+// an NSTextField is injected into the title bar view, right-aligned.
+// Center: standard opaque title bar; native title hidden; a centered NSTextField
+// is injected to guarantee true horizontal centering on all macOS versions.
+func (w *Window) SetHeaderAlignment(alignment int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	// Remove any previously injected custom title text field.
+	if !w.titleTextField.IsNil() {
+		w.titleTextField.Send(selectors.removeFromSuperview)
+		w.titleTextField.Send(selectors.release)
+		w.titleTextField = 0
+	}
+
+	current := NSWindowStyleMask(w.nsWindow.GetUint64(selectors.styleMask))
+	hasFullSize := current&NSWindowStyleMaskFullSizeContentView != 0
+	switch alignment {
+	case 1: // HeaderAlignLeft
+		if !hasFullSize {
+			w.nsWindow.SendUint(selectors.setStyleMask, uint64(current|NSWindowStyleMaskFullSizeContentView))
+		}
+		w.nsWindow.SendBool(selectors.setTitlebarAppearsTransparent, true)
+		w.nsWindow.SendUint(selectors.setTitleVisibility, uint64(NSWindowTitleVisible))
+	case 2: // HeaderAlignRight
+		if !hasFullSize {
+			w.nsWindow.SendUint(selectors.setStyleMask, uint64(current|NSWindowStyleMaskFullSizeContentView))
+		}
+		w.nsWindow.SendBool(selectors.setTitlebarAppearsTransparent, true)
+		w.nsWindow.SendUint(selectors.setTitleVisibility, uint64(NSWindowTitleHidden))
+		w.injectTitleTextField(nsTextAlignmentRight)
+	default: // HeaderAlignCenter (0)
+		// Only touch the style mask when FullSizeContentView is actually present;
+		// calling setStyleMask: with an unchanged value triggers a title re-layout
+		// that macOS renders left-aligned instead of centered.
+		if hasFullSize {
+			w.nsWindow.SendUint(selectors.setStyleMask, uint64(current&^NSWindowStyleMaskFullSizeContentView))
+		}
+		// Inject a centered NSTextField rather than relying on macOS default title
+		// positioning, which varies across OS versions and window configurations.
+		w.nsWindow.SendBool(selectors.setTitlebarAppearsTransparent, false)
+		w.nsWindow.SendUint(selectors.setTitleVisibility, uint64(NSWindowTitleHidden))
+		w.injectTitleTextField(nsTextAlignmentCenter)
+	}
+	w.alignment = alignment
+}
+
+// injectTitleTextField adds an NSTextField to the title bar's button container
+// (the view that holds the traffic-light buttons) with the given NSTextAlignment.
+// textAlignment: 0 = left, 1 = center, 2 = right. Called with w.mu held.
+func (w *Window) injectTitleTextField(textAlignment uint64) {
+	// Navigate to the view that owns the traffic-light buttons: get the close
+	// button (NSWindowCloseButton = 0) then its superview. This view has a
+	// transparent background so adding our label behind the buttons (with
+	// NSWindowBelow+nil) keeps text visible while clicks reach the buttons.
+	closeBtn := w.nsWindow.SendUint(selectors.standardWindowButton, 0)
+	if closeBtn.IsNil() {
+		return
+	}
+	tbView := closeBtn.Send(selectors.superview)
+	if tbView.IsNil() {
+		return
+	}
+
+	// Compute inset past the traffic-light buttons. NSWindowZoomButton (2) is
+	// the rightmost button; its right edge + a gap gives the safe left margin.
+	tbBounds := tbView.GetRect(selectors.bounds)
+	leftInset := CGFloat(0)
+	zoomBtn := w.nsWindow.SendUint(selectors.standardWindowButton, 2)
+	if !zoomBtn.IsNil() {
+		zf := zoomBtn.GetRect(selectors.frame)
+		leftInset = zf.Origin.X + zf.Size.Width + 8
+	}
+
+	// Anchor the text field's vertical position to the close button's frame.
+	// NSTitlebarView uses flipped coordinates (Y=0 at top), so using Y=0 with
+	// full title-bar height places NSTextField's text at the very top edge.
+	// The close button's Y is already correctly centered by AppKit; mirroring
+	// it keeps our label aligned with the traffic-light buttons.
+	cf := closeBtn.GetRect(selectors.frame)
+	textH := cf.Size.Height + 4 // 4pt taller than button keeps text un-clipped
+	textY := cf.Origin.Y + (cf.Size.Height-textH)/2
+
+	// For center alignment use a symmetric frame so text centers at exactly W/2.
+	// For right alignment the frame extends to the right edge (left-inset only).
+	var frame NSRect
+	if textAlignment == nsTextAlignmentCenter {
+		frame = MakeRect(leftInset, textY, tbBounds.Size.Width-2*leftInset, textH)
+	} else {
+		frame = MakeRect(leftInset, textY, tbBounds.Size.Width-leftInset, textH)
+	}
+
+	tf := classes.NSTextField.Send(selectors.alloc)
+	tf = tf.SendRect(selectors.initWithFrame, frame)
+	if tf.IsNil() {
+		return
+	}
+
+	// Configure as a non-editable, transparent label.
+	tf.SendBool(selectors.setEditable, false)
+	tf.SendBool(selectors.setBezeled, false)
+	tf.SendBool(selectors.setDrawsBackground, false)
+	tf.SendUint(selectors.setAlignment, textAlignment)
+
+	// Apply the standard title bar font (matches system window title).
+	titleFont := ID(classes.NSFont).SendDouble(selectors.titleBarFontOfSize, 13.0)
+	if !titleFont.IsNil() {
+		tf.SendPtr(selectors.setFont, titleFont.Ptr())
+	}
+
+	// Use the system label color so the title is readable in both light and dark mode.
+	labelColor := classes.NSColor.Send(selectors.labelColor)
+	if !labelColor.IsNil() {
+		tf.SendPtr(selectors.setTextColor, labelColor.Ptr())
+	}
+
+	// Set the current title.
+	if w.cachedTitle != "" {
+		nsTitle := NewNSString(w.cachedTitle)
+		if nsTitle != nil {
+			tf.SendPtr(selectors.setStringValue, nsTitle.ID().Ptr())
+			nsTitle.Release()
+		}
+	}
+
+	// NSViewWidthSizable (2): width tracks parent width as the window resizes.
+	tf.SendUint(selectors.setAutoresizingMask, 2)
+
+	// Insert behind all existing subviews (traffic-light buttons) so mouse events
+	// reach the buttons. The button container has a transparent background, so the
+	// label remains visible. NSWindowBelow = -1 as uintptr = ^uintptr(0).
+	tbView.Send5Ptr(selectors.addSubviewPositionedRelativeTo, tf.Ptr(), ^uintptr(0), 0)
+	w.titleTextField = tf
 }
 
 // SetStyleMask sets the window's style mask.

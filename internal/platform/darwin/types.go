@@ -79,6 +79,16 @@ const (
 	NSWindowStyleMaskFullSizeContentView NSWindowStyleMask = 1 << 15
 )
 
+// NSWindowTitleVisibility controls whether the title is visible in the title bar.
+type NSWindowTitleVisibility NSInteger
+
+const (
+	// NSWindowTitleVisible shows the native title text in the title bar (default).
+	NSWindowTitleVisible NSWindowTitleVisibility = 0
+	// NSWindowTitleHidden hides the native title text, leaving traffic-light buttons visible.
+	NSWindowTitleHidden NSWindowTitleVisibility = 1
+)
+
 // NSWindowCollectionBehavior controls how the window participates in
 // Spaces, Expose, and fullscreen.
 type NSWindowCollectionBehavior NSUInteger

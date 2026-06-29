@@ -321,6 +321,26 @@ const (
 	MenuRoleBringAllToFront
 )
 
+// HeaderAligner is an optional interface for platform windows that support
+// native title bar alignment. Platforms that don't support title alignment
+// simply don't implement this interface — callers use type assertion.
+//
+// alignment values: 0 = center (default), 1 = left, 2 = right.
+// On macOS Left/Right enable NSWindowStyleMaskFullSizeContentView with a
+// transparent title bar so GPU-rendered content fills the header area.
+type HeaderAligner interface {
+	SetHeaderAlignment(alignment int)
+}
+
+// LiveResizeRenderer is an optional interface for platform windows that can
+// receive a callback to trigger a render during live resize. On macOS,
+// AppKit runs a modal tracking loop during window resize that blocks the
+// outer event loop; without this hook the old frame is stretched by the
+// compositor until the drag ends.
+type LiveResizeRenderer interface {
+	SetLiveResizeHook(fn func())
+}
+
 // PlatScaleProvider is an optional interface for platforms that can report the
 // primary display DPI scale factor before a window is created. Callers use a
 // type assertion: if sp, ok := manager.(PlatScaleProvider); ok { ... }

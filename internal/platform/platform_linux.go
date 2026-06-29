@@ -426,6 +426,8 @@ func (w *x11PlatformWindow) IsFullscreen() bool {
 	return w.platform.inner.IsFullscreen()
 }
 
+func (w *x11PlatformWindow) SetHeaderAlignment(_ int) {} // X11 title bar is compositor-controlled
+
 func (w *x11PlatformWindow) Close() { w.platform.inner.CloseWindow() }
 
 func (w *x11PlatformWindow) Show() {
@@ -611,6 +613,18 @@ func (w *waylandPlatformWindow) FrameCallbackReady() bool {
 		return true // Not initialized or gating disabled
 	}
 	return w.platform.libwl.FrameCallbackReady()
+}
+
+func (w *waylandPlatformWindow) SetHeaderAlignment(alignment int) {
+	if w.secondary != nil {
+		if w.secondary.libwl != nil {
+			w.secondary.libwl.SetCSDTitleAlignment(alignment)
+		}
+		return
+	}
+	if w.platform.libwl != nil {
+		w.platform.libwl.SetCSDTitleAlignment(alignment)
+	}
 }
 
 func (w *waylandPlatformWindow) Destroy() {
@@ -984,10 +998,8 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 		decorName = dg.Name
 		decorVersion = dg.Version
 	}
-	// decorName/decorVersion enable SSD (server-side decorations) on the secondary window.
-	// CSD (client-side decorations) for secondary windows is deferred: each CSD window
-	// requires its own subsurface tree and per-window pointer routing, which adds
-	// significant complexity relative to the primary window path.
+	// decorName/decorVersion enable SSD on the secondary window.
+	// CSD is attempted below when SSD is unavailable.
 
 	libwl, err := wayland.OpenLibwayland(
 		compGlobal.Name, compGlobal.Version,
@@ -1035,17 +1047,60 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 			w := &sec.state
 			w.eventMu.Lock()
 			defer w.eventMu.Unlock()
-			if width > 0 && height > 0 && (int(width) != w.width || int(height) != w.height) {
-				w.width = int(width)
-				w.height = int(height)
-				w.events.Push(Event{
-					Type:           EventResize,
-					WindowID:       sec.winID,
-					Width:          int(width),
-					Height:         int(height),
-					PhysicalWidth:  int(width),
-					PhysicalHeight: int(height),
-				})
+
+			hasCSD := sec.libwl != nil && sec.libwl.CSDActive()
+			isMaximized := hasCSD && sec.libwl.IsMaximized()
+			isFullscreen := hasCSD && sec.libwl.IsFullscreen()
+
+			// Save pre-maximize size when transitioning to maximized.
+			if isMaximized && w.savedWidth == 0 && w.width > 0 {
+				w.savedWidth = w.width
+				w.savedHeight = w.height
+			}
+			if !isMaximized && w.savedWidth > 0 && width > 0 {
+				w.savedWidth = 0
+				w.savedHeight = 0
+			}
+
+			// width==0, height==0: compositor lets the client choose — restore saved size.
+			if width == 0 && height == 0 && w.savedWidth > 0 {
+				width = int32(w.savedWidth)
+				height = int32(w.savedHeight)
+				w.savedWidth = 0
+				w.savedHeight = 0
+			}
+
+			if width > 0 && height > 0 {
+				vulkanW := int(width)
+				vulkanH := int(height)
+
+				// When CSD is active and maximized, the compositor sends total geometry
+				// (content + title bar); subtract the title bar so the GPU surface
+				// covers only the content area. xdgSurfaceConfigureCb then calls
+				// ResizeCSD with these matching content dimensions.
+				if hasCSD && !isFullscreen && isMaximized {
+					tbH, _ := sec.libwl.CSDBorders()
+					vulkanH = int(height) - tbH
+					if vulkanH < 1 {
+						vulkanH = 1
+					}
+				}
+
+				if vulkanW != w.width || vulkanH != w.height {
+					if hasCSD {
+						sec.libwl.SetPendingCSDResize(vulkanW, vulkanH)
+					}
+					w.width = vulkanW
+					w.height = vulkanH
+					w.events.Push(Event{
+						Type:           EventResize,
+						WindowID:       sec.winID,
+						Width:          vulkanW,
+						Height:         vulkanH,
+						PhysicalWidth:  vulkanW,
+						PhysicalHeight: vulkanH,
+					})
+				}
 			}
 		},
 		func() {
@@ -1061,6 +1116,45 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 
 	if err := libwl.SetupToplevelListeners(); err != nil {
 		logger().Warn("secondary: xdg_toplevel listener setup failed", "err", err)
+	}
+
+	// Attempt CSD if SSD was not negotiated and the required globals are present.
+	const decorModeServerSide = 2
+	needCSD := decorName == 0 || libwl.DecorationMode() != decorModeServerSide
+	if needCSD && !config.Frameless {
+		subcompGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSubcompositor)
+		shmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlShm)
+		if subcompGlobal != nil && shmGlobal != nil {
+			if csGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpCursorShapeManagerV1); csGlobal != nil {
+				if err := sec.libwl.SetupCursorShape(csGlobal.Name, csGlobal.Version); err != nil {
+					logger().Warn("secondary CSD cursor shape setup failed", "err", err)
+				}
+			}
+			var seatName, seatVersion uint32
+			if sg := registry.GetGlobalByInterface(wayland.InterfaceWlSeat); sg != nil {
+				seatName = sg.Name
+				seatVersion = sg.Version
+			}
+			if csdErr := sec.libwl.SetupCSD(
+				subcompGlobal.Name, subcompGlobal.Version,
+				shmGlobal.Name, shmGlobal.Version,
+				seatName, seatVersion,
+				config.Width, config.Height,
+				config.Title,
+				nil, // DefaultCSDPainter
+				func() {
+					logger().Info("secondary CSD close button pressed", "id", sec.winID)
+					w := &sec.state
+					w.eventMu.Lock()
+					w.shouldClose = true
+					w.eventMu.Unlock()
+					w.events.Push(Event{Type: EventClose, WindowID: sec.winID})
+					p.WakeUp()
+				},
+			); csdErr != nil {
+				logger().Warn("secondary window CSD initialization failed", "err", csdErr)
+			}
+		}
 	}
 
 	if err := libwl.Flush(); err != nil {
@@ -2532,6 +2626,12 @@ func (p *waylandPlatform) PollEvents() Event {
 		}
 		if err := sec.libwl.DispatchDefaultQueue(); err != nil {
 			logger().Error("wayland secondary dispatch error", "id", sec.winID, "error", err)
+		}
+		// Process CSD pointer events (separate queue from xdg_toplevel events).
+		if sec.libwl.CSDActive() {
+			if err := sec.libwl.DispatchCSDEvents(); err != nil {
+				logger().Error("secondary CSD dispatch error", "id", sec.winID, "error", err)
+			}
 		}
 		if e, ok := sec.state.events.Pop(); ok {
 			return e

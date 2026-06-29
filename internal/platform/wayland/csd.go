@@ -174,6 +174,12 @@ func (m *CSDManager) SetFocused(focused bool) {
 	m.RepaintTitleBar()
 }
 
+// SetTitleAlignment updates the title alignment (0=left, 1=center, 2=right) and repaints.
+func (m *CSDManager) SetTitleAlignment(alignment int) {
+	m.state.TitleAlignment = alignment
+	m.RepaintTitleBar()
+}
+
 // HitTestTop performs hit-testing on the title bar subsurface.
 func (m *CSDManager) HitTestTop(x, y int) CSDHitResult {
 	if m.top == nil {

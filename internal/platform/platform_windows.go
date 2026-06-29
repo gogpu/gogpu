@@ -961,6 +961,8 @@ func (w *win32Window) SetModalFrameCallback(fn func()) {
 	w.setModalFrameCallback(fn)
 }
 
+func (w *win32Window) SetHeaderAlignment(_ int) {} // Win32 title bar is drawn by DWM; alignment is not supported
+
 func (w *win32Window) Destroy() {
 	if w.platform != nil {
 		w.platform.windowMu.Lock()

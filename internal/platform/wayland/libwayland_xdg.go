@@ -462,12 +462,18 @@ func (h *LibwaylandHandle) marshalVoid(proxy uintptr, opcode uint32, args ...uin
 
 // addListener calls wl_proxy_add_listener(proxy, listener, NULL).
 func (h *LibwaylandHandle) addListener(proxy uintptr, listener uintptr) error {
-	var nullData uintptr
+	return h.addListenerWithData(proxy, listener, 0)
+}
+
+// addListenerWithData calls wl_proxy_add_listener with an explicit user-data pointer.
+// Pass uintptr(unsafe.Pointer(h)) to have each callback receive h as its first argument,
+// which avoids the need for a per-type global handle variable.
+func (h *LibwaylandHandle) addListenerWithData(proxy, listener, data uintptr) error {
 	var result int32
 	args := [3]unsafe.Pointer{
 		unsafe.Pointer(&proxy),
 		unsafe.Pointer(&listener),
-		unsafe.Pointer(&nullData),
+		unsafe.Pointer(&data),
 	}
 	_ = ffi.CallFunction(&h.cifAddListener, h.fnAddListener, unsafe.Pointer(&result), args[:])
 	if result < 0 {
