@@ -25,10 +25,10 @@ func titleStartX(buf []byte, stride, beforeX, yLo, yHi int) int {
 
 func TestPaintTitleBarAlignment(t *testing.T) {
 	const (
-		winH    = defaultTitleBarHeight // 32
-		btnW    = defaultButtonWidth    // 46
-		glyphW  = 7
-		leftPad = 12
+		winH     = defaultTitleBarHeight // 32
+		btnW     = defaultButtonWidth    // 46
+		glyphW   = 7
+		leftPad  = 12
 		rightPad = 12
 	)
 	// 'B' glyph (char 66): rows 2-8 are 0xF0/0x88, so column 0 is always lit.
