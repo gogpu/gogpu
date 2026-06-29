@@ -962,7 +962,7 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 // Each secondary gets its own wl_display, wl_surface, and xdg_toplevel so the
 // compositor presents it as a separate window. Input (keyboard/pointer) is NOT
 // set up on secondary connections — it flows through the primary connection's seat.
-func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandConn, error) {
+func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandConn, error) { //nolint:gocognit // secondary window setup mirrors primary; splitting would scatter related logic
 	// Discover Wayland globals via a short-lived pure-Go connection.
 	display, err := wayland.Connect()
 	if err != nil {

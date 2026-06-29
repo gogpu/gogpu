@@ -320,11 +320,12 @@ func drawText(buf []byte, stride, x, titleH int, text string, color [4]byte, max
 			break // stop before button area
 		}
 		var ch byte
-		if r >= 32 && r <= 126 {
+		switch {
+		case r >= 32 && r <= 126:
 			ch = byte(r)
-		} else if r == '–' || r == '—' { // en dash, em dash → hyphen
+		case r == '–' || r == '—': // en dash, em dash → hyphen
 			ch = '-'
-		} else {
+		default:
 			ch = '?' // replace other non-ASCII with visible placeholder
 		}
 		glyph := bitmapFont[ch-32]
