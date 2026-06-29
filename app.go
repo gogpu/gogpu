@@ -951,6 +951,12 @@ func (a *App) modalFrameTick() {
 		a.renderLoop.RequestResize(uint32(width), uint32(height)) //nolint:gosec // G115: validated positive
 	}
 
+	// Resize secondary window swapchains to match their current physical size.
+	// During modal drag/resize on a secondary window, WM_SIZE events are
+	// suppressed and processEventsMultiThread doesn't run, so we handle
+	// swapchain updates here. resize() is a no-op when dimensions are unchanged.
+	a.resizeSecondaryWindowsDuringModal()
+
 	// Render frame on render thread (blocks until complete).
 	a.renderFrameMultiThread()
 
@@ -958,6 +964,47 @@ func (a *App) modalFrameTick() {
 	// This ensures our frame and the DWM window border update
 	// appear in the same composition cycle, reducing resize lag.
 	a.platWindow.SyncFrame()
+}
+
+// resizeSecondaryWindowsDuringModal resizes swapchains for secondary windows
+// while a Win32 modal drag/resize loop is active. During the modal loop,
+// WM_SIZE events are suppressed and processEventsMultiThread doesn't run, so
+// secondary swapchains must be updated here instead.
+func (a *App) resizeSecondaryWindowsDuringModal() {
+	if a.windowManager == nil || a.renderer == nil {
+		return
+	}
+
+	type pendingResize struct {
+		ws   *RenderTarget
+		w, h int
+	}
+
+	a.windowManager.mu.RLock()
+	resizes := make([]pendingResize, 0, len(a.windowManager.order))
+	for _, id := range a.windowManager.order {
+		win := a.windowManager.windows[id]
+		if win == nil || win.platWindow == nil || win.surface == nil {
+			continue
+		}
+		if win == a.primaryWindow {
+			continue // primary handled by RequestResize / ConsumePendingResize
+		}
+		pw, ph := win.platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			resizes = append(resizes, pendingResize{win.surface, pw, ph})
+		}
+	}
+	a.windowManager.mu.RUnlock()
+
+	if len(resizes) == 0 {
+		return
+	}
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		for _, r := range resizes {
+			r.ws.resize(r.w, r.h, a.renderer.device, a.renderer.adapter)
+		}
+	})
 }
 
 // SetAppName sets the name of the application.

@@ -192,17 +192,30 @@ func (p *darwinPlatform) PollEvents() Event {
 // WaitEvents blocks until at least one OS event is available, then processes
 // all pending events. Uses [NSApp nextEventMatchingMask:untilDate:inMode:dequeue:]
 // with distantFuture, which blocks at kernel level via mach_msg for 0% CPU idle.
+//
+// We use the current key window's handler so that keyboard events are queued
+// under the correct window ID (enabling per-window key routing in multi-window apps).
 func (p *darwinPlatform) WaitEvents() {
-	w := p.primary
-	w.eventMu.Lock()
-	defer w.eventMu.Unlock()
+	// Identify the key (focused) window.
+	p.mu.RLock()
+	keyWin := p.primary
+	for _, w := range p.windows {
+		if w.window != nil && w != p.primary && w.window.IsKeyWindow() {
+			keyWin = w
+			break
+		}
+	}
+	p.mu.RUnlock()
+
+	keyWin.eventMu.Lock()
+	defer keyWin.eventMu.Unlock()
 
 	if p.app != nil {
-		p.app.WaitEventsWithHandler(w.handleEvent)
+		p.app.WaitEventsWithHandler(keyWin.handleEvent)
 	}
 
-	// Check for resize after processing events
-	w.checkResize()
+	// Check for resize after processing events.
+	keyWin.checkResize()
 }
 
 // WakeUp unblocks WaitEvents from any goroutine by posting a synthetic
@@ -546,6 +559,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.physW = newPhysW
 			w.physH = newPhysH
 			w.events.Push(Event{
+				WindowID:       w.id,
 				Type:           EventResize,
 				Width:          newWidth,
 				Height:         newHeight,
@@ -564,7 +578,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.focusInited = true
 		} else if isKey != w.lastKeyWindow {
 			w.lastKeyWindow = isKey
-			w.events.Push(Event{Type: EventFocus, Focused: isKey})
+			w.events.Push(Event{WindowID: w.id, Type: EventFocus, Focused: isKey})
 		}
 	}
 
@@ -772,13 +786,13 @@ func (w *darwinWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	default:
 		evType = EventPointerMove
 	}
-	w.events.Push(Event{Type: evType, Pointer: ev})
+	w.events.Push(Event{WindowID: w.id, Type: evType, Pointer: ev})
 }
 
 // dispatchScrollEvent pushes a scroll event to the event queue.
 // Called from handleEvent with w.eventMu held.
 func (w *darwinWindow) dispatchScrollEvent(ev gpucontext.ScrollEvent) {
-	w.events.Push(Event{Type: EventScroll, Scroll: ev})
+	w.events.Push(Event{WindowID: w.id, Type: EventScroll, Scroll: ev})
 }
 
 // dispatchKeyEvent pushes a keyboard event to the event queue.
@@ -788,7 +802,7 @@ func (w *darwinWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modi
 	if !pressed {
 		evType = EventKeyUp
 	}
-	w.events.Push(Event{Type: evType, Key: key, Mods: mods})
+	w.events.Push(Event{WindowID: w.id, Type: evType, Key: key, Mods: mods})
 }
 
 // dispatchCharFromEvent extracts characters from an NSEvent and dispatches them.
@@ -832,7 +846,7 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 			continue
 		}
 		if r >= 32 && r != 127 {
-			w.events.Push(Event{Type: EventChar, Char: r})
+			w.events.Push(Event{WindowID: w.id, Type: EventChar, Char: r})
 		}
 		i += size
 	}

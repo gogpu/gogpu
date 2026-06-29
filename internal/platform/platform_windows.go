@@ -782,6 +782,15 @@ func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		if hasPending {
 			p.applyMenu()
 		}
+	} else {
+		// Propagate the render timer callback so secondary windows also fire
+		// modalFrameTick during their own drag/resize modal loops.
+		p.primary.callbackMu.RLock()
+		cb := p.primary.modalFrameCallback
+		p.primary.callbackMu.RUnlock()
+		if cb != nil {
+			w.setModalFrameCallback(cb)
+		}
 	}
 	return w, nil
 }
