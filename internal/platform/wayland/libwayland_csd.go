@@ -374,8 +374,8 @@ func initCSDPointerListeners() {
 }
 
 // csdPointerEnterCb: void(data, wl_pointer, serial, surface, sx_fixed, sy_fixed)
-func csdPointerEnterCb(data, pointer, serial, surface, sxFixed, syFixed uintptr) {
-	h := (*LibwaylandHandle)(unsafe.Pointer(data)) //nolint:govet // uintptr registered via addListenerWithData; Go object kept alive by caller
+func csdPointerEnterCb(data unsafe.Pointer, pointer, serial, surface, sxFixed, syFixed uintptr) {
+	h := (*LibwaylandHandle)(data)
 	if h == nil {
 		return
 	}
@@ -387,8 +387,8 @@ func csdPointerEnterCb(data, pointer, serial, surface, sxFixed, syFixed uintptr)
 }
 
 // csdPointerLeaveCb: void(data, wl_pointer, serial, surface)
-func csdPointerLeaveCb(data, pointer, serial, surface uintptr) {
-	h := (*LibwaylandHandle)(unsafe.Pointer(data)) //nolint:govet // see csdPointerEnterCb
+func csdPointerLeaveCb(data unsafe.Pointer, pointer, serial, surface uintptr) {
+	h := (*LibwaylandHandle)(data)
 	if h == nil {
 		return
 	}
@@ -402,8 +402,8 @@ func csdPointerLeaveCb(data, pointer, serial, surface uintptr) {
 }
 
 // csdPointerMotionCb: void(data, wl_pointer, time, sx_fixed, sy_fixed)
-func csdPointerMotionCb(data, pointer, time, sxFixed, syFixed uintptr) {
-	h := (*LibwaylandHandle)(unsafe.Pointer(data)) //nolint:govet // see csdPointerEnterCb
+func csdPointerMotionCb(data unsafe.Pointer, pointer, time, sxFixed, syFixed uintptr) {
+	h := (*LibwaylandHandle)(data)
 	if h == nil {
 		return
 	}
@@ -413,8 +413,8 @@ func csdPointerMotionCb(data, pointer, time, sxFixed, syFixed uintptr) {
 }
 
 // csdPointerButtonCb: void(data, wl_pointer, serial, time, button, state)
-func csdPointerButtonCb(data, pointer, serial, time, button, state uintptr) {
-	h := (*LibwaylandHandle)(unsafe.Pointer(data)) //nolint:govet // see csdPointerEnterCb
+func csdPointerButtonCb(data unsafe.Pointer, pointer, serial, time, button, state uintptr) {
+	h := (*LibwaylandHandle)(data)
 	if h == nil {
 		return
 	}
