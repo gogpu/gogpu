@@ -375,6 +375,30 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 	applyHeaderAlignment(platWindow, config.HeaderAlignment)
 	a.windowManager.add(w)
 
+	// Install live-resize hook for macOS so this window re-renders during drag.
+	// Without it, AppKit stretches the last frame to fill the new window size.
+	// Mirrors the primary window hook in registerPrimaryWindow.
+	if lr, ok := platWindow.(platform.LiveResizeRenderer); ok {
+		capturedW := w
+		capturedWS := ws
+		lr.SetLiveResizeHook(func() {
+			if a.renderLoop == nil {
+				return
+			}
+			physW, physH := platWindow.PhysicalSize()
+			if physW > 0 && physH > 0 {
+				a.renderLoop.RunOnRenderThreadVoid(func() {
+					capturedWS.resize(physW, physH, a.renderer.device, a.renderer.adapter)
+				})
+			}
+			logW, logH := platWindow.LogicalSize()
+			if capturedW.onResize != nil && logW > 0 && logH > 0 {
+				capturedW.onResize(logW, logH)
+			}
+			a.renderFrameMultiThread()
+		})
+	}
+
 	// Request a redraw so the new window gets its first frame.
 	if a.invalidator != nil {
 		a.invalidator.Invalidate()

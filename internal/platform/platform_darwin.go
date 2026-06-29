@@ -924,6 +924,7 @@ func (w *darwinWindow) checkResize() {
 		w.physH = newPhysH
 
 		w.queueEvent(Event{
+			WindowID:       w.id,
 			Type:           EventResize,
 			Width:          newWidth,
 			Height:         newHeight,
