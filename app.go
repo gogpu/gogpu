@@ -431,12 +431,15 @@ func (a *App) Run() error {
 	return nil
 }
 
+// newPlatformManagerFn creates a platform manager; replaced in tests to inject mocks.
+var newPlatformManagerFn func() platform.PlatformManager = platform.NewManager
+
 // initPlatform initializes the platform manager, applies pending menu,
 // and creates the primary window. All operations must be on the main thread.
 func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	// Initialize platform manager (process-level) — must be on main thread.
 	platform.SetLogger(slogger())
-	a.manager = platform.NewManager()
+	a.manager = newPlatformManagerFn()
 	if err := a.manager.Init(); err != nil {
 		return nil, err
 	}

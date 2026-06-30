@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"image"
 	"testing"
 
 	"github.com/gogpu/gogpu/input"
@@ -1130,5 +1131,33 @@ func TestAppSetMinMaxSizeNilPlatform(t *testing.T) {
 	}
 	if app.config.MaxWidth != 1920 || app.config.MaxHeight != 1080 {
 		t.Errorf("config MaxSize = %dx%d, want 1920x1080", app.config.MaxWidth, app.config.MaxHeight)
+	}
+}
+
+// configCapturingManager wraps mockManager and records the Config passed to CreateWindow.
+type configCapturingManager struct {
+	mockManager
+	got platform.Config
+}
+
+func (m *configCapturingManager) CreateWindow(cfg platform.Config) (platform.PlatformWindow, error) {
+	m.got = cfg
+	return &mockWindow{}, nil
+}
+
+func TestInitPlatform_PropagatesIcon(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	app := NewApp(DefaultConfig().WithIcon(img))
+
+	capturing := &configCapturingManager{}
+	old := newPlatformManagerFn
+	newPlatformManagerFn = func() platform.PlatformManager { return capturing }
+	defer func() { newPlatformManagerFn = old }()
+
+	if _, err := app.initPlatform(); err != nil {
+		t.Fatalf("initPlatform: %v", err)
+	}
+	if capturing.got.Icon != img {
+		t.Error("initPlatform: Icon not propagated to platform.Config")
 	}
 }
