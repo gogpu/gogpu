@@ -8,6 +8,29 @@ import (
 	"testing"
 )
 
+// TestSetNetWMIcon_NoOp verifies the early-return paths that need no X server.
+func TestSetNetWMIcon_NoOp(t *testing.T) {
+	atoms := &StandardAtoms{NetWMIcon: AtomNone}
+
+	// nil img with AtomNone → nil error, no panic
+	if err := (*Connection)(nil).SetNetWMIcon(0, atoms, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// non-nil img but AtomNone → still returns early
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	if err := (*Connection)(nil).SetNetWMIcon(0, atoms, img); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// zero-size image with a valid atom → returns early before any X call
+	atoms2 := &StandardAtoms{NetWMIcon: Atom(1)}
+	empty := image.NewNRGBA(image.Rect(0, 0, 0, 0))
+	if err := (*Connection)(nil).SetNetWMIcon(0, atoms2, empty); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestSetNetWMIcon_E2E creates a real X11 window, sets _NET_WM_ICON, reads it
 // back with GetProperty and verifies the ARGB encoding round-trips correctly.
 // Skips when no X server is reachable.

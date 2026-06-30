@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"image"
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu/types"
@@ -426,5 +427,17 @@ func TestConfigTabbing(t *testing.T) {
 	}
 	if cfg.TabbingIdentifier != "test.id" {
 		t.Fatalf("expected test.id, got %v", cfg.TabbingIdentifier)
+	}
+}
+
+func TestConfigWithIcon(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+	cfg := DefaultConfig().WithIcon(img)
+	if cfg.Icon != img {
+		t.Fatal("WithIcon: Icon field not set")
+	}
+	cfg2 := cfg.WithIcon(nil)
+	if cfg2.Icon != nil {
+		t.Fatal("WithIcon(nil): Icon field not cleared")
 	}
 }
