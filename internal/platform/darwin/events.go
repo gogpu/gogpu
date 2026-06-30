@@ -92,6 +92,17 @@ type EventInfo struct {
 	PointingDeviceType NSUInteger
 }
 
+// GetEventWindow returns the NSWindow associated with an NSEvent.
+// Returns the nil ID for events not tied to a specific window (key events
+// after window close, system events, etc.).
+func GetEventWindow(event ID) ID {
+	if event.IsNil() {
+		return ID(0)
+	}
+	initSelectors()
+	return event.Send(selectors.eventWindow)
+}
+
 // GetEventInfo extracts pointer-relevant information from an NSEvent.
 func GetEventInfo(event ID) EventInfo {
 	if event.IsNil() {

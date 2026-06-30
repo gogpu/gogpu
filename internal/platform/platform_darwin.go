@@ -193,10 +193,11 @@ func (p *darwinPlatform) PollEvents() Event {
 // all pending events. Uses [NSApp nextEventMatchingMask:untilDate:inMode:dequeue:]
 // with distantFuture, which blocks at kernel level via mach_msg for 0% CPU idle.
 //
-// We use the current key window's handler so that keyboard events are queued
-// under the correct window ID (enabling per-window key routing in multi-window apps).
+// Each NSEvent is routed to the darwinWindow that owns it via [NSEvent window].
+// This ensures pointer coordinates and event WindowIDs are attributed to the
+// correct window even when a non-key window receives input. Events without an
+// associated NSWindow (key events, system events) fall back to the key window.
 func (p *darwinPlatform) WaitEvents() {
-	// Identify the key (focused) window.
 	p.mu.RLock()
 	keyWin := p.primary
 	for _, w := range p.windows {
@@ -205,17 +206,37 @@ func (p *darwinPlatform) WaitEvents() {
 			break
 		}
 	}
+	// Snapshot the window list for routing — avoids holding mu during dispatch.
+	wins := make([]*darwinWindow, len(p.windows))
+	copy(wins, p.windows)
 	p.mu.RUnlock()
 
-	keyWin.eventMu.Lock()
-	defer keyWin.eventMu.Unlock()
-
-	if p.app != nil {
-		p.app.WaitEventsWithHandler(keyWin.handleEvent)
+	// Route each event to the window it came from; fall back to keyWin for
+	// events that carry no NSWindow (e.g. keyboard, mouse-exited-screen).
+	routingHandler := func(event darwin.ID, eventType darwin.NSEventType) bool {
+		target := keyWin
+		if nsWin := darwin.GetEventWindow(event); !nsWin.IsNil() {
+			for _, w := range wins {
+				if w.window != nil && w.window.NSID() == nsWin {
+					target = w
+					break
+				}
+			}
+		}
+		target.eventMu.Lock()
+		result := target.handleEvent(event, eventType)
+		target.eventMu.Unlock()
+		return result
 	}
 
-	// Check for resize after processing events.
+	if p.app != nil {
+		p.app.WaitEventsWithHandler(routingHandler)
+	}
+
+	// Check for resize after all events have been processed.
+	keyWin.eventMu.Lock()
 	keyWin.checkResize()
+	keyWin.eventMu.Unlock()
 }
 
 // WakeUp unblocks WaitEvents from any goroutine by posting a synthetic

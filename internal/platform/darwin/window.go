@@ -62,6 +62,10 @@ type Window struct {
 	liveResizeHook func()
 }
 
+// NSID returns the underlying NSWindow object ID.
+// Used by the platform layer to match NSEvents to their originating window.
+func (w *Window) NSID() ID { return w.nsWindow }
+
 // NewWindow creates a new window with the given configuration.
 func NewWindow(config WindowConfig) (*Window, error) {
 	initSelectors()

@@ -111,6 +111,9 @@ var selectors struct {
 	screens      SEL
 	visibleFrame SEL
 
+	// NSEvent
+	eventWindow SEL // [NSEvent window] → NSWindow* (nil for window-less events)
+
 	// NSDate
 	distantPast   SEL
 	distantFuture SEL
@@ -345,6 +348,9 @@ func initSelectors() {
 		selectors.mainScreen = RegisterSelector("mainScreen")
 		selectors.screens = RegisterSelector("screens")
 		selectors.visibleFrame = RegisterSelector("visibleFrame")
+
+		// NSEvent
+		selectors.eventWindow = RegisterSelector("window")
 
 		// NSDate
 		selectors.distantPast = RegisterSelector("distantPast")

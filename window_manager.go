@@ -439,6 +439,12 @@ func (a *App) closeSecondaryWindow(id WindowID) {
 	a.windowManager.remove(id)
 	a.windowManager.release(id)
 
+	// Clear the live resize hook before destroying the surface so AppKit
+	// cannot fire windowDidResize: on a torn-down RenderTarget.
+	if lr, ok := w.platWindow.(platform.LiveResizeRenderer); ok {
+		lr.SetLiveResizeHook(nil)
+	}
+
 	// Release GPU surface on the render thread.
 	if w.surface != nil {
 		a.renderLoop.RunOnRenderThreadVoid(func() {
