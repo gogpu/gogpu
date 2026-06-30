@@ -344,53 +344,9 @@ func (p *Platform) Init(config Config) error {
 	}
 
 	// Set window properties
-	if err := conn.SetWindowTitle(window, config.Title, atoms); err != nil {
+	if err := p.applyWindowProperties(conn, window, atoms, config); err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("x11: failed to set title: %w", err)
-	}
-
-	// Set WM protocols (for close button)
-	if err := conn.SetWMProtocols(window, atoms); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("x11: failed to set WM protocols: %w", err)
-	}
-
-	// Set WM class
-	if err := conn.SetWMClass(window, "gogpu", "GoGPU"); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("x11: failed to set WM class: %w", err)
-	}
-
-	// Set PID (non-fatal, some WMs don't support this)
-	_ = conn.SetWMPID(window, atoms)
-
-	// Set window type (non-fatal, some WMs don't support this)
-	_ = conn.SetNetWMWindowType(window, atoms.NetWMWindowTypeNormal, atoms)
-
-	// Set window icon (non-fatal)
-	if config.Icon != nil {
-		_ = conn.SetNetWMIcon(window, atoms, config.Icon)
-	}
-
-	// Handle frameless windows via Motif hints
-	if config.Frameless {
-		_ = conn.SetWindowBorderless(window, atoms)
-	}
-
-	// Handle non-resizable windows via Motif hints
-	if !config.Resizable && !config.Frameless {
-		hints := &MotifWMHints{
-			Flags:       MotifHintsDecorations | MotifHintsFunctions,
-			Decorations: MotifDecorBorder | MotifDecorTitle | MotifDecorMenu | MotifDecorMinimize,
-			Functions:   1 | 2 | 8, // Move | Minimize | Close (no Resize or Maximize)
-		}
-		// Non-fatal, some WMs don't support Motif hints
-		_ = conn.SetMotifWMHints(window, hints, atoms)
-	}
-
-	// Apply initial min/max size constraints (non-fatal).
-	if config.MinWidth > 0 || config.MinHeight > 0 || config.MaxWidth > 0 || config.MaxHeight > 0 {
-		_ = conn.SetWMSizeHints(window, config.MinWidth, config.MinHeight, config.MaxWidth, config.MaxHeight)
+		return err
 	}
 
 	// Get keyboard mapping (non-fatal - keyboard input may not work correctly without it)
@@ -490,6 +446,40 @@ func (p *Platform) Init(config Config) error {
 		logger().Warn("x11 init without xlib", "window", fmt.Sprintf("%#x", w.window))
 	}
 
+	return nil
+}
+
+// applyWindowProperties sets all WM properties on a newly created window.
+// Fatal properties (title, protocols, class) return an error; the rest are non-fatal.
+func (p *Platform) applyWindowProperties(conn *Connection, window ResourceID, atoms *StandardAtoms, config Config) error {
+	if err := conn.SetWindowTitle(window, config.Title, atoms); err != nil {
+		return fmt.Errorf("x11: failed to set title: %w", err)
+	}
+	if err := conn.SetWMProtocols(window, atoms); err != nil {
+		return fmt.Errorf("x11: failed to set WM protocols: %w", err)
+	}
+	if err := conn.SetWMClass(window, "gogpu", "GoGPU"); err != nil {
+		return fmt.Errorf("x11: failed to set WM class: %w", err)
+	}
+	_ = conn.SetWMPID(window, atoms)
+	_ = conn.SetNetWMWindowType(window, atoms.NetWMWindowTypeNormal, atoms)
+	if config.Icon != nil {
+		_ = conn.SetNetWMIcon(window, atoms, config.Icon)
+	}
+	if config.Frameless {
+		_ = conn.SetWindowBorderless(window, atoms)
+	}
+	if !config.Resizable && !config.Frameless {
+		hints := &MotifWMHints{
+			Flags:       MotifHintsDecorations | MotifHintsFunctions,
+			Decorations: MotifDecorBorder | MotifDecorTitle | MotifDecorMenu | MotifDecorMinimize,
+			Functions:   1 | 2 | 8, // Move | Minimize | Close (no Resize or Maximize)
+		}
+		_ = conn.SetMotifWMHints(window, hints, atoms)
+	}
+	if config.MinWidth > 0 || config.MinHeight > 0 || config.MaxWidth > 0 || config.MaxHeight > 0 {
+		_ = conn.SetWMSizeHints(window, config.MinWidth, config.MinHeight, config.MaxWidth, config.MaxHeight)
+	}
 	return nil
 }
 

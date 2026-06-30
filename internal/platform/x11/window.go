@@ -268,7 +268,7 @@ func (c *Connection) SetNetWMIcon(window ResourceID, atoms *StandardAtoms, img i
 			var argb uint32
 			if a16 > 0 {
 				a8 := a16 >> 8
-				argb = (a8 << 24) | ((r16*255/a16) << 16) | ((g16*255/a16) << 8) | (b16 * 255 / a16)
+				argb = (a8 << 24) | ((r16 * 255 / a16) << 16) | ((g16 * 255 / a16) << 8) | (b16 * 255 / a16)
 			}
 			put(off, argb)
 			off += 4
