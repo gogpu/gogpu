@@ -186,6 +186,7 @@ type StandardAtoms struct {
 	NetWMPID                Atom
 	UTF8String              Atom
 	MotifWMHints            Atom
+	NetWMIcon               Atom
 	Clipboard               Atom // CLIPBOARD selection atom (not XA_PRIMARY)
 	Targets                 Atom // TARGETS atom for selection target negotiation
 	GogpuSelection          Atom // Property name for clipboard data transfer
@@ -283,6 +284,11 @@ func (c *Connection) InternStandardAtoms() (*StandardAtoms, error) {
 	}
 
 	atoms.GogpuSelection, err = c.InternAtom(AtomNameGogpuSelection, false)
+	if err != nil {
+		return nil, err
+	}
+
+	atoms.NetWMIcon, err = c.InternAtom(AtomNameNetWMIcon, false)
 	if err != nil {
 		return nil, err
 	}

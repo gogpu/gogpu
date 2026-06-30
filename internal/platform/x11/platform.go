@@ -4,6 +4,7 @@ package x11
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"os"
 	"strconv"
@@ -32,6 +33,7 @@ type Config struct {
 	MinHeight  int // 0 = no minimum constraint
 	MaxWidth   int // 0 = no maximum constraint
 	MaxHeight  int // 0 = no maximum constraint
+	Icon       image.Image
 }
 
 // EventType represents the type of platform event.
@@ -364,6 +366,11 @@ func (p *Platform) Init(config Config) error {
 
 	// Set window type (non-fatal, some WMs don't support this)
 	_ = conn.SetNetWMWindowType(window, atoms.NetWMWindowTypeNormal, atoms)
+
+	// Set window icon (non-fatal)
+	if config.Icon != nil {
+		_ = conn.SetNetWMIcon(window, atoms, config.Icon)
+	}
 
 	// Handle frameless windows via Motif hints
 	if config.Frameless {

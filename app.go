@@ -480,6 +480,7 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		MinHeight:  a.config.MinHeight,
 		MaxWidth:   a.config.MaxWidth,
 		MaxHeight:  a.config.MaxHeight,
+		Icon:       a.config.Icon,
 	})
 	if err != nil {
 		return nil, err

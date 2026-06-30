@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"image"
 	"os"
 	"strings"
 
@@ -120,6 +121,10 @@ type Config struct {
 
 	// MaxHeight is the maximum window height in logical pixels (0 = no constraint).
 	MaxHeight int
+
+	// Icon is the window icon displayed in taskbars and window decorations.
+	// On X11: set via _NET_WM_ICON. On Windows/macOS: no-op (icons come from app resources).
+	Icon image.Image
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -343,6 +348,13 @@ func (c Config) WithHeaderAlignment(alignment HeaderAlignment) Config {
 // When false: window size is fixed at the values set by WithSize.
 func (c Config) WithResizable(resizable bool) Config {
 	c.Resizable = resizable
+	return c
+}
+
+// WithIcon sets the window icon shown in taskbars and decorations.
+// On X11: set via _NET_WM_ICON (EWMH). No-op on Windows/macOS.
+func (c Config) WithIcon(img image.Image) Config {
+	c.Icon = img
 	return c
 }
 

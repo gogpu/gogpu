@@ -2,6 +2,7 @@
 package platform
 
 import (
+	"image"
 	"sync/atomic"
 
 	"github.com/gogpu/gpucontext"
@@ -31,6 +32,7 @@ type Config struct {
 	MinHeight         int // 0 = no minimum constraint
 	MaxWidth          int // 0 = no maximum constraint
 	MaxHeight         int // 0 = no maximum constraint
+	Icon              image.Image
 }
 
 // Event represents a platform event.

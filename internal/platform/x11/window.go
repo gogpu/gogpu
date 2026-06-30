@@ -4,6 +4,7 @@ package x11
 
 import (
 	"fmt"
+	"image"
 	"os"
 )
 
@@ -236,6 +237,44 @@ func (c *Connection) SetNetWMWindowType(window ResourceID, windowType Atom, atom
 	}
 
 	return c.ChangeProperty(window, atoms.NetWMWindowType, AtomAtom, 32, PropModeReplace, data)
+}
+
+// SetNetWMIcon sets the _NET_WM_ICON property so window managers display
+// the application icon in taskbars and window decorations.
+// EWMH format: [width, height, w*h ARGB pixels] as CARDINAL/32,
+// each pixel 0xAARRGGBB, non-premultiplied.
+func (c *Connection) SetNetWMIcon(window ResourceID, atoms *StandardAtoms, img image.Image) error {
+	if atoms.NetWMIcon == AtomNone || img == nil {
+		return nil
+	}
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w == 0 || h == 0 {
+		return nil
+	}
+	data := make([]byte, (2+w*h)*4)
+	put := func(off int, v uint32) {
+		data[off] = byte(v)
+		data[off+1] = byte(v >> 8)
+		data[off+2] = byte(v >> 16)
+		data[off+3] = byte(v >> 24)
+	}
+	put(0, uint32(w))
+	put(4, uint32(h))
+	off := 8
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r16, g16, b16, a16 := img.At(x, y).RGBA()
+			var argb uint32
+			if a16 > 0 {
+				a8 := a16 >> 8
+				argb = (a8 << 24) | ((r16*255/a16) << 16) | ((g16*255/a16) << 8) | (b16 * 255 / a16)
+			}
+			put(off, argb)
+			off += 4
+		}
+	}
+	return c.ChangeProperty(window, atoms.NetWMIcon, AtomCardinal, 32, PropModeReplace, data)
 }
 
 // GetProperty reads a window property.

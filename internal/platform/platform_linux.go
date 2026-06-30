@@ -220,6 +220,7 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 		MinHeight:  config.MinHeight,
 		MaxWidth:   config.MaxWidth,
 		MaxHeight:  config.MaxHeight,
+		Icon:       config.Icon,
 	}
 	if err := p.inner.Init(x11Config); err != nil {
 		return nil, err
