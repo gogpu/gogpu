@@ -2530,11 +2530,12 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 1
 
 	case wmPaint:
-		// Validate the paint region without drawing anything via GDI.
-		// All rendering is done through the GPU pipeline (Vulkan/DX12).
-		// We must call DefWindowProc to validate the region, otherwise
-		// Windows sends WM_PAINT continuously.
+		// Validate the paint region so Windows stops sending WM_PAINT.
 		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+		// Queue EventExpose so the event-driven render loop repaints.
+		// Without this, the window stays black after alt-tab or uncovering
+		// until a mouse/keyboard event arrives (matches X11 Expose pattern).
+		p.queueEvent(Event{WindowID: w.id, Type: EventExpose})
 		return ret
 
 	case wmSize:
