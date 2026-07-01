@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.3] - 2026-07-01
+
+### Fixed
+
+- **Windows WM_PAINT → EventExpose** (#354) — `WM_PAINT` handler now queues `EventExpose` so the event-driven render loop repaints after alt-tab or window uncovering. Previously the window stayed black until a mouse/keyboard event arrived. Matches X11 `Expose` → `RequestRedraw()` pattern.
+
+### Changed
+
+- **deps:** wgpu v0.30.7 → v0.30.8 — software backend: MSAA `SampleCount>1` rejection (#234), BGRA alpha blending swizzle (#235), dynamic uniform buffer offsets (#236). Reported by @ChristianG1984 in ui#158.
+
 ## [0.43.2] - 2026-07-01
 
 ### Added

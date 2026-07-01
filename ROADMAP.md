@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.43.2
+## Current State: v0.43.3
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -80,6 +80,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.43.3** | 2026-07-01 | **Software backend fixes** — WM_PAINT EventExpose (#354), deps wgpu v0.30.8 (MSAA rejection, BGRA blending, dynamic offsets). Reported by @ChristianG1984 |
 | **v0.43.2** | 2026-07-01 | **X11 window icon** (@samyfodil) — `Config.WithIcon(image.Image)` via EWMH `_NET_WM_ICON`. ARGB encoding with un-premultiplication. |
 | **v0.43.1** | 2026-06-30 | **Header alignment + multi-window fixes** (@lkmavi) — `HeaderAlignment` API, macOS live resize, macOS/Wayland/Windows multi-window event routing and CSD fixes |
 | **v0.43.0** | 2026-06-29 | **Event-driven rendering by default** — `DefaultConfig().ContinuousRender: false` (winit 0.29 pattern). 0% CPU when idle. |
