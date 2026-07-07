@@ -74,13 +74,12 @@ func TestInvalidator_WakeupNotCalledOnCoalesced(t *testing.T) {
 		called.Add(1)
 	})
 
-	// First Invalidate — wakeup should fire
+	// Both Invalidate calls wake the event loop even when signals coalesce.
 	inv.Invalidate()
-	// Second Invalidate — channel full, wakeup should NOT fire
 	inv.Invalidate()
 
-	if got := called.Load(); got != 1 {
-		t.Errorf("expected wakeup called exactly 1 time, got %d", got)
+	if got := called.Load(); got != 2 {
+		t.Errorf("expected wakeup called 2 times, got %d", got)
 	}
 }
 
@@ -125,10 +124,10 @@ func TestInvalidator_ConcurrentAccess(t *testing.T) {
 		t.Error("expected second Consume to return false — all signals should coalesce")
 	}
 
-	// Wakeup should have been called at least once (first signal) but at most once
-	// (channel blocks subsequent signals from reaching the wakeup branch).
-	if got := wakeups.Load(); got != 1 {
-		t.Errorf("expected wakeup called exactly 1 time, got %d", got)
+	// Wakeup is called on every Invalidate so WaitEvents unblocks even when
+	// the channel signal was already pending.
+	if got := wakeups.Load(); got != goroutines {
+		t.Errorf("expected wakeup called %d times, got %d", goroutines, got)
 	}
 }
 

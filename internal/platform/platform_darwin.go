@@ -347,6 +347,14 @@ func (dw *darwinPlatformWindow) SetLiveResizeHook(fn func()) {
 	}
 }
 
+// SetLiveResizePhaseHooks implements platform.LiveResizePhaser for macOS.
+// start fires on windowWillStartLiveResize:, end on windowDidEndLiveResize:.
+func (dw *darwinPlatformWindow) SetLiveResizePhaseHooks(start, end func()) {
+	if dw.window != nil {
+		dw.window.SetLiveResizePhaseHooks(start, end)
+	}
+}
+
 // SetHeaderAlignment implements platform.HeaderAligner for macOS.
 func (dw *darwinPlatformWindow) SetHeaderAlignment(alignment int) {
 	if dw.window != nil {
@@ -559,7 +567,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 	//
 	// Physical-size tracking (physW/physH) catches Retina↔1× transitions
 	// where logical dims are unchanged but the framebuffer resolution changes.
-	if w.window != nil {
+	if w.window != nil && !w.window.InLiveResize() {
 		// Drain the screen-change signal from windowDidChangeScreen:.
 		// The signal already woke WaitEvents; draining resets the channel
 		// for the next display transition.
@@ -929,6 +937,11 @@ func (w *darwinWindow) queueEvent(event Event) {
 // Must be called with w.eventMu held.
 func (w *darwinWindow) checkResize() {
 	if w.window == nil {
+		return
+	}
+	// During live resize, defer GPU surface reconfiguration until the user
+	// releases the mouse (windowDidEndLiveResize → WakeEventLoop → here).
+	if w.window.InLiveResize() {
 		return
 	}
 

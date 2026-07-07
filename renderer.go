@@ -444,12 +444,12 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 
 	// Before acquiring surface texture, let platform update surface state
 	// (e.g., CAMetalLayer.contentsScale on macOS for HiDPI/multi-monitor).
+	// Reconfigure when the physical surface dimensions changed — including
+	// during live resize (Rio pattern): the surface must match the window
+	// every tick so the presented frame is pixel-exact, and the Metal layer's
+	// blocking nextDrawable + transaction present keep pool churn bounded.
 	if platWin != nil {
 		result := platWin.PrepareFrame()
-		// Reconfigure when the physical surface dimensions changed — covers both
-		// Retina scale transitions (ScaleChanged) and live resize (size mismatch).
-		// Acting here, before nextDrawable, eliminates the 1-frame blank square
-		// that appears when CAMetalLayer grows before the wgpu surface catches up.
 		if result.PhysicalWidth > 0 && result.PhysicalHeight > 0 &&
 			(result.PhysicalWidth != ws.width || result.PhysicalHeight != ws.height) {
 			ws.width = result.PhysicalWidth
@@ -532,6 +532,12 @@ func (r *Renderer) EndFrame() {
 // Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	ws.flushClear(r.device, r)
+	if ws.hasGPUWork {
+		// Metal presents via a separate command buffer (transaction path). Ensure
+		// draw/submit work finishes before present or the window stays blank until
+		// a later resize triggers WaitIdle during surface reconfigure.
+		r.WaitForGPU()
+	}
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
@@ -593,6 +599,20 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 	return false
 }
 
+// setTransactionPresent toggles Core Animation transaction-based present on
+// Metal surfaces (no-op elsewhere). Enabled during macOS live resize so the
+// drawable swap commits atomically with the window-resize CA transaction —
+// eliminating both frame stretching and IOSurface drawable stockpiling.
+// Must be called on the render thread.
+func (ws *RenderTarget) setTransactionPresent(enabled bool) {
+	if ws.surface == nil {
+		return
+	}
+	if tp, ok := any(ws.surface).(interface{ SetPresentsWithTransaction(bool) }); ok {
+		tp.SetPresentsWithTransaction(enabled)
+	}
+}
+
 // prepareLazyAcquire resets per-frame state for deferred beginFrame.
 // The actual swapchain acquire happens on first draw call via ensureFrameStarted.
 // Uses ws.platWindow and ws.renderer.{device,adapter} — no parameters needed.
@@ -607,8 +627,22 @@ func (ws *RenderTarget) ensureFrameStarted() bool {
 	if ws.frameStarted {
 		return ws.currentView != nil
 	}
-	ws.frameStarted = true
-	return ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter)
+	if ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter) {
+		ws.frameStarted = true
+		return true
+	}
+	// Surface may not be configured yet (0×0 at init). Retry once after resize.
+	if !ws.CanRender() && ws.platWindow != nil {
+		pw, ph := ws.platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			ws.resize(pw, ph, ws.renderer.device, ws.renderer.adapter)
+			if ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter) {
+				ws.frameStarted = true
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resetLazyState clears per-frame state after frame cycle.
@@ -1012,7 +1046,7 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
 	ws := r.activeSurface()
 	if !ws.ensureFrameStarted() {
-		return nil // No frame in progress
+		return fmt.Errorf("gogpu: surface frame not available")
 	}
 	ws.hasGPUWork = true
 

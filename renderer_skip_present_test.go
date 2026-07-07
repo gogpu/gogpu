@@ -70,8 +70,8 @@ func TestEnsureFrameStarted_NoSurface_ReturnsFalse(t *testing.T) {
 	if result {
 		t.Error("ensureFrameStarted should return false when surface not configured")
 	}
-	if !ws.frameStarted {
-		t.Error("frameStarted should be true after ensureFrameStarted (even if failed)")
+	if ws.frameStarted {
+		t.Error("frameStarted should stay false when beginFrame fails")
 	}
 }
 

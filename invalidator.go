@@ -19,15 +19,15 @@ func newInvalidator(wakeup func()) *Invalidator {
 
 // Invalidate requests a redraw. Safe to call from any goroutine.
 // Multiple concurrent calls coalesce into a single redraw.
+// WakeUp is always called so the main thread unblocks from WaitEvents
+// even when the signal was already pending (PTY output during idle).
 func (inv *Invalidator) Invalidate() {
 	select {
 	case inv.ch <- struct{}{}:
-		// First signal — wake the event loop
-		if inv.wakeup != nil {
-			inv.wakeup()
-		}
 	default:
-		// Already signaled — coalesced
+	}
+	if inv.wakeup != nil {
+		inv.wakeup()
 	}
 }
 

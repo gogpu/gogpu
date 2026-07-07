@@ -60,6 +60,12 @@ type Window struct {
 	// Used by the app layer to render a frame while the event loop is blocked.
 	// Read/written under mu.
 	liveResizeHook func()
+
+	// liveResizeStartHook / liveResizeEndHook fire on windowWillStartLiveResize: /
+	// windowDidEndLiveResize:. Used by the app layer to toggle Metal
+	// transaction-based present around the drag. Read/written under mu.
+	liveResizeStartHook func()
+	liveResizeEndHook   func()
 }
 
 // NSID returns the underlying NSWindow object ID.
@@ -524,6 +530,12 @@ func (w *Window) InLiveResize() bool {
 // Called by the windowWillStartLiveResize: NSWindowDelegate method.
 func (w *Window) StartLiveResize() {
 	w.inLiveResize.Store(true)
+	w.mu.Lock()
+	fn := w.liveResizeStartHook
+	w.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // EndLiveResize marks the end of a live resize operation and wakes the event
@@ -531,7 +543,26 @@ func (w *Window) StartLiveResize() {
 // Called by the windowDidEndLiveResize: NSWindowDelegate method.
 func (w *Window) EndLiveResize() {
 	w.inLiveResize.Store(false)
+	w.mu.Lock()
+	fn := w.liveResizeEndHook
+	w.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+	// Live resize can break the responder chain; restore keyboard focus.
+	if !w.nsWindow.IsNil() && !w.contentView.IsNil() {
+		w.nsWindow.SendPtr(selectors.makeFirstResponder, w.contentView.Ptr())
+	}
 	WakeEventLoop()
+}
+
+// SetLiveResizePhaseHooks installs callbacks fired at the start and end of a
+// live resize drag (windowWillStartLiveResize: / windowDidEndLiveResize:).
+func (w *Window) SetLiveResizePhaseHooks(start, end func()) {
+	w.mu.Lock()
+	w.liveResizeStartHook = start
+	w.liveResizeEndHook = end
+	w.mu.Unlock()
 }
 
 // SetLiveResizeHook installs a callback that fires on every windowDidResize:

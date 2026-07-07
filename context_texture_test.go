@@ -152,8 +152,9 @@ func TestDrawTextureExValidTexture(t *testing.T) {
 		height:  64,
 	}
 
-	// Should return nil when no frame is in progress (currentView == nil).
-	// This is the correct behavior - it silently succeeds without drawing.
+	// Should return an error when no frame is in progress (currentView == nil):
+	// callers rely on the error to reschedule the frame (RequestRedraw) instead
+	// of silently dropping the draw.
 	err := ctx.DrawTextureEx(tex, DrawTextureOptions{
 		X:      100,
 		Y:      200,
@@ -162,8 +163,8 @@ func TestDrawTextureExValidTexture(t *testing.T) {
 		Alpha:  0.5,
 	})
 
-	if err != nil {
-		t.Errorf("DrawTextureEx(valid) = %v, want nil", err)
+	if err == nil {
+		t.Error("DrawTextureEx(valid, no frame) = nil, want error")
 	}
 }
 
@@ -185,9 +186,9 @@ func TestDrawTextureExDefaultValues(t *testing.T) {
 		// Alpha is 0 - should default to 1.0
 	})
 
-	// Should return nil when no frame is in progress
-	if err != nil {
-		t.Errorf("DrawTextureEx(defaults) = %v, want nil", err)
+	// Defaults must pass validation; the only error is the missing surface frame.
+	if err == nil {
+		t.Error("DrawTextureEx(defaults, no frame) = nil, want error")
 	}
 }
 
@@ -261,8 +262,9 @@ func TestDrawTextureOptions(t *testing.T) {
 
 func TestDrawTextureExAlphaClamping(t *testing.T) {
 	// This test verifies the alpha clamping logic conceptually.
-	// All alpha values (including out-of-range) should pass validation and
-	// return nil when no frame is in progress.
+	// All alpha values (including out-of-range) pass validation; the draw then
+	// fails with a missing-surface-frame error (no frame in progress), which
+	// proves clamping did not reject the value.
 	ctx := &Context{renderer: newTestRenderer(800, 600)}
 
 	tex := &Texture{
@@ -284,9 +286,9 @@ func TestDrawTextureExAlphaClamping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ctx.DrawTextureEx(tex, DrawTextureOptions{Alpha: tt.alpha})
-			// All should pass validation and return nil (no frame in progress)
-			if err != nil {
-				t.Errorf("DrawTextureEx(alpha=%f) = %v, want nil", tt.alpha, err)
+			// Alpha never fails validation; the only error is the missing frame.
+			if err == nil {
+				t.Errorf("DrawTextureEx(alpha=%f, no frame) = nil, want error", tt.alpha)
 			}
 		})
 	}

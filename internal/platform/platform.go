@@ -343,6 +343,15 @@ type LiveResizeRenderer interface {
 	SetLiveResizeHook(fn func())
 }
 
+// LiveResizePhaser is an optional interface for platform windows that report
+// the start and end of a live resize drag. The app layer uses these to toggle
+// Metal transaction-based present (macOS): enabled during the drag so the
+// drawable swap commits atomically with the resize CA transaction, disabled
+// afterwards so normal rendering presents without main-thread coupling.
+type LiveResizePhaser interface {
+	SetLiveResizePhaseHooks(start, end func())
+}
+
 // PlatScaleProvider is an optional interface for platforms that can report the
 // primary display DPI scale factor before a window is created. Callers use a
 // type assertion: if sp, ok := manager.(PlatScaleProvider); ok { ... }

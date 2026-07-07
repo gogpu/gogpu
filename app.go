@@ -3,6 +3,7 @@ package gogpu
 import (
 	"io"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogpu/gogpu/input"
@@ -58,8 +59,9 @@ type App struct {
 	lastFrame              time.Time
 
 	// Event-driven rendering
-	invalidator *Invalidator
-	animations  *AnimationController
+	invalidator   *Invalidator
+	pendingRedraw atomic.Bool
+	animations    *AnimationController
 
 	// Event source for gpucontext integration
 	eventSource *eventSourceAdapter
@@ -223,6 +225,16 @@ func (a *App) OnFocus(fn func(focused bool)) *App {
 	return a
 }
 
+// InSizeMove reports whether the user is in a modal window resize/move loop.
+// While true, applications should defer expensive content relayout (e.g. terminal
+// grid changes) but may still repaint at the current content resolution.
+func (a *App) InSizeMove() bool {
+	if a.platWindow == nil {
+		return false
+	}
+	return a.platWindow.InSizeMove()
+}
+
 // HasFocus reports whether the window currently has keyboard focus.
 func (a *App) HasFocus() bool {
 	return a.focused
@@ -313,6 +325,17 @@ func (a *App) Run() error {
 
 	platWindow.Show()
 
+	// macOS can report 0×0 PhysicalSize until the first layout pass; configureSurface
+	// during initRenderer may skip. Sync once after Show so the first OnDraw can present.
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		if a.renderer != nil && a.platWindow != nil && a.renderer.primary != nil {
+			pw, ph := a.platWindow.PhysicalSize()
+			if pw > 0 && ph > 0 {
+				a.renderer.Resize(pw, ph)
+			}
+		}
+	})
+
 	// Shutdown sequence — order matters on X11/NVIDIA (see step 4 below).
 	// All GPU steps run on the render thread for thread safety.
 	// 1. WaitForGPU / DrainDeferredDestroys / tracker.CloseAll / onClose
@@ -366,6 +389,9 @@ func (a *App) Run() error {
 	a.lastFrame = time.Now()
 	a.invalidator = newInvalidator(a.manager.WakeUp)
 	a.animations = &AnimationController{}
+	if a.pendingRedraw.Swap(false) {
+		a.invalidator.Invalidate()
+	}
 	a.invalidator.Invalidate() // Request initial frame
 
 	for a.running && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
@@ -521,28 +547,68 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	// would eliminate this callback entirely. See ROADMAP.md for details.
 	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
 
-	// Enable rendering during macOS live resize.
+	// Enable rendering during macOS live resize (Rio/winit pattern).
 	//
 	// On macOS, AppKit runs a modal tracking loop during window resize
-	// (inside sendEvent:) that blocks our outer event loop. Without this hook
-	// the old frame sits in the CAMetalLayer at the old size and macOS stretches
-	// it to fill the new window dimensions, producing visible distortion.
+	// (inside sendEvent:) that blocks our outer event loop. The hook fires on
+	// every windowDidResize: tick; we resize the GPU surface to the current
+	// window size and render a full frame synchronously, exactly like Rio
+	// renders inside drawRect: during live resize. The main thread blocks in
+	// renderFrameMultiThread until the render thread has presented, so the
+	// frame lands inside the same AppKit resize tick — no stretch, no crop.
 	//
-	// windowDidResize: fires on every resize step from within AppKit's tracking
-	// loop. We call renderFrameMultiThread from the delegate callback goroutine;
-	// the render goroutine is idle while AppKit's modal loop holds the main
-	// goroutine, so RunOnRenderThreadVoid proceeds without deadlock.
+	// Leak prevention (multi-GB IOSurface churn of earlier iterations):
+	//  1. Transaction present during drag (LiveResizePhaser below): the
+	//     drawable swap commits atomically with the resize CA transaction,
+	//     so Core Animation releases superseded drawables immediately
+	//     instead of stockpiling them until the drag ends.
+	//  2. allowsNextDrawableTimeout=false: nextDrawable blocks instead of
+	//     failing under pool pressure, which previously triggered a
+	//     reconfigure-allocate spiral via recoverFromAcquireError.
 	if lr, ok := platWindow.(platform.LiveResizeRenderer); ok {
 		lr.SetLiveResizeHook(func() {
 			if a.renderLoop == nil {
 				return
 			}
+			// Queue the current physical size for the render thread; the
+			// swapchain is reconfigured there before OnDraw (Rio: set_drawable_size
+			// on every Resized event). onResize (user layout callback) still
+			// fires once after the drag via the normal event path.
 			physW, physH := platWindow.PhysicalSize()
 			if physW > 0 && physH > 0 {
 				a.renderLoop.RequestResize(uint32(physW), uint32(physH)) //nolint:gosec // G115: validated positive
 			}
 			a.renderFrameMultiThread()
 		})
+	}
+
+	// Toggle Metal transaction-based present around the live resize drag.
+	// Enabled only for the duration of the drag: outside a main-thread CA
+	// transaction, transaction present would defer frames until the next
+	// AppKit event (blank window).
+	if ph, ok := platWindow.(platform.LiveResizePhaser); ok {
+		ph.SetLiveResizePhaseHooks(
+			func() {
+				if a.renderLoop == nil || a.renderer == nil {
+					return
+				}
+				a.renderLoop.RunOnRenderThreadVoid(func() {
+					if a.renderer.primary != nil {
+						a.renderer.primary.setTransactionPresent(true)
+					}
+				})
+			},
+			func() {
+				if a.renderLoop == nil || a.renderer == nil {
+					return
+				}
+				a.renderLoop.RunOnRenderThreadVoid(func() {
+					if a.renderer.primary != nil {
+						a.renderer.primary.setTransactionPresent(false)
+					}
+				})
+			},
+		)
 	}
 
 	return platWindow, nil
@@ -594,7 +660,7 @@ func (a *App) processEventsMultiThread() {
 	// Queue primary window resize for render thread (deferred pattern).
 	// RequestResize is an atomic coalesced store so rapid live-resize events
 	// (macOS) collapse to one configure() call per render frame.
-	if lastResize != nil && a.platWindow != nil {
+	if lastResize != nil && a.platWindow != nil && !a.platWindow.InSizeMove() {
 		// Queue PHYSICAL size for render thread (GPU surface reconfiguration)
 		physW, physH := lastResize.PhysicalWidth, lastResize.PhysicalHeight
 		if physW > 0 && physH > 0 {
@@ -837,9 +903,6 @@ func (a *App) renderFrameMultiThread() {
 			continue
 		}
 		pw, ph := w.platWindow.PhysicalSize()
-		if pw <= 0 || ph <= 0 {
-			continue // Minimized
-		}
 		onDraw := w.onDraw
 		if onDraw == nil {
 			// On Wayland (and for consistency everywhere) the compositor only
@@ -849,6 +912,10 @@ func (a *App) renderFrameMultiThread() {
 			// committed at least once on startup and on any subsequent invalidation.
 			onDraw = func(ctx *Context) { ctx.Clear(0, 0, 0, 1) }
 		}
+		// Do NOT skip when PhysicalSize is 0 — macOS can report 0×0 before the
+		// first layout while the window is already visible. Skipping drops the
+		// invalidation without calling OnDraw; resize later is the only redraw.
+		// renderFrameGPU syncs the GPU surface from the platform before drawing.
 		frames = append(frames, windowFrame{
 			window: w,
 			onDraw: onDraw,
@@ -865,52 +932,90 @@ func (a *App) renderFrameMultiThread() {
 
 	// Execute GPU operations on render thread.
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		// Apply pending resize for the primary window (if still alive).
-		if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
-			if a.renderer.primary != nil {
-				a.renderer.Resize(int(w), int(h))
+		runInFramePool(func() {
+			a.renderFrameGPU(frames)
+		})
+	})
+}
+
+// renderFrameGPU performs GPU work for all visible windows.
+// Must run on the render thread inside runInFramePool on macOS.
+func (a *App) renderFrameGPU(frames []windowFrame) {
+	// Apply pending resize for the primary window (if still alive).
+	// Applied during live resize too (Rio pattern): the surface tracks the
+	// window every tick; resize() skips no-op reconfigures, and the Metal
+	// layer's blocking nextDrawable + transaction present pace pool churn.
+	if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
+		if a.renderer.primary != nil {
+			a.renderer.Resize(int(w), int(h))
+		}
+	}
+
+	// Keep the GPU surface in sync with the platform window. On macOS the
+	// renderer can hold 0×0 until the first layout; without this, OnDraw
+	// sees FramebufferSize()==0 and returns without presenting.
+	if a.platWindow != nil && a.renderer != nil && a.renderer.primary != nil {
+		pw, ph := a.platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			a.renderer.Resize(pw, ph)
+		}
+	}
+
+	// Drain deferred destroys once per frame, not per window.
+	a.renderer.DrainDeferredDestroys()
+
+	for _, frame := range frames {
+		ws := frame.window.surface
+		if ws == nil {
+			continue
+		}
+
+		// initRenderer may leave the surface unconfigured when PhysicalSize was 0.
+		if !ws.CanRender() && ws.platWindow != nil {
+			pw, ph := ws.platWindow.PhysicalSize()
+			if pw > 0 && ph > 0 {
+				ws.resize(pw, ph, a.renderer.device, a.renderer.adapter)
 			}
 		}
 
-		// Drain deferred destroys once per frame, not per window.
-		a.renderer.DrainDeferredDestroys()
+		// Lazy acquire: reset per-frame state for deferred beginFrame.
+		// beginFrame is called on first draw call, not upfront.
+		// If OnDraw produces no GPU work → no acquire, no present.
+		ws.prepareLazyAcquire()
 
-		for _, frame := range frames {
-			ws := frame.window.surface
-			if ws == nil {
-				continue
-			}
+		// Set renderer's currentSurface so draw methods target this window.
+		a.renderer.currentSurface = ws
 
-			// Lazy acquire: reset per-frame state for deferred beginFrame.
-			// beginFrame is called on first draw call, not upfront.
-			// If OnDraw produces no GPU work → no acquire, no present.
-			ws.prepareLazyAcquire()
+		// Call per-window draw callback.
+		ctx := newContextForSurface(a.renderer, ws, frame.scale)
+		frame.onDraw(ctx)
 
-			// Set renderer's currentSurface so draw methods target this window.
-			a.renderer.currentSurface = ws
-
-			// Call per-window draw callback.
-			ctx := newContextForSurface(a.renderer, ws, frame.scale)
-			frame.onDraw(ctx)
-
-			// On outdated, present() reconfigured the surface; re-render once at the
-			// live scale (a DPI change is an outdated trigger, so frame.scale may be
-			// stale). One retry only — looping can livelock a live resize; if still
-			// outdated, request another frame since nothing else reschedules on-demand.
-			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
-				ws.prepareLazyAcquire()
-				frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
-				if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
-					a.RequestRedraw()
-				}
-			}
+		// beginFrame can fail (outdated / not yet configured). Demand-driven mode
+		// already consumed the invalidation — schedule another frame.
+		if !ws.frameStarted {
+			a.RequestRedraw()
 			ws.resetLazyState()
 			a.renderer.currentSurface = nil
+			continue
 		}
 
-		// Poll submissions once after all windows are presented.
-		a.renderer.pollSubmissions()
-	})
+		// On outdated, present() reconfigured the surface; re-render once at the
+		// live scale (a DPI change is an outdated trigger, so frame.scale may be
+		// stale). One retry only — looping can livelock a live resize; if still
+		// outdated, request another frame since nothing else reschedules on-demand.
+		if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+			ws.prepareLazyAcquire()
+			frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
+			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+				a.RequestRedraw()
+			}
+		}
+		ws.resetLazyState()
+		a.renderer.currentSurface = nil
+	}
+
+	// Poll submissions once after all windows are presented.
+	a.renderer.pollSubmissions()
 }
 
 // modalFrameTick executes one update+render cycle during the Win32 modal
@@ -1045,7 +1150,9 @@ func (a *App) frameCallbackReady() bool {
 func (a *App) RequestRedraw() {
 	if a.invalidator != nil {
 		a.invalidator.Invalidate()
+		return
 	}
+	a.pendingRedraw.Store(true)
 }
 
 // StartAnimation signals that an animation is starting.
