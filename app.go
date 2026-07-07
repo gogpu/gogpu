@@ -324,9 +324,31 @@ func (a *App) Run() error {
 	}
 
 	platWindow.Show()
+	a.syncInitialSurfaceSize()
 
-	// macOS can report 0×0 PhysicalSize until the first layout pass; configureSurface
-	// during initRenderer may skip. Sync once after Show so the first OnDraw can present.
+	defer a.shutdown(platWindow)
+
+	a.registerPrimaryWindow(platWindow)
+	a.startRunLoop()
+
+	// Main loop with three rendering modes (ADR-023):
+	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
+	//   2. ANIMATING: StartAnimation() — loop active, onUpdate every tick,
+	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
+	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
+	for a.running && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
+		a.runFrame()
+	}
+
+	a.lifecycle = AppIdle
+	return nil
+}
+
+// syncInitialSurfaceSize resizes the GPU surface once after the window is
+// shown. macOS can report 0×0 PhysicalSize until the first layout pass, so
+// configureSurface during initRenderer may skip; this sync lets the first
+// OnDraw present.
+func (a *App) syncInitialSurfaceSize() {
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		if a.renderer != nil && a.platWindow != nil && a.renderer.primary != nil {
 			pw, ph := a.platWindow.PhysicalSize()
@@ -335,50 +357,48 @@ func (a *App) Run() error {
 			}
 		}
 	})
+}
 
-	// Shutdown sequence — order matters on X11/NVIDIA (see step 4 below).
-	// All GPU steps run on the render thread for thread safety.
-	// 1. WaitForGPU / DrainDeferredDestroys / tracker.CloseAll / onClose
-	// 2. Renderer.Destroy()     — release GPU surface/device/adapter (NOT instance)
-	// 3. platWindow + manager   — close the OS window and the X11 Display
-	// 4. Renderer.ReleaseInstance() — unload the Vulkan driver (ICD) LAST
-	// 5. renderLoop.Stop()      — stop the render thread last of all
-	//
-	// Step 3 must precede step 4: the X11 close path is manager.Destroy()
-	// (x11PlatformWindow.Destroy is a no-op — teardown is on the platform).
-	// XCloseDisplay invokes the NVIDIA driver's XESetCloseDisplay hook; if the
-	// Vulkan instance — and thus the ICD — was already released, that hook
-	// points into unloaded code and SIGSEGVs. Close the display while the ICD
-	// is still loaded, release the instance afterwards.
-	defer func() {
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.WaitForGPU()
-			a.renderer.DrainDeferredDestroys()
-			if a.tracker != nil {
-				_ = a.tracker.CloseAll()
-			}
-			if a.onClose != nil {
-				a.onClose()
-			}
-		})
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.Destroy()
-		})
-		platWindow.Destroy()
-		a.manager.Destroy()
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			a.renderer.ReleaseInstance()
-		})
-		a.renderLoop.Stop()
-	}()
+// shutdown runs the Run() teardown sequence. Order matters on X11/NVIDIA
+// (see step 4 below). All GPU steps run on the render thread for thread
+// safety.
+//  1. WaitForGPU / DrainDeferredDestroys / tracker.CloseAll / onClose
+//  2. Renderer.Destroy()     — release GPU surface/device/adapter (NOT instance)
+//  3. platWindow + manager   — close the OS window and the X11 Display
+//  4. Renderer.ReleaseInstance() — unload the Vulkan driver (ICD) LAST
+//  5. renderLoop.Stop()      — stop the render thread last of all
+//
+// Step 3 must precede step 4: the X11 close path is manager.Destroy()
+// (x11PlatformWindow.Destroy is a no-op — teardown is on the platform).
+// XCloseDisplay invokes the NVIDIA driver's XESetCloseDisplay hook; if the
+// Vulkan instance — and thus the ICD — was already released, that hook
+// points into unloaded code and SIGSEGVs. Close the display while the ICD
+// is still loaded, release the instance afterwards.
+func (a *App) shutdown(platWindow platform.PlatformWindow) {
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer.WaitForGPU()
+		a.renderer.DrainDeferredDestroys()
+		if a.tracker != nil {
+			_ = a.tracker.CloseAll()
+		}
+		if a.onClose != nil {
+			a.onClose()
+		}
+	})
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer.Destroy()
+	})
+	platWindow.Destroy()
+	a.manager.Destroy()
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		a.renderer.ReleaseInstance()
+	})
+	a.renderLoop.Stop()
+}
 
-	a.registerPrimaryWindow(platWindow)
-
-	// Main loop with three rendering modes (ADR-023):
-	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
-	//   2. ANIMATING: StartAnimation() — loop active, onUpdate every tick,
-	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
-	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
+// startRunLoop marks the app running and primes state consumed by the
+// first iteration of the main loop in Run().
+func (a *App) startRunLoop() {
 	a.running = true
 	a.lifecycle = AppRunning
 
@@ -393,68 +413,67 @@ func (a *App) Run() error {
 		a.invalidator.Invalidate()
 	}
 	a.invalidator.Invalidate() // Request initial frame
+}
 
-	for a.running && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
-		// Three-mode state detection (ADR-023)
-		continuousRender := a.config.ContinuousRender
-		animating := a.animations.IsAnimating()
-		invalidated := a.invalidator.Consume()
+// runFrame executes one iteration of the main loop in Run(): waits for
+// events when idle, processes platform events, ticks onUpdate, and draws
+// a frame when the three-mode state detection (ADR-023) calls for one.
+func (a *App) runFrame() {
+	continuousRender := a.config.ContinuousRender
+	animating := a.animations.IsAnimating()
+	invalidated := a.invalidator.Consume()
 
-		if !continuousRender && !animating && !invalidated {
-			// IDLE: block on OS events (0% CPU, <1ms response)
-			a.manager.WaitEvents()
-		}
-
-		// Process all pending platform events.
-		// Events may call RequestRedraw() which sets invalidated for next check.
-		a.processEventsMultiThread()
-
-		// Check if invalidation arrived during event processing
-		// (e.g., resize or UI framework responding to hover/click).
-		if a.invalidator.Consume() {
-			invalidated = true
-		}
-
-		// Calculate delta time
-		now := time.Now()
-		deltaTime := now.Sub(a.lastFrame).Seconds()
-		a.lastFrame = now
-
-		// Clamp deltaTime after long idle (WaitEvents can block for seconds/minutes).
-		// Without clamping, physics and animations would jump on the first frame.
-		// 66ms = ~15 FPS minimum, a safe upper bound for a single frame step.
-		if deltaTime > 0.066 {
-			deltaTime = 0.066
-		}
-
-		// Update input state for next frame (Ebiten-style polling)
-		// This must be called before onUpdate so JustPressed/JustReleased work correctly
-		if a.inputState != nil {
-			a.inputState.Update()
-		}
-
-		// onUpdate: ALWAYS when loop is active (ANIMATING + CONTINUOUS).
-		// UI frameworks tick animations, process signals, run layout here.
-		// If something changed, they call RequestRedraw() → invalidated = true.
-		if a.onUpdate != nil {
-			a.onUpdate(deltaTime)
-		}
-
-		// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
-		if a.invalidator.Consume() {
-			invalidated = true
-		}
-
-		// OnDraw: CONTINUOUS = every VSync (games), otherwise only when dirty.
-		// ANIMATING mode: onUpdate runs every tick, OnDraw only on RequestRedraw.
-		// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
-		if (continuousRender || invalidated) && a.frameCallbackReady() {
-			a.renderFrameMultiThread()
-		}
+	if !continuousRender && !animating && !invalidated {
+		// IDLE: block on OS events (0% CPU, <1ms response)
+		a.manager.WaitEvents()
 	}
 
-	a.lifecycle = AppIdle
-	return nil
+	// Process all pending platform events.
+	// Events may call RequestRedraw() which sets invalidated for next check.
+	a.processEventsMultiThread()
+
+	// Check if invalidation arrived during event processing
+	// (e.g., resize or UI framework responding to hover/click).
+	if a.invalidator.Consume() {
+		invalidated = true
+	}
+
+	// Calculate delta time
+	now := time.Now()
+	deltaTime := now.Sub(a.lastFrame).Seconds()
+	a.lastFrame = now
+
+	// Clamp deltaTime after long idle (WaitEvents can block for seconds/minutes).
+	// Without clamping, physics and animations would jump on the first frame.
+	// 66ms = ~15 FPS minimum, a safe upper bound for a single frame step.
+	if deltaTime > 0.066 {
+		deltaTime = 0.066
+	}
+
+	// Update input state for next frame (Ebiten-style polling)
+	// This must be called before onUpdate so JustPressed/JustReleased work correctly
+	if a.inputState != nil {
+		a.inputState.Update()
+	}
+
+	// onUpdate: ALWAYS when loop is active (ANIMATING + CONTINUOUS).
+	// UI frameworks tick animations, process signals, run layout here.
+	// If something changed, they call RequestRedraw() → invalidated = true.
+	if a.onUpdate != nil {
+		a.onUpdate(deltaTime)
+	}
+
+	// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
+	if a.invalidator.Consume() {
+		invalidated = true
+	}
+
+	// OnDraw: CONTINUOUS = every VSync (games), otherwise only when dirty.
+	// ANIMATING mode: onUpdate runs every tick, OnDraw only on RequestRedraw.
+	// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
+	if (continuousRender || invalidated) && a.frameCallbackReady() {
+		a.renderFrameMultiThread()
+	}
 }
 
 // newPlatformManagerFn creates a platform manager; replaced in tests to inject mocks.
@@ -475,27 +494,7 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		a.manager.SetAppName(a.config.AppName)
 	}
 
-	// Apply any menu set before Run().
-	if a.menu != nil || len(a.customMenus) > 0 {
-		a.updateNativeMenu()
-	}
-	// Apply pending system menu items.
-	if a.pendingSystemMenuItems != nil {
-		for menu, items := range a.pendingSystemMenuItems {
-			if mgr, ok := a.manager.(platform.PlatMenuManager); ok {
-				for _, item := range items {
-					mgr.AddToSystemMenu(platform.SystemMenu(menu), []platform.MenuItem{{
-						Title:     item.Title,
-						Action:    item.Action,
-						Role:      platform.MenuRole(item.Role),
-						Disabled:  item.Disabled,
-						Separator: item.Separator,
-					}})
-				}
-			}
-		}
-		a.pendingSystemMenuItems = nil
-	}
+	a.applyPendingMenus()
 
 	// Create primary platform window.
 	platWindow, err := a.manager.CreateWindow(platform.Config{
@@ -547,71 +546,105 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	// would eliminate this callback entirely. See ROADMAP.md for details.
 	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
 
-	// Enable rendering during macOS live resize (Rio/winit pattern).
-	//
-	// On macOS, AppKit runs a modal tracking loop during window resize
-	// (inside sendEvent:) that blocks our outer event loop. The hook fires on
-	// every windowDidResize: tick; we resize the GPU surface to the current
-	// window size and render a full frame synchronously, exactly like Rio
-	// renders inside drawRect: during live resize. The main thread blocks in
-	// renderFrameMultiThread until the render thread has presented, so the
-	// frame lands inside the same AppKit resize tick — no stretch, no crop.
-	//
-	// Leak prevention (multi-GB IOSurface churn of earlier iterations):
-	//  1. Transaction present during drag (LiveResizePhaser below): the
-	//     drawable swap commits atomically with the resize CA transaction,
-	//     so Core Animation releases superseded drawables immediately
-	//     instead of stockpiling them until the drag ends.
-	//  2. allowsNextDrawableTimeout=false: nextDrawable blocks instead of
-	//     failing under pool pressure, which previously triggered a
-	//     reconfigure-allocate spiral via recoverFromAcquireError.
-	if lr, ok := platWindow.(platform.LiveResizeRenderer); ok {
-		lr.SetLiveResizeHook(func() {
-			if a.renderLoop == nil {
-				return
-			}
-			// Queue the current physical size for the render thread; the
-			// swapchain is reconfigured there before OnDraw (Rio: set_drawable_size
-			// on every Resized event). onResize (user layout callback) still
-			// fires once after the drag via the normal event path.
-			physW, physH := platWindow.PhysicalSize()
-			if physW > 0 && physH > 0 {
-				a.renderLoop.RequestResize(uint32(physW), uint32(physH)) //nolint:gosec // G115: validated positive
-			}
-			a.renderFrameMultiThread()
-		})
-	}
-
-	// Toggle Metal transaction-based present around the live resize drag.
-	// Enabled only for the duration of the drag: outside a main-thread CA
-	// transaction, transaction present would defer frames until the next
-	// AppKit event (blank window).
-	if ph, ok := platWindow.(platform.LiveResizePhaser); ok {
-		ph.SetLiveResizePhaseHooks(
-			func() {
-				if a.renderLoop == nil || a.renderer == nil {
-					return
-				}
-				a.renderLoop.RunOnRenderThreadVoid(func() {
-					if a.renderer.primary != nil {
-						a.renderer.primary.setTransactionPresent(true)
-					}
-				})
-			},
-			func() {
-				if a.renderLoop == nil || a.renderer == nil {
-					return
-				}
-				a.renderLoop.RunOnRenderThreadVoid(func() {
-					if a.renderer.primary != nil {
-						a.renderer.primary.setTransactionPresent(false)
-					}
-				})
-			},
-		)
-	}
+	a.setupLiveResizeHook(platWindow)
+	a.setupLiveResizePhaseHooks(platWindow)
 
 	return platWindow, nil
+}
+
+// applyPendingMenus installs the menu bar and any system menu items that
+// were configured before Run(). Must run after the platform manager is
+// initialized but before the primary window is created.
+func (a *App) applyPendingMenus() {
+	if a.menu != nil || len(a.customMenus) > 0 {
+		a.updateNativeMenu()
+	}
+	if a.pendingSystemMenuItems == nil {
+		return
+	}
+	for menu, items := range a.pendingSystemMenuItems {
+		mgr, ok := a.manager.(platform.PlatMenuManager)
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			mgr.AddToSystemMenu(platform.SystemMenu(menu), []platform.MenuItem{{
+				Title:     item.Title,
+				Action:    item.Action,
+				Role:      platform.MenuRole(item.Role),
+				Disabled:  item.Disabled,
+				Separator: item.Separator,
+			}})
+		}
+	}
+	a.pendingSystemMenuItems = nil
+}
+
+// setupLiveResizeHook enables rendering during macOS live resize (Rio/winit pattern).
+//
+// On macOS, AppKit runs a modal tracking loop during window resize (inside
+// sendEvent:) that blocks our outer event loop. The hook fires on every
+// windowDidResize: tick; we resize the GPU surface to the current window
+// size and render a full frame synchronously, exactly like Rio renders
+// inside drawRect: during live resize. The main thread blocks in
+// renderFrameMultiThread until the render thread has presented, so the
+// frame lands inside the same AppKit resize tick — no stretch, no crop.
+//
+// Leak prevention (multi-GB IOSurface churn of earlier iterations):
+//  1. Transaction present during drag (setupLiveResizePhaseHooks below): the
+//     drawable swap commits atomically with the resize CA transaction,
+//     so Core Animation releases superseded drawables immediately
+//     instead of stockpiling them until the drag ends.
+//  2. allowsNextDrawableTimeout=false: nextDrawable blocks instead of
+//     failing under pool pressure, which previously triggered a
+//     reconfigure-allocate spiral via recoverFromAcquireError.
+func (a *App) setupLiveResizeHook(platWindow platform.PlatformWindow) {
+	lr, ok := platWindow.(platform.LiveResizeRenderer)
+	if !ok {
+		return
+	}
+	lr.SetLiveResizeHook(func() {
+		if a.renderLoop == nil {
+			return
+		}
+		// Queue the current physical size for the render thread; the
+		// swapchain is reconfigured there before OnDraw (Rio: set_drawable_size
+		// on every Resized event). onResize (user layout callback) still
+		// fires once after the drag via the normal event path.
+		physW, physH := platWindow.PhysicalSize()
+		if physW > 0 && physH > 0 {
+			a.renderLoop.RequestResize(uint32(physW), uint32(physH)) //nolint:gosec // G115: validated positive
+		}
+		a.renderFrameMultiThread()
+	})
+}
+
+// setupLiveResizePhaseHooks toggles Metal transaction-based present around
+// the live resize drag. Enabled only for the duration of the drag: outside
+// a main-thread CA transaction, transaction present would defer frames
+// until the next AppKit event (blank window).
+func (a *App) setupLiveResizePhaseHooks(platWindow platform.PlatformWindow) {
+	ph, ok := platWindow.(platform.LiveResizePhaser)
+	if !ok {
+		return
+	}
+	ph.SetLiveResizePhaseHooks(
+		func() { a.setTransactionPresent(true) },
+		func() { a.setTransactionPresent(false) },
+	)
+}
+
+// setTransactionPresent toggles Metal transaction-based present on the
+// render thread. Called from the live-resize phase hooks (see initPlatform).
+func (a *App) setTransactionPresent(enabled bool) {
+	if a.renderLoop == nil || a.renderer == nil {
+		return
+	}
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		if a.renderer.primary != nil {
+			a.renderer.primary.setTransactionPresent(enabled)
+		}
+	})
 }
 
 // initRenderer creates the render loop and initializes the renderer
