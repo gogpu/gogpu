@@ -532,12 +532,6 @@ func (r *Renderer) EndFrame() {
 // Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	ws.flushClear(r.device, r)
-	if ws.hasGPUWork {
-		// Metal presents via a separate command buffer (transaction path). Ensure
-		// draw/submit work finishes before present or the window stays blank until
-		// a later resize triggers WaitIdle during surface reconfigure.
-		r.WaitForGPU()
-	}
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
