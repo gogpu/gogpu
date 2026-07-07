@@ -552,6 +552,9 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 // pollSubmissions performs non-blocking submission tracking: frees GPU resources
 // for completed submissions. Called once per frame after all windows are presented.
 func (r *Renderer) pollSubmissions() {
+	if r.device == nil {
+		return
+	}
 	completedIdx := r.device.Queue().Poll()
 	r.tracker.triage(completedIdx, r.device)
 }
