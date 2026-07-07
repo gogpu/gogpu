@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Multi-backend auto-selection** (#357) — `GraphicsAPIAuto` now enumerates all available backends (DX12 + Vulkan + GLES on Windows, Vulkan + GLES on Linux) and picks the best GPU adapter. Previously Auto hardcoded a single backend (Vulkan on Windows/Linux), so old GPUs without Vulkan fell through to software. Now they get DX12 or GLES hardware acceleration. Matches Rust wgpu multi-backend architecture. Surface created before adapter enumeration to enable GLES participation. Backend name determined from selected adapter, not from config.
 
+- **deps:** wgpu v0.30.9 → v0.30.10
+
 ## [0.43.4] - 2026-07-03
 
 ### Changed
