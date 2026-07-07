@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.44.0
+## Current State: v0.44.1
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -80,6 +80,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.44.1** | 2026-07-08 | **macOS live resize fix** (@lkmavi) — IOSurface churn eliminated via NSAutoreleasePool + transaction present. Run() refactor. Enterprise-validated (wgpu-rs, Flutter, Skia). |
 | **v0.44.0** | 2026-07-08 | **Multi-backend auto-selection** (#357) — Auto enumerates DX12+Vulkan+GLES, picks best GPU. Old GPUs without Vulkan get DX12/GLES instead of software. Rust wgpu pattern. |
 | **v0.43.4** | 2026-07-03 | **deps:** wgpu v0.30.9, goffi v0.5.6 — callback stack-move corruption fix (@tie, goffi#59) |
 | **v0.43.3** | 2026-07-01 | **Software backend fixes** — WM_PAINT EventExpose (#354), deps wgpu v0.30.8 (MSAA rejection, BGRA blending, dynamic offsets). Reported by @ChristianG1984 |

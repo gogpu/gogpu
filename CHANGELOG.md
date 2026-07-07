@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.1] - 2026-07-08
+
+### Fixed
+
+- **macOS live resize IOSurface churn** (@lkmavi, #358) — per-frame `NSAutoreleasePool` drain (`RunInFramePool`) prevents multi-GB memory growth during window resize. Transaction-based present (`presentsWithTransaction`) toggled during drag so Core Animation releases superseded drawables immediately. Enterprise-validated: wgpu-rs, Flutter/Impeller, Skia, Gio all use the same patterns.
+- **macOS 0×0 initial surface** — `syncInitialSurfaceSize()` after Show() handles macOS reporting 0×0 PhysicalSize before first layout. Frames no longer skipped at zero size.
+- **`InSizeMove` guard restored** in `processEventsMultiThread` — resize events suppressed during modal resize (Windows), fixing regression from PR #352.
+- **Pre-Run() `RequestRedraw`** — `pendingRedraw atomic.Bool` stores redraw requests before the invalidator is initialized, consumed on `startRunLoop`.
+
+### Changed
+
+- **Run() refactor** — extracted `shutdown()`, `startRunLoop()`, `runFrame()`, `renderFrameGPU()`, `applyPendingMenus()`, `setupLiveResizeHook()`, `setupLiveResizePhaseHooks()`. Inline Run() reduced from 120+ to ~15 lines.
+
 ## [0.44.0] - 2026-07-08
 
 ### Changed
