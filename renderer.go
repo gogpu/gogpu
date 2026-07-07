@@ -174,49 +174,38 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 		vsync:      vsync,
 	}
 
-	// Phase 1: Create GPU instance.
+	// Phase 1: Create GPU instance with backend mask (may include multiple backends).
 	if err := r.initInstance(graphicsAPI); err != nil {
 		return nil, err
 	}
 
-	// Phase 2: For GLES, create the surface before adapter enumeration.
-	// EGL requires a window handle to build an EGL context; without one,
-	// EnumerateAdapters returns a zero-value Adapter (nil glCtx) that panics
-	// in Open. All other backends enumerate adapters without a surface (ADR-026).
-	var surfaceHint *wgpu.Surface
-	if graphicsAPI == types.GraphicsAPIGLES {
-		if err := r.createSurface(r.primary); err != nil {
-			return nil, err
-		}
-		surfaceHint = r.primary.surface
-	}
-
-	// Phase 3: Request adapter (with surface hint for GLES) and device.
-	if err := r.initAdapterDevice(surfaceHint); err != nil {
+	// Phase 2: Create the surface before adapter enumeration.
+	// GLES (EGL) requires a window handle for context creation, but creating
+	// the surface early is harmless for other backends and enables multi-backend
+	// Auto mode where GLES participates in adapter selection alongside Vulkan/DX12.
+	if err := r.createSurface(r.primary); err != nil {
 		return nil, err
 	}
 
-	// Phase 4: Finish surface setup.
-	// For GLES the surface was created in Phase 2; only configure dimensions now.
-	// For all other backends, create and configure the surface here.
-	if graphicsAPI == types.GraphicsAPIGLES {
-		if err := r.configureSurface(r.primary); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := r.initSurface(r.primary); err != nil {
-			return nil, err
-		}
+	// Phase 3: Request adapter (with surface hint for GLES deferred enumeration) and device.
+	if err := r.initAdapterDevice(r.primary.surface); err != nil {
+		return nil, err
+	}
+
+	// Phase 4: Configure surface dimensions.
+	if err := r.configureSurface(r.primary); err != nil {
+		return nil, err
 	}
 
 	return r, nil
 }
 
 // initInstance creates the wgpu Instance for the requested graphics API.
-// ADR-038: Rust/Native selection is handled inside wgpu via build tags.
+// For Auto mode, the mask includes multiple backends (e.g., DX12|Vulkan|GLES on Windows)
+// so wgpu can enumerate all available adapters and pick the best GPU.
 func (r *Renderer) initInstance(graphicsAPI types.GraphicsAPI) error {
-	var backendVariant gputypes.Backend
-	r.backendName, backendVariant = native.BackendInfo(graphicsAPI)
+	var backendMask gputypes.Backends
+	r.backendName, backendMask = native.BackendInfo(graphicsAPI)
 
 	var instanceFlags gputypes.InstanceFlags
 	if os.Getenv("GOGPU_DEBUG") == "1" {
@@ -224,7 +213,7 @@ func (r *Renderer) initInstance(graphicsAPI types.GraphicsAPI) error {
 	}
 	var err error
 	r.instance, err = wgpu.CreateInstance(&wgpu.InstanceDescriptor{
-		Backends: 1 << backendVariant,
+		Backends: backendMask,
 		Flags:    instanceFlags,
 	})
 	if err != nil {
@@ -247,7 +236,9 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
 	}
-	slog.Info("adapter selected", "name", r.adapter.Info().Name, "type", r.adapter.Info().DeviceType)
+	info := r.adapter.Info()
+	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
+	r.backendName = "Pure Go (" + info.Backend.String() + ")"
 
 	r.device, err = r.adapter.RequestDevice(nil)
 	if err != nil {
@@ -288,15 +279,6 @@ func (r *Renderer) configureSurface(ws *RenderTarget) error {
 			"width", width, "height", height)
 	}
 	return nil
-}
-
-// initSurface creates and configures a GPU surface for a window.
-// Separated from device init per ADR-026: surfaces come and go, device is permanent.
-func (r *Renderer) initSurface(ws *RenderTarget) error {
-	if err := r.createSurface(ws); err != nil {
-		return err
-	}
-	return r.configureSurface(ws)
 }
 
 // configure configures the wgpu surface with current dimensions and format.

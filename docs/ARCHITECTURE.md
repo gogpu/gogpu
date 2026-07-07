@@ -131,6 +131,24 @@ There are **two different** software rendering options:
 
 ## Backend Selection
 
+### Multi-Backend Auto-Selection (v0.44.0)
+
+When `GraphicsAPIAuto` is used (the default), gogpu creates a wgpu Instance with a
+multi-backend mask and lets wgpu enumerate all available adapters. The best GPU
+adapter wins (GPU preferred over CPU, power preference respected). This ensures
+old GPUs without Vulkan get DX12 or GLES hardware acceleration instead of falling
+through to the software backend.
+
+| Platform | Auto backends (priority order) |
+|----------|-------------------------------|
+| Windows  | Vulkan, DX12, GLES            |
+| Linux    | Vulkan, GLES                  |
+| macOS    | Metal                         |
+| Browser  | WebGPU                        |
+
+Priority is defined in `wgpu/core/backend.go:providerPriority`. Explicit API
+selection (`GOGPU_GRAPHICS_API=dx12`) bypasses auto and uses only the requested backend.
+
 ### gogpu
 
 ```go

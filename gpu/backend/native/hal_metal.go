@@ -11,13 +11,12 @@ import (
 	_ "github.com/gogpu/wgpu/hal/software"
 )
 
-// BackendInfo returns the backend display name and variant for the given graphics API.
-// The actual HAL backends are registered via init() imports above.
-func BackendInfo(api types.GraphicsAPI) (name string, variant gputypes.Backend) {
+// BackendInfo returns the backend display name and mask for the given graphics API.
+func BackendInfo(api types.GraphicsAPI) (name string, mask gputypes.Backends) {
 	switch api {
 	case types.GraphicsAPISoftware:
-		return "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
+		return "Pure Go (Software)", 0
 	default: // Metal (default on macOS)
-		return "Pure Go (gogpu/wgpu/metal)", gputypes.BackendMetal
+		return "Pure Go (Metal)", gputypes.BackendsMetal
 	}
 }

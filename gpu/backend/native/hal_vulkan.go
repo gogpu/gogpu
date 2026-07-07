@@ -12,17 +12,16 @@ import (
 	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
-// BackendInfo returns the backend display name and variant for the given graphics API.
-// The actual HAL backends are registered via init() imports above.
-func BackendInfo(api types.GraphicsAPI) (name string, variant gputypes.Backend) {
+// BackendInfo returns the backend display name and mask for the given graphics API.
+func BackendInfo(api types.GraphicsAPI) (name string, mask gputypes.Backends) {
 	switch api {
 	case types.GraphicsAPIGLES:
-		return "Pure Go (gogpu/wgpu/gles)", gputypes.BackendGL
+		return "Pure Go (GLES)", gputypes.BackendsGL
 	case types.GraphicsAPIVulkan:
-		return "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
+		return "Pure Go (Vulkan)", gputypes.BackendsVulkan
 	case types.GraphicsAPISoftware:
-		return "Pure Go (gogpu/wgpu/software)", gputypes.BackendEmpty
-	default: // Auto — prefer Vulkan on Linux
-		return "Pure Go (gogpu/wgpu/vulkan)", gputypes.BackendVulkan
+		return "Pure Go (Software)", 0
+	default: // Auto — enumerate Vulkan, GLES; best GPU adapter wins
+		return "Pure Go (Auto)", gputypes.BackendsVulkan | gputypes.BackendsGL
 	}
 }
