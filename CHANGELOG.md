@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.3] - 2026-07-08
+
+### Changed
+
+- **deps:** wgpu v0.30.12 → v0.30.13 — software backend Tier 1 fullscreen quad detection (18 → 50+ FPS, wgpu#241). Skips per-pixel SPIR-V interpretation for simple textured quad blits.
+
 ## [0.44.2] - 2026-07-08
 
 ### Changed
