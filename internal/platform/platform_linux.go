@@ -126,8 +126,9 @@ type waylandPlatform struct {
 	display  *wayland.Display
 	registry *wayland.Registry
 
-	// Scale factor from environment variables (fallback)
+	// Scale factor from environment variables (explicit override).
 	envScaleFactor float64
+	outputScale    float64
 
 	// Subpixel layout from wl_output.geometry event (ADR-047)
 	outputSubpixel    int32
@@ -529,6 +530,10 @@ func (w *waylandPlatformWindow) SetMaxSize(width, height int) {
 }
 
 func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
+	if w.platform.libwl != nil && w.ScaleFactor() > 1.0 {
+		lw, lh := w.LogicalSize()
+		w.platform.libwl.SetViewportDestination(int32(lw), int32(lh))
+	}
 	pw, ph := w.PhysicalSize()
 	return PrepareFrameResult{
 		ScaleFactor:    w.ScaleFactor(),
@@ -773,6 +778,9 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		if err == nil {
 			output := wayland.NewWlOutput(display, outputID)
 			if rtErr := display.Roundtrip(); rtErr == nil {
+				if scale := output.Scale(); scale > 0 {
+					p.outputScale = float64(scale)
+				}
 				p.outputSubpixel = output.Subpixel()
 				p.hasOutputSubpixel = true
 			}
@@ -793,6 +801,16 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		decorName = decorGlobal.Name
 		decorVersion = decorGlobal.Version
 	}
+	var fractionalName, fractionalVersion uint32
+	if fractionalGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpFractionalScaleManagerV1); fractionalGlobal != nil {
+		fractionalName = fractionalGlobal.Name
+		fractionalVersion = fractionalGlobal.Version
+	}
+	var viewporterName, viewporterVersion uint32
+	if viewporterGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpViewporter); viewporterGlobal != nil {
+		viewporterName = viewporterGlobal.Name
+		viewporterVersion = viewporterGlobal.Version
+	}
 
 	// Step 2: Open C libwayland connection — this is the SINGLE connection
 	// that owns everything: surface, xdg-shell, input, Vulkan.
@@ -806,6 +824,9 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		return fmt.Errorf("wayland: failed to open libwayland: %w", err)
 	}
 	p.libwl = libwl
+	if err := libwl.SetupFractionalScale(fractionalName, fractionalVersion, viewporterName, viewporterVersion); err != nil {
+		logger().Warn("fractional scale setup failed", "err", err)
+	}
 
 	// Set initial size on the primary window
 	p.primary.width = config.Width
@@ -2866,15 +2887,23 @@ func detectEnvScaleFactor() float64 {
 	return 0
 }
 
-// ScaleFactor returns the DPI scale factor.
-// Falls back to environment variables (GDK_SCALE, QT_SCALE_FACTOR) or 1.0.
-// TODO: Add wl_output scale tracking on C display for proper HiDPI support.
+// ScaleFactor returns the Wayland DPI scale factor.
+// Uses explicit environment overrides first, then compositor-provided fractional
+// scale, wl_output integer scale, and finally 1.0.
 func (p *waylandPlatform) ScaleFactor() float64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if p.envScaleFactor > 0 {
 		return p.envScaleFactor
+	}
+	if p.libwl != nil {
+		if scale := p.libwl.FractionalScale(); scale > 0 {
+			return scale
+		}
+	}
+	if p.outputScale > 0 {
+		return p.outputScale
 	}
 	return 1.0
 }

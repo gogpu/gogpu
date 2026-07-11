@@ -37,7 +37,9 @@ const (
 
 	// Cursor shape protocol (wp_cursor_shape_manager_v1).
 	// Modern protocol for setting cursor shapes without loading xcursor themes.
-	InterfaceWpCursorShapeManagerV1 = "wp_cursor_shape_manager_v1"
+	InterfaceWpCursorShapeManagerV1     = "wp_cursor_shape_manager_v1"
+	InterfaceWpFractionalScaleManagerV1 = "wp_fractional_scale_manager_v1"
+	InterfaceWpViewporter               = "wp_viewporter"
 
 	// KDE-specific app menu protocol. Wayland clients use this to tell KWin
 	// which D-Bus service/path exposes their dbusmenu. Required for global

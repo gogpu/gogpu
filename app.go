@@ -1010,6 +1010,9 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 				ws.resize(pw, ph, a.renderer.device, a.renderer.adapter)
 			}
 		}
+		if ws.width != uint32(frame.physW) || ws.height != uint32(frame.physH) {
+			a.renderer.ResizeSurface(ws, frame.physW, frame.physH)
+		}
 
 		// Lazy acquire: reset per-frame state for deferred beginFrame.
 		// beginFrame is called on first draw call, not upfront.
