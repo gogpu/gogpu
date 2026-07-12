@@ -625,6 +625,23 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 // Returns true to let the event be dispatched to the application.
 // Called with w.eventMu held.
 func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType) bool {
+	// Guard: ignore pointer/scroll events that arrive without an associated
+	// NSWindow. When the cursor is over the desktop or another app's window,
+	// [NSEvent window] is nil and locationInWindow returns screen-relative
+	// coordinates that would produce phantom pointer events with garbage positions.
+	switch eventType {
+	case darwin.NSEventTypeLeftMouseDown, darwin.NSEventTypeLeftMouseUp,
+		darwin.NSEventTypeRightMouseDown, darwin.NSEventTypeRightMouseUp,
+		darwin.NSEventTypeOtherMouseDown, darwin.NSEventTypeOtherMouseUp,
+		darwin.NSEventTypeMouseMoved, darwin.NSEventTypeLeftMouseDragged,
+		darwin.NSEventTypeRightMouseDragged, darwin.NSEventTypeOtherMouseDragged,
+		darwin.NSEventTypeMouseEntered, darwin.NSEventTypeMouseExited,
+		darwin.NSEventTypeScrollWheel:
+		if darwin.GetEventWindow(event).IsNil() {
+			return true
+		}
+	}
+
 	// Get event info
 	info := darwin.GetEventInfo(event)
 

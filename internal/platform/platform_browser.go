@@ -279,6 +279,8 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 			WindowID: w.id,
 			Type:     EventScroll,
 			Scroll: gpucontext.ScrollEvent{
+				X:      ev.Get("offsetX").Float(),
+				Y:      ev.Get("offsetY").Float(),
 				DeltaX: ev.Get("deltaX").Float(),
 				DeltaY: ev.Get("deltaY").Float(),
 			},

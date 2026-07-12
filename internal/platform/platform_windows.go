@@ -2936,6 +2936,13 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		pt := point{x: int32(screenX), y: int32(screenY)}
 		procScreenToClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&pt)))
 		x, y := float64(pt.x), float64(pt.y)
+		// Convert physical pixels -> logical (DIP) coordinates.
+		// ScreenToClient returns physical pixels; UI uses logical coordinates
+		// (same conversion as createPointerEvent for mouse move/click).
+		if scale := w.scaleFactor(); scale > 1.0 {
+			x /= scale
+			y /= scale
+		}
 		deltaY := extractWheelDelta(wParam)
 
 		ev := gpucontext.ScrollEvent{
@@ -2958,6 +2965,13 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		pt := point{x: int32(screenX), y: int32(screenY)}
 		procScreenToClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&pt)))
 		x, y := float64(pt.x), float64(pt.y)
+		// Convert physical pixels -> logical (DIP) coordinates.
+		// ScreenToClient returns physical pixels; UI uses logical coordinates
+		// (same conversion as createPointerEvent for mouse move/click).
+		if scale := w.scaleFactor(); scale > 1.0 {
+			x /= scale
+			y /= scale
+		}
 		deltaX := extractWheelDelta(wParam)
 
 		ev := gpucontext.ScrollEvent{

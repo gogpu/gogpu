@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -584,11 +585,26 @@ func (w *Window) liveResizeHookValue() func() {
 }
 
 // NSTextAlignment values used when injecting a custom title NSTextField.
-const (
-	nsTextAlignmentLeft   = 0
-	nsTextAlignmentCenter = 1
-	nsTextAlignmentRight  = 2
+// On arm64: Left=0, Center=1, Right=2.
+// On x86_64: Left=0, Right=1, Center=2 (swapped Center/Right).
+// Apple headers define NSTextAlignment as an NS_ENUM(NSInteger) with
+// platform-dependent values; runtime.GOARCH selects the correct mapping.
+//
+//nolint:gochecknoglobals // architecture-dependent constants set at init
+var (
+	nsTextAlignmentCenter uint64
+	nsTextAlignmentRight  uint64
 )
+
+func init() {
+	if runtime.GOARCH == "amd64" {
+		nsTextAlignmentCenter = 2
+		nsTextAlignmentRight = 1
+	} else {
+		nsTextAlignmentCenter = 1
+		nsTextAlignmentRight = 2
+	}
+}
 
 // SetHeaderAlignment adjusts the native title bar to reflect the requested
 // alignment. alignment values: 0 = center (default), 1 = left, 2 = right.
