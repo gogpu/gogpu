@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.44.5
+## Current State: v0.44.6
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -80,7 +80,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v0.44.5** | 2026-07-12 | **Wayland fractional scale** (@kivutar #369) + **WriteSurfacePixels** (#370). goffi v0.6.0 errno always-capture. deps: wgpu v0.30.17, goffi v0.6.0, gpucontext v0.21.1. |
+| **v0.44.6** | 2026-07-12 | **Wayland flush EAGAIN retry** (#368, ADR-051) — GLFW pattern, unblocks @kivutar. deps: wgpu v0.30.19. |
+| **v0.44.5** | 2026-07-12 | **Wayland fractional scale** (@kivutar #369) + **WriteSurfacePixels** (#370). goffi v0.6.0 errno always-capture. deps: wgpu v0.30.18, goffi v0.6.0, gpucontext v0.21.1. |
 | **v0.44.1** | 2026-07-08 | **macOS live resize fix** (@lkmavi) — IOSurface churn eliminated via NSAutoreleasePool + transaction present. Run() refactor. Enterprise-validated (wgpu-rs, Flutter, Skia). |
 | **v0.44.0** | 2026-07-08 | **Multi-backend auto-selection** (#357) — Auto enumerates DX12+Vulkan+GLES, picks best GPU. Old GPUs without Vulkan get DX12/GLES instead of software. Rust wgpu pattern. |
 | **v0.43.4** | 2026-07-03 | **deps:** wgpu v0.30.9, goffi v0.5.6 — callback stack-move corruption fix (@tie, goffi#59) |

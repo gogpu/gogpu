@@ -296,7 +296,7 @@ func (h *LibwaylandHandle) UpdateCSDCursor() {
 	}
 	shape := csdHitToWpCursorShape(h.csdHitResult)
 	h.SetCSDCursorShape(shape, h.csdSerial)
-	if err := h.flush(); err != nil {
+	if err := h.flushWithRetry(); err != nil {
 		slog.Warn("wayland: cursor shape flush failed", "err", err)
 	}
 }

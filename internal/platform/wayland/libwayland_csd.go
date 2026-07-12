@@ -239,7 +239,7 @@ func (h *LibwaylandHandle) DispatchCSDEvents() error {
 	// races with any backend's internal wl_display_flush — causing SIGSEGV (ADR-041, #292).
 	h.displayMu.Lock()
 	defer h.displayMu.Unlock()
-	if err := h.flush(); err != nil {
+	if err := h.flushWithRetry(); err != nil {
 		return fmt.Errorf("csd dispatch: flush failed: %w", err)
 	}
 
@@ -826,7 +826,7 @@ func (h *LibwaylandHandle) processCSDAction(action CSDHitResult, serial uint32) 
 			slog.Info("CSD: sending xdg_toplevel.move", "toplevel", h.xdgToplevel, "seat", h.csdSeat, "serial", serial)
 			h.marshalVoid(h.xdgToplevel, 5, h.csdSeat, uintptr(serial))
 			slog.Info("CSD: marshalVoid returned, flushing")
-			if err := h.flush(); err != nil {
+			if err := h.flushWithRetry(); err != nil {
 				slog.Error("CSD move flush failed", "err", err)
 			} else {
 				slog.Info("CSD: move flushed successfully")
@@ -839,7 +839,7 @@ func (h *LibwaylandHandle) processCSDAction(action CSDHitResult, serial uint32) 
 	case CSDHitMinimize:
 		if h.xdgToplevel != 0 {
 			h.marshalVoid(h.xdgToplevel, 13)
-			if err := h.flush(); err != nil {
+			if err := h.flushWithRetry(); err != nil {
 				slog.Warn("CSD minimize flush failed", "err", err)
 			}
 		}
@@ -850,7 +850,7 @@ func (h *LibwaylandHandle) processCSDAction(action CSDHitResult, serial uint32) 
 			} else {
 				h.marshalVoid(h.xdgToplevel, 9)
 			}
-			if err := h.flush(); err != nil {
+			if err := h.flushWithRetry(); err != nil {
 				slog.Warn("CSD maximize flush failed", "err", err)
 			}
 		}
@@ -859,7 +859,7 @@ func (h *LibwaylandHandle) processCSDAction(action CSDHitResult, serial uint32) 
 		if h.xdgToplevel != 0 && h.csdSeat != 0 && serial != 0 {
 			edge := csdHitToResizeEdge(action)
 			h.marshalVoid(h.xdgToplevel, 6, h.csdSeat, uintptr(serial), uintptr(edge))
-			if err := h.flush(); err != nil {
+			if err := h.flushWithRetry(); err != nil {
 				slog.Warn("CSD resize flush failed", "err", err)
 			}
 		}

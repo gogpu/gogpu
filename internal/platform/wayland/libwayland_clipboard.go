@@ -529,8 +529,10 @@ func (h *LibwaylandHandle) ClipboardRead() (string, error) {
 	h.marshalVoid(offer, 1, uintptr(unsafe.Pointer(&mimeBuf[0])), uintptr(writeFD))
 	runtime.KeepAlive(mimeBuf)
 
-	// Flush to send the receive request to the compositor
-	if err := h.flush(); err != nil {
+	// Flush to send the receive request to the compositor.
+	// Use flushWithRetry: clipboard read happens on event loop (paste action),
+	// so socket backpressure (EAGAIN) should be retried, not treated as fatal.
+	if err := h.flushWithRetry(); err != nil {
 		syscall.Close(readFD)
 		syscall.Close(writeFD)
 		return "", fmt.Errorf("wayland: flush failed: %w", err)

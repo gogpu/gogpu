@@ -3,14 +3,17 @@
 package wayland
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	"golang.org/x/sys/unix"
 )
 
 // wlMethodDestroy is the Wayland protocol method name for wl_proxy_destroy.
@@ -694,16 +697,68 @@ func (h *LibwaylandHandle) registryBind(name uint32, iface unsafe.Pointer, versi
 	return result, nil
 }
 
+// FlushError represents an error from wl_display_flush with the underlying errno.
+// EAGAIN (socket buffer full) is transient and should be retried with poll(POLLOUT).
+// EPIPE/ECONNRESET indicate the compositor closed the connection (fatal).
+type FlushError struct{ Errno syscall.Errno }
+
+// Error returns a human-readable description of the flush failure.
+func (e *FlushError) Error() string {
+	return fmt.Sprintf("wl_display_flush: %s", e.Errno)
+}
+
+// IsEAGAIN returns true if the flush failed because the socket buffer is full.
+// This is a transient condition — retry after poll(POLLOUT).
+func (e *FlushError) IsEAGAIN() bool {
+	return e.Errno == syscall.EAGAIN
+}
+
+// IsFatal returns true if the flush failed because the compositor connection is broken.
+func (e *FlushError) IsFatal() bool {
+	return e.Errno == syscall.EPIPE || e.Errno == syscall.ECONNRESET
+}
+
 // flush calls wl_display_flush(display) to send all buffered requests to the compositor.
 // Unlike wl_display_roundtrip, this does NOT read responses or trigger callbacks.
+// Returns *FlushError with errno on failure (EAGAIN = transient, EPIPE/ECONNRESET = fatal).
 func (h *LibwaylandHandle) flush() error {
 	var result int32
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	_, _ = ffi.CallFunction(&h.cifFlush, h.fnDisplayFlush, unsafe.Pointer(&result), args[:])
+	errno, _ := ffi.CallFunction(&h.cifFlush, h.fnDisplayFlush, unsafe.Pointer(&result), args[:])
 	if result < 0 {
-		return fmt.Errorf("wl_display_flush failed: %d", result)
+		return &FlushError{Errno: errno}
 	}
 	return nil
+}
+
+// flushWithRetry retries wl_display_flush on EAGAIN using poll(POLLOUT).
+// GLFW pattern: loop until flush succeeds or a non-EAGAIN error occurs.
+// Poll timeout is 4ms (SDL3 PumpEvents value) to avoid stalling the frame.
+// Use this for event-loop callers that must be resilient to socket backpressure.
+func (h *LibwaylandHandle) flushWithRetry() error {
+	for {
+		err := h.flush()
+		if err == nil {
+			return nil
+		}
+		var fe *FlushError
+		if !errors.As(err, &fe) || !fe.IsEAGAIN() {
+			return err
+		}
+		fd := h.getDisplayFD()
+		if fd < 0 {
+			return err
+		}
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}
+		n, pollErr := unix.Poll(fds, 4) // 4ms timeout (SDL3 pattern)
+		if pollErr != nil && !errors.Is(pollErr, syscall.EINTR) {
+			return pollErr
+		}
+		if n == 0 {
+			// Poll timed out — socket still full, try again next frame.
+			return nil
+		}
+	}
 }
 
 // proxyDestroy calls wl_proxy_destroy on a proxy.

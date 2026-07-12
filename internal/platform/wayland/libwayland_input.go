@@ -178,7 +178,7 @@ func (h *LibwaylandHandle) DispatchDefaultQueue() error {
 	h.displayMu.Lock()
 	defer h.displayMu.Unlock()
 
-	if err := h.flush(); err != nil {
+	if err := h.flushWithRetry(); err != nil {
 		return err
 	}
 

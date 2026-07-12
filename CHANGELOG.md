@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.6] - 2026-07-12
+
+### Fixed
+
+- **Wayland flush EAGAIN retry** (#368) — `wl_display_flush` returning -1 with EAGAIN (socket buffer full) no longer kills the app. `flushWithRetry()` uses GLFW pattern: poll(POLLOUT, 4ms) + retry. 8 event-loop callers routed. Enterprise-validated against SDL3, GLFW, Chromium, Qt6. ADR-051.
+
+### Changed
+
+- **deps:** wgpu v0.30.18 → v0.30.19
+
 ## [0.44.5] - 2026-07-12
 
 ### Added
