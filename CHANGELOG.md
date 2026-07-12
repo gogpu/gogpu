@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.4] - 2026-07-12
+
+### Added
+
+- **`ContextRenderTarget.WriteSurfacePixels`** — implements `ggcanvas.SurfacePixelWriter` interface. On the software backend, bypasses the entire WebGPU render pass pipeline (AcquireTexture → WriteTexture → SPIR-V render pass → blit) with a single RGBA→BGRA swizzle+copy into the DIB section + BitBlt. Saves ~2-3ms present overhead per frame. Used by both gg and ui (via `ggcanvas.Render`). ADR-050.
+
+### Changed
+
+- **deps:** wgpu v0.30.13 → v0.30.15 — `hal.PixelPresenter`/`hal.PixelWriter` named interfaces (io.WriterTo pattern), `Surface.PresentPixels` 3-layer API, WriteTexture SurfaceTexture fix
+- **deps:** golang.org/x/sys v0.46.0 → v0.47.0
+
 ## [0.44.3] - 2026-07-08
 
 ### Changed

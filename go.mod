@@ -6,8 +6,8 @@ require (
 	github.com/go-webgpu/goffi v0.5.6
 	github.com/gogpu/gpucontext v0.21.0
 	github.com/gogpu/gputypes v0.5.1
-	github.com/gogpu/wgpu v0.30.13
-	golang.org/x/sys v0.46.0
+	github.com/gogpu/wgpu v0.30.15
+	golang.org/x/sys v0.47.0
 )
 
 require (

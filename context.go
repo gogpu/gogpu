@@ -243,6 +243,18 @@ func (r *ContextRenderTarget) SetDamageRects(rects []image.Rectangle) {
 	r.ctx.SetDamageRects(rects)
 }
 
+// WriteSurfacePixels writes RGBA pixel data directly to the surface and presents
+// in a single operation. On the software backend this bypasses the entire WebGPU
+// render pass pipeline — one RGBA→BGRA swizzle+copy into the DIB section,
+// then BitBlt to the window. Falls back to error on GPU backends.
+func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint32) error {
+	ws := r.ctx.activeSurface()
+	if ws == nil || ws.surface == nil {
+		return fmt.Errorf("gogpu: no active surface")
+	}
+	return ws.surface.PresentPixels(data, width, height, ws.damageRects)
+}
+
 // TextureCreator returns the texture creator for promoting pending textures.
 // This enables the universal rendering path (CPU pixmap -> GPU texture -> present)
 // to create real GPU textures from raw pixel data.
