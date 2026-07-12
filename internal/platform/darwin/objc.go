@@ -383,8 +383,8 @@ func (id ID) Send(sel SEL) ID {
 }
 
 func objcCallLocked(cif *types.CallInterface, fn unsafe.Pointer, rvalue unsafe.Pointer, avalue []unsafe.Pointer) error {
-	// Add mutex if the CIF is shared
-	return ffi.CallFunction(cif, fn, rvalue, avalue)
+	_, err := ffi.CallFunction(cif, fn, rvalue, avalue)
+	return err
 }
 
 // SendClass sends a message to a Class and returns the result.
@@ -481,7 +481,7 @@ func msgSend(self ID, sel SEL, args ...uintptr) ID {
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -531,7 +531,7 @@ func (id ID) Send5Ptr(sel SEL, arg0, arg1, arg2 uintptr) ID {
 	}
 
 	var result uintptr
-	if err := ffi.CallFunction(objcRT.cifSend5Ptr, objcRT.objcMsgSend,
+	if _, err := ffi.CallFunction(objcRT.cifSend5Ptr, objcRT.objcMsgSend,
 		unsafe.Pointer(&result), argPtrs); err != nil {
 		return 0
 	}
@@ -606,7 +606,7 @@ func (id ID) SendDouble(sel SEL, arg float64) ID {
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -668,7 +668,7 @@ func (id ID) SendDoubleDouble(sel SEL, arg0, arg1 float64) ID {
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -728,7 +728,7 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -804,7 +804,7 @@ func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backin
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -861,7 +861,7 @@ func (id ID) GetRect(sel SEL) NSRect {
 
 	// Result buffer for the struct
 	var result [4]float64
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcMsgSendFn(nsRectType),
 		unsafe.Pointer(&result),
@@ -921,7 +921,7 @@ func (id ID) GetPoint(sel SEL) NSPoint {
 	// casts rvalue to *[4]float64 regardless of the actual element count, and
 	// Go 1.26's checkptr (enabled by -race) rejects a smaller allocation.
 	var result [4]float64
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -974,7 +974,7 @@ func (id ID) GetUint64(sel SEL) uint64 {
 	}
 
 	var result uint64
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -1027,7 +1027,7 @@ func (id ID) GetInt64(sel SEL) int64 {
 	}
 
 	var result int64
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -1080,7 +1080,7 @@ func (id ID) GetDouble(sel SEL) float64 {
 	}
 
 	var result float64
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSendFpret,
 		unsafe.Pointer(&result),
@@ -1133,7 +1133,7 @@ func (id ID) GetBool(sel SEL) bool {
 	}
 
 	var result uint8
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -1190,7 +1190,7 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),
@@ -1231,7 +1231,7 @@ func AllocateClassPair(superclass Class, name string) Class {
 	var extraBytes uintptr
 
 	var result uintptr
-	if err := ffi.CallFunction(cif,
+	if _, err := ffi.CallFunction(cif,
 		objcRT.objcAllocateClassPair,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
@@ -1273,7 +1273,7 @@ func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
 	typePtr := uintptr(unsafe.Pointer(&typeBytes[0]))
 
 	var result uintptr
-	if err := ffi.CallFunction(cif,
+	if _, err := ffi.CallFunction(cif,
 		objcRT.classAddMethod,
 		unsafe.Pointer(&result),
 		[]unsafe.Pointer{
@@ -1305,7 +1305,7 @@ func RegisterClassPair(cls Class) {
 	}
 
 	clsPtr := uintptr(cls)
-	_ = ffi.CallFunction(cif,
+	_, _ = ffi.CallFunction(cif,
 		objcRT.objcRegisterClassPair,
 		nil,
 		[]unsafe.Pointer{
@@ -1352,7 +1352,7 @@ func SetAssociatedObject(object ID, key unsafe.Pointer, value unsafe.Pointer, po
 		unsafe.Pointer(&polVal),
 	}
 
-	_ = ffi.CallFunction(cif, objcRT.objcSetAssociatedObjectFn, nil, args)
+	_, _ = ffi.CallFunction(cif, objcRT.objcSetAssociatedObjectFn, nil, args)
 }
 
 // GetAssociatedObject retrieves the associated object for the given key.
@@ -1387,6 +1387,6 @@ func GetAssociatedObject(object ID, key unsafe.Pointer) unsafe.Pointer {
 		unsafe.Pointer(&objVal),
 		unsafe.Pointer(&keyVal),
 	}
-	_ = ffi.CallFunction(cif, objcRT.objcGetAssociatedObjectFn, unsafe.Pointer(&ret), args)
+	_, _ = ffi.CallFunction(cif, objcRT.objcGetAssociatedObjectFn, unsafe.Pointer(&ret), args)
 	return unsafe.Pointer(ret) //nolint:govet // ret holds an ObjC pointer from C FFI, not a Go GC-managed pointer
 }

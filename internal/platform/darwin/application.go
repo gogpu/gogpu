@@ -345,7 +345,7 @@ func createApplicationDefinedEvent() ID {
 	}
 
 	var result uintptr
-	err = ffi.CallFunction(
+	_, err = ffi.CallFunction(
 		cif,
 		objcRT.objcMsgSend,
 		unsafe.Pointer(&result),

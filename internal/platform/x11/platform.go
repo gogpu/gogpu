@@ -257,7 +257,7 @@ func openXlibDisplay() (*xlibHandle, error) {
 
 	var display uintptr
 	args := [1]unsafe.Pointer{unsafe.Pointer(&displayArg)}
-	ffi.CallFunction(cifOpen, xOpenDisplay, unsafe.Pointer(&display), args[:])
+	_, _ = ffi.CallFunction(cifOpen, xOpenDisplay, unsafe.Pointer(&display), args[:])
 
 	if display == 0 {
 		return nil, fmt.Errorf("x11: XOpenDisplay(%q) returned NULL", displayEnv)
@@ -280,7 +280,7 @@ func (h *xlibHandle) close() {
 	}
 	var result int
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	ffi.CallFunction(h.cifClose, h.xCloseDisplay, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(h.cifClose, h.xCloseDisplay, unsafe.Pointer(&result), args[:])
 	h.display = 0
 }
 
@@ -1613,7 +1613,7 @@ func (p *Platform) setDetectableAutoRepeat() {
 		unsafe.Pointer(&detectable),
 		unsafe.Pointer(&supported),
 	}
-	_ = ffi.CallFunction(&cif, sym, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&cif, sym, unsafe.Pointer(&result), args[:])
 
 	if supported != 0 {
 		logger().Info("XkbSetDetectableAutoRepeat enabled")

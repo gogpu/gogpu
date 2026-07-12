@@ -320,7 +320,7 @@ func (h *LibwaylandHandle) LockPointer(surface, pointer uintptr, lifetime uint32
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return fmt.Errorf("wayland: lock_pointer returned NULL")
 	}
@@ -367,7 +367,7 @@ func (h *LibwaylandHandle) ConfinePointer(surface, pointer uintptr, lifetime uin
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return fmt.Errorf("wayland: confine_pointer returned NULL")
 	}

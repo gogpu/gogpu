@@ -434,7 +434,7 @@ func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, i
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("wl_proxy_marshal_array_constructor returned NULL (opcode %d)", opcode)
 	}
@@ -457,7 +457,7 @@ func (h *LibwaylandHandle) marshalVoid(proxy uintptr, opcode uint32, args ...uin
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&nullIface),
 	}
-	ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&dummyResult), ffiArgs[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&dummyResult), ffiArgs[:])
 }
 
 // addListener calls wl_proxy_add_listener(proxy, listener, NULL).
@@ -475,7 +475,7 @@ func (h *LibwaylandHandle) addListenerWithData(proxy, listener, data uintptr) er
 		unsafe.Pointer(&listener),
 		unsafe.Pointer(&data),
 	}
-	_ = ffi.CallFunction(&h.cifAddListener, h.fnAddListener, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifAddListener, h.fnAddListener, unsafe.Pointer(&result), args[:])
 	if result < 0 {
 		return fmt.Errorf("wl_proxy_add_listener failed: %d", result)
 	}
@@ -490,13 +490,13 @@ func (h *LibwaylandHandle) roundtrip() error {
 	var result int32
 	if h.appQueue != 0 {
 		args := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.appQueue)}
-		_ = ffi.CallFunction(&h.cifRoundtripQueue, h.fnRoundtripQueue, unsafe.Pointer(&result), args[:])
+		_, _ = ffi.CallFunction(&h.cifRoundtripQueue, h.fnRoundtripQueue, unsafe.Pointer(&result), args[:])
 		if result < 0 {
 			return fmt.Errorf("wl_display_roundtrip_queue failed: %d", result)
 		}
 	} else {
 		args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-		_ = ffi.CallFunction(&h.cifRoundtrip, h.fnRoundtrip, unsafe.Pointer(&result), args[:])
+		_, _ = ffi.CallFunction(&h.cifRoundtrip, h.fnRoundtrip, unsafe.Pointer(&result), args[:])
 		if result < 0 {
 			return fmt.Errorf("wl_display_roundtrip failed: %d", result)
 		}

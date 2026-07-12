@@ -191,10 +191,10 @@ func (h *LibwaylandHandle) DispatchDefaultQueue() error {
 	if h.appQueue != 0 {
 		// Queue-specific prepare_read: only locks for our app queue.
 		prepArgs := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.appQueue)}
-		ffi.CallFunction(&h.cifPrepareReadQ, h.fnPrepareReadQueue, unsafe.Pointer(&prepResult), prepArgs[:])
+		_, _ = ffi.CallFunction(&h.cifPrepareReadQ, h.fnPrepareReadQueue, unsafe.Pointer(&prepResult), prepArgs[:])
 	} else {
 		// Fallback: no app queue (should not happen in normal operation).
-		ffi.CallFunction(&h.cifPrepareRead, h.fnPrepareRead, unsafe.Pointer(&prepResult), dispArgs[:])
+		_, _ = ffi.CallFunction(&h.cifPrepareRead, h.fnPrepareRead, unsafe.Pointer(&prepResult), dispArgs[:])
 	}
 
 	if prepResult == 0 {
@@ -202,11 +202,11 @@ func (h *LibwaylandHandle) DispatchDefaultQueue() error {
 		fd := h.getDisplayFD()
 		if fd >= 0 && socketHasData(fd) {
 			var readResult int32
-			ffi.CallFunction(&h.cifReadEvents, h.fnReadEvents, unsafe.Pointer(&readResult), dispArgs[:])
+			_, _ = ffi.CallFunction(&h.cifReadEvents, h.fnReadEvents, unsafe.Pointer(&readResult), dispArgs[:])
 		} else {
 			// No data — cancel read lock.
 			// wl_display_cancel_read is NOT queue-specific (cancels the global read lock).
-			ffi.CallFunction(&h.cifPrepareRead, h.fnCancelRead, nil, dispArgs[:])
+			_, _ = ffi.CallFunction(&h.cifPrepareRead, h.fnCancelRead, nil, dispArgs[:])
 		}
 	}
 
@@ -214,9 +214,9 @@ func (h *LibwaylandHandle) DispatchDefaultQueue() error {
 	var dispResult int32
 	if h.appQueue != 0 {
 		queueArgs := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.appQueue)}
-		ffi.CallFunction(&h.cifDispatchQP, h.fnDispatchQueueP, unsafe.Pointer(&dispResult), queueArgs[:])
+		_, _ = ffi.CallFunction(&h.cifDispatchQP, h.fnDispatchQueueP, unsafe.Pointer(&dispResult), queueArgs[:])
 	} else {
-		ffi.CallFunction(&h.cifDispatchP, h.fnDispatchPend, unsafe.Pointer(&dispResult), dispArgs[:])
+		_, _ = ffi.CallFunction(&h.cifDispatchP, h.fnDispatchPend, unsafe.Pointer(&dispResult), dispArgs[:])
 	}
 
 	return nil

@@ -158,7 +158,7 @@ func loadCoreGraphics() error {
 
 	// Create and cache the device RGB color space
 	var csResult uintptr
-	err = ffi.CallFunction(cgState.cifNoArgs, cgState.cgColorSpaceCreateDeviceRGB,
+	_, err = ffi.CallFunction(cgState.cifNoArgs, cgState.cgColorSpaceCreateDeviceRGB,
 		unsafe.Pointer(&csResult), nil)
 	if err != nil || csResult == 0 {
 		return errors.New("darwin: CGColorSpaceCreateDeviceRGB failed")
@@ -197,7 +197,7 @@ func CreateCGImageFromRGBA(pixels []byte, width, height int) (uintptr, error) {
 		unsafe.Pointer(&bitmapInfo),
 	}
 
-	err := ffi.CallFunction(cgState.cifBitmapCtx, cgState.cgBitmapContextCreate,
+	_, err := ffi.CallFunction(cgState.cifBitmapCtx, cgState.cgBitmapContextCreate,
 		unsafe.Pointer(&ctxResult), args[:])
 	if err != nil || ctxResult == 0 {
 		return 0, ErrCGImageCreationFailed
@@ -206,12 +206,12 @@ func CreateCGImageFromRGBA(pixels []byte, width, height int) (uintptr, error) {
 	// Create CGImage from context
 	var imgResult uintptr
 	imgArgs := [1]unsafe.Pointer{unsafe.Pointer(&ctxResult)}
-	err = ffi.CallFunction(cgState.cifCreateImage, cgState.cgBitmapContextCreateImage,
+	_, err = ffi.CallFunction(cgState.cifCreateImage, cgState.cgBitmapContextCreateImage,
 		unsafe.Pointer(&imgResult), imgArgs[:])
 
 	// Release the bitmap context (image retains the data it needs)
 	releaseArgs := [1]unsafe.Pointer{unsafe.Pointer(&ctxResult)}
-	_ = ffi.CallFunction(cgState.cifReleasePtr, cgState.cgContextRelease,
+	_, _ = ffi.CallFunction(cgState.cifReleasePtr, cgState.cgContextRelease,
 		unsafe.Pointer(new(uintptr)), releaseArgs[:])
 
 	if err != nil || imgResult == 0 {
@@ -230,6 +230,6 @@ func ReleaseCGImage(image uintptr) {
 		return
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&image)}
-	_ = ffi.CallFunction(cgState.cifReleasePtr, cgState.cgImageRelease,
+	_, _ = ffi.CallFunction(cgState.cifReleasePtr, cgState.cgImageRelease,
 		unsafe.Pointer(new(uintptr)), args[:])
 }

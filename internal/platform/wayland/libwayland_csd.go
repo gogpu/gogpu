@@ -280,7 +280,7 @@ func (h *LibwaylandHandle) setupCSDPointer(seatName, seatVersion uint32) error {
 	// callbacks on the default queue.
 	var queue uintptr
 	queueArgs := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	ffi.CallFunction(&h.cifCreateQueue, h.fnCreateQueue, unsafe.Pointer(&queue), queueArgs[:])
+	_, _ = ffi.CallFunction(&h.cifCreateQueue, h.fnCreateQueue, unsafe.Pointer(&queue), queueArgs[:])
 	if queue == 0 {
 		return fmt.Errorf("wl_display_create_queue returned NULL")
 	}
@@ -299,7 +299,7 @@ func (h *LibwaylandHandle) setupCSDPointer(seatName, seatVersion uint32) error {
 
 	// Assign seat to CSD queue
 	setQueueArgs := [2]unsafe.Pointer{unsafe.Pointer(&seat), unsafe.Pointer(&queue)}
-	ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, setQueueArgs[:])
+	_, _ = ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, setQueueArgs[:])
 
 	// Bind SECOND seat on default queue — for move/resize (must be same queue as xdg_toplevel)
 	seatDefault, err := h.registryBind(seatName, h.seatInterface, version)
@@ -335,7 +335,7 @@ func (h *LibwaylandHandle) setupCSDPointer(seatName, seatVersion uint32) error {
 
 	// Assign pointer to CSD queue
 	ptrQueueArgs := [2]unsafe.Pointer{unsafe.Pointer(&pointer), unsafe.Pointer(&queue)}
-	ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, ptrQueueArgs[:])
+	_, _ = ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, ptrQueueArgs[:])
 
 	// Add pointer listener (9 events). Pass h as data so each callback can
 	// identify which LibwaylandHandle to update — this avoids the single global
@@ -614,7 +614,7 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 			h.csdSurfaces[i] = surf
 			if h.csdQueue != 0 {
 				surfQueueArgs := [2]unsafe.Pointer{unsafe.Pointer(&surf), unsafe.Pointer(&h.csdQueue)}
-				ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, surfQueueArgs[:])
+				_, _ = ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, surfQueueArgs[:])
 			}
 			subsrf, err := h.marshalConstructor2Obj(h.subcompositor, 1, h.subsurfaceInterface, surf, h.surface)
 			if err != nil {
@@ -762,7 +762,7 @@ func (h *LibwaylandHandle) marshalConstructor2Obj(proxy uintptr, opcode uint32, 
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("marshalConstructor2Obj returned NULL (opcode %d)", opcode)
 	}
@@ -787,7 +787,7 @@ func (h *LibwaylandHandle) marshalConstructorFD(proxy uintptr, opcode uint32, if
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("marshalConstructorFD returned NULL (opcode %d)", opcode)
 	}
@@ -810,7 +810,7 @@ func (h *LibwaylandHandle) marshalConstructorArgs(proxy uintptr, opcode uint32, 
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), ffiArgs[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), ffiArgs[:])
 	if result == 0 {
 		return 0, fmt.Errorf("marshalConstructorArgs returned NULL (opcode %d)", opcode)
 	}
@@ -873,7 +873,7 @@ func (h *LibwaylandHandle) dispatchCSDQueue() {
 	}
 	var result int32
 	args := [2]unsafe.Pointer{unsafe.Pointer(&h.display), unsafe.Pointer(&h.csdQueue)}
-	ffi.CallFunction(&h.cifDispatchQP, h.fnDispatchQueueP, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifDispatchQP, h.fnDispatchQueueP, unsafe.Pointer(&result), args[:])
 }
 
 // getDisplayFD returns the file descriptor for the C display connection.
@@ -884,7 +884,7 @@ func (h *LibwaylandHandle) getDisplayFD() int {
 	}
 	var result int32
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	ffi.CallFunction(&h.cifRoundtrip, h.fnGetFD, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifRoundtrip, h.fnGetFD, unsafe.Pointer(&result), args[:])
 	// cifRoundtrip has same signature: int(ptr) — reuse it for get_fd
 	return int(result)
 }

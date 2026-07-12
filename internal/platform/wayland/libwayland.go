@@ -270,7 +270,7 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 	var displayArg uintptr // NULL = use WAYLAND_DISPLAY env
 	var display uintptr
 	connectArgs := [1]unsafe.Pointer{unsafe.Pointer(&displayArg)}
-	_ = ffi.CallFunction(&h.cifConnect, h.fnDisplayConnect, unsafe.Pointer(&display), connectArgs[:])
+	_, _ = ffi.CallFunction(&h.cifConnect, h.fnDisplayConnect, unsafe.Pointer(&display), connectArgs[:])
 	if display == 0 {
 		return nil, fmt.Errorf("wayland: wl_display_connect(NULL) returned NULL")
 	}
@@ -283,7 +283,7 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 	// ADR-041 Phase 4).
 	var appQueue uintptr
 	queueArgs := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	ffi.CallFunction(&h.cifCreateQueue, h.fnCreateQueue, unsafe.Pointer(&appQueue), queueArgs[:])
+	_, _ = ffi.CallFunction(&h.cifCreateQueue, h.fnCreateQueue, unsafe.Pointer(&appQueue), queueArgs[:])
 	if appQueue == 0 {
 		h.disconnectDisplay()
 		return nil, fmt.Errorf("wayland: wl_display_create_queue returned NULL")
@@ -297,7 +297,7 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 	// → all registry.bind results on appQueue → all child objects on appQueue.
 	var displayWrapper uintptr
 	wrapperArgs := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	ffi.CallFunction(&h.cifCreateWrapper, h.fnCreateWrapper, unsafe.Pointer(&displayWrapper), wrapperArgs[:])
+	_, _ = ffi.CallFunction(&h.cifCreateWrapper, h.fnCreateWrapper, unsafe.Pointer(&displayWrapper), wrapperArgs[:])
 	if displayWrapper == 0 {
 		h.destroyAppQueue()
 		h.disconnectDisplay()
@@ -305,7 +305,7 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 	}
 	// Assign the wrapper to our app queue — children inherit this queue.
 	setQArgs := [2]unsafe.Pointer{unsafe.Pointer(&displayWrapper), unsafe.Pointer(&appQueue)}
-	ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, setQArgs[:])
+	_, _ = ffi.CallFunction(&h.cifSetQueue, h.fnProxySetQueue, nil, setQArgs[:])
 
 	// Step 5: Get registry THROUGH the wrapper so it inherits appQueue.
 	// Opcode 1 = wl_display::get_registry. Arg: one new_id (NULL placeholder).
@@ -313,7 +313,7 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 
 	// Destroy the wrapper — child objects (registry) retain the queue assignment.
 	destroyWrapperArgs := [1]unsafe.Pointer{unsafe.Pointer(&displayWrapper)}
-	ffi.CallFunction(&h.cifWrapperDestroy, h.fnWrapperDestroy, nil, destroyWrapperArgs[:])
+	_, _ = ffi.CallFunction(&h.cifWrapperDestroy, h.fnWrapperDestroy, nil, destroyWrapperArgs[:])
 
 	if err != nil {
 		h.destroyAppQueue()
@@ -648,7 +648,7 @@ func (h *LibwaylandHandle) marshalConstructor(proxy uintptr, opcode uint32, ifac
 		unsafe.Pointer(&argPtr),
 		unsafe.Pointer(&ifaceAddr),
 	}
-	_ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshal, h.fnProxyMarshal, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("wl_proxy_marshal_array_constructor returned NULL (opcode %d)", opcode)
 	}
@@ -687,7 +687,7 @@ func (h *LibwaylandHandle) registryBind(name uint32, iface unsafe.Pointer, versi
 		unsafe.Pointer(&ifaceAddr),
 		unsafe.Pointer(&version),
 	}
-	_ = ffi.CallFunction(&h.cifMarshalV, h.fnProxyMarshalV, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifMarshalV, h.fnProxyMarshalV, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("registry bind failed for global %d version %d", name, version)
 	}
@@ -699,7 +699,7 @@ func (h *LibwaylandHandle) registryBind(name uint32, iface unsafe.Pointer, versi
 func (h *LibwaylandHandle) flush() error {
 	var result int32
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	_ = ffi.CallFunction(&h.cifFlush, h.fnDisplayFlush, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifFlush, h.fnDisplayFlush, unsafe.Pointer(&result), args[:])
 	if result < 0 {
 		return fmt.Errorf("wl_display_flush failed: %d", result)
 	}
@@ -712,7 +712,7 @@ func (h *LibwaylandHandle) proxyDestroy(proxy uintptr) {
 		return
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&proxy)}
-	_ = ffi.CallFunction(&h.cifDestroy, h.fnProxyDestroy, nil, args[:])
+	_, _ = ffi.CallFunction(&h.cifDestroy, h.fnProxyDestroy, nil, args[:])
 }
 
 // destroyAppQueue destroys the app event queue.
@@ -721,7 +721,7 @@ func (h *LibwaylandHandle) destroyAppQueue() {
 		return
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.appQueue)}
-	ffi.CallFunction(&h.cifDestroyQueue, h.fnDestroyQueue, nil, args[:])
+	_, _ = ffi.CallFunction(&h.cifDestroyQueue, h.fnDestroyQueue, nil, args[:])
 	h.appQueue = 0
 }
 
@@ -731,7 +731,7 @@ func (h *LibwaylandHandle) disconnectDisplay() {
 		return
 	}
 	args := [1]unsafe.Pointer{unsafe.Pointer(&h.display)}
-	_ = ffi.CallFunction(&h.cifDisconn, h.fnDisplayDisconn, nil, args[:])
+	_, _ = ffi.CallFunction(&h.cifDisconn, h.fnDisplayDisconn, nil, args[:])
 	h.display = 0
 }
 

@@ -264,7 +264,7 @@ func (h *Handle) SetKeymapFromRMLVO(rules, model, layout, variant, options strin
 		unsafe.Pointer(&namesPtr),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&h.cifKeymapNewFromNames, h.fnKeymapNewFromNames, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifKeymapNewFromNames, h.fnKeymapNewFromNames, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return fmt.Errorf("xkbcommon: xkb_keymap_new_from_names returned NULL for layout %q", layout)
 	}
@@ -322,7 +322,7 @@ func (h *Handle) SetKeymapFromNames() error {
 		unsafe.Pointer(&namesPtr),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&h.cifKeymapNewFromNames, h.fnKeymapNewFromNames, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifKeymapNewFromNames, h.fnKeymapNewFromNames, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return fmt.Errorf("xkbcommon: xkb_keymap_new_from_names returned NULL (no system keymap?)")
 	}
@@ -385,7 +385,7 @@ func (h *Handle) KeyGetOneSym(keycode uint32) uint32 {
 		unsafe.Pointer(&h.state),
 		unsafe.Pointer(&xkbKey),
 	}
-	_ = ffi.CallFunction(&h.cifStateKeyGetOneSym, h.fnStateKeyGetOneSym, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateKeyGetOneSym, h.fnStateKeyGetOneSym, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -421,7 +421,7 @@ func (h *Handle) UpdateKey(keycode uint32, pressed bool) {
 		unsafe.Pointer(&xkbKey),
 		unsafe.Pointer(&direction),
 	}
-	_ = ffi.CallFunction(&h.cifStateUpdateKey, h.fnStateUpdateKey, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateUpdateKey, h.fnStateUpdateKey, unsafe.Pointer(&result), args[:])
 }
 
 // Ready returns true if xkbcommon is loaded and a keymap is active.
@@ -503,7 +503,7 @@ func (h *Handle) KeyRepeats(keycode uint32) bool {
 		unsafe.Pointer(&h.keymap),
 		unsafe.Pointer(&xkbKey),
 	}
-	_ = ffi.CallFunction(&h.cifKeymapKeyRepeats, h.fnKeymapKeyRepeats, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifKeymapKeyRepeats, h.fnKeymapKeyRepeats, unsafe.Pointer(&result), args[:])
 	return result == 1
 }
 
@@ -728,7 +728,7 @@ func (h *Handle) contextNew() (uintptr, error) {
 	flags := XKBContextNoFlags
 	var result uintptr
 	args := [1]unsafe.Pointer{unsafe.Pointer(&flags)}
-	_ = ffi.CallFunction(&h.cifContextNew, h.fnContextNew, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifContextNew, h.fnContextNew, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("xkbcommon: xkb_context_new returned NULL")
 	}
@@ -751,7 +751,7 @@ func (h *Handle) keymapNewFromString(keymapStr []byte) (uintptr, error) {
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&flags),
 	}
-	_ = ffi.CallFunction(&h.cifKeymapNewFromString, h.fnKeymapNewFromString, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifKeymapNewFromString, h.fnKeymapNewFromString, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("xkbcommon: xkb_keymap_new_from_string returned NULL (invalid keymap?)")
 	}
@@ -762,7 +762,7 @@ func (h *Handle) keymapNewFromString(keymapStr []byte) (uintptr, error) {
 func (h *Handle) stateNew(keymap uintptr) (uintptr, error) {
 	var result uintptr
 	args := [1]unsafe.Pointer{unsafe.Pointer(&keymap)}
-	_ = ffi.CallFunction(&h.cifStateNew, h.fnStateNew, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateNew, h.fnStateNew, unsafe.Pointer(&result), args[:])
 	if result == 0 {
 		return 0, fmt.Errorf("xkbcommon: xkb_state_new returned NULL")
 	}
@@ -783,7 +783,7 @@ func (h *Handle) stateKeyGetUtf8(key uint32, buf []byte, bufSize uint32) int32 {
 		unsafe.Pointer(&bufPtr),
 		unsafe.Pointer(&bufSize),
 	}
-	_ = ffi.CallFunction(&h.cifStateKeyGetUtf8, h.fnStateKeyGetUtf8, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateKeyGetUtf8, h.fnStateKeyGetUtf8, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -799,13 +799,13 @@ func (h *Handle) stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutD
 		unsafe.Pointer(&layoutLatched),
 		unsafe.Pointer(&layoutLocked),
 	}
-	_ = ffi.CallFunction(&h.cifStateUpdateMask, h.fnStateUpdateMask, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateUpdateMask, h.fnStateUpdateMask, unsafe.Pointer(&result), args[:])
 }
 
 func (h *Handle) destroyState() {
 	if h.state != 0 {
 		args := [1]unsafe.Pointer{unsafe.Pointer(&h.state)}
-		ffi.CallFunction(&h.cifStateUnref, h.fnStateUnref, nil, args[:])
+		_, _ = ffi.CallFunction(&h.cifStateUnref, h.fnStateUnref, nil, args[:])
 		h.state = 0
 	}
 }
@@ -813,7 +813,7 @@ func (h *Handle) destroyState() {
 func (h *Handle) destroyKeymap() {
 	if h.keymap != 0 {
 		args := [1]unsafe.Pointer{unsafe.Pointer(&h.keymap)}
-		ffi.CallFunction(&h.cifKeymapUnref, h.fnKeymapUnref, nil, args[:])
+		_, _ = ffi.CallFunction(&h.cifKeymapUnref, h.fnKeymapUnref, nil, args[:])
 		h.keymap = 0
 	}
 }
@@ -821,7 +821,7 @@ func (h *Handle) destroyKeymap() {
 func (h *Handle) destroyContext() {
 	if h.context != 0 {
 		args := [1]unsafe.Pointer{unsafe.Pointer(&h.context)}
-		ffi.CallFunction(&h.cifContextUnref, h.fnContextUnref, nil, args[:])
+		_, _ = ffi.CallFunction(&h.cifContextUnref, h.fnContextUnref, nil, args[:])
 		h.context = 0
 	}
 }
@@ -838,7 +838,7 @@ func (h *Handle) keymapModGetIndex(name string) int32 {
 		unsafe.Pointer(&h.keymap),
 		unsafe.Pointer(&namePtr),
 	}
-	_ = ffi.CallFunction(&h.cifKeymapModGetIndex, h.fnKeymapModGetIndex, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifKeymapModGetIndex, h.fnKeymapModGetIndex, unsafe.Pointer(&result), args[:])
 
 	// XKB_MOD_INVALID = 0xFFFFFFFF -> convert to int32 -1
 	if result == 0xFFFFFFFF {
@@ -860,7 +860,7 @@ func (h *Handle) stateModNameIsActive(name string) int32 {
 		unsafe.Pointer(&namePtr),
 		unsafe.Pointer(&stateType),
 	}
-	_ = ffi.CallFunction(&h.cifStateModNameIsActive, h.fnStateModNameIsActive, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateModNameIsActive, h.fnStateModNameIsActive, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -872,7 +872,7 @@ func (h *Handle) stateKeyGetLayout(key uint32) uint32 {
 		unsafe.Pointer(&h.state),
 		unsafe.Pointer(&key),
 	}
-	_ = ffi.CallFunction(&h.cifStateKeyGetLayout, h.fnStateKeyGetLayout, unsafe.Pointer(&result), args[:])
+	_, _ = ffi.CallFunction(&h.cifStateKeyGetLayout, h.fnStateKeyGetLayout, unsafe.Pointer(&result), args[:])
 	return result
 }
 
@@ -889,7 +889,7 @@ func (h *Handle) keymapKeyGetSymsByLevel(key, layout, level uint32) (uint32, int
 		unsafe.Pointer(&level),
 		unsafe.Pointer(&symsPtr),
 	}
-	_ = ffi.CallFunction(&h.cifKeymapKeyGetSymsByLevel, h.fnKeymapKeyGetSymsByLevel, unsafe.Pointer(&count), args[:])
+	_, _ = ffi.CallFunction(&h.cifKeymapKeyGetSymsByLevel, h.fnKeymapKeyGetSymsByLevel, unsafe.Pointer(&count), args[:])
 
 	if count >= 1 && symsPtr != nil {
 		keysym := *(*uint32)(symsPtr)

@@ -153,7 +153,7 @@ func darwinRegisterSel(name string) (uintptr, error) {
 	}
 
 	var result uintptr
-	if err := ffi.CallFunction(cif, nsSoundRT.selRegisterName, unsafe.Pointer(&result),
+	if _, err := ffi.CallFunction(cif, nsSoundRT.selRegisterName, unsafe.Pointer(&result),
 		[]unsafe.Pointer{unsafe.Pointer(&namePtr)}); err != nil {
 		return 0, fmt.Errorf("sound: sel_registerName(%q) call failed: %w", name, err)
 	}
@@ -179,7 +179,7 @@ func darwinGetClass(name string) (uintptr, error) {
 	}
 
 	var result uintptr
-	if err := ffi.CallFunction(cif, nsSoundRT.objcGetClass, unsafe.Pointer(&result),
+	if _, err := ffi.CallFunction(cif, nsSoundRT.objcGetClass, unsafe.Pointer(&result),
 		[]unsafe.Pointer{unsafe.Pointer(&namePtr)}); err != nil {
 		return 0, fmt.Errorf("sound: objc_getClass(%q) call failed: %w", name, err)
 	}
@@ -208,7 +208,7 @@ func darwinCreateNSString(s string) (uintptr, error) {
 	defer nsSoundRT.mu.Unlock()
 
 	var result uintptr
-	if err := ffi.CallFunction(nsSoundRT.cif3, nsSoundRT.objcMsgSend, unsafe.Pointer(&result),
+	if _, err := ffi.CallFunction(nsSoundRT.cif3, nsSoundRT.objcMsgSend, unsafe.Pointer(&result),
 		[]unsafe.Pointer{
 			unsafe.Pointer(&cls),
 			unsafe.Pointer(&selUTF8),
@@ -241,7 +241,7 @@ func platformPlay(s SystemSound) {
 	// [NSSound soundNamed:name]
 	nsSoundRT.mu.Lock()
 	var soundObj uintptr
-	err = ffi.CallFunction(nsSoundRT.cif3, nsSoundRT.objcMsgSend, unsafe.Pointer(&soundObj),
+	_, err = ffi.CallFunction(nsSoundRT.cif3, nsSoundRT.objcMsgSend, unsafe.Pointer(&soundObj),
 		[]unsafe.Pointer{
 			unsafe.Pointer(&cls),
 			unsafe.Pointer(&nsSoundRT.selSoundNamed),
@@ -255,7 +255,7 @@ func platformPlay(s SystemSound) {
 
 	// [sound play]
 	nsSoundRT.mu.Lock()
-	_ = ffi.CallFunction(nsSoundRT.cif2, nsSoundRT.objcMsgSend, nil,
+	_, _ = ffi.CallFunction(nsSoundRT.cif2, nsSoundRT.objcMsgSend, nil,
 		[]unsafe.Pointer{
 			unsafe.Pointer(&soundObj),
 			unsafe.Pointer(&nsSoundRT.selPlay),
@@ -286,7 +286,7 @@ func platformPlayFile(path string) error {
 
 	nsSoundRT.mu.Lock()
 	var obj uintptr
-	err = ffi.CallFunction(nsSoundRT.cif2, nsSoundRT.objcMsgSend, unsafe.Pointer(&obj),
+	_, err = ffi.CallFunction(nsSoundRT.cif2, nsSoundRT.objcMsgSend, unsafe.Pointer(&obj),
 		[]unsafe.Pointer{
 			unsafe.Pointer(&cls),
 			unsafe.Pointer(&selAlloc),
@@ -326,7 +326,7 @@ func platformPlayFile(path string) error {
 
 	nsSoundRT.mu.Lock()
 	var initResult uintptr
-	err = ffi.CallFunction(cif4, nsSoundRT.objcMsgSend, unsafe.Pointer(&initResult),
+	_, err = ffi.CallFunction(cif4, nsSoundRT.objcMsgSend, unsafe.Pointer(&initResult),
 		[]unsafe.Pointer{
 			unsafe.Pointer(&obj),
 			unsafe.Pointer(&selInit),
@@ -344,7 +344,7 @@ func platformPlayFile(path string) error {
 
 	// [sound play]
 	nsSoundRT.mu.Lock()
-	_ = ffi.CallFunction(nsSoundRT.cif2, nsSoundRT.objcMsgSend, nil,
+	_, _ = ffi.CallFunction(nsSoundRT.cif2, nsSoundRT.objcMsgSend, nil,
 		[]unsafe.Pointer{
 			unsafe.Pointer(&initResult),
 			unsafe.Pointer(&nsSoundRT.selPlay),

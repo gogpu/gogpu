@@ -5,16 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.44.4] - 2026-07-12
+## [0.44.5] - 2026-07-12
 
 ### Added
 
-- **`ContextRenderTarget.WriteSurfacePixels`** — implements `ggcanvas.SurfacePixelWriter` interface. On the software backend, bypasses the entire WebGPU render pass pipeline (AcquireTexture → WriteTexture → SPIR-V render pass → blit) with a single RGBA→BGRA swizzle+copy into the DIB section + BitBlt. Saves ~2-3ms present overhead per frame. Used by both gg and ui (via `ggcanvas.Render`). ADR-050.
+- **Wayland fractional scale support** (@kivutar, #369) — native `wp_fractional_scale_v1` + `wp_viewporter` protocol support. KDE Wayland at 150% scaling now renders the framebuffer at physical resolution instead of blurry upscale. Per-window fractional scale via `libwayland()` helper, viewport destination caching, protocol destroy on cleanup. Enterprise-reviewed against winit, SDL3, GTK4.
+- **`ContextRenderTarget.WriteSurfacePixels`** (#370) — implements `ggcanvas.SurfacePixelWriter` interface. Software backend zero-copy present bypasses WebGPU render pass pipeline. ADR-050.
 
 ### Changed
 
-- **deps:** wgpu v0.30.13 → v0.30.15 — `hal.PixelPresenter`/`hal.PixelWriter` named interfaces (io.WriterTo pattern), `Surface.PresentPixels` 3-layer API, WriteTexture SurfaceTexture fix
-- **deps:** golang.org/x/sys v0.46.0 → v0.47.0
+- **deps:** wgpu v0.30.13 → v0.30.18 — goffi v0.6.0 errno always-capture (ADR-049), `hal.PixelPresenter`/`hal.PixelWriter`, `Surface.PresentPixels` 3-layer API, Vulkan CmdSetBlendConstants array param fix
+- **deps:** goffi v0.5.6 → v0.6.0 — `CallFunction` returns `(syscall.Errno, error)`, assembly-level errno capture
+- **deps:** gpucontext v0.21.0 → v0.21.1, golang.org/x/sys v0.46.0 → v0.47.0
 
 ## [0.44.3] - 2026-07-08
 
