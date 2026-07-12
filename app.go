@@ -19,6 +19,17 @@ type appRenderLoop interface {
 	ConsumePendingResize() (uint32, uint32, bool)
 }
 
+func physicalSizeUint32(width, height int) (uint32, uint32, bool) {
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	maxUint32 := uint64(^uint32(0))
+	if uint64(width) > maxUint32 || uint64(height) > maxUint32 {
+		return 0, 0, false
+	}
+	return uint32(width), uint32(height), true
+}
+
 // App is the main application type.
 // It manages the window, rendering, and application lifecycle.
 //
@@ -612,8 +623,8 @@ func (a *App) setupLiveResizeHook(platWindow platform.PlatformWindow) {
 		// on every Resized event). onResize (user layout callback) still
 		// fires once after the drag via the normal event path.
 		physW, physH := platWindow.PhysicalSize()
-		if physW > 0 && physH > 0 {
-			a.renderLoop.RequestResize(uint32(physW), uint32(physH)) //nolint:gosec // G115: validated positive
+		if w, h, ok := physicalSizeUint32(physW, physH); ok {
+			a.renderLoop.RequestResize(w, h)
 		}
 		a.renderFrameMultiThread()
 	})
@@ -696,8 +707,8 @@ func (a *App) processEventsMultiThread() {
 	if lastResize != nil && a.platWindow != nil && !a.platWindow.InSizeMove() {
 		// Queue PHYSICAL size for render thread (GPU surface reconfiguration)
 		physW, physH := lastResize.PhysicalWidth, lastResize.PhysicalHeight
-		if physW > 0 && physH > 0 {
-			a.renderLoop.RequestResize(uint32(physW), uint32(physH)) //nolint:gosec // G115: validated positive
+		if w, h, ok := physicalSizeUint32(physW, physH); ok {
+			a.renderLoop.RequestResize(w, h)
 		}
 
 		// Call user callback with LOGICAL size (what user expects for layout)
@@ -1002,17 +1013,7 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		if ws == nil {
 			continue
 		}
-
-		// initRenderer may leave the surface unconfigured when PhysicalSize was 0.
-		if !ws.CanRender() && ws.platWindow != nil {
-			pw, ph := ws.platWindow.PhysicalSize()
-			if pw > 0 && ph > 0 {
-				ws.resize(pw, ph, a.renderer.device, a.renderer.adapter)
-			}
-		}
-		if ws.width != uint32(frame.physW) || ws.height != uint32(frame.physH) {
-			a.renderer.ResizeSurface(ws, frame.physW, frame.physH)
-		}
+		a.syncFrameSurfaceSize(ws, frame.physW, frame.physH)
 
 		// Lazy acquire: reset per-frame state for deferred beginFrame.
 		// beginFrame is called on first draw call, not upfront.
@@ -1054,6 +1055,26 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 	a.renderer.pollSubmissions()
 }
 
+func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
+	// initRenderer may leave the surface unconfigured when PhysicalSize was 0.
+	if !ws.CanRender() && ws.platWindow != nil {
+		pw, ph := ws.platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			ws.resize(pw, ph, a.renderer.device, a.renderer.adapter)
+		}
+	}
+	if physW <= 0 || physH <= 0 {
+		return
+	}
+	width, height, ok := physicalSizeUint32(physW, physH)
+	if !ok {
+		return
+	}
+	if ws.width != width || ws.height != height {
+		a.renderer.ResizeSurface(ws, physW, physH)
+	}
+}
+
 // modalFrameTick executes one update+render cycle during the Win32 modal
 // drag/resize loop. Called from the WM_TIMER handler on the main thread.
 //
@@ -1092,8 +1113,8 @@ func (a *App) modalFrameTick() {
 		return
 	}
 	width, height := a.platWindow.PhysicalSize()
-	if width > 0 && height > 0 {
-		a.renderLoop.RequestResize(uint32(width), uint32(height)) //nolint:gosec // G115: validated positive
+	if w, h, ok := physicalSizeUint32(width, height); ok {
+		a.renderLoop.RequestResize(w, h)
 	}
 
 	// Resize secondary window swapchains to match their current physical size.

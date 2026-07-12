@@ -459,13 +459,17 @@ type waylandPlatformWindow struct {
 func (w *waylandPlatformWindow) ID() WindowID { return w.id }
 
 func (w *waylandPlatformWindow) GetHandle() (uintptr, uintptr) {
-	if w.secondary != nil && w.secondary.libwl != nil {
-		return w.secondary.libwl.Display(), w.secondary.libwl.Surface()
-	}
-	if w.platform.libwl != nil {
-		return w.platform.libwl.Display(), w.platform.libwl.Surface()
+	if libwl := w.libwayland(); libwl != nil {
+		return libwl.Display(), libwl.Surface()
 	}
 	return 0, 0
+}
+
+func (w *waylandPlatformWindow) libwayland() *wayland.LibwaylandHandle {
+	if w.secondary != nil && w.secondary.libwl != nil {
+		return w.secondary.libwl
+	}
+	return w.platform.libwl
 }
 
 func (w *waylandPlatformWindow) LogicalSize() (int, int) {
@@ -492,7 +496,23 @@ func (w *waylandPlatformWindow) PhysicalSize() (int, int) {
 }
 
 func (w *waylandPlatformWindow) ScaleFactor() float64 {
-	return w.platform.ScaleFactor()
+	w.platform.mu.Lock()
+	envScale := w.platform.envScaleFactor
+	outputScale := w.platform.outputScale
+	w.platform.mu.Unlock()
+
+	if envScale > 0 {
+		return envScale
+	}
+	if libwl := w.libwayland(); libwl != nil {
+		if scale := libwl.FractionalScale(); scale > 0 {
+			return scale
+		}
+	}
+	if outputScale > 0 {
+		return outputScale
+	}
+	return 1.0
 }
 
 func (w *waylandPlatformWindow) ShouldClose() bool {
@@ -509,34 +529,35 @@ func (w *waylandPlatformWindow) ShouldClose() bool {
 
 func (w *waylandPlatformWindow) InSizeMove() bool { return false }
 func (w *waylandPlatformWindow) SetTitle(title string) {
-	if w.platform.libwl != nil {
-		w.platform.libwl.SetTitle(title)
-		_ = w.platform.libwl.Flush()
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.SetTitle(title)
+		_ = libwl.Flush()
 	}
 }
 
 func (w *waylandPlatformWindow) SetMinSize(width, height int) {
-	if w.platform.libwl != nil {
-		w.platform.libwl.SetMinSize(int32(width), int32(height))
-		_ = w.platform.libwl.Flush()
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.SetMinSize(int32(width), int32(height))
+		_ = libwl.Flush()
 	}
 }
 
 func (w *waylandPlatformWindow) SetMaxSize(width, height int) {
-	if w.platform.libwl != nil {
-		w.platform.libwl.SetMaxSize(int32(width), int32(height))
-		_ = w.platform.libwl.Flush()
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.SetMaxSize(int32(width), int32(height))
+		_ = libwl.Flush()
 	}
 }
 
 func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
-	if w.platform.libwl != nil && w.ScaleFactor() > 1.0 {
+	scale := w.ScaleFactor()
+	if libwl := w.libwayland(); libwl != nil && scale > 1.0 {
 		lw, lh := w.LogicalSize()
-		w.platform.libwl.SetViewportDestination(int32(lw), int32(lh))
+		libwl.SetViewportDestination(int32(lw), int32(lh))
 	}
 	pw, ph := w.PhysicalSize()
 	return PrepareFrameResult{
-		ScaleFactor:    w.ScaleFactor(),
+		ScaleFactor:    scale,
 		PhysicalWidth:  uint32(pw),
 		PhysicalHeight: uint32(ph),
 	}
@@ -559,8 +580,8 @@ func (w *waylandPlatformWindow) CursorMode() int {
 // next render: FrameCallbackReady() returns false until the compositor fires
 // the done event (FRAME-001 / BUG-WL-006, winit pattern).
 func (w *waylandPlatformWindow) SyncFrame() {
-	if w.platform.libwl != nil && wayland.FrameCallbackEnabled() {
-		w.platform.libwl.RequestFrameCallback()
+	if libwl := w.libwayland(); libwl != nil && wayland.FrameCallbackEnabled() {
+		libwl.RequestFrameCallback()
 	}
 }
 
@@ -598,15 +619,15 @@ func (w *waylandPlatformWindow) SetModalFrameCallback(_ func()) {}
 // wl_display between the main thread (event dispatch) and the render thread
 // (Vulkan WSI present/acquire). ADR-041 Phase 2.
 func (w *waylandPlatformWindow) DisplayLock() {
-	if w.platform.libwl != nil {
-		w.platform.libwl.DisplayLock()
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.DisplayLock()
 	}
 }
 
 // DisplayUnlock releases the Wayland display mutex.
 func (w *waylandPlatformWindow) DisplayUnlock() {
-	if w.platform.libwl != nil {
-		w.platform.libwl.DisplayUnlock()
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.DisplayUnlock()
 	}
 }
 
@@ -615,10 +636,11 @@ func (w *waylandPlatformWindow) DisplayUnlock() {
 // callback is pending). Returns false while waiting for the compositor's done
 // event (FRAME-001 / BUG-WL-006, winit 3-state pattern).
 func (w *waylandPlatformWindow) FrameCallbackReady() bool {
-	if w.platform.libwl == nil || !wayland.FrameCallbackEnabled() {
+	libwl := w.libwayland()
+	if libwl == nil || !wayland.FrameCallbackEnabled() {
 		return true // Not initialized or gating disabled
 	}
-	return w.platform.libwl.FrameCallbackReady()
+	return libwl.FrameCallbackReady()
 }
 
 func (w *waylandPlatformWindow) SetHeaderAlignment(alignment int) {
@@ -1020,6 +1042,16 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 		decorName = dg.Name
 		decorVersion = dg.Version
 	}
+	var fractionalName, fractionalVersion uint32
+	if fractionalGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpFractionalScaleManagerV1); fractionalGlobal != nil {
+		fractionalName = fractionalGlobal.Name
+		fractionalVersion = fractionalGlobal.Version
+	}
+	var viewporterName, viewporterVersion uint32
+	if viewporterGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpViewporter); viewporterGlobal != nil {
+		viewporterName = viewporterGlobal.Name
+		viewporterVersion = viewporterGlobal.Version
+	}
 	// decorName/decorVersion enable SSD on the secondary window.
 	// CSD is attempted below when SSD is unavailable.
 
@@ -1031,6 +1063,9 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 	if err != nil {
 		_ = display.Close()
 		return nil, fmt.Errorf("OpenLibwayland: %w", err)
+	}
+	if err := libwl.SetupFractionalScale(fractionalName, fractionalVersion, viewporterName, viewporterVersion); err != nil {
+		logger().Warn("secondary fractional scale setup failed", "err", err)
 	}
 
 	libwl.SetTitle(config.Title)

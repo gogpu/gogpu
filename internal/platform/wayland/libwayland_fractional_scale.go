@@ -148,5 +148,10 @@ func (h *LibwaylandHandle) SetViewportDestination(width, height int32) {
 	if h.viewport == 0 || width <= 0 || height <= 0 {
 		return
 	}
+	if h.viewportDestW == width && h.viewportDestH == height {
+		return
+	}
+	h.viewportDestW = width
+	h.viewportDestH = height
 	h.marshalVoid(h.viewport, 2, uintptr(width), uintptr(height))
 }
