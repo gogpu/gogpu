@@ -84,6 +84,11 @@ type RenderTarget struct {
 	// emitted for this surface. Limited to avoid log spam even at Debug level.
 	presentLogCount int
 
+	// pixelPresented is set when PresentPixels bypassed the normal
+	// Acquire→Render→Present cycle (ADR-052). endFrameForSurface skips
+	// present and cleans up stale state instead.
+	pixelPresented bool
+
 	// frameStarted tracks whether beginFrame was called this frame cycle.
 	// With lazy acquire, beginFrame is deferred until the first draw call.
 	// If OnDraw produces no GPU work, beginFrame is never called → no
@@ -531,6 +536,17 @@ func (r *Renderer) EndFrame() {
 // it does NOT poll submissions -- the caller polls once after all windows.
 // Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
+	// PresentPixels already presented — skip normal present path (ADR-052).
+	if ws.pixelPresented {
+		ws.pixelPresented = false
+		ws.hasPendingClear = false
+		if ws.platWindow != nil {
+			ws.platWindow.SyncFrame()
+		}
+		ws.releaseFrame()
+		return false
+	}
+
 	ws.flushClear(r.device, r)
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
@@ -616,6 +632,7 @@ func (ws *RenderTarget) setTransactionPresent(enabled bool) {
 func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
+	ws.pixelPresented = false
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
@@ -646,6 +663,7 @@ func (ws *RenderTarget) ensureFrameStarted() bool {
 func (ws *RenderTarget) resetLazyState() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
+	ws.pixelPresented = false
 }
 
 // releaseFrame releases per-frame resources after presentation.

@@ -252,7 +252,17 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 	if ws == nil || ws.surface == nil {
 		return fmt.Errorf("gogpu: no active surface")
 	}
-	return ws.surface.PresentPixels(data, width, height, ws.damageRects)
+	err := ws.surface.PresentPixels(data, width, height, ws.damageRects)
+	if err != nil {
+		return err
+	}
+	ws.pixelPresented = true
+	if ws.currentView != nil {
+		ws.currentView.Release()
+		ws.currentView = nil
+	}
+	ws.currentSurfaceTexture = nil
+	return nil
 }
 
 // TextureCreator returns the texture creator for promoting pending textures.
