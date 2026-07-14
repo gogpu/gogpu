@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.7] - 2026-07-14
+
+### Fixed
+
+- **pixelPresented frame lifecycle** (ADR-052) — `WriteSurfacePixels` via `PresentPixels` bypasses the Acquire→Present cycle, but `endFrameForSurface` had no knowledge of this. Software backend produced PRESENT ERROR every frame and `flushClear` rendered into stale (discarded) textures. New `pixelPresented` flag on `RenderTarget` signals that present already happened — `endFrameForSurface` skips present, resets `hasPendingClear`, and cleans up stale view/texture refs. Event-based (not type-based) — GPU backends unaffected. Enterprise-validated: SDL3 `UpdateWindowSurface` vs `RenderPresent` pattern.
+
+### Changed
+
+- **deps:** wgpu v0.30.19 → v0.30.20 — `PresentPixels` check-before-mutate (preserves acquired texture on GPU backends), DX12 UMA GPU classification fix (@Zeroes1), `CacheCoherentUMA` diagnostic logging
+
 ## [0.44.6] - 2026-07-12
 
 ### Fixed

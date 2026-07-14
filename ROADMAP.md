@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.44.6
+## Current State: v0.44.7
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -80,6 +80,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.44.7** | 2026-07-14 | **pixelPresented frame lifecycle** (ADR-052) — fixes software backend PRESENT ERROR. deps: wgpu v0.30.20 (DX12 UMA @Zeroes1). |
 | **v0.44.6** | 2026-07-12 | **Wayland flush EAGAIN retry** (#368, ADR-051) — GLFW pattern, unblocks @kivutar. deps: wgpu v0.30.19. |
 | **v0.44.5** | 2026-07-12 | **Wayland fractional scale** (@kivutar #369) + **WriteSurfacePixels** (#370). goffi v0.6.0 errno always-capture. deps: wgpu v0.30.18, goffi v0.6.0, gpucontext v0.21.1. |
 | **v0.44.1** | 2026-07-08 | **macOS live resize fix** (@lkmavi) — IOSurface churn eliminated via NSAutoreleasePool + transaction present. Run() refactor. Enterprise-validated (wgpu-rs, Flutter, Skia). |
