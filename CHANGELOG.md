@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.8] - 2026-07-15
+
+### Changed
+
+- **deps:** wgpu v0.30.20 → v0.30.21 — software backend fixes: `CopyTextureToBuffer` row stride alignment, `configureRasterPipeline` blend state extraction (premultiplied alpha compositing), `readTexel` BGRA R/B channel swap
+
 ## [0.44.7] - 2026-07-14
 
 ### Fixed
