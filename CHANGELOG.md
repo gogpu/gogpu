@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.9] - 2026-07-16
+
+### Changed
+
+- **deps:** wgpu v0.30.21 → v0.30.22 — Metal MSAA texture storage mode crash fix on Intel Mac (@AnyCPU, wgpu#271). `MTLGPUFamilyApple1` detection for correct storage mode selection.
+
 ## [0.44.8] - 2026-07-15
 
 ### Changed
