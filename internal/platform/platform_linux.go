@@ -157,7 +157,7 @@ type waylandPlatform struct {
 }
 
 // secondaryX11Conn holds an independent X11 connection for a secondary
-// geckty/gogpu window. X11 supports multiple client connections per process
+// gogpu window. X11 supports multiple client connections per process
 // trivially, and x11.Platform is already a fully self-contained
 // single-connection/single-window abstraction (its own atoms, XKB state,
 // cursor cache, event queue) — so a secondary window is just another
@@ -360,6 +360,10 @@ func (p *x11Platform) PollEvents() Event {
 	return Event{Type: EventNone}
 }
 
+// waitEventsBudget is the total per-loop-turn time WaitEvents spends polling
+// the primary and secondary connections combined, before re-checking wakeCh.
+const waitEventsBudget = 100 * time.Millisecond
+
 // WaitEvents blocks until at least one OS event is available or WakeUp is called.
 // Uses PollEventTimeout on the X11 net.Conn (Go runtime netpoller) with periodic
 // wake channel checks. This avoids the dual-poller race between unix.Poll on a
@@ -372,7 +376,23 @@ func (p *x11Platform) WaitEvents() {
 		default:
 		}
 
-		event, err := p.inner.PollEventTimeout(100 * time.Millisecond)
+		p.secondaryMu.RLock()
+		secs := make([]*secondaryX11Conn, len(p.secondaries))
+		copy(secs, p.secondaries)
+		p.secondaryMu.RUnlock()
+
+		// Split the fixed total budget across the primary plus every secondary
+		// connection, rather than giving the primary a full fixed slice and
+		// each secondary its own fixed slice on top. That keeps the worst-case
+		// added latency per loop turn constant as window count grows, instead
+		// of scaling with N (nothing here consumes/discards events —
+		// PollEventTimeout only reads from the wire and queues).
+		slice := waitEventsBudget / time.Duration(len(secs)+1)
+		if slice < time.Millisecond {
+			slice = time.Millisecond
+		}
+
+		event, err := p.inner.PollEventTimeout(slice)
 		if err != nil {
 			return
 		}
@@ -383,18 +403,8 @@ func (p *x11Platform) WaitEvents() {
 			return
 		}
 
-		// Give each secondary connection a bounded chance too, so an idle
-		// primary doesn't starve input on a secondary window for a full
-		// 100ms per loop turn. Short per-secondary timeout keeps worst-case
-		// added latency bounded as window count grows; a missed secondary
-		// event just waits one more loop iteration rather than being lost
-		// (nothing here consumes/discards events — PollEventTimeout only
-		// reads from the wire and queues, mirroring the primary path above).
-		p.secondaryMu.RLock()
-		secs := p.secondaries
-		p.secondaryMu.RUnlock()
 		for _, sec := range secs {
-			sevent, serr := sec.platform.PollEventTimeout(5 * time.Millisecond)
+			sevent, serr := sec.platform.PollEventTimeout(slice)
 			if serr != nil {
 				continue
 			}
