@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.10] - 2026-07-20
+
+### Fixed
+
+- **Linux WindowID stamping** (@lkmavi, #381) — all X11/Wayland event types (keyboard, pointer, scroll, char, focus) now carry correct `WindowID`. Previously only Close/Expose were stamped — `getByPlatformID` returned nil for all other events, silently dropping per-window callbacks on Linux.
+- **X11 multi-window** (@lkmavi, #381) — secondary windows use independent X11 connections (mirrors Wayland pattern). Each window gets its own atoms, XKB state, cursor cache, event queue. `WaitEvents` budget-split polling: `100ms / (N+1)` keeps latency constant as window count grows.
+- **Wayland secondary window Close** (@lkmavi, #381) — `Close()` on secondary window now correctly targets its own connection instead of silently closing the primary.
+
 ## [0.44.9] - 2026-07-16
 
 ### Changed
