@@ -452,6 +452,10 @@ func initSelectors() {
 		selectors.accessibilityDisplayShouldIncreaseContrast = RegisterSelector(
 			"accessibilityDisplayShouldIncreaseContrast")
 
+		// TabbingMode (macOS 10.12+)
+		selectors.setTabbingMode = RegisterSelector("setTabbingMode:")
+		selectors.setTabbingIdentifier = RegisterSelector("setTabbingIdentifier:")
+
 		// Window size constraints
 		selectors.setMinSize = RegisterSelector("setMinSize:")
 		selectors.setMaxSize = RegisterSelector("setMaxSize:")

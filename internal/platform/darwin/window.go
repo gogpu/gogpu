@@ -234,13 +234,25 @@ func (w *Window) SetTitle(title string) {
 	}
 
 	w.cachedTitle = title
+
+	// When we have an injected text field (center/right alignment), update
+	// that field and keep NSWindow.title empty. Setting NSWindow.title while
+	// titleVisibility is Hidden still exposes the string to the macOS Tab
+	// Bar, which draws a tab label from it — producing a doubled/overlapping
+	// title when "Show Tab Bar" is active (issue #384).
+	if !w.titleTextField.IsNil() {
+		nsTitle := NewNSString(title)
+		if nsTitle != nil {
+			w.titleTextField.SendPtr(selectors.setStringValue, nsTitle.ID().Ptr())
+			nsTitle.Release()
+		}
+		return
+	}
+
+	// No injected text field — set the native NSWindow.title directly.
 	nsTitle := NewNSString(title)
 	if nsTitle != nil {
 		w.nsWindow.SendPtr(selectors.setTitle, nsTitle.ID().Ptr())
-		// Keep the injected text field in sync when right-alignment is active.
-		if !w.titleTextField.IsNil() {
-			w.titleTextField.SendPtr(selectors.setStringValue, nsTitle.ID().Ptr())
-		}
 		nsTitle.Release()
 	}
 }
@@ -639,6 +651,8 @@ func (w *Window) SetHeaderAlignment(alignment int) {
 		}
 		w.nsWindow.SendBool(selectors.setTitlebarAppearsTransparent, true)
 		w.nsWindow.SendUint(selectors.setTitleVisibility, uint64(NSWindowTitleVisible))
+		// Left alignment uses the native title — restore it from cache.
+		w.syncNativeTitle()
 	case 2: // HeaderAlignRight
 		if !hasFullSize {
 			w.nsWindow.SendUint(selectors.setStyleMask, uint64(current|NSWindowStyleMaskFullSizeContentView))
@@ -646,6 +660,8 @@ func (w *Window) SetHeaderAlignment(alignment int) {
 		w.nsWindow.SendBool(selectors.setTitlebarAppearsTransparent, true)
 		w.nsWindow.SendUint(selectors.setTitleVisibility, uint64(NSWindowTitleHidden))
 		w.injectTitleTextField(nsTextAlignmentRight)
+		// Clear native title so the Tab Bar does not duplicate it (#384).
+		w.clearNativeTitle()
 	default: // HeaderAlignCenter (0)
 		// Only touch the style mask when FullSizeContentView is actually present;
 		// calling setStyleMask: with an unchanged value triggers a title re-layout
@@ -658,6 +674,8 @@ func (w *Window) SetHeaderAlignment(alignment int) {
 		w.nsWindow.SendBool(selectors.setTitlebarAppearsTransparent, false)
 		w.nsWindow.SendUint(selectors.setTitleVisibility, uint64(NSWindowTitleHidden))
 		w.injectTitleTextField(nsTextAlignmentCenter)
+		// Clear native title so the Tab Bar does not duplicate it (#384).
+		w.clearNativeTitle()
 	}
 	w.alignment = alignment
 }
@@ -748,6 +766,32 @@ func (w *Window) injectTitleTextField(textAlignment uint64) {
 	// label remains visible. NSWindowBelow = -1 as uintptr = ^uintptr(0).
 	tbView.Send5Ptr(selectors.addSubviewPositionedRelativeTo, tf.Ptr(), ^uintptr(0), 0)
 	w.titleTextField = tf
+}
+
+// clearNativeTitle sets NSWindow.title to "" so that macOS Tab Bar (and other
+// AppKit consumers of window.title) do not render a duplicate label while we
+// show our own injected NSTextField. The real title text is preserved in
+// cachedTitle and restored by syncNativeTitle when switching back to left
+// alignment. Called with w.mu held.
+func (w *Window) clearNativeTitle() {
+	empty := NewNSString("")
+	if empty != nil {
+		w.nsWindow.SendPtr(selectors.setTitle, empty.ID().Ptr())
+		empty.Release()
+	}
+}
+
+// syncNativeTitle restores NSWindow.title from cachedTitle. Used when switching
+// to left alignment where the native title is visible. Called with w.mu held.
+func (w *Window) syncNativeTitle() {
+	if w.cachedTitle == "" {
+		return
+	}
+	nsTitle := NewNSString(w.cachedTitle)
+	if nsTitle != nil {
+		w.nsWindow.SendPtr(selectors.setTitle, nsTitle.ID().Ptr())
+		nsTitle.Release()
+	}
 }
 
 // SetStyleMask sets the window's style mask.
