@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.11] - 2026-07-26
+
+### Added
+
+- **`Context.MarkExternalContent()`** (#341) — signals that an external renderer (e.g., g3d) has submitted GPU commands to the active surface. Subsequent render passes use `LoadOp::Load` instead of `LoadOp::Clear`, preserving the 3D content for UI overlay compositing. Enterprise pattern: Flutter `InlinePassContext` pass counter, Qt6 QRhi `beginExternal/endExternal`.
+
+### Changed
+
+- **deps:** wgpu v0.30.22 → v0.30.23 — 10+ fixes by @besmpl: device teardown GPU drain (#264), Vulkan fail-closed lifecycle (#265), explicit mock construction (#266), surface lifetime ownership (#269), Vulkan nil pipeline layout (#257), Metal autorelease thread pinning (#260), Metal texture array copy (#261), DX12 state reconciliation (#262), nil WritePixels guard (#277)
+- **deps:** goffi v0.6.0 → v0.6.2 — Android ARM64 Bionic support (@besmpl, goffi#62), Windows AMD64 scalar float return fix (@besmpl, goffi#65)
+- **deps:** naga v0.17.15 → v0.17.16 (transitive via wgpu) — MSL 64-bit atomic validation (@besmpl, naga#82)
+
 ## [0.44.10] - 2026-07-20
 
 ### Fixed

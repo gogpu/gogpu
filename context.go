@@ -81,6 +81,28 @@ func (c *Context) ClearColor(color gmath.Color) {
 	c.Clear(color.R, color.G, color.B, color.A)
 }
 
+// MarkExternalContent signals that an external renderer (e.g., g3d) has
+// submitted GPU commands to the active surface. Subsequent render passes
+// will use LoadOp::Load instead of LoadOp::Clear, preserving the content.
+//
+// Use case: fullscreen 3D scene with UI overlay (Scenario A). Call from a
+// PreRender hook after the external renderer has rendered to the surface,
+// so the UI compositor draws on top instead of clearing.
+//
+// For embedded 3D viewport widgets (Scenario B / CAD), use DrawGPUTexture
+// on an offscreen render target instead — no MarkExternalContent needed.
+//
+// Enterprise pattern: Flutter InlinePassContext pass_count > 0 → Load,
+// Qt6 QRhi beginExternal/endExternal.
+func (c *Context) MarkExternalContent() {
+	ws := c.activeSurface()
+	if !ws.ensureFrameStarted() {
+		return
+	}
+	ws.frameCleared = true
+	ws.hasGPUWork = true
+}
+
 // Size returns the window dimensions in logical points (DIP).
 // Use this for layout, UI coordinates, and user-facing dimensions.
 // On Retina/HiDPI displays, this is smaller than FramebufferSize by ScaleFactor.
