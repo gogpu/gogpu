@@ -180,6 +180,102 @@ func TestFrameCallbackDoneCbRouting(t *testing.T) {
 	frameCallbackHandlesMu.Unlock()
 }
 
+// TestFrameCallbackGateNotTrigger documents the gate-not-trigger contract
+// that was violated in issue #379. The frame callback done event must act
+// as a GATE (allowing the next frame to render when the app requests it)
+// but NOT as a TRIGGER (unconditionally requesting a redraw).
+//
+// Regression: commit a8b72ce introduced code that queued EventExpose on
+// every ConsumeFrameCallbackReady() == true, creating a perpetual 60 FPS
+// render loop even with ContinuousRender=false. The fix (issue #379)
+// changed the call site to consume the flag without queuing any event.
+//
+// winit reference: frame callback done transitions state to Received (gate),
+// but RedrawRequested is only set when the app explicitly calls
+// window.request_redraw() (trigger). The two are independent.
+func TestFrameCallbackGateNotTrigger(t *testing.T) {
+	h := &LibwaylandHandle{}
+
+	// Simulate the full render cycle that caused issue #379:
+	//
+	// Step 1: Frame rendered, SyncFrame registers callback.
+	// In production this calls RequestFrameCallback which sets state
+	// to Requested. Here we set it directly.
+	atomic.StoreInt32(&h.frameCallbackState, FrameCallbackRequested)
+	h.frameCallbackReady.Store(false)
+
+	// Verify: rendering is gated while waiting for compositor.
+	if h.FrameCallbackReady() {
+		t.Fatal("FrameCallbackReady() should be false while Requested")
+	}
+
+	// Step 2: Compositor fires done callback (~16.6ms later).
+	// In production this happens inside frameCallbackDoneCb.
+	atomic.StoreInt32(&h.frameCallbackState, FrameCallbackReceived)
+	h.frameCallbackReady.Store(true)
+
+	// Verify: the gate is now open.
+	if !h.FrameCallbackReady() {
+		t.Fatal("FrameCallbackReady() should be true after compositor done")
+	}
+
+	// Step 3: PollEvents calls ConsumeFrameCallbackReady() to clear the
+	// flag. The CRITICAL CONTRACT: the return value must NOT be used to
+	// queue EventExpose or otherwise trigger a redraw. It is consumed
+	// solely to reset the flag for the next cycle.
+	consumed := h.ConsumeFrameCallbackReady()
+	if !consumed {
+		t.Fatal("ConsumeFrameCallbackReady() should return true (first consume)")
+	}
+
+	// After consume: the gate check (FrameCallbackReady) still returns
+	// true because it checks frameCallbackState, not frameCallbackReady.
+	// This is correct — the gate remains open until the next
+	// RequestFrameCallback sets state back to Requested.
+	if !h.FrameCallbackReady() {
+		t.Error("FrameCallbackReady() should still be true after consume " +
+			"(gate checks state, not ready flag)")
+	}
+
+	// Second consume returns false — the flag was already cleared.
+	if h.ConsumeFrameCallbackReady() {
+		t.Error("second ConsumeFrameCallbackReady() should be false")
+	}
+
+	// The key invariant: ConsumeFrameCallbackReady() is a one-shot flag
+	// drain. It does NOT affect the rendering gate (FrameCallbackReady).
+	// Using its return value to trigger EventExpose creates a feedback
+	// loop: render → SyncFrame → RequestFrameCallback → done → consume
+	// → EventExpose → RequestRedraw → render → ... (perpetual 60 FPS).
+}
+
+// TestFrameCallbackIdleMode verifies that in idle mode (ContinuousRender=false,
+// no animation, no invalidation), the frame callback done event does NOT cause
+// unnecessary rendering. This is the scenario from issue #379.
+func TestFrameCallbackIdleMode(t *testing.T) {
+	h := &LibwaylandHandle{}
+
+	// Simulate multiple compositor VSync cycles in idle mode.
+	// Each cycle: done fires → state transitions → consume clears flag.
+	// No rendering should be triggered between cycles.
+	for cycle := range 5 {
+		// Compositor fires done.
+		atomic.StoreInt32(&h.frameCallbackState, FrameCallbackReceived)
+		h.frameCallbackReady.Store(true)
+
+		// PollEvents consumes the flag (gate-not-trigger pattern).
+		h.ConsumeFrameCallbackReady()
+
+		// Gate is open but no one is asking to render.
+		// In production: invalidated=false && continuousRender=false
+		// means runFrame skips rendering. The gate being open is
+		// irrelevant when there is nothing to draw.
+		if !h.FrameCallbackReady() {
+			t.Errorf("cycle %d: gate should remain open in idle mode", cycle)
+		}
+	}
+}
+
 // TestFrameCallbackDoneCbMissingHandle verifies that the done callback
 // handles a missing handle gracefully (no panic).
 func TestFrameCallbackDoneCbMissingHandle(t *testing.T) {

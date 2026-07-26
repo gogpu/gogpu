@@ -2831,12 +2831,15 @@ func (p *waylandPlatform) PollEvents() Event {
 			}
 		}
 
-		// FRAME-001: Check if the compositor acked our frame callback.
-		// If so, queue an expose event to trigger a redraw. This ensures
-		// the render loop does not skip the next frame when in IDLE mode
-		// (where WaitEvents blocks until an event arrives).
-		if wayland.FrameCallbackEnabled() && p.libwl.ConsumeFrameCallbackReady() {
-			w.queueEvent(Event{Type: EventExpose, WindowID: p.primaryWindowID})
+		// FRAME-001: Consume frame callback ready state. The done event
+		// already unblocked WaitEvents (data on display fd). The frame
+		// callback acts as a GATE (via frameCallbackReady() in app.go:485),
+		// NOT a TRIGGER. Synthesizing EventExpose here caused a perpetual
+		// 60 FPS render loop even with ContinuousRender=false (#379).
+		// winit separates "compositor ready" (gate) from "app wants to draw"
+		// (redraw request) — we now do the same.
+		if wayland.FrameCallbackEnabled() {
+			p.libwl.ConsumeFrameCallbackReady()
 		}
 	}
 
