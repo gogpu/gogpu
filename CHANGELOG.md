@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.12] - 2026-07-27
+
+### Fixed
+
+- **Wayland event-driven rendering regression** (#379) — frame callback done handler unconditionally queued synthetic `EventExpose`, creating perpetual 60 FPS render loop even with `ContinuousRender: false`. Frame callback is now a GATE (via `frameCallbackReady()`), not a TRIGGER. Introduced in v0.42.9. winit gate-not-trigger pattern. Two regression tests.
+
 ## [0.44.11] - 2026-07-26
 
 ### Added
