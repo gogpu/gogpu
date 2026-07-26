@@ -55,11 +55,12 @@ type App struct {
 	onResize           func(int, int)
 	onClose            func() // called before renderer destruction
 	onAnyWindowClosed  func(WindowID)
-	onSurfaceAvailable func() // platform can create GPU surfaces (ADR-026)
-	onSurfaceDestroyed func() // must drop GPU surfaces NOW (ADR-026)
-	onResumed          func() // app visible/active (ADR-026)
-	onSuspended        func() // app backgrounded (ADR-026)
-	onMemoryWarning    func() // free caches or be killed (ADR-026)
+	onSurfaceAvailable func()                             // platform can create GPU surfaces (ADR-026)
+	onSurfaceDestroyed func()                             // must drop GPU surfaces NOW (ADR-026)
+	onResumed          func()                             // app visible/active (ADR-026)
+	onSuspended        func()                             // app backgrounded (ADR-026)
+	onMemoryWarning    func()                             // free caches or be killed (ADR-026)
+	onFileDrop         func(paths []string, x, y float64) // OS file drag-and-drop
 	hitTestCallback    gpucontext.HitTestCallback
 
 	// State
@@ -212,6 +213,16 @@ func (a *App) OnClose(fn func()) *App {
 // Use it for app‑level observations like updating a tab count.
 func (a *App) OnAnyWindowClosed(fn func(WindowID)) *App {
 	a.onAnyWindowClosed = fn
+	return a
+}
+
+// OnDragDrop sets the callback for OS file drag-and-drop events.
+// When files are dragged from the OS file manager and dropped on the window,
+// this callback is invoked with the list of file paths and the drop position
+// in physical pixels. Supported on Windows (WM_DROPFILES), macOS
+// (NSDraggingDestination), X11 (XDND v5), and Wayland (wl_data_device).
+func (a *App) OnDragDrop(fn func(paths []string, x, y float64)) *App {
+	a.onFileDrop = fn
 	return a
 }
 
@@ -793,6 +804,11 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		a.dispatchPointerEvent(event)
 	case platform.EventScroll:
 		a.dispatchScrollEvent(event)
+	case platform.EventDragDrop:
+		if a.onFileDrop != nil {
+			a.onFileDrop(event.DragPaths, event.DragX, event.DragY)
+			a.RequestRedraw()
+		}
 	}
 	return lastResize, secondaryResizes
 }

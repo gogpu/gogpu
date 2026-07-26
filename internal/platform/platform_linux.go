@@ -334,6 +334,14 @@ func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID Wi
 		return Event{Type: EventScroll, Scroll: event.Scroll, WindowID: windowID}
 	case x11.EventTypeExpose:
 		return Event{Type: EventExpose, WindowID: windowID}
+	case x11.EventTypeDragEnter:
+		return Event{Type: EventDragEnter, DragPaths: event.DragPaths, DragX: event.DragX, DragY: event.DragY, WindowID: windowID}
+	case x11.EventTypeDragMove:
+		return Event{Type: EventDragMove, DragX: event.DragX, DragY: event.DragY, WindowID: windowID}
+	case x11.EventTypeDragDrop:
+		return Event{Type: EventDragDrop, DragPaths: event.DragPaths, DragX: event.DragX, DragY: event.DragY, WindowID: windowID}
+	case x11.EventTypeDragLeave:
+		return Event{Type: EventDragLeave, WindowID: windowID}
 	default:
 		return Event{Type: EventNone}
 	}

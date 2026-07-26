@@ -230,6 +230,9 @@ const (
 	mwmoInputAvail = 0x0004     // MWMO_INPUTAVAILABLE
 	infinite       = 0xFFFFFFFF // INFINITE
 
+	// File drag-and-drop (WM_DROPFILES from shell32)
+	wmDropFiles = 0x0233
+
 	// Registry constants
 	hkeyCurrentUser uintptr = 0x80000001
 	keyRead         uintptr = 0x20019
@@ -345,6 +348,13 @@ var (
 	procReleaseDC         = user32.NewProc("ReleaseDC")
 	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
 	procGetStockObject    = gdi32.NewProc("GetStockObject")
+
+	// Shell32 (file drag-and-drop)
+	shell32DnD          = windows.NewLazyDLL("shell32.dll")
+	procDragAcceptFiles = shell32DnD.NewProc("DragAcceptFiles")
+	procDragQueryFileW  = shell32DnD.NewProc("DragQueryFileW")
+	procDragQueryPoint  = shell32DnD.NewProc("DragQueryPoint")
+	procDragFinish      = shell32DnD.NewProc("DragFinish")
 )
 
 // trackMouseEventStruct is the TRACKMOUSEEVENT structure.
@@ -743,6 +753,9 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	p.windowMu.Lock()
 	p.windows[w.hwnd] = w
 	p.windowMu.Unlock()
+
+	// Enable file drag-and-drop (WM_DROPFILES from shell32).
+	procDragAcceptFiles.Call(uintptr(w.hwnd), 1) // TRUE
 
 	// Enable DWM shadow for frameless windows
 	if config.Frameless {
@@ -1623,6 +1636,53 @@ func (p *windowsPlatform) dequeueEvent() Event {
 	return Event{Type: EventNone}
 }
 
+// handleDropFiles processes WM_DROPFILES by extracting file paths from the
+// HDROP handle and queuing an EventDragDrop event. Uses shell32 APIs:
+// DragQueryFileW for path extraction, DragQueryPoint for drop position,
+// DragFinish to release the HDROP resource.
+func (p *windowsPlatform) handleDropFiles(w *win32Window, wParam uintptr) {
+	hDrop := wParam
+
+	// Query file count: index 0xFFFFFFFF returns the number of files.
+	count, _, _ := procDragQueryFileW.Call(hDrop, 0xFFFFFFFF, 0, 0)
+	if count == 0 {
+		procDragFinish.Call(hDrop)
+		return
+	}
+
+	paths := make([]string, 0, count)
+	buf := make([]uint16, 260) // MAX_PATH
+
+	for i := uintptr(0); i < count; i++ {
+		// Query required buffer length (returns number of characters, not including null).
+		needed, _, _ := procDragQueryFileW.Call(hDrop, i, 0, 0)
+		if needed == 0 {
+			continue
+		}
+		if needed+1 > uintptr(len(buf)) {
+			buf = make([]uint16, needed+1)
+		}
+		procDragQueryFileW.Call(hDrop, i, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		paths = append(paths, syscall.UTF16ToString(buf[:needed]))
+	}
+
+	// Query the drop point (in client coordinates).
+	var pt point
+	procDragQueryPoint.Call(hDrop, uintptr(unsafe.Pointer(&pt)))
+
+	procDragFinish.Call(hDrop)
+
+	if len(paths) > 0 {
+		p.queueEvent(Event{
+			WindowID:  w.id,
+			Type:      EventDragDrop,
+			DragPaths: paths,
+			DragX:     float64(pt.x),
+			DragY:     float64(pt.y),
+		})
+	}
+}
+
 // extractMousePos extracts mouse position from lParam.
 // Returns signed coordinates (can be negative near screen edges).
 func extractMousePos(lParam uintptr) (x, y float64) {
@@ -2446,6 +2506,10 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		if activationState != waInactive && w.cursorMode != 0 {
 			w.setCursorMode(w.cursorMode)
 		}
+
+	case wmDropFiles:
+		p.handleDropFiles(w, wParam)
+		return 0
 
 	case wmWakeUp:
 		// No-op: sole purpose is to unblock MsgWaitForMultipleObjectsEx in WaitEvents.

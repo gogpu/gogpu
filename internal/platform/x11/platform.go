@@ -54,6 +54,10 @@ const (
 	EventTypePointerLeave
 	EventTypeScroll
 	EventTypeExpose
+	EventTypeDragEnter // Files entered window area (XDND)
+	EventTypeDragMove  // Files moving over window
+	EventTypeDragDrop  // Files dropped on window
+	EventTypeDragLeave // Files left window area
 )
 
 // PlatformEvent represents a platform event.
@@ -76,6 +80,11 @@ type PlatformEvent struct {
 
 	// Scroll (EventTypeScroll)
 	Scroll gpucontext.ScrollEvent
+
+	// File drag-and-drop (EventTypeDragEnter, EventTypeDragDrop, EventTypeDragMove, EventTypeDragLeave)
+	DragPaths []string // file paths (set on DragEnter and DragDrop)
+	DragX     float64  // drop/hover position in physical pixels
+	DragY     float64  // drop/hover position in physical pixels
 }
 
 // xlibHandle holds the Xlib Display* pointer required for Vulkan surface creation.
@@ -141,6 +150,9 @@ type x11Window struct {
 	cursorCenterX int16 // window center for warp-back in locked mode
 	cursorCenterY int16
 	cursorGrabbed bool // whether XGrabPointer is active
+
+	// XDND drag-and-drop state for this window.
+	xdndState xdndState
 }
 
 // Platform implements X11 windowing support.
@@ -192,6 +204,9 @@ type Platform struct {
 	clipboardText  string     // locally stored clipboard content
 	ownsClipboard  bool       // true if we are the CLIPBOARD selection owner
 	clipboardReady bool       // signaled by SelectionNotify handler during read
+
+	// XDND (X Drag-and-Drop) protocol atoms. Nil if init failed (non-fatal).
+	xdnd *xdndAtoms
 
 	// Window registry keyed by X11 ResourceID for event routing.
 	windowMu sync.RWMutex
@@ -430,6 +445,14 @@ func (p *Platform) Init(config Config) error {
 	}
 	if p.scaleFactor != 1.0 {
 		logger().Info("x11 DPI scale", "factor", p.scaleFactor)
+	}
+
+	// Initialize XDND (X Drag-and-Drop) protocol atoms and set XdndAware
+	// on the window. Non-fatal: drag-and-drop won't work without it.
+	if err := p.internXdndAtoms(); err != nil {
+		logger().Warn("XDND init failed, drag-and-drop unavailable", "error", err)
+	} else if err := p.setXdndAware(window); err != nil {
+		logger().Warn("XdndAware set failed", "error", err)
 	}
 
 	// Enable detectable auto-repeat to suppress spurious KeyRelease events
@@ -886,6 +909,12 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 			w.shouldClose = true
 			w.eventMu.Unlock()
 			return PlatformEvent{Type: EventTypeClose}
+		}
+		// Check for XDND messages (drag-and-drop).
+		if p.xdnd != nil {
+			if xdndEvent := p.handleXdndClientMessage(w, e); xdndEvent.Type != EventTypeNone {
+				return xdndEvent
+			}
 		}
 
 	case *DestroyNotifyEvent:

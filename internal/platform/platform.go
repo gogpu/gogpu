@@ -57,6 +57,11 @@ type Event struct {
 
 	// Scroll (EventScroll)
 	Scroll gpucontext.ScrollEvent
+
+	// File drag-and-drop (EventDragEnter, EventDragDrop, EventDragMove, EventDragLeave)
+	DragPaths []string // file paths (set on DragEnter and DragDrop)
+	DragX     float64  // drop/hover position in physical pixels
+	DragY     float64  // drop/hover position in physical pixels
 }
 
 // EventType represents the type of platform event.
@@ -77,6 +82,10 @@ const (
 	EventPointerLeave
 	EventScroll
 	EventExpose
+	EventDragEnter // Files entered window area (OS file drag-and-drop)
+	EventDragMove  // Files moving over window
+	EventDragDrop  // Files dropped on window
+	EventDragLeave // Files left window area
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.
