@@ -140,3 +140,35 @@ func TestMarkExternalContent_MultiWindow(t *testing.T) {
 		t.Error("Context with explicit surface must target it, not primary")
 	}
 }
+
+// TestContextRenderTarget_PreserveContent verifies that the ggcanvas adapter
+// exposes the external-content state for the surface targeted by its Context.
+func TestContextRenderTarget_PreserveContent(t *testing.T) {
+	if newContext(&Renderer{}, 1.0).RenderTarget().PreserveContent() {
+		t.Error("PreserveContent() = true without an active surface")
+	}
+
+	primary := newTestWindowSurface()
+	ctx := newContext(primary.renderer, 1.0)
+	rt := ctx.RenderTarget()
+
+	if rt.PreserveContent() {
+		t.Error("PreserveContent() = true before external content is marked")
+	}
+
+	primary.frameCleared = true
+	if !rt.PreserveContent() {
+		t.Error("PreserveContent() = false with frameCleared=true")
+	}
+
+	secondary := &RenderTarget{
+		renderer:     primary.renderer,
+		format:       gputypes.TextureFormatBGRA8Unorm,
+		frameCleared: true,
+	}
+	primary.frameCleared = false
+	secondaryRT := newContextForSurface(primary.renderer, secondary, 1.0).RenderTarget()
+	if !secondaryRT.PreserveContent() {
+		t.Error("PreserveContent() did not read the Context's secondary surface")
+	}
+}

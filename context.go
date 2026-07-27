@@ -244,6 +244,14 @@ func (c *Context) RenderTarget() *ContextRenderTarget {
 // ContextRenderTarget adapts *Context to ggcanvas.RenderTarget interface.
 type ContextRenderTarget struct{ ctx *Context }
 
+// PreserveContent reports whether the active surface already contains content
+// that subsequent render passes must load. This exposes MarkExternalContent's
+// frame state to ggcanvas without introducing a dependency on gg.
+func (r *ContextRenderTarget) PreserveContent() bool {
+	ws := r.ctx.activeSurface()
+	return ws != nil && ws.frameCleared
+}
+
 // SurfaceView returns the surface texture view as a type-safe opaque handle.
 func (r *ContextRenderTarget) SurfaceView() gpucontext.TextureView {
 	tv := r.ctx.SurfaceView()
