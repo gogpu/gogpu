@@ -5,11 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.44.12] - 2026-07-27
+## [0.45.0] - 2026-07-27
+
+### Added
+
+- **OS file drag-and-drop** (#387) — Windows `WM_DROPFILES` + X11 XDND v5 protocol. 4 event types (`EventDragEnter`, `EventDragMove`, `EventDragDrop`, `EventDragLeave`) with file paths and physical pixel position. `App.OnDragDrop` callback. Foundation for ui/dnd package. macOS NSDragging + Wayland `wl_data_device` planned as follow-up.
 
 ### Fixed
 
 - **Wayland event-driven rendering regression** (#379) — frame callback done handler unconditionally queued synthetic `EventExpose`, creating perpetual 60 FPS render loop even with `ContinuousRender: false`. Frame callback is now a GATE (via `frameCallbackReady()`), not a TRIGGER. Introduced in v0.42.9. winit gate-not-trigger pattern. Two regression tests.
+- **macOS window title double render** (#384) — when "Show Tab Bar" is enabled, `NSWindow.title` is now cleared while custom title text field is active. `clearNativeTitle()`/`syncNativeTitle()` coordinate native vs injected title rendering.
+- **macOS TabbingMode selectors** (#383) — `setTabbingMode:` and `setTabbingIdentifier:` ObjC selectors registered in `initSelectors()`. Previously declared but never registered, silently no-op.
 
 ## [0.44.11] - 2026-07-26
 

@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.44.12
+## Current State: v0.45.0
 
 ✅ **Production-ready** with full feature set:
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
@@ -80,7 +80,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v0.44.12** | 2026-07-27 | **fix(wayland):** event-driven 60fps regression (#379) — gate-not-trigger pattern. |
+| **v0.45.0** | 2026-07-27 | **OS file drag-and-drop** (#387, Windows+X11). fix: Wayland 60fps (#379), macOS title double-render (#384), macOS tabbing (#383). |
 | **v0.44.11** | 2026-07-26 | **MarkExternalContent** (#341) — multi-pass frame compositing for g3d+ui. deps: wgpu v0.30.23, goffi v0.6.2 (@besmpl). |
 | **v0.44.10** | 2026-07-20 | **Linux WindowID stamping** + X11 multi-window + Wayland secondary Close (@lkmavi, #381). |
 | **v0.44.9** | 2026-07-16 | **deps:** wgpu v0.30.22 — Metal MSAA Intel Mac crash fix (@AnyCPU). |
