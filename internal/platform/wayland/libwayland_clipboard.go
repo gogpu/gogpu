@@ -48,12 +48,12 @@ var clipboardInterfaces struct {
 	// Method arrays (indexed by opcode)
 	managerMethods [2]cWlMessage // create_data_source, get_data_device
 	sourceMethods  [2]cWlMessage // offer, destroy
-	offerMethods   [3]cWlMessage // accept, receive, destroy
+	offerMethods   [5]cWlMessage // accept, receive, destroy, finish (v3), set_actions (v3)
 	deviceMethods  [3]cWlMessage // start_drag, set_selection, release
 
 	// Event arrays
 	sourceEvents [3]cWlMessage // target, send, canceled
-	offerEvents  [1]cWlMessage // offer
+	offerEvents  [3]cWlMessage // offer, source_actions (v3), action (v3)
 	deviceEvents [6]cWlMessage // data_offer, enter, leave, motion, drop, selection
 
 	// NULL types array (shared by messages without new_id arguments)
@@ -121,18 +121,26 @@ func initClipboardInterfaces() {
 		clipboardInterfaces.offerMethods[1] = cWlMessage{cstr("receive\x00"), cstr("sh\x00"), nt}
 		// opcode 2: destroy(), signature ""
 		clipboardInterfaces.offerMethods[2] = cWlMessage{cstr("destroy\x00"), cstr("\x00"), nt}
+		// opcode 3: finish(), signature "" (since v3, DnD)
+		clipboardInterfaces.offerMethods[3] = cWlMessage{cstr("finish\x00"), cstr("3\x00"), nt}
+		// opcode 4: set_actions(dnd_actions: uint, preferred_action: uint), signature "uu" (since v3, DnD)
+		clipboardInterfaces.offerMethods[4] = cWlMessage{cstr("set_actions\x00"), cstr("3uu\x00"), nt}
 
 		// wl_data_offer events
 		// event 0: offer(mime_type: string), signature "s"
 		clipboardInterfaces.offerEvents[0] = cWlMessage{cstr("offer\x00"), cstr("s\x00"), nt}
+		// event 1: source_actions(source_actions: uint), signature "u" (since v3, DnD)
+		clipboardInterfaces.offerEvents[1] = cWlMessage{cstr("source_actions\x00"), cstr("3u\x00"), nt}
+		// event 2: action(dnd_action: uint), signature "u" (since v3, DnD)
+		clipboardInterfaces.offerEvents[2] = cWlMessage{cstr("action\x00"), cstr("3u\x00"), nt}
 
 		// wl_data_offer interface
 		clipboardInterfaces.offer = cWlInterface{
 			Name:        cstr("wl_data_offer\x00"),
 			Version:     3,
-			MethodCount: 3,
+			MethodCount: 5,
 			Methods:     uintptr(unsafe.Pointer(&clipboardInterfaces.offerMethods[0])),
-			EventCount:  1,
+			EventCount:  3,
 			Events:      uintptr(unsafe.Pointer(&clipboardInterfaces.offerEvents[0])),
 		}
 
@@ -180,7 +188,7 @@ func initClipboardInterfaces() {
 var (
 	dataSourceListener  [3]uintptr // target, send, canceled
 	dataDeviceListener  [6]uintptr // data_offer, enter, leave, motion, drop, selection
-	dataOfferListener   [1]uintptr // offer (mime type advertisement)
+	dataOfferListener   [3]uintptr // offer, source_actions (v3), action (v3)
 	clipboardListenOnce sync.Once
 )
 
@@ -195,7 +203,7 @@ func initClipboardListeners() {
 		dataSourceListener[1] = ffi.NewCallback(dataSourceSendCb)
 		dataSourceListener[2] = ffi.NewCallback(dataSourceCancelledCb)
 
-		// wl_data_device events
+		// wl_data_device events (shared between clipboard and DnD)
 		dataDeviceListener[0] = ffi.NewCallback(dataDeviceDataOfferCb)
 		dataDeviceListener[1] = ffi.NewCallback(dataDeviceEnterCb)
 		dataDeviceListener[2] = ffi.NewCallback(dataDeviceLeaveCb)
@@ -203,8 +211,10 @@ func initClipboardListeners() {
 		dataDeviceListener[4] = ffi.NewCallback(dataDeviceDropCb)
 		dataDeviceListener[5] = ffi.NewCallback(dataDeviceSelectionCb)
 
-		// wl_data_offer events
+		// wl_data_offer events (v3: offer + source_actions + action)
 		dataOfferListener[0] = ffi.NewCallback(dataOfferOfferCb)
+		dataOfferListener[1] = ffi.NewCallback(dataOfferSourceActionsCb)
+		dataOfferListener[2] = ffi.NewCallback(dataOfferActionCb)
 	})
 }
 
@@ -264,6 +274,8 @@ func dataSourceCancelledCb(data, source uintptr) {
 // dataDeviceDataOfferCb: void(data, wl_data_device, id)
 // Fired when the compositor introduces a new data_offer object.
 // The id is the proxy for the new wl_data_offer (already created by libwayland).
+// This fires for BOTH clipboard selection changes and DnD sessions — the
+// subsequent event (selection vs enter) determines which subsystem uses the offer.
 func dataDeviceDataOfferCb(data, device, id uintptr) {
 	h := clipboardCallbackHandle
 	if h == nil {
@@ -277,36 +289,20 @@ func dataDeviceDataOfferCb(data, device, id uintptr) {
 	}
 
 	// Store as pending offer — will be confirmed as selection offer
-	// in the subsequent selection event.
+	// in the subsequent selection event, or as DnD offer in enter event.
 	h.clipboardMu.Lock()
 	h.clipboardPendingOffer = id
 	h.clipboardOfferHasText = false
 	h.clipboardMu.Unlock()
+
+	// Reset DnD MIME tracking for the new offer.
+	h.dndMu.Lock()
+	h.dndHasURIList = false
+	h.dndMu.Unlock()
 }
 
-// dataDeviceEnterCb: void(data, wl_data_device, serial, surface, x, y, id)
-// DnD enter event — ignored for clipboard.
-func dataDeviceEnterCb(data, device, serial, surface, x, y, id uintptr) {
-	// No-op for clipboard (DnD only).
-}
-
-// dataDeviceLeaveCb: void(data, wl_data_device)
-// DnD leave event — ignored for clipboard.
-func dataDeviceLeaveCb(data, device uintptr) {
-	// No-op for clipboard (DnD only).
-}
-
-// dataDeviceMotionCb: void(data, wl_data_device, time, x, y)
-// DnD motion event — ignored for clipboard.
-func dataDeviceMotionCb(data, device, timeMs, x, y uintptr) {
-	// No-op for clipboard (DnD only).
-}
-
-// dataDeviceDropCb: void(data, wl_data_device)
-// DnD drop event — ignored for clipboard.
-func dataDeviceDropCb(data, device uintptr) {
-	// No-op for clipboard (DnD only).
-}
+// dataDeviceEnterCb, dataDeviceLeaveCb, dataDeviceMotionCb, dataDeviceDropCb
+// are implemented in libwayland_dnd.go (drag-and-drop handler).
 
 // dataDeviceSelectionCb: void(data, wl_data_device, id)
 // Fired when the clipboard selection changes (another app copied, or we did).
@@ -343,6 +339,8 @@ func dataDeviceSelectionCb(data, device, id uintptr) {
 
 // dataOfferOfferCb: void(data, wl_data_offer, mime_type)
 // Fired for each mime type the offer advertises.
+// This fires for BOTH clipboard and DnD offers — clipboard uses text/plain,
+// DnD uses text/uri-list. We track both.
 func dataOfferOfferCb(data, offer, mimeTypePtr uintptr) {
 	h := clipboardCallbackHandle
 	if h == nil {
@@ -356,6 +354,11 @@ func dataOfferOfferCb(data, offer, mimeTypePtr uintptr) {
 		h.clipboardMu.Lock()
 		h.clipboardOfferHasText = true
 		h.clipboardMu.Unlock()
+	}
+	if mime == dndURIListMIME {
+		h.dndMu.Lock()
+		h.dndHasURIList = true
+		h.dndMu.Unlock()
 	}
 }
 

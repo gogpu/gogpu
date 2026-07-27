@@ -1129,13 +1129,41 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		}
 	}
 
-	// Bind wl_data_device_manager for clipboard (optional, for copy/paste)
+	// Bind wl_data_device_manager for clipboard + DnD (optional)
 	ddmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlDataDeviceManager)
 	if ddmGlobal != nil {
 		if err := libwl.SetupClipboard(ddmGlobal.Name, ddmGlobal.Version); err != nil {
 			logger().Warn("clipboard setup failed (copy/paste unavailable)", "err", err)
 		} else {
 			logger().Debug("clipboard protocol bound (wl_data_device_manager)")
+
+			// Register drag-and-drop callbacks on the same data_device.
+			// DnD events come through wl_data_device (enter, leave, motion, drop)
+			// which is already set up by SetupClipboard.
+			libwl.SetDnDCallbacks(&wayland.DnDCallbacks{
+				OnDragEnter: func(surface uintptr, x, y float64) {
+					w := p.findWaylandWindowBySurface(surface)
+					if w == nil {
+						w = p.primary
+					}
+					w.queueEvent(Event{Type: EventDragEnter, DragX: x, DragY: y})
+					p.WakeUp()
+				},
+				OnDragMove: func(x, y float64) {
+					// Motion events don't carry surface — use same window as enter.
+					w := p.primary
+					w.queueEvent(Event{Type: EventDragMove, DragX: x, DragY: y})
+				},
+				OnDragDrop: func(paths []string, x, y float64) {
+					w := p.primary
+					w.queueEvent(Event{Type: EventDragDrop, DragPaths: paths, DragX: x, DragY: y})
+					p.WakeUp()
+				},
+				OnDragLeave: func() {
+					w := p.primary
+					w.queueEvent(Event{Type: EventDragLeave})
+				},
+			})
 		}
 	}
 
@@ -3347,6 +3375,27 @@ func (p *waylandPlatform) CloseWindow() {
 }
 
 func (p *waylandPlatform) SetAppName(name string) {}
+
+// findWaylandWindowBySurface maps a wl_surface* proxy to the waylandWindow
+// that owns it. For DnD, the enter event carries the target surface which may
+// be a secondary window's surface. Returns nil if no match is found.
+func (p *waylandPlatform) findWaylandWindowBySurface(surface uintptr) *waylandWindow {
+	// Check primary window's surface.
+	if p.libwl != nil && p.libwl.Surface() == surface {
+		return p.primary
+	}
+
+	// Check secondary windows.
+	p.secondaryMu.RLock()
+	defer p.secondaryMu.RUnlock()
+	for _, sec := range p.secondaries {
+		if sec.libwl != nil && sec.libwl.Surface() == surface {
+			return &sec.state
+		}
+	}
+
+	return nil
+}
 
 func (p *x11Platform) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
 	return showOpenFileDialog(opts)

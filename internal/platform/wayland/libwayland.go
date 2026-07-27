@@ -191,6 +191,16 @@ type LibwaylandHandle struct {
 	clipboardOfferHasText bool       // true if current offer advertised text/plain mime
 	clipboardMu           sync.Mutex // protects clipboard state
 
+	// Drag-and-drop (wl_data_device DnD events, same manager/device as clipboard)
+	dndOffer      uintptr // current DnD wl_data_offer* (or 0, valid between enter and leave/drop)
+	dndHasURIList bool    // true if the DnD offer advertised text/uri-list
+	dndSerial     uint32  // serial from enter event (for accept)
+	dndSurface    uintptr // wl_surface* where drag entered (for multi-window routing)
+	dndX          float64 // current drag position (surface-local, physical pixels)
+	dndY          float64 // current drag position (surface-local, physical pixels)
+	dndMu         sync.Mutex
+	dndCallbacks  *DnDCallbacks // Go callbacks for DnD events (set by platform layer)
+
 	// Data symbols (interface descriptors — pointers to static C structs)
 	registryInterface      unsafe.Pointer // &wl_registry_interface
 	compositorInterface    unsafe.Pointer // &wl_compositor_interface

@@ -158,6 +158,51 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 	p.mu.Unlock()
 
+	// Install drag-and-drop handler on the content view.
+	// The handler receives NSDragging protocol events from GoGPUView and pushes
+	// them to the window's event queue, matching the event queue pattern used
+	// by Windows (WM_DROPFILES) and X11 (XDND).
+	contentView := window.ContentView()
+	if !contentView.IsNil() {
+		darwin.SetViewDragHandler(contentView, func(de darwin.DragEvent) {
+			// Y-flip: macOS uses bottom-left origin, we use top-left.
+			// w.config.Height is in logical points, matching macOS coordinates.
+			flippedY := float64(w.config.Height) - de.Y
+
+			switch de.Type {
+			case darwin.DragEventEnter:
+				w.events.Push(Event{
+					WindowID:  w.id,
+					Type:      EventDragEnter,
+					DragPaths: de.Paths,
+					DragX:     de.X,
+					DragY:     flippedY,
+				})
+			case darwin.DragEventMove:
+				w.events.Push(Event{
+					WindowID: w.id,
+					Type:     EventDragMove,
+					DragX:    de.X,
+					DragY:    flippedY,
+				})
+			case darwin.DragEventDrop:
+				w.events.Push(Event{
+					WindowID:  w.id,
+					Type:      EventDragDrop,
+					DragPaths: de.Paths,
+					DragX:     de.X,
+					DragY:     flippedY,
+				})
+			case darwin.DragEventLeave:
+				w.events.Push(Event{
+					WindowID: w.id,
+					Type:     EventDragLeave,
+				})
+			}
+			darwin.WakeEventLoop()
+		})
+	}
+
 	dw := &darwinPlatformWindow{
 		platform:  p,
 		id:        id,
@@ -252,6 +297,16 @@ func (p *darwinPlatform) WakeUp() {
 func (p *darwinPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	// Clean up drag handlers for all windows before destroying them.
+	for _, w := range p.windows {
+		if w.window != nil {
+			cv := w.window.ContentView()
+			if !cv.IsNil() {
+				darwin.ClearViewDragHandler(cv)
+			}
+		}
+	}
 
 	w := p.primary
 	if w != nil {

@@ -217,6 +217,14 @@ var selectors struct {
 	// Window size constraints
 	setMinSize SEL
 	setMaxSize SEL
+
+	// NSDragging protocol (drag-and-drop)
+	draggingLocation        SEL
+	draggingPasteboard      SEL
+	registerForDraggedTypes SEL
+	propertyListForType     SEL
+	count                   SEL // NSArray count
+	objectAtIndex           SEL // NSArray objectAtIndex:
 }
 
 // classes holds cached class references.
@@ -459,6 +467,14 @@ func initSelectors() {
 		// Window size constraints
 		selectors.setMinSize = RegisterSelector("setMinSize:")
 		selectors.setMaxSize = RegisterSelector("setMaxSize:")
+
+		// NSDragging protocol (drag-and-drop)
+		selectors.draggingLocation = RegisterSelector("draggingLocation")
+		selectors.draggingPasteboard = RegisterSelector("draggingPasteboard")
+		selectors.registerForDraggedTypes = RegisterSelector("registerForDraggedTypes:")
+		selectors.propertyListForType = RegisterSelector("propertyListForType:")
+		selectors.count = RegisterSelector("count")
+		selectors.objectAtIndex = RegisterSelector("objectAtIndex:")
 	})
 }
 
