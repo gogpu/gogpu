@@ -25,31 +25,31 @@ import (
 
 // XDND atom name constants.
 const (
-	AtomNameXdndAware     = "XdndAware"
-	AtomNameXdndEnter     = "XdndEnter"
-	AtomNameXdndLeave     = "XdndLeave"
-	AtomNameXdndPosition  = "XdndPosition"
-	AtomNameXdndStatus    = "XdndStatus"
-	AtomNameXdndDrop      = "XdndDrop"
-	AtomNameXdndFinished  = "XdndFinished"
-	AtomNameXdndSelection = "XdndSelection"
+	AtomNameXdndAware      = "XdndAware"
+	AtomNameXdndEnter      = "XdndEnter"
+	AtomNameXdndLeave      = "XdndLeave"
+	AtomNameXdndPosition   = "XdndPosition"
+	AtomNameXdndStatus     = "XdndStatus"
+	AtomNameXdndDrop       = "XdndDrop"
+	AtomNameXdndFinished   = "XdndFinished"
+	AtomNameXdndSelection  = "XdndSelection"
 	AtomNameXdndActionCopy = "XdndActionCopy"
-	AtomNameXdndTypeList  = "XdndTypeList"
-	AtomNameTextURIList   = "text/uri-list"
+	AtomNameXdndTypeList   = "XdndTypeList"
+	AtomNameTextURIList    = "text/uri-list"
 )
 
 // xdndAtoms holds interned XDND atoms.
 type xdndAtoms struct {
-	Aware      Atom
-	Enter      Atom
-	Leave      Atom
-	Position   Atom
-	Status     Atom
-	Drop       Atom
-	Finished   Atom
-	Selection  Atom
-	ActionCopy Atom
-	TypeList   Atom
+	Aware       Atom
+	Enter       Atom
+	Leave       Atom
+	Position    Atom
+	Status      Atom
+	Drop        Atom
+	Finished    Atom
+	Selection   Atom
+	ActionCopy  Atom
+	TypeList    Atom
 	TextURIList Atom
 }
 
@@ -312,7 +312,7 @@ func (p *Platform) processXdndSelectionNotify(w *x11Window, notify *SelectionNot
 	data, _, _, err := p.conn.GetProperty(
 		w.window,
 		notify.Property,
-		Atom(0), // any type
+		Atom(0),  // any type
 		0, 65536, // up to 256KB of path data
 		true, // delete after read
 	)
