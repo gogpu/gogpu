@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.1] - 2026-07-27
+
+### Added
+
+- **OS drag-and-drop: macOS + Wayland** (#387) — completes DnD on all 4 platforms. macOS: 5 NSDraggingDestination methods, registerForDraggedTypes (NSFilenamesPboardType + public.file-url), Y-coordinate flip. Wayland: wl_data_offer v3, DnD callbacks on existing wl_data_device, pipe-based data reading, ParseURIList, multi-window surface routing. Combined with v0.45.0 (Windows + X11), DnD now works on Windows, macOS, X11, and Wayland.
+
 ## [0.45.0] - 2026-07-27
 
 ### Added
