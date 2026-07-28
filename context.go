@@ -206,6 +206,32 @@ func (c *Context) SurfaceView() *wgpu.TextureView {
 	return ws.currentView
 }
 
+// CommandEncoder returns the framework-owned command encoder for the active
+// surface frame. External renderers can record additional passes into it so all
+// work targeting the swapchain image is submitted once at frame end.
+//
+// The returned encoder is borrowed and valid only during the current draw
+// callback. Callers must not call Finish, Submit, or DiscardEncoding on it.
+// Returns nil when the surface frame or encoder cannot be created.
+func (c *Context) CommandEncoder() *wgpu.CommandEncoder {
+	ws := c.activeSurface()
+	if ws == nil {
+		return nil
+	}
+	encoder, err := ws.ensureFrameEncoder()
+	if err != nil {
+		slog.Error("gogpu: shared frame encoder unavailable", "err", err)
+		return nil
+	}
+	// Deferred clears must precede every externally recorded pass. Flushing
+	// here preserves call order; waiting until EndFrame would clear overlays.
+	if !ws.flushClear(ws.renderer.device, ws.renderer) {
+		return nil
+	}
+	ws.hasGPUWork = true
+	return encoder
+}
+
 // PresentTexture draws a texture filling the entire surface.
 // This is the universal path for presenting pre-rendered content (e.g., from
 // ggcanvas.Flush) on any backend including software.
@@ -243,6 +269,17 @@ func (c *Context) RenderTarget() *ContextRenderTarget {
 
 // ContextRenderTarget adapts *Context to ggcanvas.RenderTarget interface.
 type ContextRenderTarget struct{ ctx *Context }
+
+// CommandEncoder returns the active framework-owned encoder as an opaque
+// handle. This optional capability lets compositors record into the same
+// command buffer without depending directly on gogpu or wgpu.
+func (r *ContextRenderTarget) CommandEncoder() gpucontext.CommandEncoder {
+	encoder := r.ctx.CommandEncoder()
+	if encoder == nil {
+		return gpucontext.CommandEncoder{}
+	}
+	return gpucontext.NewCommandEncoder(unsafe.Pointer(encoder)) //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
+}
 
 // PreserveContent reports whether the active surface already contains content
 // that subsequent render passes must load. This exposes MarkExternalContent's
@@ -287,6 +324,7 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 		return err
 	}
 	ws.pixelPresented = true
+	ws.discardFrameEncoder()
 	if ws.currentView != nil {
 		ws.currentView.Release()
 		ws.currentView = nil

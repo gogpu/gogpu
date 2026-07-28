@@ -55,6 +55,9 @@ type RenderTarget struct {
 	currentSurfaceTexture *wgpu.SurfaceTexture
 	currentView           *wgpu.TextureView
 	frameCleared          bool // Whether the frame has been cleared (for LoadOp selection)
+	// frameEncoder is borrowed by external renderers and owned by this surface.
+	// It is finished and submitted exactly once at frame end.
+	frameEncoder *wgpu.CommandEncoder
 
 	// Deferred clear -- eliminates separate Clear render pass.
 	// ClearColor stores the color and sets hasPendingClear=true.
@@ -486,7 +489,8 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	}
 	ws.currentView = view
 
-	// Reset frame state for new frame
+	// Reset frame state for new frame.
+	ws.discardFrameEncoder()
 	ws.frameCleared = false
 	ws.hasPendingClear = false
 	ws.hasGPUWork = false
@@ -538,6 +542,7 @@ func (r *Renderer) EndFrame() {
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	// PresentPixels already presented — skip normal present path (ADR-052).
 	if ws.pixelPresented {
+		ws.discardFrameEncoder()
 		ws.pixelPresented = false
 		ws.hasPendingClear = false
 		if ws.platWindow != nil {
@@ -548,6 +553,7 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	}
 
 	ws.flushClear(r.device, r)
+	ws.submitFrameEncoder(r)
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
@@ -666,8 +672,52 @@ func (ws *RenderTarget) resetLazyState() {
 	ws.pixelPresented = false
 }
 
+// ensureFrameEncoder returns the framework-owned encoder for this surface
+// frame, creating it lazily. Ownership remains with RenderTarget.
+func (ws *RenderTarget) ensureFrameEncoder() (*wgpu.CommandEncoder, error) {
+	if !ws.ensureFrameStarted() {
+		return nil, fmt.Errorf("gogpu: surface frame not available")
+	}
+	if ws.frameEncoder != nil {
+		return ws.frameEncoder, nil
+	}
+	encoder, err := ws.renderer.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+		Label: "gogpu_shared_frame",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gogpu: create shared frame encoder: %w", err)
+	}
+	ws.frameEncoder = encoder
+	return encoder, nil
+}
+
+// submitFrameEncoder finishes and submits the framework-owned shared encoder.
+func (ws *RenderTarget) submitFrameEncoder(r *Renderer) {
+	encoder := ws.frameEncoder
+	ws.frameEncoder = nil
+	if encoder == nil {
+		return
+	}
+	commands, err := encoder.Finish()
+	if err != nil {
+		slog.Error("finish shared frame encoder failed", "err", err)
+		return
+	}
+	r.submitTracked(commands)
+}
+
+// discardFrameEncoder abandons an unsubmitted shared encoder on cancellation.
+func (ws *RenderTarget) discardFrameEncoder() {
+	if ws.frameEncoder == nil {
+		return
+	}
+	ws.frameEncoder.DiscardEncoding()
+	ws.frameEncoder = nil
+}
+
 // releaseFrame releases per-frame resources after presentation.
 func (ws *RenderTarget) releaseFrame() {
+	ws.discardFrameEncoder()
 	if ws.currentView != nil {
 		ws.currentView.Release()
 		ws.currentView = nil
@@ -696,16 +746,20 @@ func (ws *RenderTarget) clear(red, green, blue, alpha float64) {
 
 // flushClear applies any pending clear immediately as a standalone render pass.
 // Called by EndFrame if no draw calls consumed the pending clear.
-func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) {
+func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) bool {
 	if !ws.hasPendingClear || ws.currentView == nil {
-		return
+		return true
 	}
 
-	encoder, err := device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
-		Label: "Clear",
-	})
-	if err != nil {
-		return
+	encoder := ws.frameEncoder
+	shared := encoder != nil
+	if !shared {
+		var err error
+		encoder, err = device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{Label: "Clear"})
+		if err != nil {
+			slog.Error("create clear command encoder failed", "err", err)
+			return false
+		}
 	}
 
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
@@ -719,21 +773,38 @@ func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) {
 		},
 	})
 	if err != nil {
-		return
+		if shared {
+			ws.discardFrameEncoder()
+		} else {
+			encoder.DiscardEncoding()
+		}
+		slog.Error("begin clear render pass failed", "err", err)
+		return false
 	}
 
 	if err := renderPass.End(); err != nil {
-		return
+		if shared {
+			ws.discardFrameEncoder()
+		} else {
+			encoder.DiscardEncoding()
+		}
+		slog.Error("end clear render pass failed", "err", err)
+		return false
+	}
+	ws.hasPendingClear = false
+	ws.frameCleared = true
+	if shared {
+		return true
 	}
 
 	commands, err := encoder.Finish()
 	if err != nil {
-		return
+		slog.Error("finish clear command encoder failed", "err", err)
+		return false
 	}
 
 	r.submitTracked(commands)
-	ws.hasPendingClear = false
-	ws.frameCleared = true
+	return true
 }
 
 // submitTracked submits commands with non-blocking tracking.
@@ -1463,6 +1534,7 @@ func (r *Renderer) ReleaseInstance() {
 
 // destroy releases all resources owned by this window surface.
 func (ws *RenderTarget) destroy() {
+	ws.discardFrameEncoder()
 	if ws.currentView != nil {
 		ws.currentView.Release()
 		ws.currentView = nil
