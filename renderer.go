@@ -489,8 +489,7 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	}
 	ws.currentView = view
 
-	// Reset frame state for new frame.
-	ws.discardFrameEncoder()
+	// Reset frame state for new frame
 	ws.frameCleared = false
 	ws.hasPendingClear = false
 	ws.hasGPUWork = false
@@ -636,6 +635,7 @@ func (ws *RenderTarget) setTransactionPresent(enabled bool) {
 // The actual swapchain acquire happens on first draw call via ensureFrameStarted.
 // Uses ws.platWindow and ws.renderer.{device,adapter} — no parameters needed.
 func (ws *RenderTarget) prepareLazyAcquire() {
+	ws.discardFrameEncoder()
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 	ws.pixelPresented = false

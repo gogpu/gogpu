@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -14,6 +15,14 @@ type countingSubmitQueue struct {
 	submits int
 }
 
+type commandEncoderFailDevice struct{ noop.Device }
+
+func (d *commandEncoderFailDevice) CreateCommandEncoder(
+	_ *hal.CommandEncoderDescriptor,
+) (hal.CommandEncoder, error) {
+	return nil, errors.New("injected command encoder failure")
+}
+
 func (q *countingSubmitQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
 	q.submits++
 	return uint64(q.submits), nil
@@ -21,9 +30,17 @@ func (q *countingSubmitQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
 
 func newSharedEncoderTestContext(t *testing.T) (*Context, *RenderTarget, *countingSubmitQueue) {
 	t.Helper()
+	return newSharedEncoderTestContextWithDevice(t, &noop.Device{})
+}
+
+func newSharedEncoderTestContextWithDevice(
+	t *testing.T,
+	halDevice hal.Device,
+) (*Context, *RenderTarget, *countingSubmitQueue) {
+	t.Helper()
 	queue := &countingSubmitQueue{}
 	device, err := wgpu.NewDeviceFromHAL(
-		&noop.Device{}, queue, 0, gputypes.DefaultLimits(), "shared-encoder-test",
+		halDevice, queue, 0, gputypes.DefaultLimits(), "shared-encoder-test",
 	)
 	if err != nil {
 		t.Fatalf("NewDeviceFromHAL: %v", err)
@@ -56,7 +73,9 @@ func newSharedEncoderTestContext(t *testing.T) (*Context, *RenderTarget, *counti
 	renderer.primary = target
 	t.Cleanup(func() {
 		target.discardFrameEncoder()
-		view.Release()
+		if target.currentView != nil {
+			target.currentView.Release()
+		}
 		texture.Release()
 		device.Release()
 	})
@@ -121,5 +140,108 @@ func TestContextCommandEncoderWithoutSurfaceReturnsNil(t *testing.T) {
 	ctx := newContext(&Renderer{}, 1)
 	if got := ctx.CommandEncoder(); got != nil {
 		t.Fatalf("CommandEncoder() = %v, want nil", got)
+	}
+}
+
+func TestContextRenderTargetCommandEncoderWithoutSurfaceReturnsNil(t *testing.T) {
+	ctx := newContext(&Renderer{}, 1)
+	if got := ctx.RenderTarget().CommandEncoder(); !got.IsNil() {
+		t.Fatal("opaque CommandEncoder is non-nil without an active surface")
+	}
+}
+
+func TestEnsureFrameEncoderWithoutFrameFails(t *testing.T) {
+	target := &RenderTarget{renderer: &Renderer{}}
+	if _, err := target.ensureFrameEncoder(); err == nil {
+		t.Fatal("ensureFrameEncoder succeeded without an active frame")
+	}
+}
+
+func TestContextCommandEncoderReturnsNilWhenCreationFails(t *testing.T) {
+	ctx, _, _ := newSharedEncoderTestContextWithDevice(t, &commandEncoderFailDevice{})
+	if got := ctx.CommandEncoder(); got != nil {
+		t.Fatalf("CommandEncoder() = %v after creation failure, want nil", got)
+	}
+}
+
+func TestFlushClearStandaloneSubmitsOnce(t *testing.T) {
+	_, target, queue := newSharedEncoderTestContext(t)
+	target.clear(0.1, 0.2, 0.3, 1)
+
+	if !target.flushClear(target.renderer.device, target.renderer) {
+		t.Fatal("flushClear failed")
+	}
+	if queue.submits != 1 {
+		t.Fatalf("standalone clear submissions = %d, want 1", queue.submits)
+	}
+	if target.hasPendingClear || !target.frameCleared {
+		t.Fatal("standalone clear did not update frame state")
+	}
+}
+
+func TestFlushClearDiscardsStandaloneEncoderOnInvalidView(t *testing.T) {
+	_, target, queue := newSharedEncoderTestContext(t)
+	target.currentView.Release()
+	target.clear(0.1, 0.2, 0.3, 1)
+
+	if target.flushClear(target.renderer.device, target.renderer) {
+		t.Fatal("flushClear succeeded with a released view")
+	}
+	if queue.submits != 0 {
+		t.Fatalf("invalid clear submissions = %d, want 0", queue.submits)
+	}
+}
+
+func TestContextCommandEncoderDiscardsSharedEncoderWhenClearFails(t *testing.T) {
+	ctx, target, queue := newSharedEncoderTestContext(t)
+	if encoder := ctx.CommandEncoder(); encoder == nil {
+		t.Fatal("CommandEncoder returned nil")
+	}
+	target.currentView.Release()
+	target.clear(0.1, 0.2, 0.3, 1)
+
+	if encoder := ctx.CommandEncoder(); encoder != nil {
+		t.Fatal("CommandEncoder returned encoder after clear failure")
+	}
+	if target.frameEncoder != nil {
+		t.Fatal("failed shared encoder was retained")
+	}
+	if queue.submits != 0 {
+		t.Fatalf("failed shared encoder submissions = %d, want 0", queue.submits)
+	}
+}
+
+func TestSubmitFrameEncoderDropsFinishFailure(t *testing.T) {
+	ctx, target, queue := newSharedEncoderTestContext(t)
+	encoder := ctx.CommandEncoder()
+	if encoder == nil {
+		t.Fatal("CommandEncoder returned nil")
+	}
+	encoder.CopyBufferToBuffer(nil, 0, nil, 0, 1)
+
+	target.submitFrameEncoder(target.renderer)
+	if target.frameEncoder != nil {
+		t.Fatal("failed frame encoder was retained")
+	}
+	if queue.submits != 0 {
+		t.Fatalf("invalid frame submissions = %d, want 0", queue.submits)
+	}
+}
+
+func TestEndFrameDiscardsEncoderAfterPixelPresent(t *testing.T) {
+	ctx, target, queue := newSharedEncoderTestContext(t)
+	if encoder := ctx.CommandEncoder(); encoder == nil {
+		t.Fatal("CommandEncoder returned nil")
+	}
+	target.pixelPresented = true
+
+	if target.renderer.endFrameForSurface(target) {
+		t.Fatal("pixel-presented frame unexpectedly reconfigured")
+	}
+	if target.frameEncoder != nil {
+		t.Fatal("pixel-presented frame retained its encoder")
+	}
+	if queue.submits != 0 {
+		t.Fatalf("pixel-presented frame submissions = %d, want 0", queue.submits)
 	}
 }
