@@ -191,6 +191,12 @@ type Platform struct {
 	// _XKB_RULES_NAMES is unreliable under XWayland (freedesktop#612).
 	isXWayland bool
 
+	// preferServerKeymap selects the mapping advertised by the connected X
+	// server before host-local xkbcommon. This is required when the server and
+	// client hosts can have different keyboard configuration (X forwarding,
+	// XQuartz, and XWayland).
+	preferServerKeymap bool
+
 	// DPI scale factor (from Xft.dpi or screen physical size) — process-level
 	scaleFactor float64
 
@@ -386,11 +392,20 @@ func (p *Platform) Init(config Config) error {
 	if p.isXWayland {
 		logger().Info("XWayland detected — _XKB_RULES_NAMES may be unreliable")
 	}
+	vendor := ""
+	if setup := conn.Setup(); setup != nil {
+		vendor = setup.Vendor
+	}
+	p.preferServerKeymap = shouldPreferServerKeymap(os.Getenv("DISPLAY"), vendor, p.isXWayland)
 
 	// Load libxkbcommon for proper text input (AltGr, dead keys, multi-layout).
 	// First try RMLVO from _XKB_RULES_NAMES, then system defaults.
 	// Non-fatal: falls back to manual KeycodeToKeysymGroup (no AltGr support).
-	p.initXkbcommon()
+	if p.preferServerKeymap {
+		logger().Info("using X server keyboard mapping", "DISPLAY", os.Getenv("DISPLAY"), "vendor", vendor)
+	} else {
+		p.initXkbcommon()
+	}
 
 	// Initialize XInput2 for touch support (non-fatal)
 	xi, err := conn.InitXInput2()
@@ -1320,6 +1335,7 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 // SDL3 uses the same fallback pattern.
 // BUG-INPUT-005: Now uses full state sync (modifiers + group) instead of group-only.
 func (p *Platform) handleMappingNotify() {
+	p.reloadServerKeymap()
 	if p.xkb == nil {
 		return
 	}
@@ -1351,6 +1367,8 @@ func (p *Platform) handleMappingNotify() {
 // Called on XkbNewKeyboardNotify (keyboard hot-plug) and XkbMapNotify (keymap changed).
 // BUG-INPUT-005: Handles layout reconfiguration without restart.
 func (p *Platform) reloadXkbKeymap() {
+	p.reloadServerKeymap()
+
 	p.mu.Lock()
 	xkbState := p.xkbState
 	p.mu.Unlock()
@@ -1386,14 +1404,23 @@ func (p *Platform) reloadXkbKeymap() {
 			p.mu.Unlock()
 		}
 	}
+}
 
-	// Also re-read keyboard mapping for the fallback path.
-	keymap, _ := p.conn.GetKeyboardMapping()
-	if keymap != nil {
-		p.mu.Lock()
-		p.keymap = keymap
-		p.mu.Unlock()
+// reloadServerKeymap refreshes the pure-Go core mapping after the X server
+// reports a keyboard configuration change. XQuartz rewrites this mapping when
+// the macOS input source changes, so it must be refreshed independently of XKB.
+func (p *Platform) reloadServerKeymap() {
+	if p.conn == nil {
+		return
 	}
+	keymap, err := p.conn.GetKeyboardMapping()
+	if err != nil {
+		logger().Warn("failed to refresh X server keyboard mapping", "err", err)
+		return
+	}
+	p.mu.Lock()
+	p.keymap = keymap
+	p.mu.Unlock()
 }
 
 // handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.
@@ -1708,20 +1735,29 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 	// Evdev keycode for xkbcommon: X11 keycode - 8
 	evdevKey := uint32(keycode) - 8
 
-	// Text input: use xkbcommon if available (handles AltGr/Level3 correctly).
-	// Fallback to manual KeycodeToKeysymGroup (no AltGr support).
+	// Text input uses the connected server's mapping for remote/compatibility
+	// servers, otherwise xkbcommon with the server mapping as fallback.
 	p.mu.Lock()
 	xkbState := p.xkbState
 	keymap := p.keymap
+	group := p.xkbGroup
+	preferServerKeymap := p.preferServerKeymap
 	p.mu.Unlock()
 
 	if pressed {
 		dispatched := false
 
+		// Remote and compatibility X servers own the effective keymap. Consulting
+		// their wire-protocol mapping first avoids translating with an unrelated
+		// client-host layout.
+		if preferServerKeymap {
+			dispatched = dispatchServerKeymapText(w, keymap, keycode, mods, group)
+		}
+
 		// Primary: xkbcommon (handles AltGr/Level3 and all layouts correctly).
 		// State is synced via UpdateMask from XkbStateNotify events (winit pattern).
 		// Do NOT call UpdateKey here — winit never does on X11.
-		if xkbState != nil && xkbState.Ready() {
+		if !dispatched && xkbState != nil && xkbState.Ready() {
 			s := xkbState.KeyGetUtf8(evdevKey)
 			if s != "" {
 				for _, r := range s {
@@ -1736,18 +1772,45 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 		// Fallback: manual lookup with group-aware keysym resolution.
 		// Covers cases where xkb_keymap_new_from_names(NULL) doesn't include
 		// the user's configured layouts (e.g., Russian via desktop settings).
-		if !dispatched && keymap != nil {
-			p.mu.Lock()
-			group := p.xkbGroup
-			p.mu.Unlock()
-			shift := mods&gpucontext.ModShift != 0
-			capsLock := mods&gpucontext.ModCapsLock != 0
-			keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, group)
-			if r, ok := KeysymToRune(keysym); ok && r >= 32 {
-				w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
-			}
+		if !dispatched {
+			dispatchServerKeymapText(w, keymap, keycode, mods, group)
 		}
 	}
+}
+
+func dispatchServerKeymapText(
+	w *x11Window,
+	keymap *KeyboardMapping,
+	keycode uint8,
+	mods gpucontext.Modifiers,
+	group int,
+) bool {
+	if keymap == nil {
+		return false
+	}
+	shift := mods&gpucontext.ModShift != 0
+	capsLock := mods&gpucontext.ModCapsLock != 0
+	keysym := keymap.KeycodeToKeysymGroup(keycode, shift, capsLock, group)
+	r, ok := KeysymToRune(keysym)
+	if !ok || r < 32 {
+		return false
+	}
+	w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
+	return true
+}
+
+// shouldPreferServerKeymap reports whether host-local keyboard configuration
+// can differ from the connected X server's effective mapping.
+func shouldPreferServerKeymap(display, vendor string, xwayland bool) bool {
+	if xwayland {
+		return true
+	}
+	vendor = strings.ToLower(vendor)
+	if strings.Contains(vendor, "xquartz") || strings.Contains(vendor, "apple") {
+		return true
+	}
+	host, _, _, err := parseDisplay(display)
+	return err == nil && host != "" && !strings.EqualFold(host, "unix")
 }
 
 // x11KeycodeToKey converts an X11 keycode to a gpucontext.Key.
