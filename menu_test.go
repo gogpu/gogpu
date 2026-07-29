@@ -48,6 +48,7 @@ func (m *mockMenuManager) ReduceMotion() bool                        { return fa
 func (m *mockMenuManager) HighContrast() bool                        { return false }
 func (m *mockMenuManager) FontScale() float32                        { return 1.0 }
 func (m *mockMenuManager) SubpixelLayout() gpucontext.SubpixelLayout { return 0 }
+func (m *mockMenuManager) FontSmoothing() gpucontext.FontSmoothing   { return 0 }
 func (m *mockMenuManager) SetAppName(string)                         {}
 func (m *mockMenuManager) ShowOpenFileDialog(platform.FileDialogOptions) ([]string, error) {
 	return nil, nil

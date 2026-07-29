@@ -1546,6 +1546,16 @@ func (p *darwinPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+// FontSmoothing returns the OS text anti-aliasing mode.
+// macOS disabled subpixel AA system-wide starting with Mojave (10.14, 2018).
+// All modern macOS versions use grayscale AA only. A user can disable all
+// smoothing via `defaults write -g AppleFontSmoothing -int 0`, but this is
+// rare and would require NSUserDefaults access to detect.
+// Returns FontSmoothingGrayscale as the safe default.
+func (p *darwinPlatform) FontSmoothing() gpucontext.FontSmoothing {
+	return gpucontext.FontSmoothingGrayscale
+}
+
 func (p *darwinPlatform) SetAppName(name string) {
 	if p.app != nil {
 		p.app.SetAppName(name)

@@ -181,6 +181,13 @@ func (a *gpuContextAdapter) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+func (a *gpuContextAdapter) FontSmoothing() gpucontext.FontSmoothing {
+	if a.app != nil {
+		return a.app.FontSmoothing()
+	}
+	return gpucontext.FontSmoothingGrayscale
+}
+
 // Ensure gpuContextAdapter implements gpucontext.DeviceProvider.
 var _ gpucontext.DeviceProvider = (*gpuContextAdapter)(nil)
 

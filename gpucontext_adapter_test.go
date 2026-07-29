@@ -205,6 +205,25 @@ func TestGPUContextAdapterPlatformProvider(t *testing.T) {
 		}
 	})
 
+	t.Run("FontSmoothing delegates to app", func(t *testing.T) {
+		mgr := &mockManager{fontSmoothing: gpucontext.FontSmoothingSubpixel}
+		app := &App{manager: mgr}
+		adapter := &gpuContextAdapter{app: app}
+
+		fs := adapter.FontSmoothing()
+		if fs != gpucontext.FontSmoothingSubpixel {
+			t.Errorf("FontSmoothing() = %v, want FontSmoothingSubpixel", fs)
+		}
+	})
+
+	t.Run("FontSmoothing nil app", func(t *testing.T) {
+		adapter := &gpuContextAdapter{}
+		fs := adapter.FontSmoothing()
+		if fs != gpucontext.FontSmoothingGrayscale {
+			t.Errorf("FontSmoothing() = %v, want FontSmoothingGrayscale", fs)
+		}
+	})
+
 	t.Run("DarkMode nil app", func(t *testing.T) {
 		adapter := &gpuContextAdapter{}
 		if adapter.DarkMode() {

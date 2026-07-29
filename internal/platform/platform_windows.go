@@ -1421,6 +1421,35 @@ func (p *windowsPlatform) FontScale() float32 {
 	return float32(p.ScaleFactor())
 }
 
+// FontSmoothing returns the OS text anti-aliasing mode.
+// Detection uses the same Win32 APIs as SubpixelLayout:
+//   - SPI_GETFONTSMOOTHING → BOOL: smoothing on/off
+//   - SPI_GETFONTSMOOTHINGTYPE → FE_FONTSMOOTHINGSTANDARD (1) or FE_FONTSMOOTHINGCLEARTYPE (2)
+//
+// Logic: smoothing=false → None; smoothing=true + standard → Grayscale;
+// smoothing=true + cleartype → Subpixel.
+func (p *windowsPlatform) FontSmoothing() gpucontext.FontSmoothing {
+	var enabled uint32
+	ret, _, _ := procSystemParametersInfoW.Call(
+		spiGetFontSmoothing, 0,
+		uintptr(unsafe.Pointer(&enabled)), 0,
+	)
+	if ret == 0 || enabled == 0 {
+		return gpucontext.FontSmoothingNone
+	}
+
+	var smoothingType uint32
+	ret, _, _ = procSystemParametersInfoW.Call(
+		spiGetFontSmoothingType, 0,
+		uintptr(unsafe.Pointer(&smoothingType)), 0,
+	)
+	if ret == 0 || smoothingType != fontSmoothingTypeClearType {
+		return gpucontext.FontSmoothingGrayscale
+	}
+
+	return gpucontext.FontSmoothingSubpixel
+}
+
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
 // Detection follows Qt6's pattern (qwindowsscreen.cpp):
 //  1. Check if font smoothing is enabled (SPI_GETFONTSMOOTHING)

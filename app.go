@@ -1435,6 +1435,16 @@ func (a *App) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+// FontSmoothing returns the OS text anti-aliasing mode.
+// Returns FontSmoothingGrayscale when the manager is not initialized.
+// Implements gpucontext.PlatformProvider.
+func (a *App) FontSmoothing() gpucontext.FontSmoothing {
+	if a.manager != nil {
+		return a.manager.FontSmoothing()
+	}
+	return gpucontext.FontSmoothingGrayscale
+}
+
 // SetFrameless enables or disables frameless window mode.
 // Implements gpucontext.WindowChrome.
 func (a *App) SetFrameless(frameless bool) {

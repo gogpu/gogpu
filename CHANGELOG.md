@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`App.RequestSize(width, height)`** (#397) — programmatic window resize at runtime. All 5 platforms: Windows (DPI-aware `SetWindowPos`), macOS (`setContentSize:` + unzoom), X11 (`_NET_WM_STATE` remove-maximize + `ConfigureWindow`), Wayland (advisory min=max trick, SDL3 pattern), Browser (CSS + drawingBuffer). Min/max constraint clamping, fullscreen guard, maximized restore (winit pattern). Requested by @unxed for f4 file manager.
 - **`Context.CommandEncoder()`** (#393, #394, @besmpl) — frame-owned lazy command encoder. External renderers (g3d) record passes into a borrowed encoder; gogpu remains sole owner of finish/submit/present. Single `queue.Submit()` per frame eliminates Intel Vulkan VK_ERROR_DEVICE_LOST on multi-pass compositing.
 - **`ContextRenderTarget.PreserveContent()`** (#390, #391) — exposes `MarkExternalContent` state through the render-target adapter so ggcanvas preserves earlier renderer's surface content.
+- **`App.FontSmoothing()`** (#396, ADR-057) — OS text anti-aliasing detection on all 5 platforms. Windows: `SPI_GETFONTSMOOTHING` + `SPI_GETFONTSMOOTHINGTYPE`. macOS: always Grayscale (post-Mojave). X11: `Xft.antialias` + `Xft.rgba` from RESOURCE_MANAGER. Wayland: inferred from SubpixelLayout. Browser: Grayscale. Returns `gpucontext.FontSmoothing{None,Grayscale,Subpixel}`.
 
 ### Fixed
 

@@ -142,6 +142,12 @@ func (p *browserPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+// FontSmoothing returns FontSmoothingGrayscale on browser — text rendering
+// is controlled by the browser engine, not the application.
+func (p *browserPlatform) FontSmoothing() gpucontext.FontSmoothing {
+	return gpucontext.FontSmoothingGrayscale
+}
+
 // SetAppName is a no-op on browser — the page title is set via document.title.
 func (p *browserPlatform) SetAppName(_ string) {}
 

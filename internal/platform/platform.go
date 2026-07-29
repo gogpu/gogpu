@@ -169,6 +169,11 @@ type PlatformManager interface {
 	// SubpixelLayout returns the display's subpixel arrangement for LCD text.
 	SubpixelLayout() gpucontext.SubpixelLayout
 
+	// FontSmoothing returns the OS text anti-aliasing mode.
+	// Used by text rendering pipelines to select between aliased, grayscale,
+	// and subpixel anti-aliasing.
+	FontSmoothing() gpucontext.FontSmoothing
+
 	// SetAppName sets the application name (displayed in menus).
 	SetAppName(name string)
 

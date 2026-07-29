@@ -178,3 +178,104 @@ func TestParseXftRGBA(t *testing.T) {
 		})
 	}
 }
+
+func TestParseXftAntialias(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources string
+		want      int
+	}{
+		{
+			name:      "antialias on",
+			resources: "Xft.antialias:\t1\n",
+			want:      1,
+		},
+		{
+			name:      "antialias off",
+			resources: "Xft.antialias:\t0\n",
+			want:      0,
+		},
+		{
+			name:      "not set defaults to on",
+			resources: "Xft.dpi:\t96\n",
+			want:      1,
+		},
+		{
+			name:      "whitespace around value",
+			resources: "Xft.antialias:  1  \n",
+			want:      1,
+		},
+		{
+			name:      "empty resources defaults to on",
+			resources: "",
+			want:      1,
+		},
+		{
+			name:      "mixed with other settings",
+			resources: "Xft.dpi:\t144\nXft.antialias:\t0\nXft.rgba:\trgb\n",
+			want:      0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseXftAntialias(tt.resources)
+			if got != tt.want {
+				t.Errorf("parseXftAntialias() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFontSmoothingFromXftResources(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources string
+		want      gpucontext.FontSmoothing
+	}{
+		{
+			name:      "antialias off",
+			resources: "Xft.antialias:\t0\n",
+			want:      gpucontext.FontSmoothingNone,
+		},
+		{
+			name:      "antialias on with rgb subpixel",
+			resources: "Xft.antialias:\t1\nXft.rgba:\trgb\n",
+			want:      gpucontext.FontSmoothingSubpixel,
+		},
+		{
+			name:      "antialias on with bgr subpixel",
+			resources: "Xft.antialias:\t1\nXft.rgba:\tbgr\n",
+			want:      gpucontext.FontSmoothingSubpixel,
+		},
+		{
+			name:      "antialias on with none rgba",
+			resources: "Xft.antialias:\t1\nXft.rgba:\tnone\n",
+			want:      gpucontext.FontSmoothingGrayscale,
+		},
+		{
+			name:      "antialias on without rgba",
+			resources: "Xft.antialias:\t1\n",
+			want:      gpucontext.FontSmoothingGrayscale,
+		},
+		{
+			name:      "no settings defaults to grayscale",
+			resources: "",
+			want:      gpucontext.FontSmoothingGrayscale,
+		},
+		{
+			name:      "only rgba set implies antialias on",
+			resources: "Xft.rgba:\trgb\n",
+			want:      gpucontext.FontSmoothingSubpixel,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fontSmoothingFromXftResources(tt.resources)
+			if got != tt.want {
+				t.Errorf("fontSmoothingFromXftResources() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

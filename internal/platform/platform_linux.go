@@ -457,6 +457,16 @@ func (p *x11Platform) SubpixelLayout() gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+// FontSmoothing returns the OS text anti-aliasing mode.
+// Delegates to the X11 platform which reads Xft.antialias and Xft.rgba
+// from RESOURCE_MANAGER.
+func (p *x11Platform) FontSmoothing() gpucontext.FontSmoothing {
+	if p.inner != nil {
+		return p.inner.FontSmoothing()
+	}
+	return gpucontext.FontSmoothingGrayscale
+}
+
 // DarkMode returns true if the system dark mode is active.
 func (p *x11Platform) DarkMode() bool { return detectDarkMode() }
 
@@ -2988,6 +2998,19 @@ func (p *waylandPlatform) SubpixelLayout() gpucontext.SubpixelLayout {
 		}
 	}
 	return detectSubpixelLayout()
+}
+
+// FontSmoothing returns the OS text anti-aliasing mode for Wayland.
+// Wayland has no protocol for font smoothing settings. Falls back to
+// fontconfig-based detection via detectSubpixelLayout to infer the mode.
+// Full gsettings/D-Bus integration is Phase 3.
+func (p *waylandPlatform) FontSmoothing() gpucontext.FontSmoothing {
+	// Infer from SubpixelLayout: if subpixel layout is set, subpixel AA is active.
+	layout := p.SubpixelLayout()
+	if layout != gpucontext.SubpixelNone {
+		return gpucontext.FontSmoothingSubpixel
+	}
+	return gpucontext.FontSmoothingGrayscale
 }
 
 // wlOutputSubpixelToLayout maps wl_output_subpixel enum to gpucontext.SubpixelLayout.

@@ -702,6 +702,67 @@ func parseXftRGBA(resources string) gpucontext.SubpixelLayout {
 	return gpucontext.SubpixelNone
 }
 
+// FontSmoothing returns the OS text anti-aliasing mode by reading
+// Xft.antialias and Xft.rgba from the X RESOURCE_MANAGER property.
+// Logic: antialias=0 → None; antialias=1 + rgba=none → Grayscale;
+// antialias=1 + rgba=rgb/bgr/vrgb/vbgr → Subpixel.
+// Returns FontSmoothingGrayscale if resources are unavailable (safe default).
+func (p *Platform) FontSmoothing() gpucontext.FontSmoothing {
+	if p.conn == nil {
+		return gpucontext.FontSmoothingGrayscale
+	}
+
+	rootWindow := p.conn.RootWindow()
+	if rootWindow == 0 {
+		return gpucontext.FontSmoothingGrayscale
+	}
+
+	data, _, _, err := p.conn.GetProperty(rootWindow, AtomResourceManager, Atom(0), 0, 8192, false)
+	if err != nil || len(data) == 0 {
+		return gpucontext.FontSmoothingGrayscale
+	}
+
+	resources := string(data)
+	return fontSmoothingFromXftResources(resources)
+}
+
+// fontSmoothingFromXftResources determines FontSmoothing from Xft resources.
+// Exported-style name for testability, but package-scoped.
+func fontSmoothingFromXftResources(resources string) gpucontext.FontSmoothing {
+	antialias := parseXftAntialias(resources)
+	if antialias == 0 {
+		return gpucontext.FontSmoothingNone
+	}
+
+	// antialias is on (1 or not set, default is on).
+	// Check subpixel layout to distinguish grayscale vs subpixel.
+	layout := parseXftRGBA(resources)
+	if layout != gpucontext.SubpixelNone {
+		return gpucontext.FontSmoothingSubpixel
+	}
+	return gpucontext.FontSmoothingGrayscale
+}
+
+// parseXftAntialias parses the Xft.antialias value from an X RESOURCE_MANAGER string.
+// The string contains lines like "Xft.antialias:\t1" or "Xft.antialias: 0".
+// Returns 1 if Xft.antialias is not found (antialiasing is on by default).
+// Returns 0 if explicitly set to 0, 1 if set to 1.
+func parseXftAntialias(resources string) int {
+	for _, line := range strings.Split(resources, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Xft.antialias:") {
+			continue
+		}
+		value := strings.TrimSpace(line[len("Xft.antialias:"):])
+		if value == "0" {
+			return 0
+		}
+		return 1
+	}
+	// Xft.antialias not set — antialiasing is on by default.
+	return 1
+}
+
 // initXkbcommon loads libxkbcommon and creates a keymap.
 // First tries to read the X server's actual RMLVO configuration from
 // _XKB_RULES_NAMES root window property (BUG-INPUT-004: multi-layout support).

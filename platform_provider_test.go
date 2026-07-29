@@ -93,6 +93,7 @@ type mockManager struct {
 	highContrast   bool
 	fontScale      float32
 	subpixelLayout gpucontext.SubpixelLayout
+	fontSmoothing  gpucontext.FontSmoothing
 
 	// dialog stubs — set these to control what ShowOpen/SaveFileDialog return
 	openDialogPaths []string
@@ -115,6 +116,7 @@ func (m *mockManager) ReduceMotion() bool                        { return m.redu
 func (m *mockManager) HighContrast() bool                        { return m.highContrast }
 func (m *mockManager) FontScale() float32                        { return m.fontScale }
 func (m *mockManager) SubpixelLayout() gpucontext.SubpixelLayout { return m.subpixelLayout }
+func (m *mockManager) FontSmoothing() gpucontext.FontSmoothing   { return m.fontSmoothing }
 func (m *mockManager) SetAppName(name string)                    {}
 func (m *mockManager) ShowOpenFileDialog(opts platform.FileDialogOptions) ([]string, error) {
 	m.lastDialogOpts = opts
@@ -220,6 +222,13 @@ func TestPlatformProviderNilPlatform(t *testing.T) {
 			t.Errorf("SubpixelLayout() = %v, want SubpixelNone", sl)
 		}
 	})
+
+	t.Run("FontSmoothing", func(t *testing.T) {
+		fs := app.FontSmoothing()
+		if fs != gpucontext.FontSmoothingGrayscale {
+			t.Errorf("FontSmoothing() = %v, want FontSmoothingGrayscale", fs)
+		}
+	})
 }
 
 // TestScaleFactorResolution verifies three-tier ScaleFactor resolution:
@@ -274,6 +283,7 @@ func TestPlatformProviderDelegation(t *testing.T) {
 		highContrast:   true,
 		fontScale:      1.5,
 		subpixelLayout: gpucontext.SubpixelBGR,
+		fontSmoothing:  gpucontext.FontSmoothingSubpixel,
 	}
 	mockWin := &mockWindow{
 		width:       800,
@@ -371,6 +381,13 @@ func TestPlatformProviderDelegation(t *testing.T) {
 		sl := app.SubpixelLayout()
 		if sl != gpucontext.SubpixelBGR {
 			t.Errorf("SubpixelLayout() = %v, want SubpixelBGR", sl)
+		}
+	})
+
+	t.Run("FontSmoothing", func(t *testing.T) {
+		fs := app.FontSmoothing()
+		if fs != gpucontext.FontSmoothingSubpixel {
+			t.Errorf("FontSmoothing() = %v, want FontSmoothingSubpixel", fs)
 		}
 	})
 }
@@ -530,5 +547,10 @@ func TestPlatformProviderFalseValues(t *testing.T) {
 	sl := app.SubpixelLayout()
 	if sl != gpucontext.SubpixelNone {
 		t.Errorf("SubpixelLayout() = %v, want SubpixelNone (default)", sl)
+	}
+
+	fs := app.FontSmoothing()
+	if fs != gpucontext.FontSmoothingNone {
+		t.Errorf("FontSmoothing() = %v, want FontSmoothingNone (default)", fs)
 	}
 }
