@@ -530,6 +530,17 @@ func (p *Platform) ScaleFactor() float64 {
 	return p.scaleFactor
 }
 
+// physicalToLogical converts X11 physical pixel coordinates to logical DIP.
+// X11 events report physical pixels; all other platforms (Windows, macOS,
+// Wayland, Browser) deliver logical DIP coordinates. This conversion ensures
+// pointer events are consistent with App.Size() across all platforms.
+func (p *Platform) physicalToLogical(x, y float64) (float64, float64) {
+	if scale := p.ScaleFactor(); scale > 1.0 {
+		return x / scale, y / scale
+	}
+	return x, y
+}
+
 // queryScaleFactor determines the DPI scale factor using two methods:
 //  1. Xft.dpi from RESOURCE_MANAGER property on root window (most reliable, matches GLFW/Qt/GTK)
 //  2. Screen physical dimensions as fallback (pixels / mm * 25.4 / 96)
@@ -1013,8 +1024,9 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 // handleMotionNotify processes mouse movement events.
 func (p *Platform) handleMotionNotify(w *x11Window, e *MotionNotifyEvent) {
-	x := float64(e.EventX)
-	y := float64(e.EventY)
+	// X11 reports physical pixels; convert to logical DIP to match
+	// App.Size() and all other platforms (Windows, macOS, Wayland, Browser).
+	x, y := p.physicalToLogical(float64(e.EventX), float64(e.EventY))
 
 	w.eventMu.Lock()
 	cursorMode := w.cursorMode
@@ -1054,8 +1066,7 @@ func (p *Platform) handleMotionNotify(w *x11Window, e *MotionNotifyEvent) {
 
 // handleButtonPress processes mouse button press events.
 func (p *Platform) handleButtonPress(w *x11Window, e *ButtonPressEvent) {
-	x := float64(e.EventX)
-	y := float64(e.EventY)
+	x, y := p.physicalToLogical(float64(e.EventX), float64(e.EventY))
 
 	// Scroll buttons (4-7) are emulated as button presses in X11
 	if isScrollButton(e.Detail) {
@@ -1128,8 +1139,7 @@ func (p *Platform) handleButtonPress(w *x11Window, e *ButtonPressEvent) {
 
 // handleButtonRelease processes mouse button release events.
 func (p *Platform) handleButtonRelease(w *x11Window, e *ButtonReleaseEvent) {
-	x := float64(e.EventX)
-	y := float64(e.EventY)
+	x, y := p.physicalToLogical(float64(e.EventX), float64(e.EventY))
 
 	// Scroll button releases are ignored (scroll is handled on press)
 	if isScrollButton(e.Detail) {
@@ -1196,8 +1206,7 @@ func (p *Platform) handleScrollButton(w *x11Window, detail uint8, x, y float64, 
 
 // handleEnterNotify processes pointer enter events.
 func (p *Platform) handleEnterNotify(w *x11Window, e *EnterNotifyEvent) {
-	x := float64(e.EventX)
-	y := float64(e.EventY)
+	x, y := p.physicalToLogical(float64(e.EventX), float64(e.EventY))
 
 	w.eventMu.Lock()
 	w.mouseX = x
@@ -1213,8 +1222,7 @@ func (p *Platform) handleEnterNotify(w *x11Window, e *EnterNotifyEvent) {
 
 // handleLeaveNotify processes pointer leave events.
 func (p *Platform) handleLeaveNotify(w *x11Window, e *LeaveNotifyEvent) {
-	x := float64(e.EventX)
-	y := float64(e.EventY)
+	x, y := p.physicalToLogical(float64(e.EventX), float64(e.EventY))
 
 	w.eventMu.Lock()
 	w.mouseX = x
@@ -2178,6 +2186,8 @@ func isScrollButton(detail uint8) bool {
 }
 
 // createPointerEvent creates a PointerEvent with common fields filled in.
+// Coordinates must be in logical DIP — callers convert from X11 physical
+// pixels via Platform.physicalToLogical before passing x/y here.
 func (w *x11Window) createPointerEvent(
 	eventType gpucontext.PointerEventType,
 	button gpucontext.Button,

@@ -1127,6 +1127,9 @@ func buttonsFromNumber(buttonNumber int64) gpucontext.Buttons {
 }
 
 // createPointerEvent creates a PointerEvent with common fields filled in.
+// createPointerEvent builds a PointerEvent from macOS NSEvent data.
+// Coordinates are already in logical points (NSEvent.locationInWindow) —
+// no DPI scaling needed. Consistent with App.Size() on all platforms.
 // Detects pen/tablet input from NSEvent subtype and sets PointerType,
 // Pressure, TiltX, TiltY, and Twist accordingly.
 func (w *darwinWindow) createPointerEvent(
