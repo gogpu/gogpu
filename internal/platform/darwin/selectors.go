@@ -215,8 +215,9 @@ var selectors struct {
 	setTabbingIdentifier SEL
 
 	// Window size constraints
-	setMinSize SEL
-	setMaxSize SEL
+	setMinSize     SEL
+	setMaxSize     SEL
+	setContentSize SEL
 
 	// NSDragging protocol (drag-and-drop)
 	draggingLocation        SEL
@@ -467,6 +468,7 @@ func initSelectors() {
 		// Window size constraints
 		selectors.setMinSize = RegisterSelector("setMinSize:")
 		selectors.setMaxSize = RegisterSelector("setMaxSize:")
+		selectors.setContentSize = RegisterSelector("setContentSize:")
 
 		// NSDragging protocol (drag-and-drop)
 		selectors.draggingLocation = RegisterSelector("draggingLocation")

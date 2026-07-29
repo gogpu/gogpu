@@ -265,7 +265,9 @@ func (w *Window) Size() (width, height int) {
 	return w.width, w.height
 }
 
-// SetSize sets the window content size.
+// SetSize sets the window content size using setContentSize: (inner size).
+// This correctly handles the title bar height — unlike setFrame: which sets
+// the outer window frame and would shrink the content area by the title bar.
 func (w *Window) SetSize(width, height int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -277,19 +279,11 @@ func (w *Window) SetSize(width, height int) {
 	w.width = width
 	w.height = height
 
-	// Get current frame
-	frame := w.nsWindow.GetRect(selectors.frame)
-
-	// Create new frame with updated size
-	newFrame := MakeRect(
-		frame.Origin.X,
-		frame.Origin.Y,
-		CGFloat(width),
-		CGFloat(height),
-	)
-
-	// Set frame with display
-	w.nsWindow.SendRect(selectors.setFrame, newFrame)
+	// Use setContentSize: to set the inner content area.
+	// This is the correct API — setFrame: sets the outer frame including
+	// the title bar, which would make the content area smaller than requested.
+	// winit uses setContentSize: for the same reason (window_delegate.rs:1085-1089).
+	w.nsWindow.SendSize(selectors.setContentSize, MakeSize(CGFloat(width), CGFloat(height)))
 }
 
 // ShouldClose returns true if the window should close.
@@ -923,6 +917,36 @@ func (w *Window) SetOnClose(fn func() bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.onClose = fn
+}
+
+// RequestSize sets the window content size to the given logical dimensions.
+// Skips if fullscreen or zoomed (maximized). Uses setContentSize: which
+// correctly handles the title bar (inner size, not outer frame).
+func (w *Window) RequestSize(width, height int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	// Skip if fullscreen — the compositor owns the size.
+	mask := uintptr(w.nsWindow.Send(selectors.styleMask))
+	if mask&uintptr(NSWindowStyleMaskFullScreen) != 0 {
+		return
+	}
+
+	// Restore from zoomed state before resizing (winit pattern).
+	// macOS "zoom" is analogous to Windows maximize — the caller asked for a
+	// specific size, so zoomed state should yield.
+	if w.nsWindow.Send(selectors.isZoomed) != 0 {
+		w.nsWindow.SendPtr(selectors.zoom, 0)
+	}
+
+	w.width = width
+	w.height = height
+
+	w.nsWindow.SendSize(selectors.setContentSize, MakeSize(CGFloat(width), CGFloat(height)))
 }
 
 // ScreenChangedCh returns a receive-only channel that is signaled when the

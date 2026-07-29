@@ -953,6 +953,58 @@ func (w *win32Window) IsFullscreen() bool {
 	return w.fullscreen
 }
 
+// RequestSize resizes the window's content area to the given logical size in DIP.
+// Ignores the request when fullscreen. If the window is maximized, it is restored
+// first (winit pattern). The window position is preserved (SWP_NOMOVE).
+func (w *win32Window) RequestSize(width, height int) {
+	if w.fullscreen {
+		return
+	}
+
+	// Clamp to constraints.
+	w.sizeMu.RLock()
+	if w.minWidth > 0 && width < w.minWidth {
+		width = w.minWidth
+	}
+	if w.minHeight > 0 && height < w.minHeight {
+		height = w.minHeight
+	}
+	if w.maxWidth > 0 && width > w.maxWidth {
+		width = w.maxWidth
+	}
+	if w.maxHeight > 0 && height > w.maxHeight {
+		height = w.maxHeight
+	}
+	w.sizeMu.RUnlock()
+
+	// Restore from maximized state before resizing (winit pattern).
+	ret, _, _ := procIsZoomed.Call(uintptr(w.hwnd))
+	if ret != 0 {
+		procShowWindow.Call(uintptr(w.hwnd), swRestore)
+	}
+
+	// Scale logical DIP to physical pixels.
+	dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
+	if dpi == 0 {
+		dpi = 96
+	}
+	scale := float64(dpi) / 96.0
+	physW := int32(float64(width) * scale)
+	physH := int32(float64(height) * scale)
+
+	// Add window frame to get outer dimensions.
+	style, _, _ := procGetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle)
+	outerRect := rect{left: 0, top: 0, right: physW, bottom: physH}
+	adjustWindowRectForDpi(&outerRect, style, uint32(dpi))
+
+	outerW := uintptr(outerRect.right - outerRect.left)
+	outerH := uintptr(outerRect.bottom - outerRect.top)
+
+	procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0,
+		outerW, outerH,
+		swpNoMove|swpNoZOrder|swpNoActivate)
+}
+
 func (w *win32Window) Close() {
 	procPostMessageW.Call(uintptr(w.hwnd), wmClose, 0, 0)
 }

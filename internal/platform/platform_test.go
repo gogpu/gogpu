@@ -134,6 +134,7 @@ func (m *mockPlatformWindow) InSizeMove() bool                 { return false }
 func (m *mockPlatformWindow) SetTitle(string)                  {}
 func (m *mockPlatformWindow) SetMinSize(int, int)              {}
 func (m *mockPlatformWindow) SetMaxSize(int, int)              {}
+func (m *mockPlatformWindow) RequestSize(int, int)             {}
 func (m *mockPlatformWindow) PrepareFrame() PrepareFrameResult { return PrepareFrameResult{} }
 func (m *mockPlatformWindow) SetCursor(int)                    {}
 func (m *mockPlatformWindow) SetCursorMode(int)                {}

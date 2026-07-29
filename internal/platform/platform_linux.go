@@ -523,6 +523,7 @@ func (w *x11PlatformWindow) InSizeMove() bool               { return false }
 func (w *x11PlatformWindow) SetTitle(title string)          { w.inner().SetTitle(title) }
 func (w *x11PlatformWindow) SetMinSize(width, height int)   { w.inner().SetMinSize(width, height) }
 func (w *x11PlatformWindow) SetMaxSize(width, height int)   { w.inner().SetMaxSize(width, height) }
+func (w *x11PlatformWindow) RequestSize(width, height int)  { w.inner().RequestSize(width, height) }
 func (w *x11PlatformWindow) SetCursor(cursorID int)         { w.inner().SetCursor(cursorID) }
 func (w *x11PlatformWindow) SetCursorMode(mode int)         { w.inner().SetCursorMode(mode) }
 func (w *x11PlatformWindow) CursorMode() int                { return w.inner().GetCursorMode() }
@@ -701,6 +702,45 @@ func (w *waylandPlatformWindow) SetMinSize(width, height int) {
 func (w *waylandPlatformWindow) SetMaxSize(width, height int) {
 	if libwl := w.libwayland(); libwl != nil {
 		libwl.SetMaxSize(int32(width), int32(height))
+		_ = libwl.Flush()
+	}
+}
+
+// RequestSize requests the compositor to resize the window's content area.
+// This is advisory — the compositor may reject it for maximized, fullscreen,
+// or tiled windows. On Wayland the client cannot force a window size; only
+// the compositor decides the final geometry via xdg_toplevel.configure.
+func (w *waylandPlatformWindow) RequestSize(width, height int) {
+	var wp *waylandWindow
+	if w.secondary != nil {
+		wp = &w.secondary.state
+	} else {
+		wp = w.platform.primary
+	}
+
+	wp.eventMu.Lock()
+	isMax := wp.maximized
+	isFS := wp.fullscreen
+	if !isMax && !isFS {
+		wp.width = width
+		wp.height = height
+	}
+	wp.eventMu.Unlock()
+
+	// Compositor owns the size in maximized/fullscreen — skip.
+	if isMax || isFS {
+		return
+	}
+
+	// Temporarily set min==max==desired to signal the compositor. Then
+	// restore 0,0 so the window remains freely resizable after the
+	// compositor applies the requested size.
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.SetMinSize(int32(width), int32(height))
+		libwl.SetMaxSize(int32(width), int32(height))
+		_ = libwl.Flush()
+		libwl.SetMinSize(0, 0)
+		libwl.SetMaxSize(0, 0)
 		_ = libwl.Flush()
 	}
 }

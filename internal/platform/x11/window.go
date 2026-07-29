@@ -366,6 +366,32 @@ func (c *Connection) ConfigureWindow(window ResourceID, x, y int16, width, heigh
 	return nil
 }
 
+// ResizeWindow changes only the width and height of a window without
+// altering its position. Uses ConfigureWindow with Width+Height value mask.
+func (c *Connection) ResizeWindow(window ResourceID, width, height uint16) error {
+	const (
+		ConfigWidth  = 1 << 2
+		ConfigHeight = 1 << 3
+	)
+
+	valueMask := uint16(ConfigWidth | ConfigHeight)
+
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeConfigureWindow)
+	e.PutUint8(0)  // unused
+	e.PutUint16(5) // length: 3 header + 2 values = 5 4-byte units
+	e.PutUint32(uint32(window))
+	e.PutUint16(valueMask)
+	e.PutUint16(0) // unused
+	e.PutUint32(uint32(width))
+	e.PutUint32(uint32(height))
+
+	if _, err := c.sendRequest(e.Bytes()); err != nil {
+		return fmt.Errorf("x11: ResizeWindow failed: %w", err)
+	}
+	return nil
+}
+
 // GetGeometry gets window geometry.
 func (c *Connection) GetGeometry(drawable ResourceID) (x, y int16, width, height uint16, err error) {
 	e := NewEncoder(c.byteOrder)
@@ -548,6 +574,23 @@ func (c *Connection) SetFullscreen(window ResourceID, fullscreen bool, atoms *St
 
 	return c.SendClientMessage(window, c.RootWindow(), atoms.NetWMState,
 		action, uint32(atoms.NetWMStateFullscreen), 0, 0, 0)
+}
+
+// Unmaximize removes _NET_WM_STATE_MAXIMIZED_VERT and _HORZ via a client
+// message so the window manager releases its maximized geometry constraint.
+// Both atoms are sent in one message (data1 + data2) per EWMH spec.
+func (c *Connection) Unmaximize(window ResourceID, atoms *StandardAtoms) error {
+	if atoms.NetWMState == AtomNone {
+		return nil
+	}
+	if atoms.NetWMStateMaximizedVert == AtomNone || atoms.NetWMStateMaximizedHorz == AtomNone {
+		return nil
+	}
+	return c.SendClientMessage(window, c.RootWindow(), atoms.NetWMState,
+		0, // _NET_WM_STATE_REMOVE
+		uint32(atoms.NetWMStateMaximizedVert),
+		uint32(atoms.NetWMStateMaximizedHorz),
+		0, 0)
 }
 
 // SendClientMessage sends a ClientMessage event to a window.

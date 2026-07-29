@@ -282,6 +282,36 @@ func (a *App) SetMaxSize(width, height int) {
 	}
 }
 
+// RequestSize requests the primary window to resize its content area to the
+// given logical size in DIP (device-independent pixels). Non-positive dimensions
+// are ignored. The size is clamped to any configured min/max constraints.
+// The request is ignored when the window is in fullscreen mode. On Wayland,
+// this is advisory — the compositor may reject the request for tiled windows.
+func (a *App) RequestSize(width, height int) {
+	if width <= 0 || height <= 0 {
+		return
+	}
+
+	// Clamp to constraints.
+	if a.config.MinWidth > 0 && width < a.config.MinWidth {
+		width = a.config.MinWidth
+	}
+	if a.config.MinHeight > 0 && height < a.config.MinHeight {
+		height = a.config.MinHeight
+	}
+	if a.config.MaxWidth > 0 && width > a.config.MaxWidth {
+		width = a.config.MaxWidth
+	}
+	if a.config.MaxHeight > 0 && height > a.config.MaxHeight {
+		height = a.config.MaxHeight
+	}
+
+	// Dispatch to primary window.
+	if a.primaryWindow != nil && a.primaryWindow.platWindow != nil {
+		a.primaryWindow.platWindow.RequestSize(width, height)
+	}
+}
+
 // TrackResource registers an io.Closer for automatic cleanup during shutdown.
 // Tracked resources are closed in LIFO (reverse) order after WaitIdle and
 // before the renderer is destroyed, so the GPU device is still alive.

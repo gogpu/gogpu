@@ -570,6 +570,7 @@ func (s *stubWindow) ShouldClose() bool                                         
 func (s *stubWindow) SetTitle(_ string)                                                    {}
 func (s *stubWindow) SetMinSize(_, _ int)                                                  {}
 func (s *stubWindow) SetMaxSize(_, _ int)                                                  {}
+func (s *stubWindow) RequestSize(_, _ int)                                                 {}
 func (s *stubWindow) SetCursor(_ int)                                                      {}
 func (s *stubWindow) SetFrameless(_ bool)                                                  {}
 func (s *stubWindow) IsFrameless() bool                                                    { return false }

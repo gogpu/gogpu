@@ -435,6 +435,15 @@ func (dw *darwinPlatformWindow) SetMaxSize(width, height int) {
 	}
 }
 
+// RequestSize resizes the window's content area to the given logical size.
+// Delegates to darwin.Window.RequestSize which uses setContentSize: and
+// skips fullscreen/zoomed windows.
+func (dw *darwinPlatformWindow) RequestSize(width, height int) {
+	if dw.window != nil {
+		dw.window.RequestSize(width, height)
+	}
+}
+
 func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
 	if dw.window == nil {
 		return PrepareFrameResult{ScaleFactor: 1.0}

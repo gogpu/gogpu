@@ -390,6 +390,20 @@ func (w *browserWindow) SetMinSize(_, _ int) {}
 // SetMaxSize is a no-op on browser — window sizing is controlled by the page.
 func (w *browserWindow) SetMaxSize(_, _ int) {}
 
+// RequestSize sets the canvas element dimensions to the given logical size (DIP).
+// Adjusts both the CSS layout size and the canvas drawing buffer for HiDPI.
+func (w *browserWindow) RequestSize(width, height int) {
+	dpr := js.Global().Get("devicePixelRatio").Float()
+	if dpr <= 0 {
+		dpr = 1.0
+	}
+	style := w.canvas.Get("style")
+	style.Set("width", js.ValueOf(fmt.Sprintf("%dpx", width)))
+	style.Set("height", js.ValueOf(fmt.Sprintf("%dpx", height)))
+	w.canvas.Set("width", int(float64(width)*dpr))
+	w.canvas.Set("height", int(float64(height)*dpr))
+}
+
 // SetFrameless is a no-op on browser — there's no OS window chrome.
 func (w *browserWindow) SetFrameless(_ bool) {}
 

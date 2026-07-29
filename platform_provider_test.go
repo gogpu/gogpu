@@ -48,6 +48,7 @@ func (m *mockWindow) InSizeMove() bool              { return false }
 func (m *mockWindow) SetTitle(_ string)             {}
 func (m *mockWindow) SetMinSize(w, h int)           { m.minWidth = w; m.minHeight = h }
 func (m *mockWindow) SetMaxSize(w, h int)           { m.maxWidth = w; m.maxHeight = h }
+func (m *mockWindow) RequestSize(w, h int)          { m.width = w; m.height = h }
 func (m *mockWindow) SetModalFrameCallback(func())  {}
 func (m *mockWindow) Destroy()                      {}
 func (m *mockWindow) ScaleFactor() float64          { return m.scaleFactor }

@@ -273,6 +273,12 @@ type PlatformWindow interface {
 	// SetModalFrameCallback registers a callback for platform modal operations.
 	SetModalFrameCallback(fn func())
 
+	// RequestSize requests the window to resize its content area to the given
+	// logical size in DIP (device-independent pixels). The request is ignored
+	// when the window is in fullscreen mode. On Wayland, this is advisory —
+	// the compositor may reject the request for tiled/maximized windows.
+	RequestSize(width, height int)
+
 	// Destroy releases native window resources.
 	Destroy()
 }

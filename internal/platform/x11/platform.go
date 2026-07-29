@@ -1569,6 +1569,36 @@ func (p *Platform) SetMaxSize(width, height int) {
 	_ = p.conn.SetWMSizeHints(p.primary.window, 0, 0, width, height)
 }
 
+// RequestSize resizes the window's content area to the given logical size.
+// Skips if fullscreen. If maximized, sends _NET_WM_STATE remove-maximize
+// so the window manager releases the geometry constraint (winit pattern).
+func (p *Platform) RequestSize(width, height int) {
+	if p.primary == nil || p.conn == nil {
+		return
+	}
+	if p.IsFullscreen() {
+		return
+	}
+
+	// Remove maximize state so the WM allows the resize (winit pattern).
+	// Without this, KDE/GNOME/Sway silently ignore ConfigureWindow.
+	if err := p.conn.Unmaximize(p.primary.window, p.atoms); err != nil {
+		logger().Warn("x11: Unmaximize failed", "err", err)
+	}
+
+	// X11 uses physical pixels; scale logical → physical.
+	scale := p.ScaleFactor()
+	physW := uint16(float64(width) * scale)
+	physH := uint16(float64(height) * scale)
+
+	if err := p.conn.ResizeWindow(p.primary.window, physW, physH); err != nil {
+		logger().Warn("x11: RequestSize failed", "err", err)
+		return
+	}
+
+	_ = p.conn.Flush()
+}
+
 // Destroy closes the window and releases resources.
 func (p *Platform) Destroy() {
 	p.mu.Lock()

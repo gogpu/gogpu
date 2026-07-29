@@ -1134,6 +1134,121 @@ func TestAppSetMinMaxSizeNilPlatform(t *testing.T) {
 	}
 }
 
+func TestRequestSize_ClampsToConstraints(t *testing.T) {
+	mock := &mockWindow{width: 800, height: 600}
+	wm := newWindowManager()
+	id := wm.allocate()
+	pw := &Window{
+		id:         id,
+		platWindow: mock,
+	}
+	wm.add(pw)
+
+	app := &App{
+		config:        Config{MinWidth: 200, MinHeight: 150, MaxWidth: 1920, MaxHeight: 1080},
+		primaryWindow: pw,
+		windowManager: wm,
+	}
+
+	tests := []struct {
+		name       string
+		w, h       int
+		wantW      int
+		wantH      int
+		wantCalled bool
+	}{
+		{"within bounds", 640, 480, 640, 480, true},
+		{"clamp to min width", 100, 480, 200, 480, true},
+		{"clamp to min height", 640, 100, 640, 150, true},
+		{"clamp to max width", 2000, 480, 1920, 480, true},
+		{"clamp to max height", 640, 2000, 640, 1080, true},
+		{"clamp both min", 50, 50, 200, 150, true},
+		{"clamp both max", 3000, 3000, 1920, 1080, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock.width = 800
+			mock.height = 600
+			app.RequestSize(tt.w, tt.h)
+			if mock.width != tt.wantW || mock.height != tt.wantH {
+				t.Errorf("got %dx%d, want %dx%d", mock.width, mock.height, tt.wantW, tt.wantH)
+			}
+		})
+	}
+}
+
+func TestRequestSize_SkipsNegativeAndZero(t *testing.T) {
+	mock := &mockWindow{width: 800, height: 600}
+	wm := newWindowManager()
+	id := wm.allocate()
+	pw := &Window{
+		id:         id,
+		platWindow: mock,
+	}
+	wm.add(pw)
+
+	app := &App{
+		config:        DefaultConfig(),
+		primaryWindow: pw,
+		windowManager: wm,
+	}
+
+	tests := []struct {
+		name string
+		w, h int
+	}{
+		{"zero width", 0, 600},
+		{"zero height", 800, 0},
+		{"negative width", -100, 600},
+		{"negative height", 800, -50},
+		{"both zero", 0, 0},
+		{"both negative", -1, -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock.width = 800
+			mock.height = 600
+			app.RequestSize(tt.w, tt.h)
+			// Size should NOT change — request ignored
+			if mock.width != 800 || mock.height != 600 {
+				t.Errorf("got %dx%d, want 800x600 (unchanged)", mock.width, mock.height)
+			}
+		})
+	}
+}
+
+func TestRequestSize_NilPlatformNoPanic(t *testing.T) {
+	app := NewApp(DefaultConfig())
+
+	// Must not panic when primaryWindow is nil
+	app.RequestSize(800, 600)
+}
+
+func TestRequestSize_NoConstraints(t *testing.T) {
+	mock := &mockWindow{width: 800, height: 600}
+	wm := newWindowManager()
+	id := wm.allocate()
+	pw := &Window{
+		id:         id,
+		platWindow: mock,
+	}
+	wm.add(pw)
+
+	// No min/max constraints (all zero)
+	app := &App{
+		config:        Config{},
+		primaryWindow: pw,
+		windowManager: wm,
+	}
+
+	app.RequestSize(3840, 2160)
+	if mock.width != 3840 || mock.height != 2160 {
+		t.Errorf("got %dx%d, want 3840x2160", mock.width, mock.height)
+	}
+}
+
 // configCapturingManager wraps mockManager and records the Config passed to CreateWindow.
 type configCapturingManager struct {
 	mockManager
