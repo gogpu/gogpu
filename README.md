@@ -37,7 +37,7 @@ Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU p
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
-| **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog) |
+| **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, runtime window resize (`RequestSize`), mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), OS drag-and-drop (all 4 desktop platforms), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog) |
 | **Scroll** | ScrollPhase + IsMomentum for macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes |
 | **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |
 | **Compute** | Full compute shader support |
@@ -287,6 +287,7 @@ This eliminates the GPU→CPU→GPU round-trip when integrating with gg/ggcanvas
 w, h := app.Size()              // logical points (DIP)
 fw, fh := app.PhysicalSize()    // physical pixels (framebuffer)
 scale := app.ScaleFactor()      // 1.0 = standard, 2.0 = Retina/HiDPI
+app.RequestSize(1024, 768)      // resize at runtime (all platforms, DPI-aware)
 
 // Clipboard
 text, _ := app.ClipboardRead()
