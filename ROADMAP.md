@@ -25,9 +25,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.45.x
+## Current State: v0.46.0
 
 ✅ **Production-ready** with full feature set:
+- **Font smoothing OS detection** (#396, ADR-057) — `App.FontSmoothing()` returns None/Grayscale/Subpixel on all 5 platforms (Qt6 pattern)
 - **Runtime window resize** (#397) — `App.RequestSize(width, height)` on all 5 platforms (winit/SDL3 patterns, DPI-aware, maximized restore)
 - **Single-encoder compositing** (#393, @besmpl) — frame-owned `CommandEncoder()` for multi-pass rendering (g3d + gg overlay, single queue submit)
 - **OS drag-and-drop** (#387) — all 4 desktop platforms (Windows WM_DROPFILES, X11 XDND v5, macOS NSDragging, Wayland wl_data_device)

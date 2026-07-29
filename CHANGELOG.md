@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.46.0] - 2026-07-29
 
 ### Added
 
@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **X11 HiDPI mouse coordinates** (#398) — X11 pointer events delivered physical pixels instead of logical DIP, causing offset clicks on HiDPI displays. Added `physicalToLogical` conversion in all 5 pointer handlers (MotionNotify, ButtonPress, ButtonRelease, EnterNotify, LeaveNotify). All platforms now consistently deliver logical DIP matching `App.Size()`.
 - **X11 remote keyboard mapping** (#279, #395, @unxed) — X forwarding, XQuartz, XWayland now prefer server-side XKB keymap over client host config. `serverHasXkb()` probe, fallback to `xcb_key_symbols` when XKB unavailable.
 - **macOS `SetSize` content area** — changed from `setFrame:` (outer frame including title bar) to `setContentSize:` (inner content area). Previously, requested size was reduced by the title bar height. winit pattern (window_delegate.rs:1085).
+
+### Changed
+
+- **deps:** gpucontext v0.21.1 → v0.22.0, wgpu v0.30.23 → v0.30.25
 
 ## [0.45.1] - 2026-07-27
 
