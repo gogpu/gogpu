@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.1] - 2026-07-30
+
+### Changed
+
+- **deps:** wgpu v0.30.27 → v0.30.29 — unified resource lifecycle (ADR-056, wgpu#287). BindGroup/Pipeline Release() via ResourceRef.Drop() — use-after-free on shared encoder path eliminated. DestroyQueue deadlock fix (v0.30.29). 6 lifecycle regression tests.
+
 ## [0.47.0] - 2026-07-30
 
 ### Added
