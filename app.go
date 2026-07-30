@@ -81,6 +81,11 @@ type App struct {
 	// Input state for Ebiten-style polling (KeyJustPressed, etc.)
 	inputState *input.State
 
+	// Input event queue for SDL-style PollInputEvent (ADR-058).
+	// Lazy-initialized on first PollInputEvent call. Events are collected
+	// during classifyEvent dispatch and drained each frame.
+	inputEvents []gpucontext.InputEvent
+
 	// Resource tracker for automatic GPU resource cleanup on shutdown.
 	tracker *resourceTracker
 
@@ -723,6 +728,9 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 // This matches the winit/Flutter/Qt pattern: platform layer delivers events,
 // handlers decide whether to invalidate, render loop never guesses.
 func (a *App) processEventsMultiThread() {
+	// Reset public input event queue (ADR-058). Reuse backing array.
+	a.inputEvents = a.inputEvents[:0]
+
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
 	var lastResize *platform.Event
@@ -801,6 +809,9 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 
 	switch event.Type {
 	case platform.EventResize:
+		a.inputEvents = append(a.inputEvents, gpucontext.ResizeEvent{
+			Width: event.Width, Height: event.Height,
+		})
 		if isPrimary {
 			lastResize = event
 		} else {
@@ -821,19 +832,29 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		if a.eventSource != nil {
 			a.eventSource.dispatchFocus(event.Focused)
 		}
+		a.inputEvents = append(a.inputEvents, gpucontext.FocusEvent{Focused: event.Focused})
 		a.RequestRedraw()
 
 	case platform.EventKeyDown:
 		a.dispatchKeyEvent(event, true)
+		a.inputEvents = append(a.inputEvents, gpucontext.KeyEvent{
+			Key: event.Key, Mods: event.Mods, Pressed: true,
+		})
 	case platform.EventKeyUp:
 		a.dispatchKeyEvent(event, false)
+		a.inputEvents = append(a.inputEvents, gpucontext.KeyEvent{
+			Key: event.Key, Mods: event.Mods, Pressed: false,
+		})
 	case platform.EventChar:
 		a.dispatchCharEvent(event)
+		a.inputEvents = append(a.inputEvents, gpucontext.CharEvent{Char: event.Char})
 	case platform.EventPointerDown, platform.EventPointerUp, platform.EventPointerMove,
 		platform.EventPointerEnter, platform.EventPointerLeave:
 		a.dispatchPointerEvent(event)
+		a.inputEvents = append(a.inputEvents, event.Pointer)
 	case platform.EventScroll:
 		a.dispatchScrollEvent(event)
+		a.inputEvents = append(a.inputEvents, event.Scroll)
 	case platform.EventDragDrop:
 		if a.onFileDrop != nil {
 			a.onFileDrop(event.DragPaths, event.DragX, event.DragY)
@@ -1443,6 +1464,33 @@ func (a *App) FontSmoothing() gpucontext.FontSmoothing {
 		return a.manager.FontSmoothing()
 	}
 	return gpucontext.FontSmoothingGrayscale
+}
+
+// PollInputEvent returns the next pending input event, or (nil, false) if the
+// queue is empty. Call inside OnUpdate for SDL-style event processing:
+//
+//	app.OnUpdate(func(dt float64) {
+//	    for ev, ok := app.PollInputEvent(); ok; ev, ok = app.PollInputEvent() {
+//	        switch e := ev.(type) {
+//	        case gpucontext.KeyEvent:
+//	            handleKey(e)
+//	        case gpucontext.PointerEvent:
+//	            handlePointer(e)
+//	        }
+//	    }
+//	})
+//
+// Events are collected during platform event dispatch and buffered until
+// consumed. Uncollected events are discarded at the start of the next frame.
+// This coexists with callbacks (EventSource) and state polling (Input) —
+// all three models see the same events from the same internal dispatch.
+func (a *App) PollInputEvent() (gpucontext.InputEvent, bool) {
+	if len(a.inputEvents) == 0 {
+		return nil, false
+	}
+	ev := a.inputEvents[0]
+	a.inputEvents = a.inputEvents[1:]
+	return ev, true
 }
 
 // SetFrameless enables or disables frameless window mode.

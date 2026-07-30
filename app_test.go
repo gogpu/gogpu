@@ -1249,6 +1249,114 @@ func TestRequestSize_NoConstraints(t *testing.T) {
 	}
 }
 
+func TestPollInputEvent_EmptyQueue(t *testing.T) {
+	app := NewApp(DefaultConfig())
+	ev, ok := app.PollInputEvent()
+	if ok || ev != nil {
+		t.Errorf("expected (nil, false), got (%v, %v)", ev, ok)
+	}
+}
+
+func TestPollInputEvent_KeyEvents(t *testing.T) {
+	app := &App{}
+	app.inputEvents = append(app.inputEvents,
+		gpucontext.KeyEvent{Key: gpucontext.KeyA, Pressed: true},
+		gpucontext.KeyEvent{Key: gpucontext.KeyA, Pressed: false},
+	)
+
+	ev1, ok1 := app.PollInputEvent()
+	if !ok1 {
+		t.Fatal("expected event")
+	}
+	ke, ok := ev1.(gpucontext.KeyEvent)
+	if !ok || ke.Key != gpucontext.KeyA || !ke.Pressed {
+		t.Errorf("unexpected event: %+v", ev1)
+	}
+
+	ev2, ok2 := app.PollInputEvent()
+	if !ok2 {
+		t.Fatal("expected second event")
+	}
+	ke2, ok := ev2.(gpucontext.KeyEvent)
+	if !ok || ke2.Pressed {
+		t.Errorf("expected release, got: %+v", ev2)
+	}
+
+	_, ok3 := app.PollInputEvent()
+	if ok3 {
+		t.Error("expected empty queue")
+	}
+}
+
+func TestPollInputEvent_MixedTypes(t *testing.T) {
+	app := &App{}
+	app.inputEvents = append(app.inputEvents,
+		gpucontext.KeyEvent{Key: gpucontext.KeyEscape, Pressed: true},
+		gpucontext.PointerEvent{Type: gpucontext.PointerDown, X: 100, Y: 200},
+		gpucontext.ScrollEvent{DeltaY: -3.0},
+		gpucontext.CharEvent{Char: 'x'},
+		gpucontext.FocusEvent{Focused: true},
+		gpucontext.ResizeEvent{Width: 1024, Height: 768},
+	)
+
+	types := []string{}
+	for ev, ok := app.PollInputEvent(); ok; ev, ok = app.PollInputEvent() {
+		switch ev.(type) {
+		case gpucontext.KeyEvent:
+			types = append(types, "key")
+		case gpucontext.PointerEvent:
+			types = append(types, "pointer")
+		case gpucontext.ScrollEvent:
+			types = append(types, "scroll")
+		case gpucontext.CharEvent:
+			types = append(types, "char")
+		case gpucontext.FocusEvent:
+			types = append(types, "focus")
+		case gpucontext.ResizeEvent:
+			types = append(types, "resize")
+		}
+	}
+
+	expected := []string{"key", "pointer", "scroll", "char", "focus", "resize"}
+	if len(types) != len(expected) {
+		t.Fatalf("got %d events, want %d", len(types), len(expected))
+	}
+	for i, want := range expected {
+		if types[i] != want {
+			t.Errorf("event %d: got %s, want %s", i, types[i], want)
+		}
+	}
+}
+
+func TestPollInputEvent_FrameReset(t *testing.T) {
+	app := &App{}
+	app.inputEvents = make([]gpucontext.InputEvent, 0, 16)
+	app.inputEvents = append(app.inputEvents,
+		gpucontext.KeyEvent{Key: gpucontext.KeyA, Pressed: true},
+	)
+
+	// Simulate frame reset (same as processEventsMultiThread does)
+	app.inputEvents = app.inputEvents[:0]
+
+	_, ok := app.PollInputEvent()
+	if ok {
+		t.Error("expected empty queue after frame reset")
+	}
+
+	// Backing array should be reused
+	app.inputEvents = append(app.inputEvents,
+		gpucontext.KeyEvent{Key: gpucontext.KeyB, Pressed: true},
+	)
+	ev, ok := app.PollInputEvent()
+	if !ok {
+		t.Fatal("expected event after re-fill")
+	}
+	ke := ev.(gpucontext.KeyEvent)
+	if ke.Key != gpucontext.KeyB {
+		t.Errorf("Key = %v, want KeyB", ke.Key)
+	}
+}
+
 // configCapturingManager wraps mockManager and records the Config passed to CreateWindow.
 type configCapturingManager struct {
 	mockManager
