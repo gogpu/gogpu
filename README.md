@@ -37,6 +37,7 @@ Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU p
 | **Graphics API** | Runtime selection: Vulkan, DX12, Metal, GLES, Software |
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), zero-copy surface rendering, damage-aware presentation |
+| **Input Models** | Three coexisting models: callbacks (`EventSource`), state polling (`Input()`, Ebiten-style), SDL-style event queue (`PollInputEvent()`) |
 | **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, runtime window resize (`RequestSize`), mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), OS drag-and-drop (all 4 desktop platforms), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog) |
 | **Scroll** | ScrollPhase + IsMomentum for macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes |
 | **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |
@@ -359,6 +360,31 @@ app.OnUpdate(func(dt float64) {
 ```
 
 All input methods are thread-safe and work with the frame-based update loop.
+
+### SDL-Style Event Queue
+
+For game developers who prefer explicit event processing (SDL/Pygame pattern):
+
+```go
+app.OnUpdate(func(dt float64) {
+    for ev, ok := app.PollInputEvent(); ok; ev, ok = app.PollInputEvent() {
+        switch e := ev.(type) {
+        case gpucontext.KeyEvent:
+            if e.Pressed && e.Key == gpucontext.KeyEscape {
+                app.Quit()
+            }
+        case gpucontext.PointerEvent:
+            if e.Type == gpucontext.PointerDown {
+                player.Shoot(e.X, e.Y)
+            }
+        case gpucontext.ScrollEvent:
+            camera.Zoom(e.DeltaY)
+        }
+    }
+})
+```
+
+Three input models coexist — callbacks, polling, and event queue — all driven from the same internal dispatch. Use whichever fits your use case. Zero overhead for unused models.
 
 ### Multi-Window Input
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] - 2026-07-30
+
+### Added
+
+- **`App.PollInputEvent()`** (ADR-058) — SDL-style event queue for game developers. Returns discrete `gpucontext.InputEvent` values via type switch: `KeyEvent`, `PointerEvent`, `ScrollEvent`, `CharEvent`, `FocusEvent`, `ResizeEvent`. Three input models now coexist from the same internal dispatch: callbacks (EventSource), state polling (Input), and event queue (PollInputEvent). Zero overhead when unused. Sealed `InputEvent` interface — exhaustive handling via linters. Research: 7 enterprise frameworks (Qt6, SDL3, winit, Flutter, Bevy, Gio, Ebiten).
+
 ## [0.46.0] - 2026-07-29
 
 ### Added
