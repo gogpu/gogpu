@@ -1,4 +1,4 @@
-//go:build darwin && !race
+//go:build darwin
 
 package darwin_test
 

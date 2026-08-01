@@ -64,7 +64,7 @@ type App struct {
 	hitTestCallback    gpucontext.HitTestCallback
 
 	// State
-	running                bool
+	running                atomic.Bool
 	focused                bool         // true when the window has keyboard focus
 	lifecycle              AppLifecycle // ADR-026 universal lifecycle state
 	quitOnLastWindowClosed bool         // default true — exit when last window closes
@@ -393,7 +393,7 @@ func (a *App) Run() error {
 	//   2. ANIMATING: StartAnimation() — loop active, onUpdate every tick,
 	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
 	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
-	for a.running && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
+	for a.running.Load() && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
 		a.runFrame()
 	}
 
@@ -456,7 +456,7 @@ func (a *App) shutdown(platWindow platform.PlatformWindow) {
 // startRunLoop marks the app running and primes state consumed by the
 // first iteration of the main loop in Run().
 func (a *App) startRunLoop() {
-	a.running = true
+	a.running.Store(true)
 	a.lifecycle = AppRunning
 
 	// ADR-026: surface available on desktop = once at init.
@@ -968,7 +968,7 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 
 	// Check if app should quit (ADR-026: QuitOnLastWindowClosed)
 	if a.quitOnLastWindowClosed && a.windowManager.count() == 0 {
-		a.running = false
+		a.running.Store(false)
 	}
 }
 
@@ -1252,7 +1252,7 @@ func (a *App) SetAppName(name string) {
 // Quit requests the application to quit.
 // The main loop will exit after completing the current frame.
 func (a *App) Quit() {
-	a.running = false
+	a.running.Store(false)
 }
 
 // frameCallbackReady checks if the platform allows rendering this frame.

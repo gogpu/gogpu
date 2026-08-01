@@ -50,7 +50,7 @@ func TestApp_StartRunLoop(t *testing.T) {
 
 	app.startRunLoop()
 
-	if !app.running {
+	if !app.running.Load() {
 		t.Error("startRunLoop should set running=true")
 	}
 	if app.lifecycle != AppRunning {
@@ -73,7 +73,7 @@ func TestApp_StartRunLoop_NoPendingRedrawNoCallback(t *testing.T) {
 
 	app.startRunLoop()
 
-	if !app.running {
+	if !app.running.Load() {
 		t.Error("startRunLoop should set running=true")
 	}
 }

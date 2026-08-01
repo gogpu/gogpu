@@ -95,14 +95,14 @@ func TestAppOnCloseChaining(t *testing.T) {
 func TestAppQuit(t *testing.T) {
 	app := NewApp(DefaultConfig())
 
-	if app.running {
+	if app.running.Load() {
 		t.Error("running should be false initially")
 	}
 
-	app.running = true
+	app.running.Store(true)
 	app.Quit()
 
-	if app.running {
+	if app.running.Load() {
 		t.Error("running should be false after Quit()")
 	}
 }
@@ -623,7 +623,7 @@ func TestApp_OnAnyWindowClosed_Primary(t *testing.T) {
 	)
 
 	// ADR-026: primary close with no other windows → app exits
-	if app.running {
+	if app.running.Load() {
 		t.Error("app should be stopped after last window close")
 	}
 	if app.primaryWindow != nil {
@@ -638,8 +638,8 @@ func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
 	app := &App{
 		windowManager: newWindowManager(),
 		renderLoop:    &mockRenderLoop{},
-		running:       true,
 	}
+	app.running.Store(true)
 	pid := platform.NewWindowID()
 	app.primaryWindow = &Window{
 		id:         app.windowManager.allocate(),
@@ -664,7 +664,7 @@ func TestApp_OnAnyWindowClosed_PrimaryRejected(t *testing.T) {
 	if called {
 		t.Error("should not be called when onClose rejects")
 	}
-	if !app.running {
+	if !app.running.Load() {
 		t.Error("app should still be running")
 	}
 }
@@ -738,9 +738,9 @@ func TestApp_PrimaryCloseKeepsSecondary(t *testing.T) {
 	app := &App{
 		windowManager:          newWindowManager(),
 		renderLoop:             &mockRenderLoop{},
-		running:                true,
 		quitOnLastWindowClosed: true,
 	}
+	app.running.Store(true)
 
 	// Create primary
 	primaryPID := platform.NewWindowID()
@@ -767,7 +767,7 @@ func TestApp_PrimaryCloseKeepsSecondary(t *testing.T) {
 	if app.primaryWindow != nil {
 		t.Error("primaryWindow should be nil after close")
 	}
-	if !app.running {
+	if !app.running.Load() {
 		t.Error("app should still be running — secondary window alive")
 	}
 	if app.windowManager.get(secondaryID) == nil {
@@ -780,7 +780,7 @@ func TestApp_PrimaryCloseKeepsSecondary(t *testing.T) {
 	// Close secondary — NOW app should exit
 	app.classifyEvent(&platform.Event{Type: platform.EventClose, WindowID: secondaryPID}, nil, nil)
 
-	if app.running {
+	if app.running.Load() {
 		t.Error("app should stop after last window closed")
 	}
 	if app.windowManager.count() != 0 {
@@ -792,9 +792,9 @@ func TestApp_QuitOnLastWindowClosedFalse(t *testing.T) {
 	app := &App{
 		windowManager:          newWindowManager(),
 		renderLoop:             &mockRenderLoop{},
-		running:                true,
 		quitOnLastWindowClosed: false,
 	}
+	app.running.Store(true)
 
 	pid := platform.NewWindowID()
 	id := app.windowManager.allocate()
@@ -808,7 +808,7 @@ func TestApp_QuitOnLastWindowClosedFalse(t *testing.T) {
 	// Close only window
 	app.classifyEvent(&platform.Event{Type: platform.EventClose, WindowID: pid}, nil, nil)
 
-	if !app.running {
+	if !app.running.Load() {
 		t.Error("app should still run with quitOnLastWindowClosed=false")
 	}
 }
@@ -974,8 +974,8 @@ func TestApp_WindowCloseEvent_OnClosePanic(t *testing.T) {
 	app := &App{
 		windowManager: newWindowManager(),
 		renderLoop:    &mockRenderLoop{},
-		running:       true,
 	}
+	app.running.Store(true)
 	pid := platform.NewWindowID()
 	app.primaryWindow = &Window{
 		id:         app.windowManager.allocate(),
@@ -996,7 +996,7 @@ func TestApp_WindowCloseEvent_OnClosePanic(t *testing.T) {
 		WindowID: pid,
 	})
 
-	if !app.running {
+	if !app.running.Load() {
 		t.Error("app should still be running after panicking onClose")
 	}
 }
