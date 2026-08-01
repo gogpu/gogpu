@@ -2650,9 +2650,18 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// Update cached client size after DPI-driven resize.
 		w.updateSize()
 
+		// Emit ScaleChanged BEFORE Resize (cause before effect, ADR-059).
+		logW, logH := w.LogicalSize()
+		p.queueEvent(Event{
+			Type:        EventScaleChanged,
+			WindowID:    w.id,
+			ScaleFactor: w.scaleFactor(),
+			Width:       logW,
+			Height:      logH,
+		})
+
 		// Queue resize event with new DPI-adjusted dimensions.
 		physW, physH := w.PhysicalSize()
-		logW, logH := w.LogicalSize()
 		p.queueEvent(Event{
 			Type:           EventResize,
 			WindowID:       w.id,

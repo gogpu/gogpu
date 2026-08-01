@@ -652,6 +652,20 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.config.Height = newHeight
 			w.physW = newPhysW
 			w.physH = newPhysH
+
+			// Detect scale change — emit ScaleChanged before Resize (ADR-059).
+			newScale := w.window.BackingScaleFactor()
+			if w.lastScale != 0 && w.lastScale != newScale {
+				w.events.Push(Event{
+					WindowID:    w.id,
+					Type:        EventScaleChanged,
+					ScaleFactor: newScale,
+					Width:       newWidth,
+					Height:      newHeight,
+				})
+			}
+			w.lastScale = newScale
+
 			w.events.Push(Event{
 				WindowID:       w.id,
 				Type:           EventResize,

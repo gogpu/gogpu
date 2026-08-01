@@ -179,6 +179,7 @@ type browserWindow struct {
 	id          WindowID
 	canvas      js.Value
 	shouldClose bool
+	lastScale   float64 // DPI scale change detection (ADR-059)
 
 	// JS callbacks stored for cleanup.
 	jsCallbacks []js.Func
@@ -365,8 +366,11 @@ func (w *browserWindow) PrepareFrame() PrepareFrameResult {
 		w.canvas.Set("height", physH)
 	}
 
+	scaleChanged := w.lastScale != 0 && w.lastScale != dpr
+	w.lastScale = dpr
+
 	return PrepareFrameResult{
-		ScaleChanged:   changed,
+		ScaleChanged:   changed || scaleChanged,
 		ScaleFactor:    dpr,
 		PhysicalWidth:  uint32(physW),
 		PhysicalHeight: uint32(physH),

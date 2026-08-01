@@ -43,7 +43,7 @@ Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU p
 | **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
-| **HiDPI** | Per-monitor DPI, WM_DPICHANGED, logical/physical coordinate split, WithSize in logical DIP (ADR-030) |
+| **HiDPI** | Per-monitor DPI, runtime DPI change (`ScaleChangedEvent` on all platforms), WM_DPICHANGED, logical/physical coordinate split, WithSize in logical DIP (ADR-030, ADR-059) |
 | **Integration** | DeviceProvider, WindowProvider, PlatformProvider, WindowChrome, SurfaceView |
 | **Logging** | Structured logging via `log/slog`, silent by default |
 | **Build** | Zero CGO with Pure Go backend |

@@ -855,6 +855,13 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 	case platform.EventScroll:
 		a.dispatchScrollEvent(event)
 		a.inputEvents = append(a.inputEvents, event.Scroll)
+	case platform.EventScaleChanged:
+		a.inputEvents = append(a.inputEvents, gpucontext.ScaleChangedEvent{
+			ScaleFactor: event.ScaleFactor,
+			Width:       event.Width,
+			Height:      event.Height,
+		})
+		a.RequestRedraw()
 	case platform.EventDragDrop:
 		if a.onFileDrop != nil {
 			a.onFileDrop(event.DragPaths, event.DragX, event.DragY)

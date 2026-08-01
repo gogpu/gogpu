@@ -43,7 +43,8 @@ type waylandWindow struct {
 	height      int
 	shouldClose bool
 	configured  bool
-	activated   bool // xdg_toplevel Activated state (window manager focus)
+	activated   bool    // xdg_toplevel Activated state (window manager focus)
+	lastScale   float64 // DPI scale change detection (ADR-059)
 
 	// eventMu guards window state fields (shouldClose, maximized, fullscreen,
 	// width, height, savedWidth, savedHeight). The event queue has its own
@@ -501,6 +502,7 @@ type x11PlatformWindow struct {
 	platform  *x11Platform
 	id        WindowID
 	secondary *secondaryX11Conn // non-nil for secondary windows
+	lastScale float64           // DPI scale change detection (ADR-059)
 }
 
 // inner returns the *x11.Platform connection backing this window: the
@@ -542,8 +544,12 @@ func (w *x11PlatformWindow) SetModalFrameCallback(_ func()) {}
 
 func (w *x11PlatformWindow) PrepareFrame() PrepareFrameResult {
 	pw, ph := w.inner().GetSize()
+	scale := w.inner().ScaleFactor()
+	scaleChanged := w.lastScale != 0 && w.lastScale != scale
+	w.lastScale = scale
 	return PrepareFrameResult{
-		ScaleFactor:    w.inner().ScaleFactor(),
+		ScaleChanged:   scaleChanged,
+		ScaleFactor:    scale,
 		PhysicalWidth:  uint32(pw),
 		PhysicalHeight: uint32(ph),
 	}
@@ -761,8 +767,32 @@ func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
 		lw, lh := w.LogicalSize()
 		libwl.SetViewportDestination(int32(lw), int32(lh))
 	}
+
+	// Detect scale change (ADR-059).
+	var wp *waylandWindow
+	if w.secondary != nil {
+		wp = &w.secondary.state
+	} else {
+		wp = w.platform.primary
+	}
+	wp.eventMu.Lock()
+	scaleChanged := wp.lastScale != 0 && wp.lastScale != scale
+	if scaleChanged {
+		lw, lh := w.LogicalSize()
+		wp.events.Push(Event{
+			WindowID:    wp.winID,
+			Type:        EventScaleChanged,
+			ScaleFactor: scale,
+			Width:       lw,
+			Height:      lh,
+		})
+	}
+	wp.lastScale = scale
+	wp.eventMu.Unlock()
+
 	pw, ph := w.PhysicalSize()
 	return PrepareFrameResult{
+		ScaleChanged:   scaleChanged,
 		ScaleFactor:    scale,
 		PhysicalWidth:  uint32(pw),
 		PhysicalHeight: uint32(ph),

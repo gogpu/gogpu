@@ -25,9 +25,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.47.0
+## Current State: v0.48.0
 
 ✅ **Production-ready** with full feature set:
+- **Runtime DPI/scale change** (#409, ADR-059) — `ScaleChangedEvent` on all 5 platforms. Multi-display HiDPI: window drag between Retina and FullHD. winit/Qt6/SDL3 patterns
 - **SDL-style event queue** (ADR-058) — `App.PollInputEvent()` with sealed `InputEvent` interface. Three coexisting input models: callbacks, polling, event queue. Research: Qt6, SDL3, winit, Flutter, Bevy, Gio, Ebiten
 - **Font smoothing OS detection** (#396, ADR-057) — `App.FontSmoothing()` returns None/Grayscale/Subpixel on all 5 platforms (Qt6 pattern)
 - **Runtime window resize** (#397) — `App.RequestSize(width, height)` on all 5 platforms (winit/SDL3 patterns, DPI-aware, maximized restore)

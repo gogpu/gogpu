@@ -62,6 +62,9 @@ type Event struct {
 	DragPaths []string // file paths (set on DragEnter and DragDrop)
 	DragX     float64  // drop/hover position in physical pixels
 	DragY     float64  // drop/hover position in physical pixels
+
+	// Scale factor (EventScaleChanged)
+	ScaleFactor float64
 }
 
 // EventType represents the type of platform event.
@@ -82,10 +85,11 @@ const (
 	EventPointerLeave
 	EventScroll
 	EventExpose
-	EventDragEnter // Files entered window area (OS file drag-and-drop)
-	EventDragMove  // Files moving over window
-	EventDragDrop  // Files dropped on window
-	EventDragLeave // Files left window area
+	EventDragEnter    // Files entered window area (OS file drag-and-drop)
+	EventDragMove     // Files moving over window
+	EventDragDrop     // Files dropped on window
+	EventDragLeave    // Files left window area
+	EventScaleChanged // DPI scale factor changed (ADR-059)
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.

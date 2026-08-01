@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0] - 2026-08-01
+
+### Added
+
+- **Runtime DPI/Scale Factor Change** (#409, ADR-059) — `EventScaleChanged` emitted on all 5 platforms when window moves between monitors with different DPI. Windows: `WM_DPICHANGED`. macOS: `lastScale` comparison in PollEvents. Wayland: `lastScale` tracking in PrepareFrame. X11/Browser: `lastScale` tracking. Event ordering: `ScaleChangedEvent` before `ResizeEvent` (winit pattern). Enterprise research: winit, Qt6, SDL3, Flutter.
+
+### Fixed
+
+- **`App.Quit()` thread safety** (#406, @jbunds) — `running` field changed from `bool` to `atomic.Bool` for safe cross-goroutine shutdown.
+
+### Changed
+
+- **deps:** gpucontext v0.23.0 → v0.24.0 (ScaleChangedEvent), wgpu v0.30.31 → v0.30.32
+
+## [0.48.0] - 2026-08-01
+
+### Added
+
+- **Runtime DPI/scale factor change** (#409, ADR-059) — `ScaleChangedEvent` emitted on all 5 platforms when window moves between monitors with different DPI or OS DPI settings change. Windows: `WM_DPICHANGED` → `EventScaleChanged` before `EventResize`. macOS: `lastScale` tracking in PollEvents. Wayland: `lastScale` in PrepareFrame with event queue emission. X11: `lastScale` tracking in PrepareFrame. Browser: `lastScale` for DPR-only changes (zoom). Enterprise research: winit, Qt6, SDL3, Flutter.
+
+### Fixed
+
+- **`App.Quit()` thread safety** (#406, @jbunds) — `running` field changed from `bool` to `atomic.Bool`. Safe to call `Quit()` from any goroutine (timer, signal handler, network callback).
+
+### Changed
+
+- **deps:** gpucontext v0.23.0 → v0.24.0 (ScaleChangedEvent), wgpu v0.30.31 → v0.30.32 (deps)
+
 ## [0.47.3] - 2026-08-01
 
 ### Changed
