@@ -212,9 +212,37 @@ func TestRenderFrameGPU_NilSurfaces(t *testing.T) {
 }
 
 // TestRenderFrameGPU_UnconfiguredSurface exercises ws!=nil but CanRender()==false
-// with no platWindow set on the RenderTarget.
+// with no platWindow set on the RenderTarget: the callback DOES draw, and the
+// surface cannot be acquired, so the frame is owed another attempt.
 func TestRenderFrameGPU_UnconfiguredSurface(t *testing.T) {
-	ws := &RenderTarget{} // CanRender()==false, platWindow==nil
+	// renderer set so the draw call can reach beginFrame and be refused there.
+	ws := &RenderTarget{renderer: &Renderer{}} // CanRender()==false, platWindow==nil
+
+	app := &App{
+		renderLoop: &mockRenderLoop{},
+		renderer:   &Renderer{},
+		platWindow: nil,
+	}
+	frames := []windowFrame{
+		{window: &Window{surface: ws}, onDraw: func(c *Context) { c.MarkExternalContent() }, scale: 1.0},
+	}
+	app.renderFrameGPU(frames)
+
+	// A draw call asked for the swapchain and could not have it, so the frame
+	// was lost and RequestRedraw must have been queued.
+	if !app.pendingRedraw.Load() {
+		t.Error("renderFrameGPU should queue a redraw when a draw call could not acquire the surface")
+	}
+}
+
+// A callback that issues no draw calls is lazy acquire working as intended, not
+// a lost frame. Queueing a redraw for it is a loop with no exit: the next frame
+// draws nothing either, so the app renders as fast as the platform allows for as
+// long as it is open — ~27% of a core on an idle X11 window, with nothing on
+// screen changing. Demand-driven UIs draw nothing whenever nothing changed, so
+// this is the common case, not a corner.
+func TestRenderFrameGPU_NoDrawCallsDoesNotRescheduleForever(t *testing.T) {
+	ws := &RenderTarget{}
 
 	app := &App{
 		renderLoop: &mockRenderLoop{},
@@ -226,9 +254,8 @@ func TestRenderFrameGPU_UnconfiguredSurface(t *testing.T) {
 	}
 	app.renderFrameGPU(frames)
 
-	// The frame had no GPU work, so RequestRedraw must have been queued.
-	if !app.pendingRedraw.Load() {
-		t.Error("renderFrameGPU should queue a redraw when frameStarted==false")
+	if app.pendingRedraw.Load() {
+		t.Error("a frame that drew nothing queued another frame, which will also draw nothing")
 	}
 }
 

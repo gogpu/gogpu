@@ -97,6 +97,14 @@ type RenderTarget struct {
 	// If OnDraw produces no GPU work, beginFrame is never called → no
 	// swapchain acquire/present → zero GPU overhead.
 	frameStarted bool
+
+	// acquireFailed records that a draw call asked for the swapchain this
+	// frame and could not have it. It is what separates "the callback drew
+	// nothing", which is what lazy acquire is FOR, from "the callback drew and
+	// the surface was unavailable", which is worth another frame. Without the
+	// distinction the demand-driven loop reschedules itself forever against a
+	// UI that correctly draws nothing when nothing changed.
+	acquireFailed bool
 }
 
 // lockDisplay acquires the platform display lock if the window supports it.
@@ -639,6 +647,7 @@ func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
+	ws.acquireFailed = false
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
@@ -662,6 +671,7 @@ func (ws *RenderTarget) ensureFrameStarted() bool {
 			}
 		}
 	}
+	ws.acquireFailed = true
 	return false
 }
 
@@ -670,6 +680,7 @@ func (ws *RenderTarget) resetLazyState() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
+	ws.acquireFailed = false
 }
 
 // ensureFrameEncoder returns the framework-owned encoder for this surface

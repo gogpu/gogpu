@@ -1101,10 +1101,23 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		ctx := newContextForSurface(a.renderer, ws, frame.scale)
 		frame.onDraw(ctx)
 
-		// beginFrame can fail (outdated / not yet configured). Demand-driven mode
-		// already consumed the invalidation — schedule another frame.
+		// No frame started. Two very different reasons:
+		//
+		// The callback issued no draw calls, so lazy acquire never acquired
+		// anything. That is what lazy acquire is for, not a failure — there is
+		// nothing to present and nothing to retry. Asking for another frame
+		// here is a loop with no exit: a demand-driven UI draws nothing when
+		// nothing changed, so the next frame draws nothing either, and the app
+		// spins at whatever rate the platform allows, burning CPU on an idle
+		// window (~27% of a core on X11, with no visible frames at all).
+		//
+		// Or a draw call did ask for the swapchain and could not have it
+		// (surface outdated, not yet configured). Demand-driven mode already
+		// consumed the invalidation, so that one does need another frame.
 		if !ws.frameStarted {
-			a.RequestRedraw()
+			if ws.acquireFailed {
+				a.RequestRedraw()
+			}
 			ws.resetLazyState()
 			a.renderer.currentSurface = nil
 			continue
