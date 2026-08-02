@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.1] - 2026-08-02
+
+### Fixed
+
+- **Demand-driven idle loop** (#411, @samyfodil) — `renderFrameGPU` unconditionally called `RequestRedraw` when `!frameStarted`, causing infinite render loop (~27% CPU on idle X11) for demand-driven UIs that correctly draw nothing when nothing changed. New `acquireFailed` flag distinguishes "callback drew nothing" (lazy acquire working as designed) from "callback drew but swapchain unavailable" (genuine failure, retry warranted).
+
 ## [0.48.0] - 2026-08-01
 
 ### Added
