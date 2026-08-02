@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.4] - 2026-08-02
+
+### Fixed
+
+- **`App.Quit()` does not unblock idle WaitEvents** (reported by @jbunds on [wgpu#294](https://github.com/gogpu/wgpu/pull/294)) — `Quit()` set `running=false` but never woke the event loop. In event-driven mode the main loop stayed blocked in `WaitEvents` until mouse/keyboard input. Fixed: `Quit()` invokes an atomically published `WakeUp` (macOS `PostEmptyEvent` / GLFW-winit pattern). Darwin smoke tests use `WithContinuousRender(true)`.
+
 ## [0.48.3] - 2026-08-02
 
 ### Fixed

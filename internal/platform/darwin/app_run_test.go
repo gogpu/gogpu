@@ -5,6 +5,7 @@ package darwin_test
 import (
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,10 +44,13 @@ func runAppOnce(t *testing.T, cfg gogpu.Config, setup func(app *gogpu.App), expe
 // This mirrors the production call stack without invoking DrawTriangle (to avoid
 // shader compilation failures) while still exercising BeginFrame/EndFrame.
 func TestDarwinAppRunSmoke(t *testing.T) {
+	// ContinuousRender so OnUpdate advances without waiting for input —
+	// default event-driven mode idles in WaitEvents after the first frame.
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo)
+		WithBackend(gogpu.BackendGo).
+		WithContinuousRender(true)
 
 	frames := 0
 	runAppOnce(t, cfg,
@@ -74,7 +78,8 @@ func TestDarwinAppRunNoDraw(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo)
+		WithBackend(gogpu.BackendGo).
+		WithContinuousRender(true)
 
 	frames := 0
 	runAppOnce(t, cfg,
@@ -99,7 +104,8 @@ func TestDarwinAppRunPanicOnUpdate(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo)
+		WithBackend(gogpu.BackendGo).
+		WithContinuousRender(true)
 
 	runAppOnce(t, cfg,
 		func(app *gogpu.App) {
@@ -118,7 +124,8 @@ func TestDarwinAppRunPanicOnDrawNoTriangle(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo)
+		WithBackend(gogpu.BackendGo).
+		WithContinuousRender(true)
 
 	runAppOnce(t, cfg,
 		func(app *gogpu.App) {
@@ -139,7 +146,8 @@ func TestDarwinAppRunPanicPath(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo)
+		WithBackend(gogpu.BackendGo).
+		WithContinuousRender(true)
 
 	const iterations = 20
 	for i := 0; i < iterations; i++ {
@@ -156,5 +164,42 @@ func TestDarwinAppRunPanicPath(t *testing.T) {
 			},
 			true,
 		)
+	}
+}
+
+// TestDarwinAppQuitUnblocksIdle verifies Quit from a background timer exits
+// App.Run while the event-driven loop is blocked in WaitEvents — without
+// requiring a mouse/keyboard event (jbunds report on wgpu#294 / gogpu macOS).
+func TestDarwinAppQuitUnblocksIdle(t *testing.T) {
+	cfg := gogpu.DefaultConfig().
+		WithTitle("gogpu").
+		WithSize(640, 480).
+		WithBackend(gogpu.BackendGo)
+	// ContinuousRender left false: after the first frame the loop idles.
+
+	done := make(chan struct{})
+	runOnMainThread(t, func() {
+		defer close(done)
+		app := gogpu.NewApp(cfg)
+		var quitOnce sync.Once
+		app.OnDraw(func(ctx *gogpu.Context) {
+			ctx.Clear(0, 0, 0, 1)
+			// Schedule Quit after the first frame so wakeupFn is published
+			// and the loop is about to block in WaitEvents.
+			quitOnce.Do(func() {
+				time.AfterFunc(200*time.Millisecond, func() {
+					app.Quit()
+				})
+			})
+		})
+		if err := app.Run(); err != nil {
+			t.Fatalf("App.Run failed: %v", err)
+		}
+	})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("App.Run did not exit after Quit — WaitEvents was not woken")
 	}
 }

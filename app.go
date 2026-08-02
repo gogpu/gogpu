@@ -74,6 +74,9 @@ type App struct {
 	invalidator   *Invalidator
 	pendingRedraw atomic.Bool
 	animations    *AnimationController
+	// wakeupFn unblocks WaitEvents from any goroutine (Quit, timers).
+	// Stored atomically so Quit never races with manager/invalidator publish.
+	wakeupFn atomic.Value // holds func()
 
 	// Event source for gpucontext integration
 	eventSource *eventSourceAdapter
@@ -465,6 +468,7 @@ func (a *App) startRunLoop() {
 	}
 	a.lastFrame = time.Now()
 	a.invalidator = newInvalidator(a.manager.WakeUp)
+	a.wakeupFn.Store(a.manager.WakeUp)
 	a.animations = &AnimationController{}
 	if a.pendingRedraw.Swap(false) {
 		a.invalidator.Invalidate()
@@ -1271,8 +1275,14 @@ func (a *App) SetAppName(name string) {
 
 // Quit requests the application to quit.
 // The main loop will exit after completing the current frame.
+// Safe to call from any goroutine. After startRunLoop, also wakes
+// WaitEvents so the idle (event-driven) loop notices running=false
+// without waiting for a device input event (GLFW/winit/SDL pattern).
 func (a *App) Quit() {
 	a.running.Store(false)
+	if v := a.wakeupFn.Load(); v != nil {
+		v.(func())()
+	}
 }
 
 // frameCallbackReady checks if the platform allows rendering this frame.

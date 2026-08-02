@@ -107,6 +107,33 @@ func TestAppQuit(t *testing.T) {
 	}
 }
 
+// TestAppQuitWakesEventLoop verifies Quit unblocks WaitEvents (reported by
+// @jbunds on macOS: App.Run hung until mouse/keyboard input after Quit from
+// a timer because running=false alone does not wake the idle loop).
+func TestAppQuitWakesEventLoop(t *testing.T) {
+	app := NewApp(DefaultConfig())
+	woken := false
+	app.wakeupFn.Store(func() { woken = true })
+	app.running.Store(true)
+
+	app.Quit()
+
+	if app.running.Load() {
+		t.Error("running should be false after Quit()")
+	}
+	if !woken {
+		t.Error("Quit should invoke wakeupFn to unblock WaitEvents")
+	}
+}
+
+func TestAppQuitBeforeStartRunLoopNoWakeup(t *testing.T) {
+	app := NewApp(DefaultConfig())
+	app.Quit()
+	if app.running.Load() {
+		t.Error("running should be false after Quit()")
+	}
+}
+
 func TestAppRequestRedrawNilInvalidator(t *testing.T) {
 	app := NewApp(DefaultConfig())
 
