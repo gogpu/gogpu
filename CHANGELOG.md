@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.2] - 2026-08-02
+
+### Changed
+
+- **deps:** wgpu v0.30.32 → v0.30.34, naga v0.17.16 → v0.18.0, goffi v0.6.2 → v0.6.3, webgpu v0.5.4 → v0.5.5
+
 ## [0.48.1] - 2026-08-02
 
 ### Fixed
