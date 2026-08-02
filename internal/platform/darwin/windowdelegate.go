@@ -4,7 +4,6 @@ package darwin
 
 import (
 	"sync"
-	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
 )
@@ -138,17 +137,20 @@ func CreateWindowDelegate(win *Window) (ID, error) {
 	if delegate.IsNil() {
 		return 0, ErrWindowCreationFailed
 	}
-	SetAssociatedObject(delegate, unsafe.Pointer(&delegateAssociatedKey), unsafe.Pointer(win), 0)
+	delegateWindows.Store(uintptr(delegate), win)
 
 	return delegate, nil
 }
 
-var delegateAssociatedKey = "com.gpu.gowindow.delegate"
+// delegateWindows maps ObjC delegate ID → *Window. Replaces ObjC associated
+// objects to avoid uintptr→unsafe.Pointer round-trip that checkptr rejects
+// under -race. Same pattern as purego block callbacks (wgpu#293).
+var delegateWindows sync.Map
 
 func getWindowFromDelegate(delegate ID) *Window {
-	ptr := GetAssociatedObject(delegate, unsafe.Pointer(&delegateAssociatedKey))
-	if ptr == nil {
+	val, ok := delegateWindows.Load(uintptr(delegate))
+	if !ok {
 		return nil
 	}
-	return (*Window)(ptr)
+	return val.(*Window)
 }

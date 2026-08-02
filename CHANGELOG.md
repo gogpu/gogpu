@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.3] - 2026-08-02
+
+### Fixed
+
+- **macOS `GetAssociatedObject` checkptr crash under `-race`** (#406) — replaced ObjC associated object round-trip with Go-side `sync.Map` lookup for delegate → `*Window` mapping. Eliminates `uintptr → unsafe.Pointer` conversion that checkptr rejects. Same purego pattern as wgpu block callbacks fix ([wgpu#293](https://github.com/gogpu/wgpu/issues/293)). Third and final checkptr source discovered by @jbunds.
+
 ## [0.48.2] - 2026-08-02
 
 ### Changed

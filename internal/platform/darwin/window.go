@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
 // Errors returned by Window operations.
@@ -354,7 +353,7 @@ func (w *Window) Destroy() {
 	// Remove delegate properly
 	if w.delegate != 0 {
 		w.nsWindow.SendPtr(selectors.setDelegate, 0) // setDelegate:nil
-		SetAssociatedObject(w.delegate, unsafe.Pointer(&delegateAssociatedKey), nil, 0)
+		delegateWindows.Delete(uintptr(w.delegate))
 		w.delegate.Send(selectors.release)
 		w.delegate = 0
 	}
