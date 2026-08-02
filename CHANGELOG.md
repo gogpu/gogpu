@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.5] - 2026-08-02
+
+### Changed
+
+- **deps:** wgpu v0.30.34 → v0.30.35 — DX12 DirectComposition path for per-pixel alpha transparency ([wgpu#298](https://github.com/gogpu/wgpu/issues/298)). `CreateSwapChainForComposition` via DirectComposition visual tree when `AlphaMode == Premultiplied`. `GOGPU_DX12_FORCE_HWND=1` env var for RenderDoc compatibility. Unblocks #361 (@shaolei).
+
 ## [0.48.4] - 2026-08-02
 
 ### Fixed
