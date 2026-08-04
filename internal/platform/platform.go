@@ -271,6 +271,16 @@ type PlatformWindow interface {
 	// On Wayland and Browser this is a no-op (compositor controls visibility).
 	Show()
 
+	// Hide hides the window.
+	// On Wayland this is a no-op (the compositor controls window visibility;
+	// clients can only minimize a toplevel). On Browser it is a no-op.
+	Hide()
+
+	// SetPosition moves the window to the given logical screen position
+	// (top-left origin, DIP). On Wayland this is a no-op — the compositor
+	// owns toplevel placement.
+	SetPosition(x, y int)
+
 	// SyncFrame synchronizes the rendered frame with the compositor.
 	SyncFrame()
 

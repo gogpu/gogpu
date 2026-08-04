@@ -590,6 +590,14 @@ func (w *x11PlatformWindow) Show() {
 	}
 }
 
+func (w *x11PlatformWindow) Hide() {
+	w.inner().Hide()
+}
+
+func (w *x11PlatformWindow) SetPosition(x, y int) {
+	w.inner().SetPosition(x, y)
+}
+
 // BlitPixels copies RGBA pixel data to the window using X11 PutImage.
 func (w *x11PlatformWindow) BlitPixels(pixels []byte, width, height int) error {
 	return w.inner().BlitPixels(pixels, width, height)
@@ -862,6 +870,15 @@ func (w *waylandPlatformWindow) Close() {
 }
 
 func (w *waylandPlatformWindow) Show() {}
+
+// Hide is a no-op on Wayland: the compositor controls window visibility and
+// clients cannot unmap a toplevel (winit limitation). Use Minimize for the
+// closest supported behavior.
+func (w *waylandPlatformWindow) Hide() {}
+
+// SetPosition is a no-op on Wayland: xdg_toplevel placement is owned by the
+// compositor.
+func (w *waylandPlatformWindow) SetPosition(x, y int) {}
 
 func (w *waylandPlatformWindow) SetModalFrameCallback(_ func()) {}
 

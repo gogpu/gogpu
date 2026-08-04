@@ -468,7 +468,7 @@ func (c *Connection) ConfigureWindow(window ResourceID, x, y int16, width, heigh
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeConfigureWindow)
 	e.PutUint8(0)  // unused
-	e.PutUint16(8) // length: 3 + 1 + 4 values = 8 4-byte units
+	e.PutUint16(7) // length: 3 header + 4 values = 7 4-byte units
 	e.PutUint32(uint32(window))
 	e.PutUint16(valueMask)
 	e.PutUint16(0) // unused
@@ -479,6 +479,37 @@ func (c *Connection) ConfigureWindow(window ResourceID, x, y int16, width, heigh
 
 	if _, err := c.sendRequest(e.Bytes()); err != nil {
 		return fmt.Errorf("x11: ConfigureWindow failed: %w", err)
+	}
+	return nil
+}
+
+// moveWindowRequest builds the ConfigureWindow request body for a
+// position-only change (X and Y value masks).
+func moveWindowRequest(bo ByteOrder, window ResourceID, x, y int16) []byte {
+	const (
+		ConfigX = 1 << 0
+		ConfigY = 1 << 1
+	)
+	valueMask := uint16(ConfigX | ConfigY)
+
+	e := NewEncoder(bo)
+	e.PutUint8(OpcodeConfigureWindow)
+	e.PutUint8(0)  // unused
+	e.PutUint16(5) // length: 3 header + 2 values = 5 4-byte units
+	e.PutUint32(uint32(window))
+	e.PutUint16(valueMask)
+	e.PutUint16(0) // unused
+	e.PutUint32(uint32(x))
+	e.PutUint32(uint32(y))
+	return e.Bytes()
+}
+
+// MoveWindow changes only the window position (physical pixels) without
+// altering its size. Uses ConfigureWindow with the X and Y value masks.
+func (c *Connection) MoveWindow(window ResourceID, x, y int16) error {
+	req := moveWindowRequest(c.byteOrder, window, x, y)
+	if _, err := c.sendRequest(req); err != nil {
+		return fmt.Errorf("x11: MoveWindow failed: %w", err)
 	}
 	return nil
 }

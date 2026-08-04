@@ -23,6 +23,8 @@ type mockWindow struct {
 	maximized       bool
 	minimized       bool
 	closed          bool
+	visible         bool
+	posX, posY      int
 	hitTestCallback func(float64, float64) gpucontext.HitTestResult
 	closeFn         func() bool
 
@@ -75,7 +77,9 @@ func (m *mockWindow) IsMaximized() bool    { return m.maximized }
 func (m *mockWindow) SetFullscreen(v bool) { m.fullscreen = v }
 func (m *mockWindow) IsFullscreen() bool   { return m.fullscreen }
 func (m *mockWindow) Close()               { m.closed = true }
-func (m *mockWindow) Show()                {}
+func (m *mockWindow) Show()                { m.visible = true }
+func (m *mockWindow) Hide()                { m.visible = false }
+func (m *mockWindow) SetPosition(x, y int) { m.posX = x; m.posY = y }
 
 // mockScaleManager wraps mockManager and implements platform.PlatScaleProvider.
 type mockScaleManager struct {

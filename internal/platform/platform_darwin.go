@@ -543,6 +543,20 @@ func (dw *darwinPlatformWindow) Show() {
 	}
 }
 
+// Hide hides the window.
+func (dw *darwinPlatformWindow) Hide() {
+	if dw.window != nil {
+		dw.window.Hide()
+	}
+}
+
+// SetPosition moves the window to the given logical screen position.
+func (dw *darwinPlatformWindow) SetPosition(x, y int) {
+	if dw.window != nil {
+		dw.window.SetPosition(x, y)
+	}
+}
+
 func (dw *darwinPlatformWindow) SetOnClose(fn func() bool) {
 	if dw.window != nil {
 		dw.window.SetOnClose(fn)

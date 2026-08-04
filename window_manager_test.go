@@ -325,6 +325,59 @@ func TestWindow_Visible(t *testing.T) {
 	}
 }
 
+func TestWindow_ShowHideUpdatesPlatformAndFlag(t *testing.T) {
+	mw := &mockWindow{visible: false}
+	w := &Window{platWindow: mw, visible: false}
+
+	w.Show()
+	if !mw.visible {
+		t.Error("Show() did not make the platform window visible")
+	}
+	if !w.Visible() {
+		t.Error("Show() did not set the public visible flag")
+	}
+
+	w.Hide()
+	if mw.visible {
+		t.Error("Hide() did not hide the platform window")
+	}
+	if w.Visible() {
+		t.Error("Hide() did not clear the public visible flag")
+	}
+}
+
+func TestWindow_SetPositionDelegates(t *testing.T) {
+	mw := &mockWindow{}
+	w := &Window{platWindow: mw}
+
+	w.SetPosition(120, 80)
+	if mw.posX != 120 || mw.posY != 80 {
+		t.Errorf("SetPosition delegated to (%d, %d), want (120, 80)", mw.posX, mw.posY)
+	}
+}
+
+func TestWindow_SetSizeDelegates(t *testing.T) {
+	mw := &mockWindow{width: 10, height: 20}
+	w := &Window{platWindow: mw}
+
+	w.SetSize(320, 240)
+	if mw.width != 320 || mw.height != 240 {
+		t.Errorf("SetSize delegated to (%d, %d), want (320, 240)", mw.width, mw.height)
+	}
+}
+
+func TestWindow_ControlsNilPlatformNoPanic(t *testing.T) {
+	w := &Window{}
+	w.Show()
+	w.Hide()
+	w.SetPosition(1, 2)
+	w.SetSize(3, 4)
+
+	if w.Visible() {
+		t.Error("Hide() with nil platform should leave visible=false")
+	}
+}
+
 func TestWindowManager_AllocateSequential(t *testing.T) {
 	wm := newWindowManager()
 

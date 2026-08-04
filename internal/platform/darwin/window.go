@@ -300,6 +300,35 @@ func (w *Window) SetSize(width, height int) {
 	w.nsWindow.SendSize(selectors.setContentSize, MakeSize(CGFloat(width), CGFloat(height)))
 }
 
+// SetPosition moves the window origin to the given logical screen position.
+// gogpu uses a top-left origin; AppKit uses bottom-left, so Y is flipped
+// against the main screen height using the window's current outer frame
+// height (winit pattern).
+func (w *Window) SetPosition(x, y int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return
+	}
+
+	frameH := w.height
+	if f := w.nsWindow.GetRect(selectors.frame); f.Size.Height > 0 {
+		frameH = int(f.Size.Height)
+	}
+
+	screenH := frameH
+	screen := classes.NSScreen.Send(selectors.mainScreen)
+	if !screen.IsNil() {
+		if f := screen.GetRect(selectors.frame); f.Size.Height > 0 {
+			screenH = int(f.Size.Height)
+		}
+	}
+
+	originY := screenH - y - frameH
+	w.nsWindow.SendPoint(selectors.setFrameOrigin, MakePoint(CGFloat(x), CGFloat(originY)))
+}
+
 // ShouldClose returns true if the window should close.
 func (w *Window) ShouldClose() bool {
 	w.mu.Lock()

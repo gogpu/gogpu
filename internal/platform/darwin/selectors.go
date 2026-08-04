@@ -43,6 +43,7 @@ var selectors struct {
 	deminiaturize                            SEL
 	zoom                                     SEL
 	setFrame                                 SEL
+	setFrameOrigin                           SEL
 	frame                                    SEL
 	contentRectForFrameRect                  SEL
 	frameRectForContentRect                  SEL
@@ -296,6 +297,7 @@ func initSelectors() {
 		selectors.deminiaturize = RegisterSelector("deminiaturize:")
 		selectors.zoom = RegisterSelector("zoom:")
 		selectors.setFrame = RegisterSelector("setFrame:display:")
+		selectors.setFrameOrigin = RegisterSelector("setFrameOrigin:")
 		selectors.frame = RegisterSelector("frame")
 		selectors.contentRectForFrameRect = RegisterSelector("contentRectForFrameRect:")
 		selectors.frameRectForContentRect = RegisterSelector("frameRectForContentRect:")

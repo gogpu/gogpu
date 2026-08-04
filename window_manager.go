@@ -148,6 +148,37 @@ func (w *Window) Visible() bool {
 	return w.visible
 }
 
+// Show makes the window visible and gives it input focus.
+func (w *Window) Show() {
+	if w.platWindow != nil {
+		w.platWindow.Show()
+	}
+	w.visible = true
+}
+
+// Hide hides the window.
+func (w *Window) Hide() {
+	if w.platWindow != nil {
+		w.platWindow.Hide()
+	}
+	w.visible = false
+}
+
+// SetPosition moves the window to the given logical screen position
+// (top-left origin, DIP). On Wayland the compositor owns toplevel placement.
+func (w *Window) SetPosition(x, y int) {
+	if w.platWindow != nil {
+		w.platWindow.SetPosition(x, y)
+	}
+}
+
+// SetSize resizes the window content area to the given logical size (DIP).
+func (w *Window) SetSize(width, height int) {
+	if w.platWindow != nil {
+		w.platWindow.RequestSize(width, height)
+	}
+}
+
 // WindowManager tracks all open windows in the application.
 // Thread-safe: all methods are protected by a read-write mutex.
 type WindowManager struct {

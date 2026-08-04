@@ -1204,6 +1204,65 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 	return ret
 }
 
+// SendPoint sends a message with an NSPoint argument.
+//
+//nolint:govet // mirrors the existing SendSize/SendRect helpers.
+func (id ID) SendPoint(sel SEL, point NSPoint) ID {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		nsPointType,                 // point
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self  uintptr
+		sel   uintptr
+		point NSPoint
+	}{
+		self:  uintptr(id),
+		sel:   uintptr(sel),
+		point: point,
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.point),
+	}
+
+	var result uintptr
+	_, err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return ID(result)
+}
+
 // AllocateClassPair creates a new ObjC class as a subclass of superclass.
 // Returns the new Class, or 0 if allocation fails.
 // Call RegisterClassPair after adding methods.

@@ -456,6 +456,12 @@ func (w *browserWindow) Close() { w.shouldClose = true }
 // Show is a no-op on browser -- the canvas is always visible.
 func (w *browserWindow) Show() {}
 
+// Hide is a no-op on browser — the canvas is always visible.
+func (w *browserWindow) Hide() {}
+
+// SetPosition is a no-op on browser — the page position is fixed.
+func (w *browserWindow) SetPosition(_, _ int) {}
+
 // SyncFrame is a no-op — browser compositing is handled by requestAnimationFrame.
 func (w *browserWindow) SyncFrame() {}
 

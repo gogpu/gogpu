@@ -1675,6 +1675,34 @@ func (p *Platform) RequestSize(width, height int) {
 	_ = p.conn.Flush()
 }
 
+// Hide unmaps the window.
+func (p *Platform) Hide() {
+	if p.primary == nil || p.conn == nil {
+		return
+	}
+	if err := p.conn.UnmapWindow(p.primary.window); err != nil {
+		logger().Warn("x11: UnmapWindow failed in Hide", "err", err)
+		return
+	}
+	_ = p.conn.Flush()
+}
+
+// SetPosition moves the window to the given logical screen position (DIP),
+// converting to physical pixels with the current scale factor.
+func (p *Platform) SetPosition(x, y int) {
+	if p.primary == nil || p.conn == nil {
+		return
+	}
+	scale := p.ScaleFactor()
+	physX := int16(float64(x) * scale)
+	physY := int16(float64(y) * scale)
+	if err := p.conn.MoveWindow(p.primary.window, physX, physY); err != nil {
+		logger().Warn("x11: MoveWindow failed in SetPosition", "err", err)
+		return
+	}
+	_ = p.conn.Flush()
+}
+
 // Destroy closes the window and releases resources.
 func (p *Platform) Destroy() {
 	p.mu.Lock()
