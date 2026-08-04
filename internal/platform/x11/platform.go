@@ -107,6 +107,10 @@ type x11Window struct {
 	// X11 window ID
 	window ResourceID
 
+	// colormap is the ARGB colormap created for a transparent window
+	// (0 when the window uses the root visual). Freed on Destroy.
+	colormap ResourceID
+
 	// Window state (guarded by eventMu for thread-safe access from multiple goroutines).
 	width       int
 	height      int
@@ -348,7 +352,7 @@ func (p *Platform) Init(config Config) error {
 		Transparent: config.Transparent,
 	}
 
-	window, err := conn.CreateWindow(windowConfig)
+	window, colormap, err := conn.CreateWindow(windowConfig)
 	if err != nil {
 		_ = conn.Close()
 		return fmt.Errorf("x11: failed to create window: %w", err)
@@ -358,6 +362,7 @@ func (p *Platform) Init(config Config) error {
 	// Store physical pixel dimensions (what the X server sees).
 	w := &x11Window{
 		window:        window,
+		colormap:      colormap,
 		width:         physWidth,
 		height:        physHeight,
 		startTime:     time.Now(),
@@ -1720,6 +1725,11 @@ func (p *Platform) Destroy() {
 
 			_ = p.conn.DestroyWindow(w.window)
 			w.window = 0
+		}
+		// Free the ARGB colormap created for transparent windows.
+		if w != nil && w.colormap != 0 {
+			_ = p.conn.FreeColormap(w.colormap)
+			w.colormap = 0
 		}
 		_ = p.conn.Close()
 		p.conn = nil

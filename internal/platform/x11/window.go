@@ -27,15 +27,18 @@ const classTrueColor = 4
 // color cells lazily from the colormap.
 const allocNone = 0
 
-// CreateWindow creates a new X11 window.
-func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
+// CreateWindow creates a new X11 window. It returns the window ID and, when
+// a transparent ARGB visual was used, the matching colormap ID (0 otherwise)
+// so callers can free it on teardown.
+func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, ResourceID, error) {
 	screen := c.DefaultScreen()
 	if screen == nil {
-		return 0, fmt.Errorf("x11: no default screen")
+		return 0, 0, fmt.Errorf("x11: no default screen")
 	}
 
 	// Generate window ID
 	windowID := c.GenerateID()
+	colormap := ResourceID(0)
 
 	// Background pixmap None, not a black BackPixel: a black BackPixel makes the X
 	// server paint newly-exposed areas black on resize before the GPU repaints
@@ -74,8 +77,9 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 		if argb, argbDepth, ok := findARGBVisual(screen); ok {
 			cmap := c.GenerateID()
 			if err := c.CreateColormap(cmap, screen.Root, argb.VisualID, allocNone); err != nil {
-				return 0, err
+				return 0, 0, err
 			}
+			colormap = cmap
 			depth = argbDepth
 			visual = argb.VisualID
 			valueMask |= CWColormap
@@ -106,10 +110,10 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 	}
 
 	if _, err := c.sendRequest(e.Bytes()); err != nil {
-		return 0, fmt.Errorf("x11: CreateWindow failed: %w", err)
+		return 0, 0, fmt.Errorf("x11: CreateWindow failed: %w", err)
 	}
 
-	return windowID, nil
+	return windowID, colormap, nil
 }
 
 // findARGBVisual returns a 32-bit TrueColor visual whose RGB masks leave
@@ -160,6 +164,26 @@ func (c *Connection) CreateColormap(id, window ResourceID, visual uint32, alloc 
 		return fmt.Errorf("x11: CreateColormap failed: %w", err)
 	}
 	return nil
+}
+
+// FreeColormap frees a colormap resource.
+func (c *Connection) FreeColormap(colormap ResourceID) error {
+	req := createFreeColormapRequest(c.byteOrder, colormap)
+	if _, err := c.sendRequest(req); err != nil {
+		return fmt.Errorf("x11: FreeColormap failed: %w", err)
+	}
+	return nil
+}
+
+// createFreeColormapRequest builds the FreeColormap request body.
+// Wire format: opcode, unused, length=2, colormap.
+func createFreeColormapRequest(bo ByteOrder, colormap ResourceID) []byte {
+	e := NewEncoder(bo)
+	e.PutUint8(OpcodeFreeColormap)
+	e.PutUint8(0)  // unused
+	e.PutUint16(2) // length
+	e.PutUint32(uint32(colormap))
+	return e.Bytes()
 }
 
 // MapWindow makes a window visible.

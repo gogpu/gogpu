@@ -49,7 +49,7 @@ func TestSetNetWMIcon_E2E(t *testing.T) {
 		t.Skip("_NET_WM_ICON atom not supported by this X server")
 	}
 
-	window, err := conn.CreateWindow(WindowConfig{Width: 1, Height: 1})
+	window, _, err := conn.CreateWindow(WindowConfig{Width: 1, Height: 1})
 	if err != nil {
 		t.Fatalf("CreateWindow: %v", err)
 	}

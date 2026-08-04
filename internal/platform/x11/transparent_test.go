@@ -105,3 +105,15 @@ func TestCreateColormapRequest_BigEndian(t *testing.T) {
 		t.Errorf("big-endian request = %v, want %v", got, want)
 	}
 }
+
+// TestFreeColormapRequest verifies the wire encoding of FreeColormap.
+func TestFreeColormapRequest(t *testing.T) {
+	got := createFreeColormapRequest(LSBFirst, 0x11223344)
+	want := []byte{
+		79, 0, 2, 0, // opcode, unused, length
+		0x44, 0x33, 0x22, 0x11, // colormap
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("FreeColormap request = %v, want %v", got, want)
+	}
+}
