@@ -193,6 +193,10 @@ const (
 	swpNoZOrder     = 0x0004
 	swpFrameChanged = 0x0020
 
+	// DwmEnableBlurBehindWindow flags (DWM_BLURBEHIND)
+	dwmBBEnable     = 0x00000001 // DWM_BB_ENABLE
+	dwmBBBlurRegion = 0x00000002 // DWM_BB_BLURREGION
+
 	// GetWindowLongPtr index
 	gwlStyle = ^uintptr(15) // GWL_STYLE = -16 as unsigned uintptr
 
@@ -283,9 +287,10 @@ var (
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
 
 	// DWM (Desktop Window Manager) for frameless window shadow
-	dwmapi                       = windows.NewLazyDLL("dwmapi.dll")
-	procDwmExtendFrameIntoClient = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
-	procDwmFlush                 = dwmapi.NewProc("DwmFlush")
+	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
+	procDwmExtendFrameIntoClient  = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	procDwmEnableBlurBehindWindow = dwmapi.NewProc("DwmEnableBlurBehindWindow")
+	procDwmFlush                  = dwmapi.NewProc("DwmFlush")
 
 	// WaitEvents / WakeUp
 	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
@@ -348,6 +353,8 @@ var (
 	procReleaseDC         = user32.NewProc("ReleaseDC")
 	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
 	procGetStockObject    = gdi32.NewProc("GetStockObject")
+	procCreateRectRgn     = gdi32.NewProc("CreateRectRgn")
+	procDeleteObject      = gdi32.NewProc("DeleteObject")
 
 	// Shell32 (file drag-and-drop)
 	shell32DnD          = windows.NewLazyDLL("shell32.dll")
@@ -673,6 +680,37 @@ func adjustWindowRectForDpi(r *rect, style uintptr, dpi uint32) {
 	}
 }
 
+// dwmBlurBehind mirrors the native DWM_BLURBEHIND structure.
+type dwmBlurBehind struct {
+	dwFlags                uint32
+	fEnable                uint32
+	hRgnBlur               uintptr
+	fTransitionOnMaximized uint32
+}
+
+// enableDwmBlurBehind enables per-pixel-alpha compositing for the window
+// using DwmEnableBlurBehindWindow with an empty blur region — the winit/SDL3
+// pattern documented in ADR-060. WS_EX_LAYERED is intentionally NOT used:
+// it is GDI whole-window opacity, not per-pixel alpha with GPU rendering.
+func enableDwmBlurBehind(hwnd windows.HWND) {
+	if hwnd == 0 {
+		return
+	}
+	// CreateRectRgn(0, 0, -1, -1) creates an empty region.
+	rgn, _, _ := procCreateRectRgn.Call(0, 0, ^uintptr(0), ^uintptr(0))
+	if rgn == 0 {
+		return
+	}
+	defer procDeleteObject.Call(rgn)
+
+	bb := dwmBlurBehind{
+		dwFlags:  dwmBBEnable | dwmBBBlurRegion,
+		fEnable:  1, // TRUE
+		hRgnBlur: rgn,
+	}
+	procDwmEnableBlurBehindWindow.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bb)))
+}
+
 // createWindowWin32 creates a new Win32 HWND window from the given config.
 // Shared between PlatformManager.CreateWindow and the legacy Init(config).
 func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error) {
@@ -767,6 +805,13 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
 			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
 		w.updateSize()
+	}
+
+	// Enable DWM blur-behind for per-pixel-alpha transparency (ADR-060).
+	// Independent of frameless mode — a transparent window keeps its chrome
+	// unless the application also opts into WithFrameless.
+	if config.Transparent {
+		enableDwmBlurBehind(w.hwnd)
 	}
 
 	w.updateSize()

@@ -129,6 +129,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		Resizable:         config.Resizable,
 		Fullscreen:        config.Fullscreen,
 		Frameless:         config.Frameless,
+		Transparent:       config.Transparent,
 		TabbingMode:       config.TabbingMode,
 		TabbingIdentifier: config.TabbingIdentifier,
 	}
@@ -142,7 +143,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	// Create Metal surface for GPU rendering.
 	// Note: Surface is created before window is shown, but drawable size
 	// is set after Show() when window has valid dimensions.
-	surface, err := darwin.NewSurface(window)
+	surface, err := darwin.NewSurface(window, config.Transparent)
 	if err != nil {
 		// Non-fatal: window works without Metal surface
 		// This allows the window to still be used with software rendering

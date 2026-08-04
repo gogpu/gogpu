@@ -991,7 +991,7 @@ func TestDarwinGogpuWindowSurfaceStress(t *testing.T) {
 				_ = w.IsVisible()
 				w.UpdateSize()
 
-				s, err := platformdarwin.NewSurface(w)
+				s, err := platformdarwin.NewSurface(w, false)
 				s = must(t, "NewSurface", s, err)
 				s.Configure(platformdarwin.DefaultSurfaceConfig())
 				s.UpdateSize()

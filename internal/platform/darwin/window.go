@@ -23,6 +23,7 @@ type WindowConfig struct {
 	Resizable         bool
 	Fullscreen        bool
 	Frameless         bool
+	Transparent       bool
 	TabbingMode       int
 	TabbingIdentifier string
 }
@@ -128,6 +129,12 @@ func NewWindow(config WindowConfig) (*Window, error) {
 			nsWindow.SendPtr(selectors.setTitle, title.ID().Ptr())
 			title.Release()
 		}
+	}
+
+	// Per-pixel alpha: the window must not be opaque or AppKit fills the
+	// background black and the compositor ignores the surface alpha.
+	if config.Transparent {
+		nsWindow.SendBool(selectors.setOpaque, false)
 	}
 
 	// Create custom GoGPUView (ADR-015: prevents macOS system beep on key press).

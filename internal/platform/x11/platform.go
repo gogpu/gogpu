@@ -23,17 +23,18 @@ import (
 // Config holds configuration for creating a platform window.
 // This mirrors platform.Config to avoid import cycles.
 type Config struct {
-	Title      string
-	Width      int
-	Height     int
-	Resizable  bool
-	Fullscreen bool
-	Frameless  bool
-	MinWidth   int // 0 = no minimum constraint
-	MinHeight  int // 0 = no minimum constraint
-	MaxWidth   int // 0 = no maximum constraint
-	MaxHeight  int // 0 = no maximum constraint
-	Icon       image.Image
+	Title       string
+	Width       int
+	Height      int
+	Resizable   bool
+	Fullscreen  bool
+	Frameless   bool
+	Transparent bool
+	MinWidth    int // 0 = no minimum constraint
+	MinHeight   int // 0 = no minimum constraint
+	MaxWidth    int // 0 = no maximum constraint
+	MaxHeight   int // 0 = no maximum constraint
+	Icon        image.Image
 }
 
 // EventType represents the type of platform event.
@@ -337,13 +338,14 @@ func (p *Platform) Init(config Config) error {
 
 	// Create window with physical pixel dimensions
 	windowConfig := WindowConfig{
-		Title:      config.Title,
-		Width:      uint16(physWidth),
-		Height:     uint16(physHeight),
-		X:          0,
-		Y:          0,
-		Resizable:  config.Resizable,
-		Fullscreen: config.Fullscreen,
+		Title:       config.Title,
+		Width:       uint16(physWidth),
+		Height:      uint16(physHeight),
+		X:           0,
+		Y:           0,
+		Resizable:   config.Resizable,
+		Fullscreen:  config.Fullscreen,
+		Transparent: config.Transparent,
 	}
 
 	window, err := conn.CreateWindow(windowConfig)

@@ -559,17 +559,18 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 
 	// Create primary platform window.
 	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:      a.config.Title,
-		Width:      a.config.Width,
-		Height:     a.config.Height,
-		Resizable:  a.config.Resizable,
-		Fullscreen: a.config.Fullscreen,
-		Frameless:  a.config.Frameless,
-		MinWidth:   a.config.MinWidth,
-		MinHeight:  a.config.MinHeight,
-		MaxWidth:   a.config.MaxWidth,
-		MaxHeight:  a.config.MaxHeight,
-		Icon:       a.config.Icon,
+		Title:       a.config.Title,
+		Width:       a.config.Width,
+		Height:      a.config.Height,
+		Resizable:   a.config.Resizable,
+		Fullscreen:  a.config.Fullscreen,
+		Frameless:   a.config.Frameless,
+		Transparent: a.config.Transparent,
+		MinWidth:    a.config.MinWidth,
+		MinHeight:   a.config.MinHeight,
+		MaxWidth:    a.config.MaxWidth,
+		MaxHeight:   a.config.MaxHeight,
+		Icon:        a.config.Icon,
 	})
 	if err != nil {
 		return nil, err

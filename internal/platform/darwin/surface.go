@@ -107,6 +107,16 @@ func (l *MetalLayer) PixelFormat() MetalPixelFormat {
 	return MetalPixelFormat(result)
 }
 
+// SetOpaque controls whether the layer is composited as fully opaque.
+// Transparent windows must set this to false or Core Animation ignores the
+// layer alpha and composites black (ADR-060, gogpu#361).
+func (l *MetalLayer) SetOpaque(opaque bool) {
+	if l == nil || l.id.IsNil() {
+		return
+	}
+	l.id.SendBool(selectors.setOpaque, opaque)
+}
+
 // SetDrawableSize sets the size of the layer's drawable textures.
 func (l *MetalLayer) SetDrawableSize(width, height int) {
 	if l == nil || l.id.IsNil() {
@@ -303,7 +313,7 @@ type Surface struct {
 // The surface is created with default configuration but drawable size
 // is deferred until the window is visible and has valid dimensions.
 // Call UpdateSize() after the window is shown to set the correct size.
-func NewSurface(window *Window) (*Surface, error) {
+func NewSurface(window *Window, transparent bool) (*Surface, error) {
 	if window == nil {
 		return nil, errors.New("darwin: window is nil")
 	}
@@ -318,6 +328,7 @@ func NewSurface(window *Window) (*Surface, error) {
 	layer.SetPixelFormat(MetalPixelFormatBGRA8UNorm)
 	layer.SetFramebufferOnly(true)
 	layer.SetMaximumDrawableCount(3) // Triple buffering
+	layer.SetOpaque(!transparent)
 
 	// Set autoresizingMask so the layer auto-resizes with the view.
 	// Without this, the layer's bounds stay at CGRectZero in layer-hosting mode,

@@ -237,17 +237,18 @@ func (p *x11Platform) Init() error {
 // CreateWindow creates an X11 window.
 func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 	x11Config := x11.Config{
-		Title:      config.Title,
-		Width:      config.Width,
-		Height:     config.Height,
-		Resizable:  config.Resizable,
-		Fullscreen: config.Fullscreen,
-		Frameless:  config.Frameless,
-		MinWidth:   config.MinWidth,
-		MinHeight:  config.MinHeight,
-		MaxWidth:   config.MaxWidth,
-		MaxHeight:  config.MaxHeight,
-		Icon:       config.Icon,
+		Title:       config.Title,
+		Width:       config.Width,
+		Height:      config.Height,
+		Resizable:   config.Resizable,
+		Fullscreen:  config.Fullscreen,
+		Frameless:   config.Frameless,
+		Transparent: config.Transparent,
+		MinWidth:    config.MinWidth,
+		MinHeight:   config.MinHeight,
+		MaxWidth:    config.MaxWidth,
+		MaxHeight:   config.MaxHeight,
+		Icon:        config.Icon,
 	}
 
 	if p.primaryWindowID != 0 {

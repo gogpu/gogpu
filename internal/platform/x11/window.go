@@ -10,14 +10,22 @@ import (
 
 // WindowConfig holds configuration for creating a window.
 type WindowConfig struct {
-	Title      string
-	Width      uint16
-	Height     uint16
-	X          int16
-	Y          int16
-	Resizable  bool
-	Fullscreen bool
+	Title       string
+	Width       uint16
+	Height      uint16
+	X           int16
+	Y           int16
+	Resizable   bool
+	Fullscreen  bool
+	Transparent bool
 }
+
+// X11 visual class for TrueColor (depth 24/32).
+const classTrueColor = 4
+
+// allocNone is the AllocNone value for CreateColormap: the server allocates
+// color cells lazily from the colormap.
+const allocNone = 0
 
 // CreateWindow creates a new X11 window.
 func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
@@ -34,6 +42,8 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 	// (black flicker). None leaves the background untouched — we repaint on resize
 	// and Expose. GLFW/SDL/Chromium pattern.
 	valueMask := uint32(CWBackPixmap | CWEventMask)
+	depth := screen.RootDepth
+	visual := screen.RootVisual
 
 	// Event mask - listen for common events
 	eventMask := uint32(
@@ -55,13 +65,31 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 		eventMask, // CWEventMask
 	}
 
+	// Per-pixel alpha: create the window with a 32-bit ARGB visual and a
+	// matching colormap so the compositor can blend the surface alpha
+	// against the desktop (GLFW/SDL3 pattern, ADR-060). Falls back to the
+	// root visual when no ARGB visual is available — transparency then
+	// silently degrades to opaque.
+	if config.Transparent {
+		if argb, argbDepth, ok := findARGBVisual(screen); ok {
+			cmap := c.GenerateID()
+			if err := c.CreateColormap(cmap, screen.Root, argb.VisualID, allocNone); err != nil {
+				return 0, err
+			}
+			depth = argbDepth
+			visual = argb.VisualID
+			valueMask |= CWColormap
+			valueList = append(valueList, uint32(cmap))
+		}
+	}
+
 	// Build request
 	// Request length = 8 + len(valueList) in 4-byte units
 	reqLen := uint16(8 + len(valueList))
 
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeCreateWindow)
-	e.PutUint8(screen.RootDepth) // depth
+	e.PutUint8(depth) // depth
 	e.PutUint16(reqLen)
 	e.PutUint32(uint32(windowID))
 	e.PutUint32(uint32(screen.Root))
@@ -71,7 +99,7 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 	e.PutUint16(config.Height)
 	e.PutUint16(0) // border width
 	e.PutUint16(WindowClassInputOutput)
-	e.PutUint32(screen.RootVisual)
+	e.PutUint32(visual)
 	e.PutUint32(valueMask)
 	for _, v := range valueList {
 		e.PutUint32(v)
@@ -82,6 +110,56 @@ func (c *Connection) CreateWindow(config WindowConfig) (ResourceID, error) {
 	}
 
 	return windowID, nil
+}
+
+// findARGBVisual returns a 32-bit TrueColor visual whose RGB masks leave
+// the top byte free for alpha, plus its depth. Returns ok=false when the
+// screen has no ARGB visual so callers can fall back to the root visual.
+func findARGBVisual(screen *ScreenInfo) (VisualType, uint8, bool) {
+	if screen == nil {
+		return VisualType{}, 0, false
+	}
+	for _, depth := range screen.Depths {
+		if depth.Depth != 32 {
+			continue
+		}
+		for _, v := range depth.Visuals {
+			if v.Class != classTrueColor {
+				continue
+			}
+			mask := v.RedMask | v.GreenMask | v.BlueMask
+			// A 32-bit TrueColor visual without alpha covers all 32 bits;
+			// an ARGB visual leaves the top byte unoccupied.
+			if mask != 0 && mask != 0xFFFFFFFF {
+				return v, depth.Depth, true
+			}
+		}
+	}
+	return VisualType{}, 0, false
+}
+
+// createColormapRequest builds the CreateColormap request body.
+// Wire format: opcode, unused, length=5, colormap, window, visual, alloc, pad.
+func createColormapRequest(bo ByteOrder, id, window ResourceID, visual uint32, alloc uint8) []byte {
+	e := NewEncoder(bo)
+	e.PutUint8(OpcodeCreateColormap)
+	e.PutUint8(0)  // unused
+	e.PutUint16(5) // length: 20 bytes / 4
+	e.PutUint32(uint32(id))
+	e.PutUint32(uint32(window))
+	e.PutUint32(visual)
+	e.PutUint8(alloc)
+	e.PutPad()
+	return e.Bytes()
+}
+
+// CreateColormap creates a colormap for the given visual.
+func (c *Connection) CreateColormap(id, window ResourceID, visual uint32, alloc uint8) error {
+	req := createColormapRequest(c.byteOrder, id, window, visual, alloc)
+	if _, err := c.sendRequest(req); err != nil {
+		return fmt.Errorf("x11: CreateColormap failed: %w", err)
+	}
+	return nil
 }
 
 // MapWindow makes a window visible.

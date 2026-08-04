@@ -26,6 +26,7 @@ type Config struct {
 	Resizable         bool
 	Fullscreen        bool
 	Frameless         bool
+	Transparent       bool
 	TabbingMode       int
 	TabbingIdentifier string
 	MinWidth          int // 0 = no minimum constraint

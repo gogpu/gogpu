@@ -68,6 +68,7 @@ var selectors struct {
 	// NSWindow titlebar transparency / title visibility
 	setTitlebarAppearsTransparent SEL
 	setTitleVisibility            SEL
+	setOpaque                     SEL // NSWindow.setOpaque: / CALayer.setOpaque:
 
 	// NSView - View management
 	setWantsLayer   SEL
@@ -315,6 +316,7 @@ func initSelectors() {
 		selectors.windowDidResize = RegisterSelector("windowDidResize:")
 		selectors.setTitlebarAppearsTransparent = RegisterSelector("setTitlebarAppearsTransparent:")
 		selectors.setTitleVisibility = RegisterSelector("setTitleVisibility:")
+		selectors.setOpaque = RegisterSelector("setOpaque:")
 
 		// NSView
 		selectors.setWantsLayer = RegisterSelector("setWantsLayer:")
