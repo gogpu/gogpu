@@ -70,6 +70,10 @@ type RenderTarget struct {
 	// VSync preference for this window
 	vsync bool
 
+	// transparent requests CompositeAlphaModePremultiplied for this surface
+	// when the adapter advertises support (ADR-060, gogpu#361).
+	transparent bool
+
 	// damageRects holds the dirty regions for the current frame (physical pixels,
 	// top-left origin). Set by Context.SetDamageRects(), consumed and cleared by
 	// present(). When nil, the full surface is presented (backward compatible).
@@ -180,14 +184,15 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference) (*Renderer, error) {
+func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool) (*Renderer, error) {
 	r := &Renderer{
 		powerPreference: powerPref,
 	}
 	r.primary = &RenderTarget{
-		renderer:   r,
-		platWindow: platWin,
-		vsync:      vsync,
+		renderer:    r,
+		platWindow:  platWin,
+		vsync:       vsync,
+		transparent: transparent,
 	}
 
 	// Phase 1: Create GPU instance with backend mask (may include multiple backends).
@@ -299,14 +304,16 @@ func (r *Renderer) configureSurface(ws *RenderTarget) error {
 
 // configure configures the wgpu surface with current dimensions and format.
 func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) error {
-	presentMode := ws.resolvePresentMode(adapter)
+	caps := adapter.GetSurfaceCapabilities(ws.surface)
+	presentMode := resolvePresentMode(caps, ws.vsync)
+	alphaMode := resolveAlphaMode(caps, ws.transparent)
 
 	return ws.surface.Configure(device, &wgpu.SurfaceConfiguration{
 		Format:      ws.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       ws.width,
 		Height:      ws.height,
-		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+		AlphaMode:   alphaMode,
 		PresentMode: presentMode,
 	})
 }
@@ -315,23 +322,22 @@ func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) er
 // Rust wgpu fallback pattern. For VSync on (AutoVsync): FifoRelaxed -> Fifo.
 // For VSync off (AutoNoVsync): Immediate -> Mailbox -> Fifo.
 // Falls back to Fifo which is guaranteed by the Vulkan spec.
-func (ws *RenderTarget) resolvePresentMode(adapter *wgpu.Adapter) gputypes.PresentMode {
-	caps := adapter.GetSurfaceCapabilities(ws.surface)
+func resolvePresentMode(caps *wgpu.SurfaceCapabilities, vsync bool) gputypes.PresentMode {
 	if caps == nil {
 		// No capabilities available — use safe default.
 		mode := gputypes.PresentModeFifo
-		if !ws.vsync {
+		if !vsync {
 			mode = gputypes.PresentModeImmediate
 		}
 		slog.Debug("gogpu: no surface capabilities, using default present mode",
-			"mode", mode, "vsync", ws.vsync)
+			"mode", mode, "vsync", vsync)
 		return mode
 	}
 
 	supported := caps.PresentModes
 	var mode gputypes.PresentMode
 
-	if ws.vsync {
+	if vsync {
 		// VSync on: FifoRelaxed -> Fifo (like Rust AutoVsync).
 		mode = pickPresentMode(supported,
 			gputypes.PresentModeFifoRelaxed,
@@ -347,8 +353,30 @@ func (ws *RenderTarget) resolvePresentMode(adapter *wgpu.Adapter) gputypes.Prese
 	}
 
 	slog.Debug("gogpu: resolved present mode",
-		"mode", mode, "vsync", ws.vsync, "supported", supported)
+		"mode", mode, "vsync", vsync, "supported", supported)
 	return mode
+}
+
+// resolveAlphaMode selects the surface alpha compositing mode.
+// Transparent windows request CompositeAlphaModePremultiplied; if the
+// adapter does not advertise it (or capabilities are unavailable) the
+// surface falls back to Opaque, preserving pre-ADR-060 behavior.
+func resolveAlphaMode(caps *wgpu.SurfaceCapabilities, transparent bool) gputypes.CompositeAlphaMode {
+	if !transparent {
+		return gputypes.CompositeAlphaModeOpaque
+	}
+	if caps == nil {
+		slog.Debug("gogpu: no surface capabilities, using opaque alpha mode")
+		return gputypes.CompositeAlphaModeOpaque
+	}
+	for _, mode := range caps.AlphaModes {
+		if mode == gputypes.CompositeAlphaModePremultiplied {
+			return mode
+		}
+	}
+	slog.Debug("gogpu: premultiplied alpha unsupported, using opaque alpha mode",
+		"supported", caps.AlphaModes)
+	return gputypes.CompositeAlphaModeOpaque
 }
 
 // pickPresentMode returns the first mode from preferred that is in supported.

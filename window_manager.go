@@ -332,12 +332,13 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 
 	// Create RenderTarget for this window.
 	ws := &RenderTarget{
-		renderer:   a.renderer,
-		platWindow: platWindow,
-		surface:    surface,
-		format:     a.renderer.surfaceFormat,
-		vsync:      false, // Secondary windows: Immediate (ADR-010 VSync strategy)
-		state:      SurfaceReady,
+		renderer:    a.renderer,
+		platWindow:  platWindow,
+		surface:     surface,
+		format:      a.renderer.surfaceFormat,
+		vsync:       false, // Secondary windows: Immediate (ADR-010 VSync strategy)
+		transparent: config.Transparent,
+		state:       SurfaceReady,
 	}
 
 	// Configure surface with initial dimensions on the render thread.

@@ -177,6 +177,25 @@ func TestConfigWithFramelessBuilder(t *testing.T) {
 	}
 }
 
+func TestConfigWithTransparent(t *testing.T) {
+	tests := []struct {
+		name        string
+		transparent bool
+	}{
+		{"enabled", true},
+		{"disabled", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig().WithTransparent(tt.transparent)
+			if cfg.Transparent != tt.transparent {
+				t.Errorf("Transparent = %v, want %v", cfg.Transparent, tt.transparent)
+			}
+		})
+	}
+}
+
 func TestConfigBuilderChaining(t *testing.T) {
 	t.Setenv("GOGPU_GRAPHICS_API", "")
 
@@ -186,7 +205,8 @@ func TestConfigBuilderChaining(t *testing.T) {
 		WithBackend(types.BackendNative).
 		WithGraphicsAPI(types.GraphicsAPIVulkan).
 		WithContinuousRender(false).
-		WithFrameless(true)
+		WithFrameless(true).
+		WithTransparent(true)
 
 	if cfg.Title != "Test App" {
 		t.Errorf("Title = %q, want %q", cfg.Title, "Test App")
@@ -208,6 +228,9 @@ func TestConfigBuilderChaining(t *testing.T) {
 	}
 	if !cfg.Frameless {
 		t.Error("Frameless = false, want true")
+	}
+	if !cfg.Transparent {
+		t.Error("Transparent = false, want true")
 	}
 	// Verify defaults not overridden remain intact.
 	if !cfg.Resizable {

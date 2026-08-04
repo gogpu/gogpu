@@ -77,6 +77,15 @@ type Config struct {
 	// WindowChrome.SetHitTestCallback for drag, resize, and button regions.
 	Frameless bool
 
+	// Transparent enables a per-pixel-alpha window (rounded corners, tray
+	// popups, overlays). When true, the swapchain uses
+	// CompositeAlphaModePremultiplied when the surface supports it and the
+	// platform window is created with the native transparency style
+	// (DwmBlurBehind on Windows, NSWindow.isOpaque=false on macOS, ARGB
+	// visual on X11, no opaque region on Wayland). The application must
+	// clear with alpha=0 for transparent regions.
+	Transparent bool
+
 	// PowerPreference specifies GPU power consumption preference for adapter selection.
 	// On systems with both integrated and discrete GPUs (e.g. laptops),
 	// this controls which GPU is selected.
@@ -275,6 +284,16 @@ func (c Config) WithFullscreen() Config {
 // Use WindowChrome.SetHitTestCallback to define drag, resize, and button regions.
 func (c Config) WithFrameless(frameless bool) Config {
 	c.Frameless = frameless
+	return c
+}
+
+// WithTransparent enables or disables per-pixel-alpha window transparency.
+// When true, the surface selects CompositeAlphaModePremultiplied when
+// supported and the platform window is created with its native transparency
+// style. Falls back to an opaque surface when the backend does not support
+// premultiplied alpha.
+func (c Config) WithTransparent(transparent bool) Config {
+	c.Transparent = transparent
 	return c
 }
 

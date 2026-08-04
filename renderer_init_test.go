@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu"
 )
 
 // TestConfigureSurface_ZeroDimensionsSkips verifies that configureSurface
@@ -154,6 +155,67 @@ func TestPickPresentMode_EmptySupportedReturnsFifo(t *testing.T) {
 	got := pickPresentMode(nil, gputypes.PresentModeImmediate)
 	if got != gputypes.PresentModeFifo {
 		t.Errorf("pickPresentMode(nil) = %v, want Fifo", got)
+	}
+}
+
+// TestResolvePresentMode_NilCapsUsesVsyncDefault verifies the nil-capabilities
+// fallback keeps the previous default-mode behavior after the refactor.
+func TestResolvePresentMode_NilCapsUsesVsyncDefault(t *testing.T) {
+	if got := resolvePresentMode(nil, true); got != gputypes.PresentModeFifo {
+		t.Errorf("resolvePresentMode(nil, vsync=true) = %v, want Fifo", got)
+	}
+	if got := resolvePresentMode(nil, false); got != gputypes.PresentModeImmediate {
+		t.Errorf("resolvePresentMode(nil, vsync=false) = %v, want Immediate", got)
+	}
+}
+
+// TestResolvePresentMode_PicksFromCapabilities verifies present-mode selection
+// honors the supported list from surface capabilities.
+func TestResolvePresentMode_PicksFromCapabilities(t *testing.T) {
+	caps := &wgpu.SurfaceCapabilities{
+		PresentModes: []gputypes.PresentMode{gputypes.PresentModeFifo},
+	}
+	if got := resolvePresentMode(caps, false); got != gputypes.PresentModeFifo {
+		t.Errorf("resolvePresentMode(caps, vsync=false) = %v, want Fifo (only supported)", got)
+	}
+}
+
+// TestResolveAlphaMode_OpaqueWhenNotTransparent verifies the default surface
+// configuration stays CompositeAlphaModeOpaque (backward compatible).
+func TestResolveAlphaMode_OpaqueWhenNotTransparent(t *testing.T) {
+	caps := &wgpu.SurfaceCapabilities{
+		AlphaModes: []gputypes.CompositeAlphaMode{gputypes.CompositeAlphaModePremultiplied},
+	}
+	if got := resolveAlphaMode(caps, false); got != gputypes.CompositeAlphaModeOpaque {
+		t.Errorf("resolveAlphaMode(caps, false) = %v, want Opaque", got)
+	}
+}
+
+// TestResolveAlphaMode_PremultipliedWhenSupported verifies transparent windows
+// select CompositeAlphaModePremultiplied when the adapter advertises it.
+func TestResolveAlphaMode_PremultipliedWhenSupported(t *testing.T) {
+	caps := &wgpu.SurfaceCapabilities{
+		AlphaModes: []gputypes.CompositeAlphaMode{
+			gputypes.CompositeAlphaModeOpaque,
+			gputypes.CompositeAlphaModePremultiplied,
+		},
+	}
+	if got := resolveAlphaMode(caps, true); got != gputypes.CompositeAlphaModePremultiplied {
+		t.Errorf("resolveAlphaMode(caps, true) = %v, want Premultiplied", got)
+	}
+}
+
+// TestResolveAlphaMode_FallsBackToOpaque verifies transparent windows degrade
+// to Opaque when premultiplied alpha is unsupported or capabilities are nil.
+func TestResolveAlphaMode_FallsBackToOpaque(t *testing.T) {
+	opaqueOnly := &wgpu.SurfaceCapabilities{
+		AlphaModes: []gputypes.CompositeAlphaMode{gputypes.CompositeAlphaModeOpaque},
+	}
+	if got := resolveAlphaMode(opaqueOnly, true); got != gputypes.CompositeAlphaModeOpaque {
+		t.Errorf("resolveAlphaMode(opaqueOnly, true) = %v, want Opaque fallback", got)
+	}
+	if got := resolveAlphaMode(nil, true); got != gputypes.CompositeAlphaModeOpaque {
+		t.Errorf("resolveAlphaMode(nil, true) = %v, want Opaque fallback", got)
 	}
 }
 
