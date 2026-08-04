@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"syscall"
 	"time"
@@ -709,7 +710,13 @@ func enableDwmBlurBehind(hwnd windows.HWND) {
 		fEnable:  1, // TRUE
 		hRgnBlur: rgn,
 	}
-	procDwmEnableBlurBehindWindow.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bb)))
+	hr, _, _ := procDwmEnableBlurBehindWindow.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bb)))
+	if hr != 0 {
+		// Non-fatal: DWM can be unavailable (e.g. Server Core, DWM disabled);
+		// the window simply stays opaque.
+		slog.Debug("gogpu: DwmEnableBlurBehindWindow failed, window stays opaque",
+			"hr", hr)
+	}
 }
 
 // createWindowWin32 creates a new Win32 HWND window from the given config.

@@ -316,6 +316,9 @@ func (w *Window) SetPosition(x, y int) {
 	if f := w.nsWindow.GetRect(selectors.frame); f.Size.Height > 0 {
 		frameH = int(f.Size.Height)
 	}
+	// Fallback note: if the frame selector fails we fall back to the content
+	// height, which can shift Y by the title bar height (low probability —
+	// NSWindow.frame is always available once the window exists).
 
 	screenH := frameH
 	screen := classes.NSScreen.Send(selectors.mainScreen)
