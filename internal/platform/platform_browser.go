@@ -32,6 +32,9 @@ func (p *browserPlatform) Init() error {
 // CreateWindow creates a browserWindow backed by a <canvas> element.
 // If no <canvas> exists in the DOM, one is created and appended to the body.
 func (p *browserPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	// TODO(#361, ADR-060): Browser transparency — CSS transparency (e.g.
+	// canvas background) is not implemented yet; Config.Transparent is
+	// silently ignored.
 	doc := js.Global().Get("document")
 
 	// Find or create a <canvas> element.

@@ -117,3 +117,65 @@ func TestFreeColormapRequest(t *testing.T) {
 		t.Errorf("FreeColormap request = %v, want %v", got, want)
 	}
 }
+
+// TestEncodeCreateWindowRequest_TransparentValueOrder verifies the value mask
+// and value list for a transparent 32-bit ARGB window: CWBorderPixel must be
+// present and values must be in ascending bit order
+// (BackPixmap, BorderPixel, EventMask, Colormap).
+func TestEncodeCreateWindowRequest_TransparentValueOrder(t *testing.T) {
+	const eventMask = 0x00000002
+	valueMask := uint32(CWBackPixmap | CWBorderPixel | CWEventMask | CWColormap)
+	valueList := []uint32{0, 0, eventMask, 0x40} // backpixmap, border_pixel, eventmask, colormap
+
+	got := encodeCreateWindowRequest(
+		LSBFirst, 0x10, 0x20,
+		0, 0, 640, 480,
+		32, 0x30, valueMask, valueList,
+	)
+	want := []byte{
+		1, 32, 12, 0, // opcode, depth, length (8 + 4 values)
+		0x10, 0x00, 0x00, 0x00, // window
+		0x20, 0x00, 0x00, 0x00, // parent
+		0x00, 0x00, 0x00, 0x00, // x, y
+		0x80, 0x02, 0xE0, 0x01, // width=640, height=480
+		0x00, 0x00, 0x01, 0x00, // border width, class=InputOutput
+		0x30, 0x00, 0x00, 0x00, // visual
+		0x09, 0x28, 0x00, 0x00, // value mask: 1|8|0x800|0x2000 = 0x2809
+		0x00, 0x00, 0x00, 0x00, // backpixmap = None
+		0x00, 0x00, 0x00, 0x00, // border_pixel = 0
+		0x02, 0x00, 0x00, 0x00, // event mask
+		0x40, 0x00, 0x00, 0x00, // colormap
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("transparent CreateWindow request = %v, want %v", got, want)
+	}
+}
+
+// TestEncodeCreateWindowRequest_OpaqueValueOrder verifies the default window
+// keeps the original two-value encoding (BackPixmap, EventMask).
+func TestEncodeCreateWindowRequest_OpaqueValueOrder(t *testing.T) {
+	const eventMask = 0x00000002
+	valueMask := uint32(CWBackPixmap | CWEventMask)
+	valueList := []uint32{0, eventMask}
+
+	got := encodeCreateWindowRequest(
+		LSBFirst, 0x10, 0x20,
+		0, 0, 800, 600,
+		24, 0x30, valueMask, valueList,
+	)
+	want := []byte{
+		1, 24, 10, 0, // opcode, depth, length (8 + 2 values)
+		0x10, 0x00, 0x00, 0x00, // window
+		0x20, 0x00, 0x00, 0x00, // parent
+		0x00, 0x00, 0x00, 0x00, // x, y
+		0x20, 0x03, 0x58, 0x02, // width=800, height=600
+		0x00, 0x00, 0x01, 0x00, // border width, class=InputOutput
+		0x30, 0x00, 0x00, 0x00, // visual
+		0x01, 0x08, 0x00, 0x00, // value mask: 1|0x800 = 0x0801
+		0x00, 0x00, 0x00, 0x00, // backpixmap = None
+		0x02, 0x00, 0x00, 0x00, // event mask
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("opaque CreateWindow request = %v, want %v", got, want)
+	}
+}

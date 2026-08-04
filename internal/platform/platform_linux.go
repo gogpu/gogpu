@@ -962,6 +962,10 @@ func (p *waylandPlatform) Init() error {
 // The first call initializes the primary connection. Subsequent calls create
 // secondary windows each with their own independent Wayland connection and surface.
 func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	// TODO(#361, ADR-060): Wayland transparency — explicitly call
+	// wl_surface_set_opaque_region(NULL) when config.Transparent is set.
+	// For now Config.Transparent is silently ignored: Wayland surfaces have
+	// no opaque region by default, so surface alpha already composites.
 	if p.libwl != nil {
 		// Secondary window: open a new independent Wayland connection.
 		sec, err := p.createSecondaryConn(config)

@@ -133,8 +133,16 @@ func NewWindow(config WindowConfig) (*Window, error) {
 
 	// Per-pixel alpha: the window must not be opaque or AppKit fills the
 	// background black and the compositor ignores the surface alpha.
+	// SDL3 sets all three (opaque=NO, hasShadow=NO, backgroundColor=clearColor):
+	// without clearColor AppKit composites the swapchain alpha over an opaque
+	// background; without hasShadow=NO the system shadow renders incorrectly
+	// for overlay/popup windows.
 	if config.Transparent {
 		nsWindow.SendBool(selectors.setOpaque, false)
+		nsWindow.SendBool(selectors.setHasShadow, false)
+		if color := classes.NSColor.Send(selectors.clearColor); !color.IsNil() {
+			nsWindow.SendPtr(selectors.setBackgroundColor, color.Ptr())
+		}
 	}
 
 	// Create custom GoGPUView (ADR-015: prevents macOS system beep on key press).
