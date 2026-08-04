@@ -1205,8 +1205,6 @@ func (id ID) SendSize(sel SEL, size NSSize) ID {
 }
 
 // SendPoint sends a message with an NSPoint argument.
-//
-//nolint:govet // mirrors the existing SendSize/SendRect helpers.
 func (id ID) SendPoint(sel SEL, point NSPoint) ID {
 	if id == 0 || sel == 0 {
 		return 0

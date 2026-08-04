@@ -5,11 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.49.0] - 2026-08-04
 
 ### Added
 
-- **`Config.WithTransparent(bool)`** (#361, @shaolei) — per-pixel-alpha window transparency. When enabled, the swapchain selects `CompositeAlphaModePremultiplied` when the surface supports it (falling back to `Opaque`), and the platform window is created with its native transparency style.
+- **Per-pixel alpha transparency** (#361, @shaolei) — `Config.WithTransparent(bool)` enables transparent windows for tray popups, overlays, HUDs. Swapchain selects `CompositeAlphaModePremultiplied` with fallback to Opaque. Platform support: Windows (DwmBlurBehind), macOS (NSWindow.isOpaque + clearColor + hasShadow), X11 (32-bit ARGB visual + CWBorderPixel). Wayland/Browser: documented as follow-up.
+- **Window control API** (#361, @shaolei) — `Window.Show()`, `Window.Hide()`, `Window.SetPosition(x, y int)`, `Window.SetSize(w, h int)`. Logical DIP coordinates on all platforms. Windows (ShowWindow + SetWindowPos with DPI scaling), macOS (makeKeyAndOrderFront + setFrameOrigin with Y-flip), X11 (MapWindow + MoveWindow). Wayland/Browser: documented no-ops (compositor/page controls placement).
+
+### Fixed
+
+- **X11 ConfigureWindow length** — header + values = 7 words, was incorrectly 8 (@shaolei)
+- **macOS lint** — removed unused `//nolint:govet` directive on SendPoint
 
 ## [0.48.5] - 2026-08-02
 
