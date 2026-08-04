@@ -1651,7 +1651,7 @@ func (p *darwinPlatform) addPlatformItem(parentMenu darwin.ID, item MenuItem) {
 		return
 	}
 
-	if item.Role != MenuRoleNone {
+	if item.Role != MenuRoleNone && item.Action == nil {
 		roleStr := roleToString(item.Role)
 		if roleStr != "" {
 			darwin.AddMenuItemWithRole(parentMenu, item.Title, roleStr)
