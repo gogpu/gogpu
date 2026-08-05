@@ -233,9 +233,9 @@ func TestKeyboard_OutOfRangeKey(t *testing.T) {
 
 func TestKeyboard_Modifiers(t *testing.T) {
 	tests := []struct {
-		name string
-		mod  Modifier
-		left Key
+		name  string
+		mod   Modifier
+		left  Key
 		right Key
 	}{
 		{"Shift", ModShift, KeyShiftLeft, KeyShiftRight},
@@ -804,10 +804,10 @@ func TestKeyboard_RapidToggle(t *testing.T) {
 
 func TestKeyboard_EdgeDetection_Table(t *testing.T) {
 	type frame struct {
-		action       string // "press", "release", "none"
-		wantJP       bool   // JustPressed
-		wantJR       bool   // JustReleased
-		wantPressed  bool   // Pressed
+		action      string // "press", "release", "none"
+		wantJP      bool   // JustPressed
+		wantJR      bool   // JustReleased
+		wantPressed bool   // Pressed
 	}
 
 	tests := []struct {
