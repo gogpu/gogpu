@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.2] - 2026-08-05
+
+### Fixed
+
+- **Input: JustPressed/JustReleased/Mouse.Delta always false/zero in OnUpdate** (#425) — `inputState.Update()` was called before `onUpdate`, setting `previous = current` before user code could read edge state. Moved `Update()` after `onUpdate` callback, matching Ebiten/Unity/Godot ordering: events → user reads edges → clear for next frame. Reported by @FDUTCH ([#385](https://github.com/gogpu/gogpu/discussions/385)).
+
+### Added
+
+- **38 enterprise-level input tests** — keyboard edge detection (JustPressed, JustReleased, multi-frame lifecycle, same-frame press+release, rapid toggle), mouse (buttons, delta, scroll accumulation, position), app loop ordering regression tests, thread safety (concurrent access), table-driven multi-frame scenarios.
+
 ## [0.49.1] - 2026-08-04
 
 ### Fixed

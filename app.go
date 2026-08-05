@@ -511,17 +511,20 @@ func (a *App) runFrame() {
 		deltaTime = 0.066
 	}
 
-	// Update input state for next frame (Ebiten-style polling)
-	// This must be called before onUpdate so JustPressed/JustReleased work correctly
-	if a.inputState != nil {
-		a.inputState.Update()
-	}
-
 	// onUpdate: ALWAYS when loop is active (ANIMATING + CONTINUOUS).
 	// UI frameworks tick animations, process signals, run layout here.
 	// If something changed, they call RequestRedraw() → invalidated = true.
 	if a.onUpdate != nil {
 		a.onUpdate(deltaTime)
+	}
+
+	// Advance input state AFTER onUpdate so edge detectors (JustPressed,
+	// JustReleased, Mouse.Delta) are visible during the callback.
+	// Update() sets previous = current, clearing edges for the next frame.
+	// Order: events → onUpdate (user reads edges) → Update (clear).
+	// Matches Ebiten, Unity, Godot — all clear edges after user callback.
+	if a.inputState != nil {
+		a.inputState.Update()
 	}
 
 	// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
