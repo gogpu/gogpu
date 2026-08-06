@@ -201,6 +201,10 @@ type LibwaylandHandle struct {
 	dndMu         sync.Mutex
 	dndCallbacks  *DnDCallbacks // Go callbacks for DnD events (set by platform layer)
 
+	// Outgoing drag source state
+	lastButtonSerial uint32     // serial from last wl_pointer.button press (for start_drag)
+	dragMu           sync.Mutex // protects lastButtonSerial
+
 	// Data symbols (interface descriptors — pointers to static C structs)
 	registryInterface      unsafe.Pointer // &wl_registry_interface
 	compositorInterface    unsafe.Pointer // &wl_compositor_interface

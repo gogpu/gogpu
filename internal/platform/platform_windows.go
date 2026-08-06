@@ -1112,6 +1112,12 @@ func (w *win32Window) SetModalFrameCallback(fn func()) {
 
 func (w *win32Window) SetHeaderAlignment(_ int) {} // Win32 title bar is drawn by DWM; alignment is not supported
 
+// StartDrag initiates an outgoing drag-and-drop via COM DoDragDrop.
+// Blocks until the drag completes; done fires before returning.
+func (w *win32Window) StartDrag(paths []string, done func(DragResult)) {
+	startDragWindows(paths, done)
+}
+
 func (w *win32Window) Destroy() {
 	if w.platform != nil {
 		w.platform.windowMu.Lock()

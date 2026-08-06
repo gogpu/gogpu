@@ -615,6 +615,11 @@ func (dw *darwinPlatformWindow) BlitPixels(pixels []byte, width, height int) err
 	return nil
 }
 
+// StartDrag initiates an outgoing drag-and-drop via macOS NSDragging.
+func (dw *darwinPlatformWindow) StartDrag(paths []string, done func(DragResult)) {
+	startDragDarwin(dw.window, paths, done)
+}
+
 func (dw *darwinPlatformWindow) Destroy() {
 	// Destruction handled by platform.Destroy()
 }

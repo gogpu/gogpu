@@ -299,9 +299,33 @@ type PlatformWindow interface {
 	// the compositor may reject the request for tiled/maximized windows.
 	RequestSize(width, height int)
 
+	// StartDrag initiates an outgoing drag-and-drop operation with the given
+	// file paths. The done callback is invoked when the drag completes with a
+	// result indicating whether the data was copied, moved, or canceled.
+	//
+	// This must be called from the main thread (inside a pointer-down handler
+	// or similar user gesture). On platforms that block the caller during the
+	// drag session (Windows DoDragDrop, X11 XDND source loop), the callback
+	// fires before StartDrag returns. On platforms with async DnD (Wayland,
+	// macOS), the callback fires later when the compositor or pasteboard
+	// reports completion.
+	StartDrag(paths []string, done func(DragResult))
+
 	// Destroy releases native window resources.
 	Destroy()
 }
+
+// DragResult describes how a drag-and-drop operation ended.
+type DragResult int
+
+const (
+	// DragCancelled means the user canceled the drag.
+	DragCancelled DragResult = iota
+	// DragCopied means the target copied the dragged data.
+	DragCopied
+	// DragMoved means the target moved the dragged data.
+	DragMoved
+)
 
 // DisplayLocker is an optional interface for platforms where the display
 // connection is shared between threads and requires explicit synchronization.

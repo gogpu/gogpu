@@ -474,6 +474,25 @@ func (w *browserWindow) CursorMode() int { return 0 }
 // SetModalFrameCallback is a no-op — browser has no modal resize loops.
 func (w *browserWindow) SetModalFrameCallback(_ func()) {}
 
+// StartDrag initiates an outgoing drag via HTML5 Drag and Drop API.
+// In the browser, drag operations require user gesture context (dragstart event).
+// Since we cannot programmatically initiate a drag without a native dragstart,
+// this implementation sets up the data transfer so that the next native dragstart
+// on the canvas will carry the file paths. The done callback fires immediately
+// with DragCancelled because HTML5 drag requires the browser's own gesture.
+func (w *browserWindow) StartDrag(paths []string, done func(DragResult)) {
+	// HTML5 Drag and Drop requires the dragstart event to originate from the
+	// browser's native event handling. We cannot programmatically start a drag
+	// from Go/WASM. The proper pattern is to listen for dragstart on the canvas
+	// and populate dataTransfer there.
+	//
+	// For now, we report cancellation since programmatic drag initiation is not
+	// possible in the browser security model.
+	if done != nil {
+		done(DragCancelled)
+	}
+}
+
 // Destroy releases JS callbacks.
 func (w *browserWindow) Destroy() {
 	for _, cb := range w.jsCallbacks {

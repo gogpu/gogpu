@@ -589,6 +589,11 @@ func (s *stubWindow) SetCursorMode(_ int)                                       
 func (s *stubWindow) CursorMode() int                                                      { return 0 }
 func (s *stubWindow) SetModalFrameCallback(_ func())                                       {}
 func (s *stubWindow) Destroy()                                                             {}
+func (s *stubWindow) StartDrag(_ []string, done func(DragResult)) {
+	if done != nil {
+		done(DragCancelled)
+	}
+}
 
 func TestRoleQuit_ClosesWindow(t *testing.T) {
 	m := newLinuxMenuState()

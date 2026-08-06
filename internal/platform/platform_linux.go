@@ -5,6 +5,7 @@ package platform
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"strconv"
@@ -603,6 +604,11 @@ func (w *x11PlatformWindow) BlitPixels(pixels []byte, width, height int) error {
 	return w.inner().BlitPixels(pixels, width, height)
 }
 
+// StartDrag initiates an outgoing drag-and-drop via the XDND protocol.
+func (w *x11PlatformWindow) StartDrag(paths []string, done func(DragResult)) {
+	startXDNDDrag(w.inner(), paths, done)
+}
+
 // Destroy tears down a secondary window's independent connection and
 // unregisters it. Primary destruction is handled by platform.Destroy().
 func (w *x11PlatformWindow) Destroy() {
@@ -919,6 +925,35 @@ func (w *waylandPlatformWindow) SetHeaderAlignment(alignment int) {
 	}
 	if w.platform.libwl != nil {
 		w.platform.libwl.SetCSDTitleAlignment(alignment)
+	}
+}
+
+// StartDrag initiates an outgoing drag-and-drop via Wayland wl_data_device.start_drag.
+func (w *waylandPlatformWindow) StartDrag(paths []string, done func(DragResult)) {
+	libwl := w.libwayland()
+	if libwl == nil {
+		if done != nil {
+			done(DragCancelled)
+		}
+		return
+	}
+	if err := libwl.StartDragSource(paths, func(result int) {
+		if done == nil {
+			return
+		}
+		switch result {
+		case 1:
+			done(DragCopied)
+		case 2:
+			done(DragMoved)
+		default:
+			done(DragCancelled)
+		}
+	}); err != nil {
+		slog.Warn("wayland: StartDrag failed", "err", err)
+		if done != nil {
+			done(DragCancelled)
+		}
 	}
 }
 
@@ -1694,6 +1729,11 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			})
 		},
 		OnPointerButton: func(serial, timeMs, button, state uint32) {
+			// Store the serial for outgoing drag source (start_drag requires it).
+			if state == wayland.PointerButtonStatePressed {
+				p.libwl.SetLastButtonSerial(serial)
+			}
+
 			w.pointerMu.Lock()
 			if !w.pointerIn {
 				w.pointerMu.Unlock()
