@@ -56,9 +56,9 @@ GoGPU is a GPU computing ecosystem for Go with triple-backend WebGPU support (AD
 | **gg**        | 2D graphics library (Canvas API)     | [gogpu/gg](https://github.com/gogpu/gg)              |
 | **wgpu**      | Unified Go WebGPU (3 backends)       | [gogpu/wgpu](https://github.com/gogpu/wgpu)          |
 | **naga**      | WGSL shader compiler                 | [gogpu/naga](https://github.com/gogpu/naga)          |
-| **ui**        | GUI toolkit (22+ widgets, 4 themes)  | [gogpu/ui](https://github.com/gogpu/ui)              |
+| **ui**        | GUI toolkit (24 widgets, 4 themes)   | [gogpu/ui](https://github.com/gogpu/ui)              |
 | **g3d**       | 3D rendering (scene graph, PBR, GLTF)| [gogpu/g3d](https://github.com/gogpu/g3d)            |
-| **compose**   | Multi-process composition (design phase) | [gogpu/compose](https://github.com/gogpu/compose) |
+| **compose**   | Multi-process composition (v0.1.0)    | [gogpu/compose](https://github.com/gogpu/compose) |
 | **systray**   | System tray (Win32/macOS/Linux)      | [gogpu/systray](https://github.com/gogpu/systray)    |
 
 ### Shared Infrastructure: gputypes + gpucontext
@@ -304,12 +304,11 @@ gogpu/
 ├── gpu/
 │   ├── types/          # Backend type enum (BackendType)
 │   └── backend/
-│       ├── native/     # HAL backend creation (Vulkan/Metal selection)
-│       └── rust/       # Rust HAL adapter (opt-in, -tags rust)
+│       └── native/     # HAL backend creation (Vulkan/Metal selection)
 ├── gmath/              # Math (Vec2, Vec3, Mat4, Color)
 ├── window/             # Window config
 ├── input/              # Ebiten-style input state (keyboard, mouse)
-└── internal/platform/  # OS windowing + input (Win32, Cocoa, X11, Wayland)
+└── internal/platform/  # OS windowing + input + drag-and-drop (Win32, Cocoa, X11, Wayland)
 ```
 
 **Note:** The renderer uses `*wgpu.Device`/`*wgpu.Queue` from the wgpu public API.
@@ -724,6 +723,8 @@ inherit the logger configuration when registered.
 | **File Dialogs** | ✅ IFileOpenDialog COM | ✅ NSOpenPanel/NSSavePanel | ✅ D-Bus portal + zenity/kdialog | ✅ D-Bus portal + zenity/kdialog | Stub |
 | **Native Menus** | ✅ Win32 HMENU | ✅ NSMenu | ✅ D-Bus AppMenu (KDE/Unity) | ✅ D-Bus AppMenu (KDE/Unity) | — |
 | **Clipboard** | ✅ | ✅ | ✅ ICCCM | ✅ wl_data_device | ✅ Clipboard API |
+| **Drag & Drop (in)** | ✅ WM_DROPFILES | ✅ NSDragging | ✅ XDND v5 | ✅ wl_data_device | — |
+| **Drag & Drop (out)** | ✅ COM DoDragDrop | ✅ NSDraggingSource | ✅ XDND v5 | ✅ wl_data_source | Stub |
 | **System Sounds** | ✅ winmm | ✅ NSSound | ✅ canberra/PulseAudio | ✅ canberra/PulseAudio | — |
 
 ## See Also

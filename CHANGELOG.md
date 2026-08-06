@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.0] - 2026-08-06
+
+### Added
+
+- **Outgoing drag-and-drop (drag source)** (#427, ADR-061) — `Window.StartDrag(DragData, callback)` initiates file drag from gogpu window to external apps (desktop, file manager, other windows). All 5 platforms: Windows (COM OLE2 DoDragDrop + IDataObject/IDropSource/IEnumFORMATETC), macOS (NSDraggingSource + beginDraggingSessionWithItems), X11 (XDND v5 protocol), Wayland (wl_data_source + wl_data_device.start_drag), Browser (stub — no drag source API in browsers). Async on macOS, modal on Windows/X11. Enterprise references: Qt6 qwindowsdrag.cpp, SDL3, winit.
+- **Drag source example** — `examples/drag_source/` demonstrates click-hold-drag to desktop with file copy result.
+
+### Fixed
+
+- **Windows DoDragDrop returned 0x80004021 (CO_E_NOT_SUPPORTED)** — `OleInitialize` must be the first COM call on the main thread, before `CoInitializeEx`. Moved to platform `initProcess()`.
+- **Windows DoDragDrop exited modal loop immediately** — `DRAGDROP_S_USEDEFAULTCURSORS` constant was `0x00040002` (wrong), correct value is `0x00040102`.
+- **Windows drag drop target rejected files** — `IDataObject::EnumFormatEtc` returned `E_NOTIMPL`. Explorer requires format enumeration during drag-over. Implemented `IEnumFORMATETC` with CF_HDROP.
+- **Windows COM QueryInterface accepted all IIDs** — DoDragDrop queries for optional interfaces (IAsyncOperation); accepting them caused calls to unpopulated vtable offsets. Now returns `E_NOINTERFACE` for unknown IIDs.
+- **macOS drag result callback** — added `draggingSession:endedAtPoint:operation:` to GoGPUView for async drag completion.
+
+### Changed
+
+- **deps:** wgpu v0.30.35 → v0.30.36 (Vulkan present semaphore fix)
+- Removed `scripts/` directory (CI-only checks now handled by `/release-go` skill)
+
 ## [0.49.2] - 2026-08-05
 
 ### Fixed

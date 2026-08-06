@@ -25,9 +25,13 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.48.4
+## Current State: v0.50.0
 
 ✅ **Production-ready** with full feature set:
+- **Outgoing drag source** (#427, ADR-061) — `Window.StartDrag(DragData, callback)` on all 5 platforms (Windows COM DoDragDrop, macOS NSDraggingSource, X11 XDND v5, Wayland wl_data_source, Browser stub). Enterprise references: Qt6, SDL3, winit
+- **Per-pixel alpha transparency** (#361, @shaolei) — `Config.WithTransparent(bool)` for overlay/tray popup windows. Windows DwmBlurBehind, macOS isOpaque+clearColor, X11 ARGB visual
+- **Window control API** (#361, @shaolei) — `Window.Show()`, `Hide()`, `SetPosition()`, `SetSize()` on all desktop platforms
+- **Input ordering fix** (#425, @FDUTCH) — `JustPressed`/`Delta` now visible in `OnUpdate` (Ebiten/Unity/Godot ordering)
 - **Quit wakes idle loop** (#406, @lkmavi) — `App.Quit()` invokes `WakeUp` so event-driven loop exits without waiting for input (GLFW/winit/SDL pattern)
 - **macOS checkptr safe** (#406, @jbunds) — ObjC associated object replaced with Go-side `sync.Map` (purego pattern)
 - **Demand-driven idle loop fix** (#411, @samyfodil) — 0% CPU on idle windows (was ~27% on X11). `acquireFailed` flag for lazy acquire correctness
@@ -36,7 +40,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 - **Font smoothing OS detection** (#396, ADR-057) — `App.FontSmoothing()` returns None/Grayscale/Subpixel on all 5 platforms (Qt6 pattern)
 - **Runtime window resize** (#397) — `App.RequestSize(width, height)` on all 5 platforms (winit/SDL3 patterns, DPI-aware, maximized restore)
 - **Single-encoder compositing** (#393, @besmpl) — frame-owned `CommandEncoder()` for multi-pass rendering (g3d + gg overlay, single queue submit)
-- **OS drag-and-drop** (#387) — all 4 desktop platforms (Windows WM_DROPFILES, X11 XDND v5, macOS NSDragging, Wayland wl_data_device)
+- **OS drag-and-drop** (#387, #427) — incoming: all 4 desktop platforms (Windows WM_DROPFILES, X11 XDND v5, macOS NSDragging, Wayland wl_data_device); outgoing: all 5 platforms via `StartDrag`
 - **CSD maximize/fullscreen geometry** (#300) — 5 bugs fixed (enterprise research: GTK4, winit/SCTK, SDL3/libdecor). Negative offset geometry model, fullscreen state parsing, decoration lifecycle.
 - **Hidden-then-show window creation** — GLFW/Ebiten/SDL3/Flutter pattern: window created hidden, shown after GPU init. Eliminates black flash and WM_SETFOCUS race on all platforms.
 - **Universal App Lifecycle** — RenderTarget, QuitOnLastWindowClosed, AppLifecycle enum (5 states), surface/lifecycle callbacks (ADR-026, Phases 1-3)
@@ -89,6 +93,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.50.0** | 2026-08-06 | **Outgoing drag source** (#427, ADR-061) — `StartDrag` all 5 platforms. Per-pixel alpha (#361, @shaolei). Input ordering fix (#425, @FDUTCH). deps wgpu v0.30.36. |
+| **v0.49.2** | 2026-08-05 | Input JustPressed/Delta ordering fix (#425, @FDUTCH). 38 enterprise input tests. |
+| **v0.49.1** | 2026-08-04 | macOS menu Role+Action fix (#423, @jbunds). |
+| **v0.49.0** | 2026-08-04 | Per-pixel alpha transparency (#361, @shaolei). Window Show/Hide/SetPosition/SetSize. |
+| **v0.48.5** | 2026-08-02 | deps wgpu v0.30.35 — DX12 DirectComposition for per-pixel alpha. |
+| **v0.48.4** | 2026-08-02 | Quit wakes idle loop (@jbunds). macOS checkptr fix (@jbunds). |
 | **v0.45.1** | 2026-07-27 | **DnD complete** — macOS NSDragging + Wayland wl_data_device. All 4 platforms. |
 | **v0.45.0** | 2026-07-27 | **OS file drag-and-drop** (#387, Windows+X11). fix: Wayland 60fps (#379), macOS title double-render (#384), macOS tabbing (#383). |
 | **v0.44.11** | 2026-07-26 | **MarkExternalContent** (#341) — multi-pass frame compositing for g3d+ui. deps: wgpu v0.30.23, goffi v0.6.2 (@besmpl). |
@@ -227,7 +237,7 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 | **Ecosystem Logging** | Unified slog-based logging across all repos | Backlog (TASK-LOG-001) |
 | **System Tray** | OS-level tray icon (Win32/macOS/Linux) | ✅ Shipped — [gogpu/systray](https://github.com/gogpu/systray) v0.1.0 |
 | **Native Dialogs** | File open/save, color picker, message box | Planned |
-| **Drag & Drop** | OS-level and inter-window drag and drop | Planned |
+| **Drag & Drop** | OS-level incoming (all 4 desktop, v0.45.0) + outgoing drag source (`StartDrag`, all 5 platforms, v0.50.0, ADR-061) | ✅ Shipped |
 | **Clipboard** | Text clipboard on all platforms (Win32/macOS/X11/Wayland). Rich clipboard (images, HTML, custom types) planned | ✅ Text shipped (v0.39.3) |
 | **Notifications** | OS-level desktop notifications | Planned |
 | **Independent Render Thread** | Decouple render loop from message pump | [Research](docs/dev/research/INDEPENDENT_RENDER_THREAD.md) |
