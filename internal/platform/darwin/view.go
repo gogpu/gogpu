@@ -257,6 +257,32 @@ func registerGoGPUViewClass() (Class, error) {
 	})
 	ClassAddMethod(cls, RegisterSelector("performDragOperation:"), performDragIMP, "B@:@")
 
+	// --- NSDraggingSource protocol methods (outgoing drag) ---
+
+	// draggingSession:sourceOperationMaskForDraggingContext:
+	// Tells AppKit which drag operations we support as a source.
+	sourceOpMaskIMP := ffi.NewCallback(func(self, sel, session, context uintptr) uintptr {
+		return 1 | 16 // NSDragOperationCopy | NSDragOperationMove
+	})
+	ClassAddMethod(cls,
+		RegisterSelector("draggingSession:sourceOperationMaskForDraggingContext:"),
+		sourceOpMaskIMP, "Q@:@q")
+
+	// draggingSession:endedAtPoint:operation:
+	// Called when an outgoing drag session ends. Provides the actual operation
+	// (Copy/Move/None) so we can relay it to the Go callback.
+	// NSPoint (two doubles) passed by value — we ignore point coords, only need operation.
+	dragEndedIMP := ffi.NewCallback(func(self, sel, session uintptr, ptX, ptY float64, operation uintptr) uintptr {
+		cb := getDragSourceCallback(self)
+		if cb != nil {
+			cb(DragOperation(operation))
+		}
+		return 0
+	})
+	ClassAddMethod(cls,
+		RegisterSelector("draggingSession:endedAtPoint:operation:"),
+		dragEndedIMP, "v@:@{CGPoint=dd}Q")
+
 	RegisterClassPair(cls)
 	return cls, nil
 }

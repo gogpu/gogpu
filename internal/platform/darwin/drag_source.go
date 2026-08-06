@@ -8,7 +8,11 @@ package darwin
 // to initiate an outgoing file drag. Files are wrapped as NSURL pasteboard writers
 // inside NSDraggingItem objects.
 //
-// Reference: Apple NSDraggingSource documentation, NSPasteboardWriting protocol.
+// The drag session is ASYNCHRONOUS — beginDraggingSessionWithItems returns immediately.
+// The result is delivered via draggingSession:endedAtPoint:operation: callback on the
+// source view (GoGPUView), registered in registerGoGPUViewClass().
+//
+// Reference: Apple NSDraggingSource protocol, NSPasteboardWriting protocol.
 
 import (
 	"sync"
@@ -19,13 +23,35 @@ import (
 type DragOperation int
 
 const (
-	// DragOperationNone means the drag was canceled.
 	DragOperationNone DragOperation = 0
-	// DragOperationCopy means the target copied the data.
 	DragOperationCopy DragOperation = 1
-	// DragOperationMove means the target moved the data.
 	DragOperationMove DragOperation = 16
 )
+
+// dragSourceCallbacks maps view pointers to their drag completion callbacks.
+// Same pattern as viewDragHandlers for incoming drag.
+var (
+	dragSourceCallbacks   = make(map[uintptr]func(DragOperation))
+	dragSourceCallbacksMu sync.RWMutex
+)
+
+// SetDragSourceCallback registers a one-shot callback for the drag result.
+func SetDragSourceCallback(view ID, cb func(DragOperation)) {
+	dragSourceCallbacksMu.Lock()
+	defer dragSourceCallbacksMu.Unlock()
+	if cb == nil {
+		delete(dragSourceCallbacks, view.Ptr())
+	} else {
+		dragSourceCallbacks[view.Ptr()] = cb
+	}
+}
+
+// getDragSourceCallback retrieves the drag completion callback for a view.
+func getDragSourceCallback(viewPtr uintptr) func(DragOperation) {
+	dragSourceCallbacksMu.RLock()
+	defer dragSourceCallbacksMu.RUnlock()
+	return dragSourceCallbacks[viewPtr]
+}
 
 // dragSourceSelectors holds selectors for drag source operations.
 var dragSourceSelectors struct {
@@ -57,21 +83,35 @@ func initDragSourceSelectors() {
 }
 
 // StartDrag initiates an outgoing file drag from the window's content view.
-// Returns the drag operation result when the drag session ends.
-// beginDraggingSessionWithItems:event:source: runs a modal tracking loop
-// inside AppKit, so this blocks until the drag completes.
-func (w *Window) StartDrag(paths []string) DragOperation {
+// The done callback fires asynchronously when the drag session ends via
+// draggingSession:endedAtPoint:operation: on GoGPUView.
+func (w *Window) StartDrag(paths []string, done func(DragOperation)) {
 	initDragSourceSelectors()
 
 	if w.contentView == 0 || len(paths) == 0 {
-		return DragOperationNone
+		if done != nil {
+			done(DragOperationNone)
+		}
+		return
+	}
+
+	// Register callback BEFORE starting drag (async — result arrives later).
+	if done != nil {
+		SetDragSourceCallback(w.contentView, func(op DragOperation) {
+			SetDragSourceCallback(w.contentView, nil) // one-shot
+			done(op)
+		})
 	}
 
 	// Create NSMutableArray for NSDraggingItems.
 	array := msgSend(ID(dragSourceSelectors.mutableArrayClass), selectors.alloc)
 	array = msgSend(array, selectors.init)
 	if array == 0 {
-		return DragOperationNone
+		SetDragSourceCallback(w.contentView, nil)
+		if done != nil {
+			done(DragOperationNone)
+		}
+		return
 	}
 	defer msgSend(array, selectors.release)
 
@@ -86,8 +126,6 @@ func (w *Window) StartDrag(paths []string) DragOperation {
 			continue
 		}
 
-		// Create NSDraggingItem with the NSURL as pasteboard writer.
-		// NSURL conforms to NSPasteboardWriting, so it is valid here.
 		item := msgSend(ID(dragSourceSelectors.draggingItemClass), selectors.alloc)
 		item = msgSend(item, dragSourceSelectors.initWithPasteboardWriter, uintptr(nsURL))
 		if item == 0 {
@@ -103,24 +141,25 @@ func (w *Window) StartDrag(paths []string) DragOperation {
 	currentEvent := msgSend(nsApp, dragSourceSelectors.currentEvent)
 
 	if currentEvent == 0 {
-		// No current event — cannot initiate drag outside of an event handler.
-		return DragOperationNone
+		SetDragSourceCallback(w.contentView, nil)
+		if done != nil {
+			done(DragOperationNone)
+		}
+		return
 	}
 
-	// Begin the drag session.
-	// [contentView beginDraggingSessionWithItems:array event:currentEvent source:contentView]
+	// Begin the async drag session.
 	session := msgSend(w.contentView, dragSourceSelectors.beginDraggingSession,
 		uintptr(array), uintptr(currentEvent), uintptr(w.contentView))
 
 	if session == 0 {
-		return DragOperationNone
+		SetDragSourceCallback(w.contentView, nil)
+		if done != nil {
+			done(DragOperationNone)
+		}
+		return
 	}
-
-	// AppKit manages the drag session asynchronously from here.
-	// The actual drag result requires implementing draggingSession:endedAtPoint:operation:
-	// on the source view (GoGPUView). Without that callback, we default to Copy.
-	// TODO: register endedAtPoint:operation: callback for accurate DragResult.
-	return DragOperationCopy
+	// Session is async — result arrives via endedAtPoint:operation: callback.
 }
 
 // makeDragNSString creates an NSString from a Go string. Caller must release.
