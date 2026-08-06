@@ -210,6 +210,7 @@ const (
 	// GetSystemMetrics / MonitorFromWindow constants
 	smCXSizeFrame           = 32 // SM_CXSIZEFRAME
 	smCYSizeFrame           = 33 // SM_CYSIZEFRAME
+	smCYCaption             = 4  // SM_CYCAPTION
 	smCXPaddedBorder        = 92 // SM_CXPADDEDBORDERWIDTH
 	monitorDefaultToNearest = 2  // MONITOR_DEFAULTTONEAREST
 
@@ -1041,6 +1042,19 @@ func (w *win32Window) RequestSize(width, height int) {
 
 	outerW := uintptr(outerRect.right - outerRect.left)
 	outerH := uintptr(outerRect.bottom - outerRect.top)
+	if w.frameless {
+		// JBR: WM_NCCALCSIZE removes the top NC area (title bar + top frame
+		// + padded border) and folds it into the client area, but
+		// AdjustWindowRect still included it in the outer height. Subtract it
+		// here so the client area matches the requested logical size.
+		cyCaption, _, _ := procGetSystemMetrics.Call(smCYCaption)
+		cyFrame, _, _ := procGetSystemMetrics.Call(smCYSizeFrame)
+		cyPadded, _, _ := procGetSystemMetrics.Call(smCXPaddedBorder)
+		topNC := cyCaption + cyFrame + cyPadded
+		if topNC < outerH {
+			outerH -= topNC
+		}
+	}
 
 	procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0,
 		outerW, outerH,
