@@ -741,36 +741,41 @@ func (c *Connection) Unmaximize(window ResourceID, atoms *StandardAtoms) error {
 		0, 0)
 }
 
-// SendClientMessage sends a ClientMessage event to a window.
+// SendClientMessage sends a ClientMessage event to a window with
+// SubstructureNotify|SubstructureRedirect mask (for WM messages to root).
 func (c *Connection) SendClientMessage(window, target ResourceID, msgType Atom, data0, data1, data2, data3, data4 uint32) error {
-	// Build event data
-	eventData := make([]byte, 32)
+	return c.sendClientMessageWithMask(window, target, msgType,
+		EventMaskSubstructureNotify|EventMaskSubstructureRedirect,
+		data0, data1, data2, data3, data4)
+}
 
-	// Event type (ClientMessage = 33) + synthetic flag
-	eventData[0] = EventClientMessage | 0x80 // Set synthetic flag
-	// Format (32-bit)
-	eventData[1] = 32
-	// Sequence (unused for synthetic events)
-	eventData[2] = 0
-	eventData[3] = 0
-	// Window
+// SendClientMessageDirect sends a ClientMessage with event_mask=0.
+// Required for XDND protocol — target windows don't select SubstructureRedirect,
+// so the X server silently drops events with that mask. All enterprise references
+// (Qt6, GTK4, SDL3, winit) use event_mask=0 for XDND messages.
+func (c *Connection) SendClientMessageDirect(window, target ResourceID, msgType Atom, data0, data1, data2, data3, data4 uint32) error {
+	return c.sendClientMessageWithMask(window, target, msgType, 0,
+		data0, data1, data2, data3, data4)
+}
+
+func (c *Connection) sendClientMessageWithMask(window, target ResourceID, msgType Atom, eventMask uint32, data0, data1, data2, data3, data4 uint32) error {
+	eventData := make([]byte, 32)
+	eventData[0] = EventClientMessage | 0x80 // synthetic flag
+	eventData[1] = 32                        // format: 32-bit
 	c.putUint32LE(eventData[4:8], uint32(window))
-	// Type
 	c.putUint32LE(eventData[8:12], uint32(msgType))
-	// Data
 	c.putUint32LE(eventData[12:16], data0)
 	c.putUint32LE(eventData[16:20], data1)
 	c.putUint32LE(eventData[20:24], data2)
 	c.putUint32LE(eventData[24:28], data3)
 	c.putUint32LE(eventData[28:32], data4)
 
-	// Build SendEvent request
 	e := NewEncoder(c.byteOrder)
 	e.PutUint8(OpcodeSendEvent)
 	e.PutUint8(0)   // propagate = false
 	e.PutUint16(11) // length = 11 4-byte units
 	e.PutUint32(uint32(target))
-	e.PutUint32(EventMaskSubstructureNotify | EventMaskSubstructureRedirect)
+	e.PutUint32(eventMask)
 	e.PutBytes(eventData)
 
 	if _, err := c.sendRequest(e.Bytes()); err != nil {

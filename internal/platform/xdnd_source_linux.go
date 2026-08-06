@@ -276,7 +276,7 @@ func sendXdndEnterSource(conn *x11.Connection, atoms *x11.XdndAtoms, source, tar
 	// data[2] = first type = text/uri-list
 	// data[3] = 0 (second type)
 	// data[4] = 0 (third type)
-	if err := conn.SendClientMessage(target, target, atoms.Enter,
+	if err := conn.SendClientMessageDirect(target, target, atoms.Enter,
 		uint32(source),
 		5<<24, // version 5, types inline (bit 0 = 0)
 		uint32(atoms.TextURIList),
@@ -297,7 +297,7 @@ func sendXdndPosition(conn *x11.Connection, atoms *x11.XdndAtoms, source, target
 	// data[3] = timestamp (CurrentTime = 0)
 	// data[4] = action = XdndActionCopy
 	pos := uint32(rootX)<<16 | uint32(uint16(rootY))
-	if err := conn.SendClientMessage(target, target, atoms.Position,
+	if err := conn.SendClientMessageDirect(target, target, atoms.Position,
 		uint32(source),
 		0,
 		pos,
@@ -313,7 +313,7 @@ func sendXdndPosition(conn *x11.Connection, atoms *x11.XdndAtoms, source, target
 
 // sendXdndDrop sends XdndDrop to the target.
 func sendXdndDrop(conn *x11.Connection, atoms *x11.XdndAtoms, source, target x11.ResourceID) {
-	if err := conn.SendClientMessage(target, target, atoms.Drop,
+	if err := conn.SendClientMessageDirect(target, target, atoms.Drop,
 		uint32(source),
 		0,
 		0, // CurrentTime
@@ -328,7 +328,7 @@ func sendXdndDrop(conn *x11.Connection, atoms *x11.XdndAtoms, source, target x11
 
 // sendXdndLeaveSource sends XdndLeave to the target.
 func sendXdndLeaveSource(conn *x11.Connection, atoms *x11.XdndAtoms, source, target x11.ResourceID) {
-	if err := conn.SendClientMessage(target, target, atoms.Leave,
+	if err := conn.SendClientMessageDirect(target, target, atoms.Leave,
 		uint32(source),
 		0, 0, 0, 0,
 	); err != nil {

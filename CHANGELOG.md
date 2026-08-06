@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.1] - Unreleased
+
+### Fixed
+
+- **X11: drag source targets never accept drop** (#431, @unxed) — `SendClientMessage` used `SubstructureNotify|SubstructureRedirect` event mask for XDND messages. Target windows don't select `SubstructureRedirect`, so the X server silently dropped XdndEnter/Position/Drop events. Changed to `event_mask=0` per all enterprise references (Qt6 `qxcbdrag.cpp:421`, GTK4 `gdkdrag-x11.c:1005`, SDL3 `SDL_x11events.c:1759`, winit `dnd.rs:93`).
+- **X11: drop position always reported as 0,0** (#431, @unxed) — `handleXdndPosition` used `GetGeometry` to convert root coordinates to window-local. `GetGeometry` returns parent-relative coords, which for reparented windows (all WM-managed) gives the offset within the WM frame, not root-relative. Replaced with `TranslateCoordinates(root, window)` per Qt6 `qxcbdrag.cpp:282`.
+
 ## [0.50.0] - 2026-08-06
 
 ### Added

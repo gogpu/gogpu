@@ -201,16 +201,15 @@ func (p *Platform) handleXdndPosition(w *x11Window, data [5]uint32) PlatformEven
 	x := float64(data[2] >> 16)
 	y := float64(data[2] & 0xFFFF)
 
-	// Convert root coordinates to window-local coordinates.
-	// XdndPosition sends root-relative coords; we need window-relative.
+	// Convert root coordinates to window-local using TranslateCoordinates.
+	// GetGeometry returns parent-relative coords which are wrong for reparented
+	// windows (all WM-managed). Qt6 uses xcb_translate_coordinates (qxcbdrag.cpp:282).
 	if w.window != 0 {
-		geom, err := p.conn.getGeometry(w.window)
+		_, dstX, dstY, err := p.conn.TranslateCoordinates(
+			p.conn.RootWindow(), w.window, int16(data[2]>>16), int16(data[2]&0xFFFF))
 		if err == nil {
-			// Translate root coords to window coords by subtracting window origin.
-			// For nested windows, we need TranslateCoordinates, but for
-			// top-level windows getGeometry + border gives us the offset.
-			x -= float64(geom.x)
-			y -= float64(geom.y)
+			x = float64(dstX)
+			y = float64(dstY)
 		}
 	}
 
@@ -352,7 +351,7 @@ func (p *Platform) sendXdndStatus(w *x11Window, accept bool) {
 		action = uint32(p.xdnd.ActionCopy)
 	}
 
-	if err := p.conn.SendClientMessage(
+	if err := p.conn.SendClientMessageDirect(
 		w.xdndState.sourceWindow, // target for SendEvent
 		w.xdndState.sourceWindow, // window field
 		p.xdnd.Status,
@@ -381,7 +380,7 @@ func (p *Platform) sendXdndFinished(w *x11Window, accepted bool) {
 		action = uint32(p.xdnd.ActionCopy)
 	}
 
-	if err := p.conn.SendClientMessage(
+	if err := p.conn.SendClientMessageDirect(
 		w.xdndState.sourceWindow,
 		w.xdndState.sourceWindow,
 		p.xdnd.Finished,
