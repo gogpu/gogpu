@@ -269,10 +269,12 @@ func (p *Platform) handleXdndLeave(w *x11Window) PlatformEvent {
 }
 
 // waitForXdndSelectionNotify pumps events until SelectionNotify arrives for
-// the XDND selection, or until a 1-second timeout. This mirrors the clipboard
-// read pattern (clipboard.go:ClipboardRead).
+// the XDND selection, or until a 2-second timeout. Late-arriving XdndPosition
+// events are processed here — TCP batching can cause them to arrive after
+// XdndDrop but before SelectionNotify, and discarding them leaves the drop
+// position at 0,0 (#431, @unxed).
 func (p *Platform) waitForXdndSelectionNotify(w *x11Window) PlatformEvent {
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if time.Now().After(deadline) {
 			slog.Warn("xdnd: SelectionNotify timeout")
@@ -286,9 +288,15 @@ func (p *Platform) waitForXdndSelectionNotify(w *x11Window) PlatformEvent {
 			continue
 		}
 
-		if notify, ok := event.(*SelectionNotifyEvent); ok {
-			if notify.Selection == p.xdnd.Selection && notify.Requestor == w.window {
-				return p.processXdndSelectionNotify(w, notify)
+		switch e := event.(type) {
+		case *SelectionNotifyEvent:
+			if e.Selection == p.xdnd.Selection && e.Requestor == w.window {
+				return p.processXdndSelectionNotify(w, e)
+			}
+
+		case *ClientMessageEvent:
+			if p.xdnd != nil && e.Type == p.xdnd.Position {
+				p.handleXdndPosition(w, e.Data32())
 			}
 		}
 	}
