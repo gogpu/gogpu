@@ -122,6 +122,7 @@ type xdndDragState struct {
 	targetAccepts bool
 	sourceWindow  x11.ResourceID
 	rootWindow    x11.ResourceID
+	started       bool
 }
 
 // runXDNDDragLoop runs the modal drag event loop.
@@ -130,6 +131,17 @@ func runXDNDDragLoop(p *x11.Platform, conn *x11.Connection, atoms *x11.XdndAtoms
 		sourceWindow: sourceWindow,
 		rootWindow:   conn.RootWindow(),
 	}
+
+	// Drain events queued before the grab — they belong to the application,
+	// not to this drag session. A stale ButtonRelease would end the gesture
+	// immediately (#431, @unxed).
+	for {
+		ev, err := conn.PollEventTimeout(0)
+		if err != nil || ev == nil {
+			break
+		}
+	}
+	ds.started = true
 
 	deadline := time.Now().Add(5 * time.Minute) // safety timeout
 
@@ -158,7 +170,7 @@ func (ds *xdndDragState) handleEvent(p *x11.Platform, conn *x11.Connection, atom
 		return ds.handleClientMessage(conn, atoms, e)
 
 	case *x11.ButtonReleaseEvent:
-		return ds.handleButtonRelease(conn, atoms)
+		return ds.handleButtonRelease(p, conn, atoms)
 
 	case *x11.KeyPressEvent:
 		// Keycode 9 = Escape on most X11 systems.
@@ -176,7 +188,7 @@ func (ds *xdndDragState) handleEvent(p *x11.Platform, conn *x11.Connection, atom
 }
 
 func (ds *xdndDragState) handleMotion(conn *x11.Connection, atoms *x11.XdndAtoms, e *x11.MotionNotifyEvent) {
-	targetWin := findXDNDTargetWindow(conn, ds.rootWindow, e.RootX, e.RootY)
+	targetWin := findXDNDTargetWindow(conn, ds.rootWindow, e.RootX, e.RootY, atoms.Aware)
 
 	if targetWin != ds.currentTarget {
 		if ds.currentTarget != 0 {
@@ -199,26 +211,49 @@ func (ds *xdndDragState) handleClientMessage(conn *x11.Connection, atoms *x11.Xd
 	switch e.Type {
 	case atoms.Status:
 		data := e.Data32()
+		if !ds.ownsSession(x11.ResourceID(data[0])) {
+			return 0, false
+		}
 		ds.targetAccepts = (data[1] & 1) != 0
 		return 0, false
 
 	case atoms.Finished:
 		data := e.Data32()
-		if data[1]&1 != 0 {
-			if x11.Atom(data[2]) == atoms.ActionCopy {
-				return DragCopied, true
-			}
-			return DragMoved, true
+		if !ds.ownsSession(x11.ResourceID(data[0])) {
+			return 0, false
 		}
-		return DragCancelled, true
+		return dragResultFromFinished(atoms, data), true
 	}
 	return 0, false
 }
 
-func (ds *xdndDragState) handleButtonRelease(conn *x11.Connection, atoms *x11.XdndAtoms) (DragResult, bool) {
+// ownsSession checks that a reply belongs to the current drag target.
+// Prevents stale XdndStatus/Finished from a previous session from ending this one.
+func (ds *xdndDragState) ownsSession(window x11.ResourceID) bool {
+	return ds.currentTarget != 0 && window == ds.currentTarget
+}
+
+// dragResultFromFinished interprets XdndFinished. We only offer ActionCopy,
+// so an accepted drop with any other action is not a success.
+func dragResultFromFinished(atoms *x11.XdndAtoms, data [5]uint32) DragResult {
+	if data[1]&1 == 0 {
+		return DragCancelled
+	}
+	if x11.Atom(data[2]) == atoms.ActionCopy {
+		return DragCopied
+	}
+	slog.Warn("x11: drop accepted with unexpected action",
+		"action", data[2], "offered", uint32(atoms.ActionCopy))
+	return DragCancelled
+}
+
+func (ds *xdndDragState) handleButtonRelease(p *x11.Platform, conn *x11.Connection, atoms *x11.XdndAtoms) (DragResult, bool) {
+	if !ds.started {
+		return 0, false
+	}
 	if ds.currentTarget != 0 && ds.targetAccepts {
 		sendXdndDrop(conn, atoms, ds.sourceWindow, ds.currentTarget)
-		return waitForXdndFinished(conn, atoms, 2*time.Second), true
+		return ds.waitForXdndFinished(p, conn, atoms, 5*time.Second), true
 	}
 	if ds.currentTarget != 0 {
 		sendXdndLeaveSource(conn, atoms, ds.sourceWindow, ds.currentTarget)
@@ -227,21 +262,18 @@ func (ds *xdndDragState) handleButtonRelease(conn *x11.Connection, atoms *x11.Xd
 }
 
 // findXDNDTargetWindow finds the deepest XDND-aware window under the cursor.
-func findXDNDTargetWindow(conn *x11.Connection, root x11.ResourceID, rootX, rootY int16) x11.ResourceID {
-	// Translate root coords to find the child window under cursor.
+// awareAtom is the pre-interned XdndAware atom to avoid a sync roundtrip per call.
+func findXDNDTargetWindow(conn *x11.Connection, root x11.ResourceID, rootX, rootY int16, awareAtom x11.Atom) x11.ResourceID {
 	child, _, _, err := conn.TranslateCoordinates(root, root, rootX, rootY)
 	if err != nil || child == 0 {
 		return 0
 	}
 
-	// Walk down the window tree to find the deepest XdndAware window.
-	// For most drop targets, the toplevel is XdndAware.
 	target := child
 	for {
-		if isXDNDAware(conn, target) {
+		if hasXDNDAware(conn, target, awareAtom) {
 			return target
 		}
-		// Try to go deeper.
 		deeper, _, _, err := conn.TranslateCoordinates(root, target, rootX, rootY)
 		if err != nil || deeper == 0 || deeper == target {
 			break
@@ -249,20 +281,15 @@ func findXDNDTargetWindow(conn *x11.Connection, root x11.ResourceID, rootX, root
 		target = deeper
 	}
 
-	// Check if the original child is aware.
-	if isXDNDAware(conn, child) {
+	if hasXDNDAware(conn, child, awareAtom) {
 		return child
 	}
 	return 0
 }
 
-// isXDNDAware checks if a window has the XdndAware property.
-func isXDNDAware(conn *x11.Connection, window x11.ResourceID) bool {
-	atom, err := conn.InternAtom(x11.AtomNameXdndAware, true)
-	if err != nil || atom == 0 {
-		return false
-	}
-	data, _, _, err := conn.GetProperty(window, atom, x11.AtomAtom, 0, 1, false)
+// hasXDNDAware checks if a window has the XdndAware property using a cached atom.
+func hasXDNDAware(conn *x11.Connection, window x11.ResourceID, awareAtom x11.Atom) bool {
+	data, _, _, err := conn.GetProperty(window, awareAtom, x11.AtomAtom, 0, 1, false)
 	if err != nil || len(data) < 4 {
 		return false
 	}
@@ -296,7 +323,7 @@ func sendXdndPosition(conn *x11.Connection, atoms *x11.XdndAtoms, source, target
 	// data[2] = position: x << 16 | y
 	// data[3] = timestamp (CurrentTime = 0)
 	// data[4] = action = XdndActionCopy
-	pos := uint32(rootX)<<16 | uint32(uint16(rootY))
+	pos := uint32(uint16(rootX))<<16 | uint32(uint16(rootY))
 	if err := conn.SendClientMessageDirect(target, target, atoms.Position,
 		uint32(source),
 		0,
@@ -339,29 +366,34 @@ func sendXdndLeaveSource(conn *x11.Connection, atoms *x11.XdndAtoms, source, tar
 	}
 }
 
-// waitForXdndFinished polls for XdndFinished within a timeout.
-func waitForXdndFinished(conn *x11.Connection, atoms *x11.XdndAtoms, timeout time.Duration) DragResult {
+// waitForXdndFinished polls for XdndFinished within a timeout, handling
+// SelectionRequest events that arrive before it. The target requests the
+// drag data (via ConvertSelection) as soon as it receives XdndDrop, so the
+// SelectionRequest lands inside this wait. Discarding it caused the target
+// to receive no data and report "invalid drag type" (#431, @unxed).
+func (ds *xdndDragState) waitForXdndFinished(p *x11.Platform, conn *x11.Connection, atoms *x11.XdndAtoms, timeout time.Duration) DragResult {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		event, err := conn.PollEventTimeout(50 * time.Millisecond)
 		if err != nil || event == nil {
 			continue
 		}
-		if e, ok := event.(*x11.ClientMessageEvent); ok {
-			if e.Type == atoms.Finished {
-				data := e.Data32()
-				if data[1]&1 != 0 {
-					action := x11.Atom(data[2])
-					if action == atoms.ActionCopy {
-						return DragCopied
-					}
-					return DragMoved
-				}
-				return DragCancelled
+		switch e := event.(type) {
+		case *x11.SelectionRequestEvent:
+			p.HandleDragSelectionRequest(e)
+
+		case *x11.ClientMessageEvent:
+			if e.Type != atoms.Finished {
+				continue
 			}
+			data := e.Data32()
+			if !ds.ownsSession(x11.ResourceID(data[0])) {
+				continue
+			}
+			return dragResultFromFinished(atoms, data)
 		}
 	}
-	// Timeout — treat as canceled.
+	slog.Warn("x11: XdndFinished timeout — target did not respond")
 	return DragCancelled
 }
 
