@@ -5,12 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.50.1] - Unreleased
+## [0.50.1] - 2026-08-06
 
 ### Fixed
 
 - **X11: drag source targets never accept drop** (#431, @unxed) — `SendClientMessage` used `SubstructureNotify|SubstructureRedirect` event mask for XDND messages. Target windows don't select `SubstructureRedirect`, so the X server silently dropped XdndEnter/Position/Drop events. Changed to `event_mask=0` per all enterprise references (Qt6 `qxcbdrag.cpp:421`, GTK4 `gdkdrag-x11.c:1005`, SDL3 `SDL_x11events.c:1759`, winit `dnd.rs:93`).
-- **X11: drop position always reported as 0,0** (#431, @unxed) — `handleXdndPosition` used `GetGeometry` to convert root coordinates to window-local. `GetGeometry` returns parent-relative coords, which for reparented windows (all WM-managed) gives the offset within the WM frame, not root-relative. Replaced with `TranslateCoordinates(root, window)` per Qt6 `qxcbdrag.cpp:282`.
+- **X11: drop position always reported as 0,0** (#431, @unxed) — two causes: (1) `handleXdndPosition` used `GetGeometry` (parent-relative) instead of `TranslateCoordinates` (Qt6 pattern); (2) `waitForXdndSelectionNotify` discarded late `XdndPosition` events arriving between `XdndDrop` and `SelectionNotify` due to TCP batching.
+- **X11: drag source reported DragMoved on failed drops** (#431, @unxed) — `waitForXdndFinished` discarded `SelectionRequest` events, so target got no data and reported "invalid drag type". Session filtering added to prevent stale `XdndFinished` from previous drag from ending the current session.
+- **X11: sign extension in XdndPosition for negative multi-monitor coords** (#431, @unxed) — `uint32(rootX)<<16` sign-extends negative `int16`; fixed to `uint32(uint16(rootX))<<16`.
+- **X11: `isXDNDAware` called `InternAtom` per motion event** (#431, @unxed) — sync roundtrip on every pointer move during drag. Cached `XdndAware` atom passed as parameter.
 
 ## [0.50.0] - 2026-08-06
 
