@@ -290,9 +290,9 @@ var (
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
 
 	// DWM (Desktop Window Manager) for frameless window shadow
-	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
-	procDwmExtendFrameIntoClient  = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
-	procDwmFlush                  = dwmapi.NewProc("DwmFlush")
+	dwmapi                       = windows.NewLazyDLL("dwmapi.dll")
+	procDwmExtendFrameIntoClient = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	procDwmFlush                 = dwmapi.NewProc("DwmFlush")
 
 	// WaitEvents / WakeUp
 	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
@@ -780,13 +780,22 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	// Enable file drag-and-drop (WM_DROPFILES from shell32).
 	procDragAcceptFiles.Call(uintptr(w.hwnd), 1) // TRUE
 
-	// Enable DWM shadow for frameless windows
+	// Enable DWM shadow for frameless windows. Transparent windows must skip
+	// the DwmExtendFrameIntoClientArea call: it switches the window onto the
+	// DWM glass composition path, which overrides DirectComposition per-pixel
+	// alpha (semi-transparent content renders as an opaque tint — verified on
+	// Windows 11 with gogpu#361). Frameless transparent windows therefore lose
+	// the DWM system shadow; apps should draw their own shadow in-content.
+	// SetWindowPos(swpFrameChanged) + updateSize are still required so the
+	// WM_NCCALCSIZE JBR path removes the title bar.
 	if config.Frameless {
 		type margins struct {
 			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
 		}
-		m := margins{0, 0, 0, 1}
-		procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+		if !config.Transparent {
+			m := margins{0, 0, 0, 1}
+			procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+		}
 		procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
 			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
 		w.updateSize()
