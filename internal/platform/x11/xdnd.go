@@ -296,7 +296,21 @@ func (p *Platform) waitForXdndSelectionNotify(w *x11Window) PlatformEvent {
 
 		case *ClientMessageEvent:
 			if p.xdnd != nil && e.Type == p.xdnd.Position {
-				p.handleXdndPosition(w, e.Data32())
+				// Update position only — do NOT send XdndStatus after drop
+				// (spec does not allow target to answer positions post-drop).
+				data := e.Data32()
+				x := float64(data[2] >> 16)
+				y := float64(data[2] & 0xFFFF)
+				if w.window != 0 {
+					_, dstX, dstY, err := p.conn.TranslateCoordinates(
+						p.conn.RootWindow(), w.window, int16(data[2]>>16), int16(data[2]&0xFFFF))
+					if err == nil {
+						x = float64(dstX)
+						y = float64(dstY)
+					}
+				}
+				w.xdndState.lastX = x
+				w.xdndState.lastY = y
 			}
 		}
 	}
