@@ -241,7 +241,7 @@ func dataObjQueryInterface(this, riid, ppvObject uintptr) uintptr {
 		return 0 // S_OK
 	}
 	*(*uintptr)(unsafe.Pointer(ppvObject)) = 0 //nolint:govet // COM out-pointer null on failure
-	return 0x80004002 // E_NOINTERFACE
+	return 0x80004002                          // E_NOINTERFACE
 }
 
 // IUnknown::AddRef
@@ -353,7 +353,7 @@ func dataObjEnumFormatEtc(this, dwDirection, ppEnumFormatEtc uintptr) uintptr {
 		return 0x8007000E // E_OUTOFMEMORY
 	}
 	*(*uintptr)(unsafe.Pointer(ppEnumFormatEtc)) = enum.comPtr() //nolint:govet // COM out-pointer write
-	return 0 // S_OK
+	return 0                                                     // S_OK
 }
 
 // --- IEnumFORMATETC ---
@@ -406,7 +406,7 @@ func enumFmtQueryInterface(this, riid, ppvObject uintptr) uintptr {
 		return 0 // S_OK
 	}
 	*(*uintptr)(unsafe.Pointer(ppvObject)) = 0 //nolint:govet // COM out-pointer null on failure
-	return 0x80004002 // E_NOINTERFACE
+	return 0x80004002                          // E_NOINTERFACE
 }
 
 func enumFmtAddRef(this uintptr) uintptr {
@@ -481,7 +481,7 @@ func enumFmtClone(this, ppEnum uintptr) uintptr {
 	}
 	clone.index = obj.index
 	*(*uintptr)(unsafe.Pointer(ppEnum)) = clone.comPtr() //nolint:govet // COM out-pointer write
-	return 0 // S_OK
+	return 0                                             // S_OK
 }
 
 // IDataObject::DAdvise — not supported.
@@ -543,7 +543,7 @@ func dropSrcQueryInterface(this, riid, ppvObject uintptr) uintptr {
 		return 0 // S_OK
 	}
 	*(*uintptr)(unsafe.Pointer(ppvObject)) = 0 //nolint:govet // COM out-pointer null on failure
-	return 0x80004002 // E_NOINTERFACE
+	return 0x80004002                          // E_NOINTERFACE
 }
 
 func dropSrcAddRef(this uintptr) uintptr {

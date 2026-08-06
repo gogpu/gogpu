@@ -156,7 +156,7 @@ func (m *mockPlatformWindow) StartDrag(_ []string, done func(DragResult)) {
 		done(DragCancelled)
 	}
 }
-func (m *mockPlatformWindow) SetOnClose(func() bool)           {}
+func (m *mockPlatformWindow) SetOnClose(func() bool) {}
 
 func (m *mockPlatformWindow) SetFrameless(v bool) { m.frameless = v }
 func (m *mockPlatformWindow) IsFrameless() bool   { return m.frameless }

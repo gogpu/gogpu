@@ -58,7 +58,7 @@ func (m *mockWindow) StartDrag(_ []string, done func(platform.DragResult)) {
 		done(platform.DragCancelled)
 	}
 }
-func (m *mockWindow) ScaleFactor() float64          { return m.scaleFactor }
+func (m *mockWindow) ScaleFactor() float64 { return m.scaleFactor }
 func (m *mockWindow) PrepareFrame() platform.PrepareFrameResult {
 	w, h := m.PhysicalSize()
 	return platform.PrepareFrameResult{
