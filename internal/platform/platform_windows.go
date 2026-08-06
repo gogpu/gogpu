@@ -162,17 +162,22 @@ const (
 	hkeyLocalMachine uintptr = 0x80000002
 
 	// Frameless window constants
-	wsPopup            = 0x80000000 // WS_POPUP
-	wsThickFrame       = 0x00040000 // WS_THICKFRAME (for resize in frameless)
-	wsCaption          = 0x00C00000 // WS_CAPTION (title bar)
-	wmNCHitTest        = 0x0084     // WM_NCHITTEST
-	wmNCCalcSize       = 0x0083     // WM_NCCALCSIZE
-	wmNCPaint          = 0x0085     // WM_NCPAINT
-	wmNCActivate       = 0x0086     // WM_NCACTIVATE
-	wmNCUAHDrawCaption = 0x00AE     // Undocumented: UxTheme caption draw
-	wmNCUAHDrawFrame   = 0x00AF     // Undocumented: UxTheme frame draw
-	swMinimize         = 6          // SW_MINIMIZE
-	swMaximize         = 3          // SW_MAXIMIZE
+	wsPopup      = 0x80000000 // WS_POPUP
+	wsThickFrame = 0x00040000 // WS_THICKFRAME (for resize in frameless)
+	wsCaption    = 0x00C00000 // WS_CAPTION (title bar)
+	// WS_EX_NOREDIRECTIONBITMAP: DComp per-pixel alpha requires disabling the
+	// DWM redirection bitmap; otherwise the swap chain is composed onto an
+	// opaque redirection surface and transparency is not visible
+	// (wgpu v0.30.35 release note; winit/wgpu-rs precedent).
+	wsExNoRedirectionBitmap = 0x00200000
+	wmNCHitTest             = 0x0084 // WM_NCHITTEST
+	wmNCCalcSize            = 0x0083 // WM_NCCALCSIZE
+	wmNCPaint               = 0x0085 // WM_NCPAINT
+	wmNCActivate            = 0x0086 // WM_NCACTIVATE
+	wmNCUAHDrawCaption      = 0x00AE // Undocumented: UxTheme caption draw
+	wmNCUAHDrawFrame        = 0x00AF // Undocumented: UxTheme frame draw
+	swMinimize              = 6      // SW_MINIMIZE
+	swMaximize              = 3      // SW_MAXIMIZE
 
 	// WM_NCHITTEST return values
 	htCaption     = 2
@@ -194,10 +199,6 @@ const (
 	swpNoSize       = 0x0001
 	swpNoZOrder     = 0x0004
 	swpFrameChanged = 0x0020
-
-	// DwmEnableBlurBehindWindow flags (DWM_BLURBEHIND)
-	dwmBBEnable     = 0x00000001 // DWM_BB_ENABLE
-	dwmBBBlurRegion = 0x00000002 // DWM_BB_BLURREGION
 
 	// GetWindowLongPtr index
 	gwlStyle = ^uintptr(15) // GWL_STYLE = -16 as unsigned uintptr
@@ -291,7 +292,6 @@ var (
 	// DWM (Desktop Window Manager) for frameless window shadow
 	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
 	procDwmExtendFrameIntoClient  = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
-	procDwmEnableBlurBehindWindow = dwmapi.NewProc("DwmEnableBlurBehindWindow")
 	procDwmFlush                  = dwmapi.NewProc("DwmFlush")
 
 	// WaitEvents / WakeUp
@@ -355,8 +355,6 @@ var (
 	procReleaseDC         = user32.NewProc("ReleaseDC")
 	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
 	procGetStockObject    = gdi32.NewProc("GetStockObject")
-	procCreateRectRgn     = gdi32.NewProc("CreateRectRgn")
-	procDeleteObject      = gdi32.NewProc("DeleteObject")
 
 	// Shell32 (file drag-and-drop)
 	shell32DnD          = windows.NewLazyDLL("shell32.dll")
@@ -689,43 +687,6 @@ func adjustWindowRectForDpi(r *rect, style uintptr, dpi uint32) {
 	}
 }
 
-// dwmBlurBehind mirrors the native DWM_BLURBEHIND structure.
-type dwmBlurBehind struct {
-	dwFlags                uint32
-	fEnable                uint32
-	hRgnBlur               uintptr
-	fTransitionOnMaximized uint32
-}
-
-// enableDwmBlurBehind enables per-pixel-alpha compositing for the window
-// using DwmEnableBlurBehindWindow with an empty blur region — the winit/SDL3
-// pattern documented in ADR-060. WS_EX_LAYERED is intentionally NOT used:
-// it is GDI whole-window opacity, not per-pixel alpha with GPU rendering.
-func enableDwmBlurBehind(hwnd windows.HWND) {
-	if hwnd == 0 {
-		return
-	}
-	// CreateRectRgn(0, 0, -1, -1) creates an empty region.
-	rgn, _, _ := procCreateRectRgn.Call(0, 0, ^uintptr(0), ^uintptr(0))
-	if rgn == 0 {
-		return
-	}
-	defer procDeleteObject.Call(rgn)
-
-	bb := dwmBlurBehind{
-		dwFlags:  dwmBBEnable | dwmBBBlurRegion,
-		fEnable:  1, // TRUE
-		hRgnBlur: rgn,
-	}
-	hr, _, _ := procDwmEnableBlurBehindWindow.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bb)))
-	if hr != 0 {
-		// Non-fatal: DWM can be unavailable (e.g. Server Core, DWM disabled);
-		// the window simply stays opaque.
-		slog.Debug("gogpu: DwmEnableBlurBehindWindow failed, window stays opaque",
-			"hr", hr)
-	}
-}
-
 // createWindowWin32 creates a new Win32 HWND window from the given config.
 // Shared between PlatformManager.CreateWindow and the legacy Init(config).
 func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error) {
@@ -740,6 +701,15 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	}
 
 	style := uintptr(wsOverlappedWindow)
+
+	// Per-pixel alpha via DirectComposition requires the window to opt out of
+	// the DWM redirection bitmap; otherwise the DComp swap chain is composed
+	// behind/over an opaque window surface and transparency is not visible
+	// (gogpu#361, wgpu v0.30.35 release note).
+	dwExStyle := uintptr(0)
+	if config.Transparent {
+		dwExStyle = wsExNoRedirectionBitmap
+	}
 
 	// Best-guess DPI before HWND exists (SDL3 hybrid pattern).
 	// Position is CW_USEDEFAULT → query primary monitor.
@@ -759,7 +729,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 	// Create window with pre-scaled outer dimensions.
 	hwnd, _, _ := procCreateWindowExW.Call(
-		0,
+		dwExStyle,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(titlePtr)),
 		style,
@@ -822,11 +792,14 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		w.updateSize()
 	}
 
-	// Enable DWM blur-behind for per-pixel-alpha transparency (ADR-060).
-	// Independent of frameless mode — a transparent window keeps its chrome
-	// unless the application also opts into WithFrameless.
+	// Transparent windows opt out of the DWM redirection bitmap above, so the
+	// DComp swapchain composites per-pixel alpha directly. DwmEnableBlurBehindWindow
+	// is intentionally NOT called here: with WS_EX_NOREDIRECTIONBITMAP it would
+	// paint an opaque blurred backdrop behind the swapchain and hide the desktop
+	// (winit skips blur-behind when no_redirection_bitmap is enabled).
 	if config.Transparent {
-		enableDwmBlurBehind(w.hwnd)
+		slog.Info("gogpu: transparent window created with WS_EX_NOREDIRECTIONBITMAP",
+			"hwnd", hwnd)
 	}
 
 	w.updateSize()
