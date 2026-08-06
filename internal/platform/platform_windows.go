@@ -587,6 +587,13 @@ func newPlatformManager() PlatformManager {
 // DPI awareness, HINSTANCE, window class registration, default cursor.
 // Called by both the PlatformManager Init() and the legacy Platform Init(config).
 func (p *windowsPlatform) initProcess() error {
+	// OleInitialize MUST be the first COM call on the main thread.
+	// It calls CoInitializeEx(STA) internally AND installs the OLE drag-drop
+	// message filter. If CoInitializeEx is called first (e.g., by file dialogs),
+	// OleInitialize returns S_FALSE without installing the message filter,
+	// causing DoDragDrop to fail with CO_E_NOT_SUPPORTED.
+	procOleInitialize.Call(0)
+
 	// Enable per-monitor DPI awareness programmatically.
 	if err := procSetProcessDpiAwarenessContext.Find(); err == nil {
 		procSetProcessDpiAwarenessContext.Call(^uintptr(3)) // -4 as uintptr

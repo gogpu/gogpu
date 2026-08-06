@@ -3,12 +3,6 @@
 package platform
 
 // drag_windows.go — Outgoing drag-and-drop (drag source) via COM OLE2 DoDragDrop.
-//
-// Implementation uses the same COM vtable pattern as dialog_windows.go.
-// We build minimal IDataObject and IDropSource COM objects inline using
-// Go-allocated vtable arrays. CF_HDROP (DROPFILES) is used for file paths.
-//
-// Reference: Microsoft Win32 DoDragDrop documentation, SDL3 SDL_sysdnd.c.
 
 import (
 	"encoding/binary"
@@ -20,14 +14,36 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// COM GUIDs for QueryInterface validation.
+// DoDragDrop queries for optional interfaces (IAsyncOperation, etc.) — we must
+// return E_NOINTERFACE for anything we don't implement, otherwise COM calls
+// methods at vtable offsets we haven't populated.
+type comGUID struct {
+	Data1 uint32
+	Data2 uint16
+	Data3 uint16
+	Data4 [8]byte
+}
+
 var (
-	procDoDragDrop       = ole32.NewProc("DoDragDrop")
-	procReleaseStgMedium = ole32.NewProc("ReleaseStgMedium") // reserved for STGMEDIUM cleanup
-	procGlobalSize       = kernel32.NewProc("GlobalSize")
+	iidIUnknown    = comGUID{0x00000000, 0x0000, 0x0000, [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	iidIDataObject = comGUID{0x0000010E, 0x0000, 0x0000, [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	iidIDropSource = comGUID{0x00000121, 0x0000, 0x0000, [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+)
+
+func guidEqual(a, b *comGUID) bool {
+	return a.Data1 == b.Data1 && a.Data2 == b.Data2 && a.Data3 == b.Data3 && a.Data4 == b.Data4
+}
+
+var (
+	procOleInitialize = ole32.NewProc("OleInitialize")
+	procDoDragDrop    = ole32.NewProc("DoDragDrop")
+	procGlobalSize    = kernel32.NewProc("GlobalSize")
 )
 
 // COM/OLE constants for drag-and-drop.
 const (
+	gmemFixed    = 0x0000
 	gmemZeroinit = 0x0040
 	gmemGHND     = gmemMoveable | gmemZeroinit
 
@@ -72,16 +88,10 @@ type dropFiles struct {
 
 // startDragWindows initiates a COM OLE2 drag-and-drop operation with file paths.
 // This blocks the calling thread until the drag completes (modal loop inside DoDragDrop).
+// MUST be called from the HWND owner thread (main thread) — DoDragDrop requires the
+// message pump that owns the window. Do NOT call LockOSThread here; the goroutine is
+// already pinned to the main OS thread by gogpu.App.Run().
 func startDragWindows(paths []string, done func(DragResult)) {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	// Initialize COM on this thread (may already be initialized).
-	hr, _, _ := procCoInitializeEx.Call(0, coinitApartmentThreaded)
-	if hr == comSOK || hr == comSFalse {
-		defer procCoUninitialize.Call()
-	}
-
 	hGlobal, err := buildDropFilesHGlobal(paths)
 	if err != nil {
 		if done != nil {
@@ -90,20 +100,22 @@ func startDragWindows(paths []string, done func(DragResult)) {
 		return
 	}
 
-	// Build inline IDataObject and IDropSource COM objects.
 	dataObj := newSimpleDataObject(hGlobal)
 	dropSrc := newSimpleDropSource()
 
 	var dwEffect uint32
-	hr, _, _ = procDoDragDrop.Call(
+	hr, _, _ := procDoDragDrop.Call(
 		dataObj.comPtr(),
 		dropSrc.comPtr(),
 		uintptr(dropEffectCopy|dropEffectMove),
 		uintptr(unsafe.Pointer(&dwEffect)),
 	)
+	runtime.KeepAlive(dataObj)
+	runtime.KeepAlive(dropSrc)
 
 	var result DragResult
-	if hr == dragdropSOK {
+	switch hr {
+	case dragdropSOK, 0x00040100: // S_OK or DRAGDROP_S_DROP
 		switch dwEffect {
 		case dropEffectCopy:
 			result = DragCopied
@@ -112,13 +124,9 @@ func startDragWindows(paths []string, done func(DragResult)) {
 		default:
 			result = DragCancelled
 		}
-	} else {
-		// DRAGDROP_S_CANCEL or error
+	default:
 		result = DragCancelled
 	}
-
-	// Clean up the HGLOBAL (DoDragDrop may or may not have freed it depending on dwEffect).
-	// ReleaseStgMedium is the proper way; we handle it in IDataObject release.
 
 	if done != nil {
 		done(result)
@@ -178,35 +186,41 @@ func buildDropFilesHGlobal(paths []string) (uintptr, error) {
 // --- Minimal inline IDataObject ---
 
 // simpleDataObject implements IDataObject with a single CF_HDROP format.
-// The COM vtable is built as a Go array of function pointers.
+// vtblPtr (first field) points to a GlobalAlloc'd vtable — COM reads *this to get it.
 type simpleDataObject struct {
-	vtblPtr  uintptr // points to vtbl[0]
+	vtblPtr  uintptr
 	refCount int32
 	hGlobal  uintptr
-	vtbl     [12]uintptr // IUnknown(3) + IDataObject(9)
 }
 
 func newSimpleDataObject(hGlobal uintptr) *simpleDataObject {
+	// Allocate vtable in non-GC memory so COM can safely dereference it.
+	vtblMem, _, _ := procGlobalAlloc.Call(uintptr(gmemFixed), 12*unsafe.Sizeof(uintptr(0)))
+	if vtblMem == 0 {
+		return nil
+	}
+	vtbl := unsafe.Slice((*uintptr)(unsafe.Pointer(vtblMem)), 12) //nolint:govet // GlobalAlloc returns non-GC memory
+	// IUnknown
+	vtbl[0] = syscall.NewCallback(dataObjQueryInterface)
+	vtbl[1] = syscall.NewCallback(dataObjAddRef)
+	vtbl[2] = syscall.NewCallback(dataObjRelease)
+	// IDataObject
+	vtbl[3] = syscall.NewCallback(dataObjGetData)
+	vtbl[4] = syscall.NewCallback(dataObjGetDataHere)
+	vtbl[5] = syscall.NewCallback(dataObjQueryGetData)
+	vtbl[6] = syscall.NewCallback(dataObjGetCanonicalFormatEtc)
+	vtbl[7] = syscall.NewCallback(dataObjSetData)
+	vtbl[8] = syscall.NewCallback(dataObjEnumFormatEtc)
+	vtbl[9] = syscall.NewCallback(dataObjDAdvise)
+	vtbl[10] = syscall.NewCallback(dataObjDUnadvise)
+	vtbl[11] = syscall.NewCallback(dataObjEnumDAdvise)
+
 	obj := &simpleDataObject{
+		vtblPtr:  vtblMem,
 		refCount: 1,
 		hGlobal:  hGlobal,
 	}
-	// IUnknown
-	obj.vtbl[0] = syscall.NewCallback(dataObjQueryInterface)
-	obj.vtbl[1] = syscall.NewCallback(dataObjAddRef)
-	obj.vtbl[2] = syscall.NewCallback(dataObjRelease)
-	// IDataObject
-	obj.vtbl[3] = syscall.NewCallback(dataObjGetData)
-	obj.vtbl[4] = syscall.NewCallback(dataObjGetDataHere)
-	obj.vtbl[5] = syscall.NewCallback(dataObjQueryGetData)
-	obj.vtbl[6] = syscall.NewCallback(dataObjGetCanonicalFormatEtc)
-	obj.vtbl[7] = syscall.NewCallback(dataObjSetData)
-	obj.vtbl[8] = syscall.NewCallback(dataObjEnumFormatEtc)
-	obj.vtbl[9] = syscall.NewCallback(dataObjDAdvise)
-	obj.vtbl[10] = syscall.NewCallback(dataObjDUnadvise)
-	obj.vtbl[11] = syscall.NewCallback(dataObjEnumDAdvise)
-	obj.vtblPtr = uintptr(unsafe.Pointer(&obj.vtbl[0]))
-	// Pin the object to prevent GC.
+	// Prevent GC from collecting the object while COM holds a reference.
 	runtime.SetFinalizer(obj, nil)
 	return obj
 }
@@ -215,16 +229,19 @@ func (o *simpleDataObject) comPtr() uintptr {
 	return uintptr(unsafe.Pointer(o))
 }
 
-// IUnknown::QueryInterface
+// IUnknown::QueryInterface — only accept IUnknown and IDataObject.
 func dataObjQueryInterface(this, riid, ppvObject uintptr) uintptr {
-	// Accept IUnknown and IDataObject.
 	if ppvObject == 0 {
 		return 0x80070057 // E_INVALIDARG
 	}
-	// For simplicity, accept any QI and return ourselves (DoDragDrop only needs IDataObject).
-	*(*uintptr)(unsafe.Pointer(ppvObject)) = this //nolint:govet // COM out-pointer write
-	dataObjAddRef(this)
-	return 0 // S_OK
+	guid := (*comGUID)(unsafe.Pointer(riid)) //nolint:govet // COM REFIID pointer cast
+	if guidEqual(guid, &iidIUnknown) || guidEqual(guid, &iidIDataObject) {
+		*(*uintptr)(unsafe.Pointer(ppvObject)) = this //nolint:govet // COM out-pointer write
+		dataObjAddRef(this)
+		return 0 // S_OK
+	}
+	*(*uintptr)(unsafe.Pointer(ppvObject)) = 0 //nolint:govet // COM out-pointer null on failure
+	return 0x80004002 // E_NOINTERFACE
 }
 
 // IUnknown::AddRef
@@ -321,9 +338,150 @@ func dataObjSetData(this, pFormatEtc, pMedium, fRelease uintptr) uintptr {
 	return 0x80004001 // E_NOTIMPL
 }
 
-// IDataObject::EnumFormatEtc — not supported (DoDragDrop does not require it for simple drops).
+// IDataObject::EnumFormatEtc — returns an enumerator for our single CF_HDROP format.
+// Explorer calls this to discover available clipboard formats during drag-over.
 func dataObjEnumFormatEtc(this, dwDirection, ppEnumFormatEtc uintptr) uintptr {
-	return 0x80004001 // E_NOTIMPL
+	if ppEnumFormatEtc == 0 {
+		return 0x80070057 // E_INVALIDARG
+	}
+	// DATADIR_GET = 1, DATADIR_SET = 2
+	if dwDirection != 1 {
+		return 0x80004001 // E_NOTIMPL (we only support DATADIR_GET)
+	}
+	enum := newFormatEnumerator()
+	if enum == nil {
+		return 0x8007000E // E_OUTOFMEMORY
+	}
+	*(*uintptr)(unsafe.Pointer(ppEnumFormatEtc)) = enum.comPtr() //nolint:govet // COM out-pointer write
+	return 0 // S_OK
+}
+
+// --- IEnumFORMATETC ---
+
+var iidIEnumFORMATETC = comGUID{0x00000103, 0x0000, 0x0000, [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+
+// formatEnumerator implements IEnumFORMATETC with a single CF_HDROP entry.
+type formatEnumerator struct {
+	vtblPtr  uintptr
+	refCount int32
+	index    int32 // current enumeration position (0 or 1)
+}
+
+func newFormatEnumerator() *formatEnumerator {
+	vtblMem, _, _ := procGlobalAlloc.Call(uintptr(gmemFixed), 7*unsafe.Sizeof(uintptr(0)))
+	if vtblMem == 0 {
+		return nil
+	}
+	vtbl := unsafe.Slice((*uintptr)(unsafe.Pointer(vtblMem)), 7) //nolint:govet // GlobalAlloc returns non-GC memory
+	// IUnknown
+	vtbl[0] = syscall.NewCallback(enumFmtQueryInterface)
+	vtbl[1] = syscall.NewCallback(enumFmtAddRef)
+	vtbl[2] = syscall.NewCallback(enumFmtRelease)
+	// IEnumFORMATETC
+	vtbl[3] = syscall.NewCallback(enumFmtNext)
+	vtbl[4] = syscall.NewCallback(enumFmtSkip)
+	vtbl[5] = syscall.NewCallback(enumFmtReset)
+	vtbl[6] = syscall.NewCallback(enumFmtClone)
+
+	obj := &formatEnumerator{
+		vtblPtr:  vtblMem,
+		refCount: 1,
+	}
+	runtime.SetFinalizer(obj, nil)
+	return obj
+}
+
+func (o *formatEnumerator) comPtr() uintptr {
+	return uintptr(unsafe.Pointer(o))
+}
+
+func enumFmtQueryInterface(this, riid, ppvObject uintptr) uintptr {
+	if ppvObject == 0 {
+		return 0x80070057 // E_INVALIDARG
+	}
+	guid := (*comGUID)(unsafe.Pointer(riid)) //nolint:govet // COM REFIID pointer cast
+	if guidEqual(guid, &iidIUnknown) || guidEqual(guid, &iidIEnumFORMATETC) {
+		*(*uintptr)(unsafe.Pointer(ppvObject)) = this //nolint:govet // COM out-pointer write
+		enumFmtAddRef(this)
+		return 0 // S_OK
+	}
+	*(*uintptr)(unsafe.Pointer(ppvObject)) = 0 //nolint:govet // COM out-pointer null on failure
+	return 0x80004002 // E_NOINTERFACE
+}
+
+func enumFmtAddRef(this uintptr) uintptr {
+	obj := (*formatEnumerator)(unsafe.Pointer(this)) //nolint:govet // COM this pointer cast
+	obj.refCount++
+	return uintptr(obj.refCount)
+}
+
+func enumFmtRelease(this uintptr) uintptr {
+	obj := (*formatEnumerator)(unsafe.Pointer(this)) //nolint:govet // COM this pointer cast
+	obj.refCount--
+	return uintptr(obj.refCount)
+}
+
+// IEnumFORMATETC::Next — returns the next N FORMATETC entries.
+func enumFmtNext(this, celt, rgelt, pceltFetched uintptr) uintptr {
+	if rgelt == 0 {
+		return 0x80070057 // E_INVALIDARG
+	}
+	obj := (*formatEnumerator)(unsafe.Pointer(this)) //nolint:govet // COM this pointer cast
+
+	fetched := uint32(0)
+	for i := uintptr(0); i < celt; i++ {
+		if obj.index >= 1 { // we have exactly one format
+			break
+		}
+		dst := (*formatETC)(unsafe.Pointer(rgelt + i*unsafe.Sizeof(formatETC{}))) //nolint:govet // COM array element
+		dst.cfFormat = cfHDROP
+		dst.ptd = 0
+		dst.dwAspect = dvaspectContent
+		dst.lindex = -1
+		dst.tymed = tymedHGlobal
+		obj.index++
+		fetched++
+	}
+	if pceltFetched != 0 {
+		*(*uint32)(unsafe.Pointer(pceltFetched)) = fetched //nolint:govet // COM out-pointer
+	}
+	if fetched < uint32(celt) {
+		return 1 // S_FALSE — fewer items returned than requested
+	}
+	return 0 // S_OK
+}
+
+// IEnumFORMATETC::Skip
+func enumFmtSkip(this, celt uintptr) uintptr {
+	obj := (*formatEnumerator)(unsafe.Pointer(this)) //nolint:govet // COM this pointer cast
+	obj.index += int32(celt)
+	if obj.index > 1 {
+		obj.index = 1
+		return 1 // S_FALSE
+	}
+	return 0 // S_OK
+}
+
+// IEnumFORMATETC::Reset
+func enumFmtReset(this uintptr) uintptr {
+	obj := (*formatEnumerator)(unsafe.Pointer(this)) //nolint:govet // COM this pointer cast
+	obj.index = 0
+	return 0 // S_OK
+}
+
+// IEnumFORMATETC::Clone
+func enumFmtClone(this, ppEnum uintptr) uintptr {
+	if ppEnum == 0 {
+		return 0x80070057 // E_INVALIDARG
+	}
+	obj := (*formatEnumerator)(unsafe.Pointer(this)) //nolint:govet // COM this pointer cast
+	clone := newFormatEnumerator()
+	if clone == nil {
+		return 0x8007000E // E_OUTOFMEMORY
+	}
+	clone.index = obj.index
+	*(*uintptr)(unsafe.Pointer(ppEnum)) = clone.comPtr() //nolint:govet // COM out-pointer write
+	return 0 // S_OK
 }
 
 // IDataObject::DAdvise — not supported.
@@ -347,17 +505,24 @@ func dataObjEnumDAdvise(this, ppEnumAdvise uintptr) uintptr {
 type simpleDropSource struct {
 	vtblPtr  uintptr
 	refCount int32
-	vtbl     [5]uintptr // IUnknown(3) + IDropSource(2)
 }
 
 func newSimpleDropSource() *simpleDropSource {
-	obj := &simpleDropSource{refCount: 1}
-	obj.vtbl[0] = syscall.NewCallback(dropSrcQueryInterface)
-	obj.vtbl[1] = syscall.NewCallback(dropSrcAddRef)
-	obj.vtbl[2] = syscall.NewCallback(dropSrcRelease)
-	obj.vtbl[3] = syscall.NewCallback(dropSrcQueryContinueDrag)
-	obj.vtbl[4] = syscall.NewCallback(dropSrcGiveFeedback)
-	obj.vtblPtr = uintptr(unsafe.Pointer(&obj.vtbl[0]))
+	vtblMem, _, _ := procGlobalAlloc.Call(uintptr(gmemFixed), 5*unsafe.Sizeof(uintptr(0)))
+	if vtblMem == 0 {
+		return nil
+	}
+	vtbl := unsafe.Slice((*uintptr)(unsafe.Pointer(vtblMem)), 5) //nolint:govet // GlobalAlloc returns non-GC memory
+	vtbl[0] = syscall.NewCallback(dropSrcQueryInterface)
+	vtbl[1] = syscall.NewCallback(dropSrcAddRef)
+	vtbl[2] = syscall.NewCallback(dropSrcRelease)
+	vtbl[3] = syscall.NewCallback(dropSrcQueryContinueDrag)
+	vtbl[4] = syscall.NewCallback(dropSrcGiveFeedback)
+
+	obj := &simpleDropSource{
+		vtblPtr:  vtblMem,
+		refCount: 1,
+	}
 	runtime.SetFinalizer(obj, nil)
 	return obj
 }
@@ -366,14 +531,19 @@ func (o *simpleDropSource) comPtr() uintptr {
 	return uintptr(unsafe.Pointer(o))
 }
 
-// IUnknown methods for IDropSource
+// IUnknown methods for IDropSource — only accept IUnknown and IDropSource.
 func dropSrcQueryInterface(this, riid, ppvObject uintptr) uintptr {
 	if ppvObject == 0 {
 		return 0x80070057 // E_INVALIDARG
 	}
-	*(*uintptr)(unsafe.Pointer(ppvObject)) = this //nolint:govet // COM out-pointer write
-	dropSrcAddRef(this)
-	return 0 // S_OK
+	guid := (*comGUID)(unsafe.Pointer(riid)) //nolint:govet // COM REFIID pointer cast
+	if guidEqual(guid, &iidIUnknown) || guidEqual(guid, &iidIDropSource) {
+		*(*uintptr)(unsafe.Pointer(ppvObject)) = this //nolint:govet // COM out-pointer write
+		dropSrcAddRef(this)
+		return 0 // S_OK
+	}
+	*(*uintptr)(unsafe.Pointer(ppvObject)) = 0 //nolint:govet // COM out-pointer null on failure
+	return 0x80004002 // E_NOINTERFACE
 }
 
 func dropSrcAddRef(this uintptr) uintptr {
@@ -396,13 +566,12 @@ func dropSrcQueryContinueDrag(this, fEscapePressed, grfKeyState uintptr) uintptr
 	}
 	// MK_LBUTTON = 0x0001
 	if grfKeyState&0x0001 == 0 {
-		// Left button released — drop.
 		return 0x00040100 // DRAGDROP_S_DROP
 	}
 	return 0 // S_OK — continue
 }
 
-// IDropSource::GiveFeedback — use default cursors.
+// IDropSource::GiveFeedback — use system default drag cursors.
 func dropSrcGiveFeedback(this, dwEffect uintptr) uintptr {
-	return 0x00040002 // DRAGDROP_S_USEDEFAULTCURSORS
+	return 0x00040102 // DRAGDROP_S_USEDEFAULTCURSORS
 }
