@@ -413,11 +413,24 @@ func (c *Connection) sendRequestWithReply(data []byte) ([]byte, error) {
 	}
 }
 
-func (c *Connection) seqFromBuf(buf []byte) uint16 {
+func (c *Connection) seqFromHeader(buf []byte) uint16 {
 	if c.byteOrder == MSBFirst {
 		return binary.BigEndian.Uint16(buf[2:4])
 	}
 	return binary.LittleEndian.Uint16(buf[2:4])
+}
+
+func (c *Connection) dispatchReply(seq uint16, data []byte) bool {
+	c.replyMu.Lock()
+	ch, ok := c.pendingReplies[seq]
+	if ok {
+		delete(c.pendingReplies, seq)
+	}
+	c.replyMu.Unlock()
+	if ok {
+		ch <- data
+	}
+	return ok
 }
 
 // readerLoop runs in its own goroutine and exclusively reads from the socket,
@@ -444,38 +457,18 @@ func (c *Connection) readerLoop() {
 
 		if responseType == 0 { // Error (type 0)
 			demuxedErrors++
-			seq := c.seqFromBuf(buf)
-			c.replyMu.Lock()
-			ch, ok := c.pendingReplies[seq]
-			if ok {
-				delete(c.pendingReplies, seq)
-			}
-			c.replyMu.Unlock()
-
-			if ok {
-				ch <- buf
-			} else {
-				err := c.parseError(buf)
-				slog.Warn("x11: asynchronous error", "err", err)
+			seq := c.seqFromHeader(buf)
+			if !c.dispatchReply(seq, buf) {
+				slog.Warn("x11: asynchronous error", "err", c.parseError(buf))
 			}
 		} else if responseType == 1 { // Reply (type 1)
 			demuxedReplies++
-			seq := c.seqFromBuf(buf)
+			seq := c.seqFromHeader(buf)
 			additional, err := c.readAdditional(buf)
 			if err != nil {
 				return
 			}
-
-			c.replyMu.Lock()
-			ch, ok := c.pendingReplies[seq]
-			if ok {
-				delete(c.pendingReplies, seq)
-			}
-			c.replyMu.Unlock()
-
-			if ok {
-				ch <- additional
-			}
+			c.dispatchReply(seq, additional)
 		} else {
 			// GenericEvent (type 35)
 			if responseType&0x7F == EventGenericEvent {
