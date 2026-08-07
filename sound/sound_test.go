@@ -34,6 +34,13 @@ func TestSystemSoundString(t *testing.T) {
 		want  string
 	}{
 		{Click, "Click"},
+		{Invoke, "Invoke"},
+		{Focus, "Focus"},
+		{MoveNext, "MoveNext"},
+		{MovePrev, "MovePrev"},
+		{GoBack, "GoBack"},
+		{Show, "Show"},
+		{Hide, "Hide"},
 		{Alert, "Alert"},
 		{Error, "Error"},
 		{Warning, "Warning"},
@@ -50,7 +57,6 @@ func TestSystemSoundString(t *testing.T) {
 }
 
 func TestPlayDisabled(t *testing.T) {
-	// Sounds are disabled by default; Play should not panic.
 	defer func() {
 		state.mu.Lock()
 		state.enabled = false
@@ -58,6 +64,13 @@ func TestPlayDisabled(t *testing.T) {
 	}()
 
 	Play(Click)
+	Play(Invoke)
+	Play(Focus)
+	Play(MoveNext)
+	Play(MovePrev)
+	Play(GoBack)
+	Play(Show)
+	Play(Hide)
 	Play(Alert)
 	Play(Error)
 	Play(Warning)
@@ -81,7 +94,7 @@ func TestDebounce(t *testing.T) {
 	defer func() {
 		state.mu.Lock()
 		state.enabled = false
-		state.lastPlay = [5]time.Time{}
+		state.lastPlay = [12]time.Time{}
 		state.mu.Unlock()
 	}()
 
@@ -114,7 +127,7 @@ func TestDebounceExpired(t *testing.T) {
 	defer func() {
 		state.mu.Lock()
 		state.enabled = false
-		state.lastPlay = [5]time.Time{}
+		state.lastPlay = [12]time.Time{}
 		state.mu.Unlock()
 	}()
 
@@ -172,7 +185,7 @@ func TestDifferentSoundsNotDebounced(t *testing.T) {
 	defer func() {
 		state.mu.Lock()
 		state.enabled = false
-		state.lastPlay = [5]time.Time{}
+		state.lastPlay = [12]time.Time{}
 		state.mu.Unlock()
 	}()
 

@@ -20,6 +20,17 @@ func xdgSoundPaths(s SystemSound) []string {
 			filepath.Join(stereo, "button-pressed.oga"),
 			filepath.Join(stereo, "message.oga"),
 		}
+	case Invoke:
+		return []string{
+			filepath.Join(stereo, "button-pressed.oga"),
+		}
+	case Focus, MoveNext, MovePrev, GoBack, Hide:
+		return nil
+	case Show:
+		return []string{
+			filepath.Join(stereo, "dialog-information.oga"),
+			filepath.Join(stereo, "message.oga"),
+		}
 	case Alert:
 		return []string{
 			filepath.Join(stereo, "bell.oga"),
@@ -104,8 +115,10 @@ func platformPlay(s SystemSound) {
 // canberaSoundID maps SystemSound to libcanberra/XDG event IDs.
 func canberaSoundID(s SystemSound) string {
 	switch s {
-	case Click:
+	case Click, Invoke:
 		return "button-pressed"
+	case Show:
+		return "dialog-information"
 	case Alert:
 		return "bell"
 	case Error:

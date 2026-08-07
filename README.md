@@ -40,7 +40,7 @@ Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU p
 | **Input Models** | Three coexisting models: callbacks (`EventSource`), state polling (`Input()`, Ebiten-style), SDL-style event queue (`PollInputEvent()`) |
 | **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, runtime window resize (`RequestSize`), mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), OS drag-and-drop: incoming (all 4 desktop platforms) + outgoing drag source (`StartDrag`, all 5 platforms), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog) |
 | **Scroll** | ScrollPhase + IsMomentum for macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes |
-| **Sound** | Platform system sounds for UI feedback (winmm, NSSound, canberra/PulseAudio) |
+| **Sound** | 12 UI sound types (UWP ElementSoundPlayer parity): Click, Invoke, Focus, Navigate, Show/Hide, feedback. winmm, NSSound, canberra |
 | **Compute** | Full compute shader support |
 | **Window Chrome** | Frameless windows with custom title bars, DWM shadow, hit-test regions |
 | **HiDPI** | Per-monitor DPI, runtime DPI change (`ScaleChangedEvent` on all platforms), WM_DPICHANGED, logical/physical coordinate split, WithSize in logical DIP (ADR-030, ADR-059) |
@@ -608,7 +608,7 @@ Vulkan     DX12  Metal  GLES   Software
 | `gmath/` | Vec2, Vec3, Vec4, Mat4, Color |
 | `window/` | Window configuration |
 | `input/` | Keyboard and mouse input |
-| `sound/` | Platform system sounds (Click, Alert, Error, Warning, Success) |
+| `sound/` | Platform system sounds — 12 types: Click, Invoke, Focus, Navigate, Show/Hide, Alert, Error, Warning, Success (UWP parity) |
 | `internal/platform/` | Platform-specific windowing (Win32, Cocoa, X11, Wayland, Browser) |
 | `internal/thread/` | Multi-thread rendering (RenderLoop) |
 

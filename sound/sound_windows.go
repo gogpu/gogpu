@@ -23,39 +23,57 @@ const (
 	sndFilename  = 0x00020000 // pszSound is a file name
 )
 
-// windowsSoundAlias maps SystemSound to Windows registry sound aliases.
-// These correspond to entries under HKCU\AppEvents\Schemes\Apps\.Default.
-func windowsSoundAlias(s SystemSound) string {
-	switch s {
-	case Click:
-		return ".Default"
-	case Alert:
-		return "SystemNotification"
-	case Error:
-		return "SystemHand"
-	case Warning:
-		return "SystemExclamation"
-	case Success:
-		return "SystemAsterisk"
-	default:
-		return ".Default"
-	}
-}
+// navigationWav is a subtle UI click sound shipped with Windows.
+const navigationWav = `C:\Windows\Media\Windows Navigation Start.wav`
 
-func platformPlay(s SystemSound) {
-	alias := windowsSoundAlias(s)
+func playAlias(alias string) {
 	ptr, err := windows.UTF16PtrFromString(alias)
 	if err != nil {
 		return
 	}
-	// PlaySoundW(pszSound, hmod, fdwSound)
-	// SND_ALIAS|SND_ASYNC|SND_NODEFAULT: play the registry alias
-	// asynchronously; if no sound is configured, skip silently.
 	procPlaySnd.Call(
 		uintptr(unsafe.Pointer(ptr)),
 		0,
 		uintptr(sndAlias|sndAsync|sndNoDefault),
 	)
+}
+
+func playWavFile(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	ptr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return false
+	}
+	ret, _, _ := procPlaySnd.Call(
+		uintptr(unsafe.Pointer(ptr)),
+		0,
+		uintptr(sndFilename|sndAsync|sndNoDefault),
+	)
+	return ret != 0
+}
+
+func platformPlay(s SystemSound) {
+	switch s {
+	case Click, Invoke, Focus, MoveNext, MovePrev, GoBack:
+		if playWavFile(navigationWav) {
+			return
+		}
+		playAlias(".Default")
+	case Show:
+		playAlias("SystemNotification")
+	case Hide:
+		// Silent -- standard UX, no sound on dismiss.
+	case Alert:
+		playAlias("SystemNotification")
+	case Error:
+		playAlias("SystemHand")
+	case Warning:
+		playAlias("SystemExclamation")
+	case Success:
+		playAlias("SystemAsterisk")
+	}
 }
 
 func platformPlayFile(path string) error {

@@ -20,8 +20,22 @@ import (
 type SystemSound int
 
 const (
-	// Click is the default UI interaction sound (button press, menu select).
+	// Click is the default UI interaction sound (button press, checkbox toggle).
 	Click SystemSound = iota
+	// Invoke is an action invoked sound (command execution).
+	Invoke
+	// Focus plays when an element receives keyboard focus.
+	Focus
+	// MoveNext plays on forward navigation (Tab, Right, Down).
+	MoveNext
+	// MovePrev plays on backward navigation (Shift+Tab, Left, Up).
+	MovePrev
+	// GoBack plays on back navigation.
+	GoBack
+	// Show plays when a dialog or flyout appears.
+	Show
+	// Hide plays when a dialog or flyout is dismissed.
+	Hide
 	// Alert is a notification sound.
 	Alert
 	// Error indicates an error occurred.
@@ -37,6 +51,20 @@ func (s SystemSound) String() string {
 	switch s {
 	case Click:
 		return "Click"
+	case Invoke:
+		return "Invoke"
+	case Focus:
+		return "Focus"
+	case MoveNext:
+		return "MoveNext"
+	case MovePrev:
+		return "MovePrev"
+	case GoBack:
+		return "GoBack"
+	case Show:
+		return "Show"
+	case Hide:
+		return "Hide"
 	case Alert:
 		return "Alert"
 	case Error:
@@ -61,7 +89,7 @@ var state struct {
 	enabled bool
 
 	// lastPlay tracks the last play time per SystemSound for debounce.
-	lastPlay [5]time.Time // indexed by SystemSound
+	lastPlay [12]time.Time // indexed by SystemSound
 }
 
 // SetEnabled enables or disables UI sound playback globally.

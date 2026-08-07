@@ -18,6 +18,20 @@ func darwinSoundName(s SystemSound) string {
 	switch s {
 	case Click:
 		return "Tink"
+	case Invoke:
+		return "Pop"
+	case Focus:
+		return "Tink"
+	case MoveNext:
+		return "Tink"
+	case MovePrev:
+		return "Tink"
+	case GoBack:
+		return "Tink"
+	case Show:
+		return "Blow"
+	case Hide:
+		return "Pop"
 	case Alert:
 		return "Glass"
 	case Error:

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **12 SystemSound types** (#433, ADR-063) — expanded from 5 to 12: Click, Invoke, Focus, MoveNext, MovePrev, GoBack, Show, Hide, Alert, Error, Warning, Success. UWP ElementSoundPlayer parity.
+
+### Fixed
+
+- **Windows: Click mapped to notification beep** (#433) — `sound.Click` now plays `Windows Navigation Start.wav` (subtle UI click) with fallback to `.Default` registry alias. Was `.Default` → `Windows Background.wav` (notification sound).
+
 ## [0.50.1] - 2026-08-06
 
 ### Fixed
