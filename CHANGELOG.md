@@ -5,15 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.50.2] - 2026-08-07
 
 ### Added
 
 - **12 SystemSound types** (#433, ADR-063) — expanded from 5 to 12: Click, Invoke, Focus, MoveNext, MovePrev, GoBack, Show, Hide, Alert, Error, Warning, Success. UWP ElementSoundPlayer parity.
+- **`Config.WithSoundFeedback(true)`** — one-line sound enable in app config, no separate `sound` import needed.
 
 ### Fixed
 
-- **Windows: Click mapped to notification beep** (#433) — `sound.Click` now plays `Windows Navigation Start.wav` (subtle UI click) with fallback to `.Default` registry alias. Was `.Default` → `Windows Background.wav` (notification sound).
+- **X11: connection dual-reader event/reply loss** (#431, #435, @unxed, ADR-062) — single reader goroutine (xgb pattern) replaces two competing socket readers. Events arriving during sync roundtrips were silently discarded; now demuxed to unbounded queue. Fixes: drop position always 0,0, ~60% of incoming drops lost, XDND drag source reliability. `bufio.Reader` eliminates partial-read stream desync.
+- **X11: drag source UngrabPointer on release** (#435, @unxed) — pointer ungrabbed immediately on button release, preventing deadlock when target shows modal dialog. Synthetic PointerUp event queued to fix input state after drag.
+- **Windows: Click mapped to notification beep** (#433) — `sound.Click` now plays `Windows Navigation Start.wav` (subtle UI click) with fallback to `.Default` registry alias.
 
 ## [0.50.1] - 2026-08-06
 
