@@ -3,8 +3,12 @@
 package x11
 
 import (
+	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
@@ -23,8 +27,50 @@ var (
 )
 
 // Connection represents a connection to an X11 server.
+type eventQueue struct {
+	mu     sync.Mutex
+	events []Event
+	signal chan struct{}
+}
+
+func newEventQueue() *eventQueue {
+	return &eventQueue{
+		signal: make(chan struct{}, 1),
+	}
+}
+
+func (q *eventQueue) push(e Event) {
+	q.mu.Lock()
+	q.events = append(q.events, e)
+	q.mu.Unlock()
+	select {
+	case q.signal <- struct{}{}:
+	default:
+	}
+}
+
+func (q *eventQueue) pop() Event {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.events) == 0 {
+		return nil
+	}
+	e := q.events[0]
+	q.events[0] = nil
+	q.events = q.events[1:]
+	if len(q.events) > 0 {
+		select {
+		case q.signal <- struct{}{}:
+		default:
+		}
+	}
+	return e
+}
+
+// Connection represents a connection to an X11 server.
 type Connection struct {
-	conn net.Conn
+	conn   net.Conn
+	reader *bufio.Reader
 
 	// Protocol settings
 	byteOrder ByteOrder
@@ -41,10 +87,11 @@ type Connection struct {
 	nextSeq atomic.Uint32
 
 	// Synchronization
-	mu       sync.Mutex
-	readBuf  []byte
-	writeBuf []byte
-	closed   bool
+	mu      sync.Mutex
+	closed  bool
+	writeMu sync.Mutex
+	replyMu sync.Mutex
+	done    chan struct{}
 
 	// Atom cache
 	atomCache     map[string]Atom
@@ -54,12 +101,14 @@ type Connection struct {
 	screenNum int
 
 	// Pending replies
-	pendingReplies     map[uint16]chan []byte
-	pendingRepliesLock sync.Mutex
+	pendingReplies map[uint16]chan []byte
 
 	// Extension registry (major opcode → extension name)
 	extensions     map[string]*ExtensionInfo
 	extensionsLock sync.RWMutex
+
+	// Event queue
+	eventQ *eventQueue
 }
 
 // Connect establishes a connection to the X server using the DISPLAY environment variable.
@@ -102,13 +151,14 @@ func ConnectTo(display string) (*Connection, error) {
 
 	c := &Connection{
 		conn:           conn,
+		reader:         bufio.NewReader(conn),
 		byteOrder:      LSBFirst,
-		readBuf:        make([]byte, 32*1024),
-		writeBuf:       make([]byte, 0, 4096),
 		atomCache:      make(map[string]Atom),
 		screenNum:      screenNum,
 		pendingReplies: make(map[uint16]chan []byte),
 		extensions:     make(map[string]*ExtensionInfo),
+		eventQ:         newEventQueue(),
+		done:           make(chan struct{}),
 	}
 
 	// Perform connection setup
@@ -116,6 +166,8 @@ func ConnectTo(display string) (*Connection, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+
+	go c.readerLoop()
 
 	return c, nil
 }
@@ -178,7 +230,7 @@ func (c *Connection) performSetup(displayNum string) error {
 
 	// Read initial response (8 bytes minimum)
 	initialBuf := make([]byte, 8)
-	if _, err := c.conn.Read(initialBuf); err != nil {
+	if _, err := io.ReadFull(c.reader, initialBuf); err != nil {
 		return fmt.Errorf("x11: failed to read setup response: %w", err)
 	}
 
@@ -195,7 +247,9 @@ func (c *Connection) performSetup(displayNum string) error {
 
 		// Read additional data
 		additionalBuf := make([]byte, additionalLen*4)
-		_, _ = c.conn.Read(additionalBuf)
+		if _, err := io.ReadFull(c.reader, additionalBuf); err != nil {
+			return fmt.Errorf("x11: failed to read setup error data: %w", err)
+		}
 
 		if reasonLen > 0 && int(reasonLen) <= len(additionalBuf) {
 			reason := string(additionalBuf[:reasonLen])
@@ -210,13 +264,8 @@ func (c *Connection) performSetup(displayNum string) error {
 
 	// Read remaining setup data
 	remainingBuf := make([]byte, additionalLen*4)
-	totalRead := 0
-	for totalRead < len(remainingBuf) {
-		n, err := c.conn.Read(remainingBuf[totalRead:])
-		if err != nil {
-			return fmt.Errorf("x11: failed to read setup data: %w", err)
-		}
-		totalRead += n
+	if _, err := io.ReadFull(c.reader, remainingBuf); err != nil {
+		return fmt.Errorf("x11: failed to read setup data: %w", err)
 	}
 
 	// Combine buffers for parsing
@@ -241,20 +290,22 @@ func (c *Connection) performSetup(displayNum string) error {
 // Close closes the connection to the X server.
 func (c *Connection) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
+		c.mu.Unlock()
 		return nil
 	}
 	c.closed = true
+	c.mu.Unlock()
+
+	close(c.done)
 
 	// Close pending reply channels
-	c.pendingRepliesLock.Lock()
+	c.replyMu.Lock()
 	for _, ch := range c.pendingReplies {
 		close(ch)
 	}
 	c.pendingReplies = nil
-	c.pendingRepliesLock.Unlock()
+	c.replyMu.Unlock()
 
 	if c.conn != nil {
 		return c.conn.Close()
@@ -306,11 +357,15 @@ func (c *Connection) RootWindow() ResourceID {
 // sendRequest sends a request and returns the sequence number.
 func (c *Connection) sendRequest(data []byte) (uint16, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	closed := c.closed
+	c.mu.Unlock()
 
-	if c.closed {
+	if closed {
 		return 0, ErrConnectionClosed
 	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 
 	seq := c.getNextSeq()
 	if _, err := c.conn.Write(data); err != nil {
@@ -323,127 +378,167 @@ func (c *Connection) sendRequest(data []byte) (uint16, error) {
 // sendRequestWithReply sends a request and waits for a reply.
 func (c *Connection) sendRequestWithReply(data []byte) ([]byte, error) {
 	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
+	closed := c.closed
+	c.mu.Unlock()
+
+	if closed {
 		return nil, ErrConnectionClosed
 	}
 
-	seq := c.getNextSeq()
-	replyCh := make(chan []byte, 1)
+	ch := make(chan []byte, 1)
 
-	c.pendingRepliesLock.Lock()
-	c.pendingReplies[seq] = replyCh
-	c.pendingRepliesLock.Unlock()
+	c.writeMu.Lock()
+	seq := c.getNextSeq()
+	c.replyMu.Lock()
+	c.pendingReplies[seq] = ch
+	c.replyMu.Unlock()
 
 	if _, err := c.conn.Write(data); err != nil {
-		c.mu.Unlock()
-		c.pendingRepliesLock.Lock()
+		c.replyMu.Lock()
 		delete(c.pendingReplies, seq)
-		c.pendingRepliesLock.Unlock()
+		c.replyMu.Unlock()
+		c.writeMu.Unlock()
 		return nil, fmt.Errorf("x11: failed to send request: %w", err)
 	}
-	c.mu.Unlock()
+	c.writeMu.Unlock()
 
-	// Read responses until we get our reply
+	select {
+	case reply := <-ch:
+		if reply[0] == 0 {
+			return nil, c.parseError(reply)
+		}
+		return reply, nil
+	case <-c.done:
+		return nil, ErrConnectionClosed
+	}
+}
+
+// readerLoop runs in its own goroutine and exclusively reads from the socket,
+// demultiplexing events, replies, and errors to their respective destinations.
+func (c *Connection) readerLoop() {
+	defer c.Close()
+
+	var demuxedEvents, demuxedReplies, demuxedErrors uint64
+
+	defer func() {
+		slog.Debug("x11: connection reader loop exited",
+			"events", demuxedEvents,
+			"replies", demuxedReplies,
+			"errors", demuxedErrors)
+	}()
+
 	for {
-		reply, err := c.readResponse()
-		if err != nil {
-			return nil, err
+		buf := make([]byte, 32)
+		if _, err := io.ReadFull(c.reader, buf); err != nil {
+			return
 		}
 
-		// Check if this is our reply
-		select {
-		case data := <-replyCh:
-			return data, nil
-		default:
-			// Not our reply, continue
-			_ = reply
+		responseType := buf[0]
+
+		// Error (type 0)
+		if responseType == 0 {
+			demuxedErrors++
+			var seq uint16
+			if c.byteOrder == MSBFirst {
+				seq = binary.BigEndian.Uint16(buf[2:4])
+			} else {
+				seq = binary.LittleEndian.Uint16(buf[2:4])
+			}
+			c.replyMu.Lock()
+			ch, ok := c.pendingReplies[seq]
+			if ok {
+				delete(c.pendingReplies, seq)
+			}
+			c.replyMu.Unlock()
+
+			if ok {
+				ch <- buf
+			} else {
+				err := c.parseError(buf)
+				slog.Warn("x11: asynchronous error", "err", err)
+			}
+
+			total := demuxedEvents + demuxedReplies + demuxedErrors
+			if total%1000 == 0 {
+				slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
+			}
+			continue
+		}
+
+		// Reply (type 1)
+		if responseType == 1 {
+			demuxedReplies++
+			var seq uint16
+			if c.byteOrder == MSBFirst {
+				seq = binary.BigEndian.Uint16(buf[2:4])
+			} else {
+				seq = binary.LittleEndian.Uint16(buf[2:4])
+			}
+			additional, err := c.readAdditional(buf)
+			if err != nil {
+				return
+			}
+
+			c.replyMu.Lock()
+			ch, ok := c.pendingReplies[seq]
+			if ok {
+				delete(c.pendingReplies, seq)
+			}
+			c.replyMu.Unlock()
+
+			if ok {
+				ch <- additional
+			}
+
+			total := demuxedEvents + demuxedReplies + demuxedErrors
+			if total%1000 == 0 {
+				slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
+			}
+			continue
+		}
+
+		// GenericEvent (type 35)
+		if responseType&0x7F == EventGenericEvent {
+			var err error
+			buf, err = c.readAdditional(buf)
+			if err != nil {
+				return
+			}
+		}
+
+		// Event
+		event, err := c.parseEvent(buf)
+		if err == nil && event != nil {
+			demuxedEvents++
+			c.eventQ.push(event)
+
+			total := demuxedEvents + demuxedReplies + demuxedErrors
+			if total%1000 == 0 {
+				slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
+			}
 		}
 	}
 }
 
-// readResponse reads a single response from the server.
-func (c *Connection) readResponse() ([]byte, error) {
-	// Read the first 32 bytes (fixed size for events/errors, base for replies)
-	buf := make([]byte, 32)
-	if _, err := c.conn.Read(buf); err != nil {
-		return nil, fmt.Errorf("x11: failed to read response: %w", err)
-	}
-
-	responseType := buf[0]
-
-	// Error (type 0)
-	if responseType == 0 {
-		// Parse error
-		return nil, c.parseError(buf)
-	}
-
-	// Reply (type 1)
-	if responseType == 1 {
-		// Get additional data length
-		d := NewDecoder(c.byteOrder, buf[4:8])
-		additionalLen, _ := d.Uint32()
-
-		if additionalLen > 0 {
-			// Read additional data into a new combined buffer
-			additional := make([]byte, additionalLen*4)
-			totalRead := 0
-			for totalRead < len(additional) {
-				n, err := c.conn.Read(additional[totalRead:])
-				if err != nil {
-					return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
-				}
-				totalRead += n
-			}
-			// Create new buffer with combined data (avoid appending to non-zero length slice)
-			combined := make([]byte, 0, 32+len(additional))
-			combined = append(combined, buf...)
-			combined = append(combined, additional...)
-			buf = combined
-		}
-
-		// Get sequence number and dispatch to waiting goroutine
-		seqD := NewDecoder(c.byteOrder, buf[2:4])
-		seq, _ := seqD.Uint16()
-
-		c.pendingRepliesLock.Lock()
-		ch, ok := c.pendingReplies[seq]
-		if ok {
-			delete(c.pendingReplies, seq)
-		}
-		c.pendingRepliesLock.Unlock()
-
-		if ok {
-			ch <- buf
-		}
-
+// readAdditional reads additional data from the connection based on the length
+// field at offset 4 of the 32-byte header. Returns the extended buffer if
+// additional data was present, or the original buffer otherwise.
+func (c *Connection) readAdditional(buf []byte) ([]byte, error) {
+	d := NewDecoder(c.byteOrder, buf[4:8])
+	additionalLen, _ := d.Uint32()
+	if additionalLen == 0 {
 		return buf, nil
 	}
 
-	// GenericEvent (type 35) — variable-length, used by extensions (XInput2, etc.)
-	if responseType&0x7F == EventGenericEvent {
-		d := NewDecoder(c.byteOrder, buf[4:8])
-		additionalLen, _ := d.Uint32()
-		if additionalLen > 0 {
-			additional := make([]byte, additionalLen*4)
-			totalRead := 0
-			for totalRead < len(additional) {
-				n, err := c.conn.Read(additional[totalRead:])
-				if err != nil {
-					return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
-				}
-				totalRead += n
-			}
-			combined := make([]byte, 0, 32+len(additional))
-			combined = append(combined, buf...)
-			combined = append(combined, additional...)
-			buf = combined
-		}
-		return buf, nil
+	additional := make([]byte, additionalLen*4)
+	if _, err := io.ReadFull(c.reader, additional); err != nil {
+		return nil, err
 	}
 
-	// Event (type 2-34, 36-127)
-	return buf, nil
+	combined := make([]byte, 0, 32+len(additional))
+	combined = append(combined, buf...)
+	combined = append(combined, additional...)
+	return combined, nil
 }
 
 // parseError parses an X11 error response.

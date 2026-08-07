@@ -3,9 +3,7 @@
 package x11
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"time"
 )
 
@@ -787,66 +785,18 @@ func (c *Connection) parseGenericEvent(buf []byte) (Event, error) {
 	}, nil
 }
 
-// readAdditional reads additional data from the connection based on the length
-// field at offset 4 of the 32-byte header. Returns the extended buffer if
-// additional data was present, or the original buffer otherwise.
-func (c *Connection) readAdditional(buf []byte) ([]byte, error) {
-	d := NewDecoder(c.byteOrder, buf[4:8])
-	additionalLen, _ := d.Uint32()
-	if additionalLen == 0 {
-		return buf, nil
-	}
-
-	additional := make([]byte, additionalLen*4)
-	totalRead := 0
-	for totalRead < len(additional) {
-		n, err := c.conn.Read(additional[totalRead:])
-		if err != nil {
-			return nil, err
-		}
-		totalRead += n
-	}
-
-	combined := make([]byte, 0, 32+len(additional))
-	combined = append(combined, buf...)
-	combined = append(combined, additional...)
-	return combined, nil
-}
-
 // WaitForEvent reads and returns the next event from the server.
 // This call blocks until an event is available.
 func (c *Connection) WaitForEvent() (Event, error) {
 	for {
-		buf := make([]byte, 32)
-		if _, err := c.conn.Read(buf); err != nil {
-			return nil, fmt.Errorf("x11: failed to read event: %w", err)
+		if ev := c.eventQ.pop(); ev != nil {
+			return ev, nil
 		}
-
-		responseType := buf[0]
-
-		// Error response
-		if responseType == 0 {
-			return nil, c.parseError(buf)
+		select {
+		case <-c.eventQ.signal:
+		case <-c.done:
+			return nil, ErrConnectionClosed
 		}
-
-		// Reply response - skip (we're looking for events)
-		if responseType == 1 {
-			if _, err := c.readAdditional(buf); err != nil {
-				return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
-			}
-			continue
-		}
-
-		// GenericEvent (type 35) — variable-length, read additional payload
-		if responseType&0x7F == EventGenericEvent {
-			var err error
-			buf, err = c.readAdditional(buf)
-			if err != nil {
-				return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
-			}
-		}
-
-		return c.parseEvent(buf)
 	}
 }
 
@@ -854,7 +804,7 @@ func (c *Connection) WaitForEvent() (Event, error) {
 // Returns nil, nil if no event is available - this is the expected case
 // when there are no pending events to process.
 func (c *Connection) PollEvent() (Event, error) {
-	return c.PollEventTimeout(time.Millisecond)
+	return c.PollEventTimeout(0)
 }
 
 // PollEventTimeout checks for a pending event with a configurable timeout.
@@ -863,60 +813,32 @@ func (c *Connection) PollEvent() (Event, error) {
 //
 //nolint:nilnil // nil,nil is intentional to indicate "no event available"
 func (c *Connection) PollEventTimeout(timeout time.Duration) (Event, error) {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil, ErrConnectionClosed
-	}
-	c.mu.Unlock()
-
-	// Set a read deadline so Read returns after the timeout if no data.
-	if err := c.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, nil //nolint:nilerr // deadline not supported = no polling
-	}
-
-	buf := make([]byte, 32)
-	_, err := io.ReadFull(c.conn, buf)
-
-	// Clear deadline for subsequent blocking reads.
-	_ = c.conn.SetReadDeadline(time.Time{})
-
-	if err != nil {
-		// Timeout = no data available (normal case).
-		if isTimeoutError(err) {
+	if timeout <= 0 {
+		if ev := c.eventQ.pop(); ev != nil {
+			return ev, nil
+		}
+		select {
+		case <-c.done:
+			return nil, ErrConnectionClosed
+		default:
 			return nil, nil
 		}
-		return nil, fmt.Errorf("x11: poll read: %w", err)
 	}
 
-	responseType := buf[0]
+	t := time.NewTimer(timeout)
+	defer t.Stop()
 
-	// Error response
-	if responseType == 0 {
-		return nil, c.parseError(buf)
-	}
-
-	// Reply response — skip (we're looking for events).
-	if responseType == 1 {
-		if _, err := c.readAdditional(buf); err != nil {
-			return nil, fmt.Errorf("x11: failed to read reply data: %w", err)
+	for {
+		if ev := c.eventQ.pop(); ev != nil {
+			return ev, nil
 		}
-		return nil, nil
-	}
 
-	// GenericEvent (type 35) — variable-length, read additional payload.
-	if responseType&0x7F == EventGenericEvent {
-		buf, err = c.readAdditional(buf)
-		if err != nil {
-			return nil, fmt.Errorf("x11: failed to read generic event data: %w", err)
+		select {
+		case <-c.eventQ.signal:
+		case <-t.C:
+			return nil, nil
+		case <-c.done:
+			return nil, ErrConnectionClosed
 		}
 	}
-
-	return c.parseEvent(buf)
-}
-
-// isTimeoutError checks if an error is a network timeout (deadline exceeded).
-func isTimeoutError(err error) bool {
-	var netErr interface{ Timeout() bool }
-	return errors.As(err, &netErr) && netErr.Timeout()
 }

@@ -122,7 +122,6 @@ type xdndDragState struct {
 	targetAccepts bool
 	sourceWindow  x11.ResourceID
 	rootWindow    x11.ResourceID
-	started       bool
 }
 
 // runXDNDDragLoop runs the modal drag event loop.
@@ -131,17 +130,6 @@ func runXDNDDragLoop(p *x11.Platform, conn *x11.Connection, atoms *x11.XdndAtoms
 		sourceWindow: sourceWindow,
 		rootWindow:   conn.RootWindow(),
 	}
-
-	// Drain events queued before the grab — they belong to the application,
-	// not to this drag session. A stale ButtonRelease would end the gesture
-	// immediately (#431, @unxed).
-	for {
-		ev, err := conn.PollEventTimeout(0)
-		if err != nil || ev == nil {
-			break
-		}
-	}
-	ds.started = true
 
 	deadline := time.Now().Add(5 * time.Minute) // safety timeout
 
@@ -248,9 +236,6 @@ func dragResultFromFinished(atoms *x11.XdndAtoms, data [5]uint32) DragResult {
 }
 
 func (ds *xdndDragState) handleButtonRelease(p *x11.Platform, conn *x11.Connection, atoms *x11.XdndAtoms) (DragResult, bool) {
-	if !ds.started {
-		return 0, false
-	}
 	if ds.currentTarget != 0 && ds.targetAccepts {
 		sendXdndDrop(conn, atoms, ds.sourceWindow, ds.currentTarget)
 		return ds.waitForXdndFinished(p, conn, atoms, 5*time.Second), true

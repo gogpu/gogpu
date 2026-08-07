@@ -38,6 +38,13 @@ func main() {
 		WithSize(400, 200).
 		WithContinuousRender(true))
 
+	app.OnDragDrop(func(paths []string, x, y float64) {
+		fmt.Printf("[drop] received %d file(s) at (%.1f, %.1f):\n", len(paths), x, y)
+		for i, path := range paths {
+			fmt.Printf("  [%d]: %s\n", i, path)
+		}
+	})
+
 	dragging := false
 
 	app.OnUpdate(func(dt float64) {
