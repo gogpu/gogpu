@@ -413,6 +413,13 @@ func (c *Connection) sendRequestWithReply(data []byte) ([]byte, error) {
 	}
 }
 
+func (c *Connection) seqFromBuf(buf []byte) uint16 {
+	if c.byteOrder == MSBFirst {
+		return binary.BigEndian.Uint16(buf[2:4])
+	}
+	return binary.LittleEndian.Uint16(buf[2:4])
+}
+
 // readerLoop runs in its own goroutine and exclusively reads from the socket,
 // demultiplexing events, replies, and errors to their respective destinations.
 func (c *Connection) readerLoop() {
@@ -435,15 +442,9 @@ func (c *Connection) readerLoop() {
 
 		responseType := buf[0]
 
-		// Error (type 0)
-		if responseType == 0 {
+		if responseType == 0 { // Error (type 0)
 			demuxedErrors++
-			var seq uint16
-			if c.byteOrder == MSBFirst {
-				seq = binary.BigEndian.Uint16(buf[2:4])
-			} else {
-				seq = binary.LittleEndian.Uint16(buf[2:4])
-			}
+			seq := c.seqFromBuf(buf)
 			c.replyMu.Lock()
 			ch, ok := c.pendingReplies[seq]
 			if ok {
@@ -457,23 +458,9 @@ func (c *Connection) readerLoop() {
 				err := c.parseError(buf)
 				slog.Warn("x11: asynchronous error", "err", err)
 			}
-
-			total := demuxedEvents + demuxedReplies + demuxedErrors
-			if total%1000 == 0 {
-				slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
-			}
-			continue
-		}
-
-		// Reply (type 1)
-		if responseType == 1 {
+		} else if responseType == 1 { // Reply (type 1)
 			demuxedReplies++
-			var seq uint16
-			if c.byteOrder == MSBFirst {
-				seq = binary.BigEndian.Uint16(buf[2:4])
-			} else {
-				seq = binary.LittleEndian.Uint16(buf[2:4])
-			}
+			seq := c.seqFromBuf(buf)
 			additional, err := c.readAdditional(buf)
 			if err != nil {
 				return
@@ -489,33 +476,27 @@ func (c *Connection) readerLoop() {
 			if ok {
 				ch <- additional
 			}
-
-			total := demuxedEvents + demuxedReplies + demuxedErrors
-			if total%1000 == 0 {
-				slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
+		} else {
+			// GenericEvent (type 35)
+			if responseType&0x7F == EventGenericEvent {
+				var err error
+				buf, err = c.readAdditional(buf)
+				if err != nil {
+					return
+				}
 			}
-			continue
+
+			// Event
+			event, err := c.parseEvent(buf)
+			if err == nil && event != nil {
+				demuxedEvents++
+				c.eventQ.push(event)
+			}
 		}
 
-		// GenericEvent (type 35)
-		if responseType&0x7F == EventGenericEvent {
-			var err error
-			buf, err = c.readAdditional(buf)
-			if err != nil {
-				return
-			}
-		}
-
-		// Event
-		event, err := c.parseEvent(buf)
-		if err == nil && event != nil {
-			demuxedEvents++
-			c.eventQ.push(event)
-
-			total := demuxedEvents + demuxedReplies + demuxedErrors
-			if total%1000 == 0 {
-				slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
-			}
+		total := demuxedEvents + demuxedReplies + demuxedErrors
+		if total%1000 == 0 {
+			slog.Debug("x11: connection demux stats", "events", demuxedEvents, "replies", demuxedReplies, "errors", demuxedErrors)
 		}
 	}
 }
