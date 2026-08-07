@@ -45,25 +45,49 @@ func main() {
 		}
 	})
 
-	dragging := false
+	inDrag := false
+	canDrag := false
+	clickX, clickY := float32(0), float32(0)
+	hasClickPos := false
 
 	app.OnUpdate(func(dt float64) {
 		mouse := app.Input().Mouse()
 
+		// We are only allowed to initiate an outgoing drag if the mouse was
+		// released at some point while hovering over or focusing our window.
+		// If the mouse enters our window with the button ALREADY pressed,
+		// the drag started outside (incoming drop) and we must not hijack it.
+		if !mouse.Pressed(input.MouseButtonLeft) {
+			canDrag = true
+			hasClickPos = false
+		}
+
 		if mouse.JustPressed(input.MouseButtonLeft) {
-			dragging = true
 			fmt.Println("[mouse] button down — hold and drag")
 		}
 
-		if dragging && mouse.Pressed(input.MouseButtonLeft) {
-			dx, dy := mouse.Delta()
-			if dx != 0 || dy != 0 {
-				dragging = false
+		if canDrag && mouse.Pressed(input.MouseButtonLeft) && !inDrag {
+			if !hasClickPos {
+				clickX, clickY = mouse.Position()
+				hasClickPos = true
+			}
+
+			currX, currY := mouse.Position()
+			dx := currX - clickX
+			dy := currY - clickY
+
+			// Apply a 5-pixel drag threshold (5*5 = 25 sq pixels) to filter out
+			// sub-pixel mouse jitter during normal clicks, as well as coordinate
+			// jumps when clicking an unfocused window (click-to-focus).
+			if dx*dx+dy*dy > 25.0 {
+				canDrag = false
+				inDrag = true
 				fmt.Println("[drag] starting...")
 
 				app.StartDrag(gogpu.DragData{
 					FilePaths: []string{tmpFile},
 				}, func(result gogpu.DragResult) {
+					inDrag = false
 					switch result {
 					case gogpu.DragCopied:
 						fmt.Println("[drag] result: COPIED")
@@ -74,10 +98,6 @@ func main() {
 					}
 				})
 			}
-		}
-
-		if mouse.JustReleased(input.MouseButtonLeft) {
-			dragging = false
 		}
 	})
 
