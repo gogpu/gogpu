@@ -455,13 +455,15 @@ func (c *Connection) readerLoop() {
 
 		responseType := buf[0]
 
-		if responseType == 0 { // Error (type 0)
+		switch {
+		case responseType == 0: // Error (type 0)
 			demuxedErrors++
 			seq := c.seqFromHeader(buf)
 			if !c.dispatchReply(seq, buf) {
 				slog.Warn("x11: asynchronous error", "err", c.parseError(buf))
 			}
-		} else if responseType == 1 { // Reply (type 1)
+
+		case responseType == 1: // Reply (type 1)
 			demuxedReplies++
 			seq := c.seqFromHeader(buf)
 			additional, err := c.readAdditional(buf)
@@ -469,16 +471,16 @@ func (c *Connection) readerLoop() {
 				return
 			}
 			c.dispatchReply(seq, additional)
-		} else {
-			// GenericEvent (type 35)
-			if responseType&0x7F == EventGenericEvent {
-				var err error
-				buf, err = c.readAdditional(buf)
-				if err != nil {
-					return
-				}
-			}
 
+		case responseType&0x7F == EventGenericEvent:
+			var err error
+			buf, err = c.readAdditional(buf)
+			if err != nil {
+				return
+			}
+			fallthrough
+
+		default:
 			// Event
 			event, err := c.parseEvent(buf)
 			if err == nil && event != nil {
