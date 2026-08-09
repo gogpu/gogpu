@@ -35,14 +35,11 @@ type damageDebugMode struct {
 }
 
 // parseDamageDebugMode parses GOGPU_DEBUG_DAMAGE env var.
-// Supports: "overlay", "log", "overlay,log", "1" (= overlay).
+// Supports: "overlay", "log", "overlay,log".
 func parseDamageDebugMode() damageDebugMode {
 	val := os.Getenv("GOGPU_DEBUG_DAMAGE")
 	if val == "" {
 		return damageDebugMode{}
-	}
-	if val == "1" {
-		return damageDebugMode{overlay: true}
 	}
 	var mode damageDebugMode
 	for _, part := range strings.Split(val, ",") {

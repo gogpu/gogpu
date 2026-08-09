@@ -19,7 +19,7 @@ func TestParseDamageDebugMode(t *testing.T) {
 		wantLog bool
 	}{
 		{"empty", "", false, false},
-		{"1", "1", true, false},
+		{"1 (legacy, not supported)", "1", false, false},
 		{"overlay only", "overlay", true, false},
 		{"log only", "log", false, true},
 		{"overlay,log", "overlay,log", true, true},
