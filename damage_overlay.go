@@ -296,9 +296,9 @@ func (o *damageDebugOverlay) renderBuiltIn(ctx gpucontext.DebugOverlayContext) {
 		appendInstance(&instances, rect, r, g, b, fillAlpha)
 
 		// Border quads: 3px-wide strips at ~70% alpha (visible outline).
-		const borderWidth = 3
+		const borderWidth = 1
 		if rect.Dx() > borderWidth*2 && rect.Dy() > borderWidth*2 {
-			borderAlpha := alpha * 0.7
+			borderAlpha := alpha * 0.5
 			br := float32(f.color.R) / 255.0 * borderAlpha
 			bg := float32(f.color.G) / 255.0 * borderAlpha
 			bb := float32(f.color.B) / 255.0 * borderAlpha
