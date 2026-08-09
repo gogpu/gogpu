@@ -100,6 +100,18 @@ type damageDebugOverlay struct {
 	// sources are reset by present().
 	damageSources *[]*DamageSource
 
+	// hasGPUWork is a reference to the RenderTarget's hasGPUWork flag.
+	// When true and no external sources reported damage, the overlay
+	// synthesizes a "gogpu" full-surface snapshot so built-in DrawTriangle
+	// and similar calls are visible in the overlay.
+	hasGPUWork *bool
+
+	// scaleFactor is the DPI scale factor for coordinate conversion.
+	// Damage sources (e.g., gg) may report rects in logical coordinates,
+	// while the overlay renders in physical surface pixels. Rects are scaled
+	// by this factor before rendering.
+	scaleFactor float64
+
 	// Shared GPU pipeline resources — lazy init on first Draw.
 	*overlayPipeline
 
@@ -154,20 +166,38 @@ func (o *damageDebugOverlay) Draw(ctx gpucontext.DebugOverlayContext) bool {
 
 // collectSnapshots reads current damage state from all registered sources.
 // Called before present() resets the sources.
+//
+// When no external damage sources are registered but the surface has GPU work
+// (e.g., DrawTriangle), a synthetic "gogpu" full-surface snapshot is generated
+// so the overlay has something to display. This ensures built-in rendering
+// examples show damage feedback without requiring explicit DamageSource registration.
+//
+// Damage rects from sources may be in logical coordinates (e.g., gg reports in
+// user space). When scaleFactor > 1.0, rects are scaled to physical surface
+// pixels for correct overlay positioning on HiDPI/Retina displays.
 func (o *damageDebugOverlay) collectSnapshots() []gpucontext.DamageSourceSnapshot {
-	if o.damageSources == nil {
+	// Synthetic snapshot for built-in GPU work without registered sources.
+	if o.damageSources == nil || len(*o.damageSources) == 0 {
+		if o.hasGPUWork != nil && *o.hasGPUWork {
+			return []gpucontext.DamageSourceSnapshot{{
+				Name:  "gogpu",
+				Color: damagePalette[0], // green
+				Full:  true,
+			}}
+		}
 		return nil
 	}
+
 	sources := *o.damageSources
-	if len(sources) == 0 {
-		return nil
-	}
 	snapshots := make([]gpucontext.DamageSourceSnapshot, len(sources))
 	for i, ds := range sources {
+		rects := append([]image.Rectangle(nil), ds.rects...)
+		// NOTE: gg's trackDamage() already scales logical → physical via deviceScale.
+		// Do NOT scale again here — double scaling causes wrong overlay positions.
 		snapshots[i] = gpucontext.DamageSourceSnapshot{
 			Name:   ds.name,
 			Color:  ds.color,
-			Rects:  append([]image.Rectangle(nil), ds.rects...),
+			Rects:  rects,
 			Full:   ds.full,
 			Reason: ds.reason,
 		}
@@ -260,7 +290,12 @@ func (o *damageDebugOverlay) renderBuiltIn(ctx gpucontext.DebugOverlayContext) {
 			continue
 		}
 
-		o.drawRect(encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, rect, f.color, alpha)
+		// Single fill rect with moderate alpha. Border rendering requires
+		// separate uniform buffers per draw (GPU race on shared buffer).
+		// Borders will be added by gg text-enhanced overlay (DamageOverlayRenderer).
+		// Chromium FadedGreen(60) fill = ~24% max alpha.
+		fillAlpha := alpha * 0.18
+		o.drawRect(encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, rect, f.color, fillAlpha)
 	}
 }
 
@@ -283,12 +318,12 @@ func (o *damageDebugOverlay) drawRect(
 	c color.RGBA,
 	alpha float32,
 ) {
-	// Pre-multiply color by fade alpha. Source color alpha from the palette
-	// is the base opacity; multiply by the fade factor.
-	baseAlpha := float32(c.A) / 255.0 * alpha
-	r := float32(c.R) / 255.0 * baseAlpha
-	g := float32(c.G) / 255.0 * baseAlpha
-	b := float32(c.B) / 255.0 * baseAlpha
+	// Pre-multiply color by the caller-provided alpha.
+	// For fill: alpha ~0.12 (subtle tint). For border: alpha ~0.7 (visible outline).
+	r := float32(c.R) / 255.0 * alpha
+	g := float32(c.G) / 255.0 * alpha
+	b := float32(c.B) / 255.0 * alpha
+	baseAlpha := alpha
 
 	// Write uniforms: rect(4f) + screen(2f) + pad(2f) + color(4f) = 48 bytes
 	binary.LittleEndian.PutUint32(o.uniformData[0:4], math.Float32bits(float32(rect.Min.X)))
@@ -407,8 +442,16 @@ func initDamageOverlayIfNeeded(ws *RenderTarget) {
 			return
 		}
 	}
+	scale := 1.0
+	if ws.platWindow != nil {
+		if s := ws.platWindow.ScaleFactor(); s > 0 {
+			scale = s
+		}
+	}
 	overlay := &damageDebugOverlay{
 		damageSources: &ws.damageSources,
+		hasGPUWork:    &ws.hasGPUWork,
+		scaleFactor:   scale,
 		device:        ws.renderer.device,
 		surfaceFormat: ws.renderer.surfaceFormat,
 		mode:          mode,
@@ -431,8 +474,16 @@ func (ws *RenderTarget) setCustomDamageRenderer(renderer gpucontext.DamageOverla
 	// the custom renderer can take effect when drawing starts.
 	mode := getDamageDebugMode()
 	mode.overlay = true
+	scale := 1.0
+	if ws.platWindow != nil {
+		if s := ws.platWindow.ScaleFactor(); s > 0 {
+			scale = s
+		}
+	}
 	overlay := &damageDebugOverlay{
 		damageSources:  &ws.damageSources,
+		hasGPUWork:     &ws.hasGPUWork,
+		scaleFactor:    scale,
 		device:         ws.renderer.device,
 		surfaceFormat:  ws.renderer.surfaceFormat,
 		mode:           mode,

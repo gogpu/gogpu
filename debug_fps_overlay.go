@@ -22,6 +22,11 @@ var _ gpucontext.DebugOverlay = (*fpsDebugOverlay)(nil)
 // fpsRingSize is the number of frame times kept for rolling statistics.
 const fpsRingSize = 120
 
+// fpsMinSamples is the minimum number of frame time samples required before
+// rendering the FPS bar. Early frames have unreliable timing (startup latency,
+// pipeline compilation) that would produce a misleading RED bar flash.
+const fpsMinSamples = 10
+
 // fpsLogInterval is the minimum duration between slog emissions.
 const fpsLogInterval = time.Second
 
@@ -136,7 +141,7 @@ func (o *fpsDebugOverlay) Draw(ctx gpucontext.DebugOverlayContext) bool {
 		o.logFPS(now, ctx.FrameNumber)
 	}
 
-	if o.mode.overlay && o.ringCount > 0 {
+	if o.mode.overlay && o.ringCount >= fpsMinSamples {
 		o.renderBar(ctx)
 	}
 

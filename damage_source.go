@@ -15,16 +15,24 @@ const maxDamageRects = 32
 
 // damagePalette assigns a visually distinct overlay color to each registered
 // damage source. Colors are assigned by registration order (modulo palette
-// length). Alpha is set low for semi-transparent overlay rendering.
+// length). Alpha is set low for subtle see-through overlay rendering.
+//
+// Enterprise references:
+//   - Chromium PaintRect fill: alpha = 60/255 (~24%) at full step, fades to 0
+//   - Chromium debug_colors.cc FadedGreen: initial_value=60 for fill, 255 for border
+//   - GTK4 updatesoverlay.c: alpha = 0.4 * (1 - progress) (red, no per-source)
+//
+// Our palette stores the BORDER alpha (high). Fill alpha is computed as
+// borderAlpha * 0.2 in drawRect (border=visible outline, fill=subtle tint).
 var damagePalette = [8]color.RGBA{
-	{R: 0, G: 200, B: 0, A: 80},    // green
-	{R: 0, G: 100, B: 255, A: 80},  // blue
-	{R: 255, G: 140, B: 0, A: 80},  // orange
-	{R: 160, G: 32, B: 240, A: 80}, // purple
-	{R: 0, G: 210, B: 210, A: 80},  // cyan
-	{R: 255, G: 220, B: 0, A: 80},  // yellow
-	{R: 220, G: 0, B: 180, A: 80},  // magenta
-	{R: 50, G: 205, B: 50, A: 80},  // lime
+	{R: 0, G: 220, B: 0, A: 180},    // green  — border 70%, fill 14%
+	{R: 0, G: 100, B: 255, A: 180},  // blue
+	{R: 255, G: 140, B: 0, A: 180},  // orange
+	{R: 160, G: 32, B: 240, A: 180}, // purple
+	{R: 0, G: 210, B: 210, A: 180},  // cyan
+	{R: 255, G: 220, B: 0, A: 180},  // yellow
+	{R: 220, G: 0, B: 180, A: 180},  // magenta
+	{R: 50, G: 205, B: 50, A: 180},  // lime
 }
 
 // DamageSource is a concrete damage reporter for a single renderer registered
