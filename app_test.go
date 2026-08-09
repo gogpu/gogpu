@@ -363,6 +363,7 @@ func TestGpucontextKeyToInputKey(t *testing.T) {
 		{"ScrollLock", gpucontext.KeyScrollLock, input.KeyScrollLock},
 		{"NumLock", gpucontext.KeyNumLock, input.KeyNumLock},
 		{"Pause", gpucontext.KeyPause, input.KeyPause},
+		{"Cancel", gpucontext.KeyCancel, input.KeyCancel},
 		{"Unknown", gpucontext.Key(9999), input.KeyUnknown},
 	}
 

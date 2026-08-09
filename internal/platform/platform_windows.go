@@ -2003,6 +2003,7 @@ const (
 	vkControl   = 0x11
 	vkMenu      = 0x12 // Alt
 	vkPause     = 0x13
+	vkCancel    = 0x03 // Ctrl+Break arrives as VK_CANCEL, not VK_PAUSE
 	vkCapital   = 0x14 // Caps Lock
 	vkSpace     = 0x20
 	vkPrior     = 0x21 // Page Up
@@ -2232,6 +2233,11 @@ func vkCodeToKey(vkCode uintptr) gpucontext.Key {
 		return gpucontext.KeyNumLock
 	case vkPause:
 		return gpucontext.KeyPause
+	case vkCancel:
+		// Ctrl+Break is delivered as VK_CANCEL (0x03), distinct from the
+		// plain Pause key (VK_PAUSE). Report it as KeyCancel so hosts can
+		// bind Ctrl+Break to an interrupt without losing the distinction.
+		return gpucontext.KeyCancel
 	}
 
 	return gpucontext.KeyUnknown
