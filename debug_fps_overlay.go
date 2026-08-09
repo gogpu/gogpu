@@ -32,6 +32,9 @@ const fpsBarWidth = 60
 // A 60fps frame (16.67ms) fills about half the bar; slower frames grow taller.
 const fpsBarMaxHeight = 100
 
+// overlayNameFPS is the overlay identifier for the FPS debug overlay.
+const overlayNameFPS = "fps"
+
 // fpsDebugMode controls which FPS debug features are active.
 type fpsDebugMode struct {
 	overlay bool // Visual bar in top-right corner
@@ -51,9 +54,9 @@ func parseFPSDebugMode() fpsDebugMode {
 	var mode fpsDebugMode
 	for _, part := range strings.Split(val, ",") {
 		switch strings.TrimSpace(part) {
-		case "overlay":
+		case overlayModeOverlay:
 			mode.overlay = true
-		case "log":
+		case overlayModeLog:
 			mode.log = true
 		}
 	}
@@ -95,15 +98,8 @@ type fpsDebugOverlay struct {
 	lastDraw time.Time
 	lastLog  time.Time
 
-	// GPU pipeline resources -- lazy init on first Draw.
-	pipeline       *wgpu.RenderPipeline
-	pipelineLayout *wgpu.PipelineLayout
-	shader         *wgpu.ShaderModule
-	uniformLayout  *wgpu.BindGroupLayout
-	uniformBuffer  *wgpu.Buffer
-	uniformBindGrp *wgpu.BindGroup
-	uniformData    []byte
-	pipelineInited bool
+	// Shared GPU pipeline resources -- lazy init on first Draw.
+	*overlayPipeline
 
 	// device is the GPU device for pipeline creation and uniform writes.
 	device *wgpu.Device
@@ -116,7 +112,7 @@ type fpsDebugOverlay struct {
 }
 
 // Name returns the overlay identifier for registration and env var filtering.
-func (o *fpsDebugOverlay) Name() string { return "fps" }
+func (o *fpsDebugOverlay) Name() string { return overlayNameFPS }
 
 // Draw renders the FPS overlay for the current frame.
 //
@@ -201,11 +197,13 @@ func (o *fpsDebugOverlay) logFPS(now time.Time, frameNumber uint64) {
 // renderBar draws the FPS bar (background + colored bar) in the top-right
 // corner of the surface.
 func (o *fpsDebugOverlay) renderBar(ctx gpucontext.DebugOverlayContext) {
-	if !o.pipelineInited {
-		if err := o.initPipeline(ctx); err != nil {
+	if o.overlayPipeline == nil || !o.inited {
+		p, err := initOverlayPipeline(o.device, o.surfaceFormat, "FPS", damageOverlayShaderSource)
+		if err != nil {
 			slog.Error("gogpu: fps overlay pipeline init failed", "err", err)
 			return
 		}
+		o.overlayPipeline = p
 	}
 
 	stats := o.computeStats()
@@ -304,120 +302,6 @@ func (o *fpsDebugOverlay) drawQuad(
 	}
 }
 
-// initPipeline creates the GPU pipeline resources for the FPS overlay.
-// Called lazily on first Draw. Zero cost when overlay is not active.
-// Reuses damageOverlayShaderSource (same flat-color quad shader).
-//
-//nolint:funlen // pipeline init is inherently sequential setup code
-func (o *fpsDebugOverlay) initPipeline(ctx gpucontext.DebugOverlayContext) error {
-	if o.device == nil {
-		return fmt.Errorf("gogpu: fps overlay: no GPU device")
-	}
-
-	var err error
-
-	o.shader, err = o.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
-		Label: "FPS Overlay Shader",
-		WGSL:  damageOverlayShaderSource,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: fps overlay shader: %w", err)
-	}
-
-	o.uniformLayout, err = o.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Label: "FPS Overlay Uniform Layout",
-		Entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-				Buffer: &gputypes.BufferBindingLayout{
-					Type:           gputypes.BufferBindingTypeUniform,
-					MinBindingSize: damageOverlayUniformSize,
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: fps overlay uniform layout: %w", err)
-	}
-
-	o.pipelineLayout, err = o.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
-		Label:            "FPS Overlay Pipeline Layout",
-		BindGroupLayouts: []*wgpu.BindGroupLayout{o.uniformLayout},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: fps overlay pipeline layout: %w", err)
-	}
-
-	// Alpha blending: premultiplied source over destination.
-	// SrcFactor=One because color is pre-multiplied in drawQuad.
-	o.pipeline, err = o.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
-		Label:  "FPS Overlay Pipeline",
-		Layout: o.pipelineLayout,
-		Vertex: wgpu.VertexState{
-			Module:     o.shader,
-			EntryPoint: "vs_main",
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Fragment: &wgpu.FragmentState{
-			Module:     o.shader,
-			EntryPoint: "fs_main",
-			Targets: []gputypes.ColorTargetState{
-				{
-					Format:    o.surfaceFormat,
-					WriteMask: gputypes.ColorWriteMaskAll,
-					Blend: &gputypes.BlendState{
-						Color: gputypes.BlendComponent{
-							Operation: gputypes.BlendOperationAdd,
-							SrcFactor: gputypes.BlendFactorOne,
-							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
-						},
-						Alpha: gputypes.BlendComponent{
-							Operation: gputypes.BlendOperationAdd,
-							SrcFactor: gputypes.BlendFactorOne,
-							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
-						},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: fps overlay pipeline: %w", err)
-	}
-
-	o.uniformBuffer, err = o.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "FPS Overlay Uniforms",
-		Size:  damageOverlayUniformSize,
-		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: fps overlay uniform buffer: %w", err)
-	}
-
-	o.uniformBindGrp, err = o.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  "FPS Overlay Uniform Bind Group",
-		Layout: o.uniformLayout,
-		Entries: []wgpu.BindGroupEntry{
-			{
-				Binding: 0,
-				Buffer:  o.uniformBuffer,
-				Size:    damageOverlayUniformSize,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: fps overlay uniform bind group: %w", err)
-	}
-
-	o.uniformData = make([]byte, damageOverlayUniformSize)
-	o.pipelineInited = true
-	return nil
-}
-
 // initFPSOverlayIfNeeded checks the GOGPU_DEBUG_FPS env var and
 // auto-registers the FPS overlay on the given RenderTarget. Called once
 // per surface during the first drawDebugOverlays call.
@@ -431,7 +315,7 @@ func initFPSOverlayIfNeeded(ws *RenderTarget) {
 	}
 	// Check if already registered.
 	for _, ov := range ws.debugOverlays {
-		if ov.Name() == "fps" {
+		if ov.Name() == overlayNameFPS {
 			return
 		}
 	}

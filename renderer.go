@@ -978,11 +978,11 @@ func (r *Renderer) initTrianglePipeline() error {
 		Layout: r.trianglePipelineLayout,
 		Vertex: wgpu.VertexState{
 			Module:     r.triangleShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     r.triangleShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    r.surfaceFormat,
@@ -1131,7 +1131,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		Layout: r.texQuadPipelineLayout,
 		Vertex: wgpu.VertexState{
 			Module:     r.texQuadShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 		},
 		Primitive: gputypes.PrimitiveState{
 			Topology: gputypes.PrimitiveTopologyTriangleList,
@@ -1139,7 +1139,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     r.texQuadShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    r.surfaceFormat,
