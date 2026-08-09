@@ -16,9 +16,9 @@ import (
 
 	"github.com/gogpu/gg"
 	_ "github.com/gogpu/gg/gpu" // enable GPU-bound rendering and rasterized tiles
-	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gg/integration/ggcanvas"
-	"github.com/gogpu/gogpu"    // https://pkg.go.dev/github.com/gogpu/gogpu#readme-ecosystem
+	"github.com/gogpu/gg/text"
+	"github.com/gogpu/gogpu" // https://pkg.go.dev/github.com/gogpu/gogpu#readme-ecosystem
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/wgpu"
 )
@@ -38,11 +38,11 @@ const (
 
 // state stores the application state (uniforms, color palette, and FPS stats).
 type state struct {
-	frameCounter          int     // tracks the number of frames rendered
-	zoom, fps             float64 // zoom tracks the magnification factor of the current frame; fps imprecisely tracks FPS rendered
+	frameCount int     // tracks the number of frames rendered
+	zoom, fps  float64 // zoom tracks the magnification factor of the current frame; fps imprecisely tracks FPS rendered
 	targetXHi, targetYHi,
-	targetXLo, targetYLo  float32 // double-precision target coordinates in the complex plane
-	paletteColors        []uint32 // pre-computed color palette
+	targetXLo, targetYLo float32 // double-precision target coordinates in the complex plane
+	paletteColors []uint32 // pre-computed color palette
 
 }
 
@@ -74,10 +74,10 @@ type renderer struct {
 
 // uniforms stores per-frame uniforms.
 type uniforms struct { // total: (1 uint32 field + 11 float32 fields) * 4 bytes == 48 bytes
-	paletteSize                                     uint32
-	frameCounter, iterations, pad                  float32 // block 1
-	width,        height,     zoomHi,    zoomLo    float32 // block 2
-	targetXHi,    targetYHi,  targetXLo, targetYLo float32 // block 3
+	paletteSize                                uint32
+	frameCount, iterations, pad                float32 // block 1
+	width, height, zoomHi, zoomLo              float32 // block 2
+	targetXHi, targetYHi, targetXLo, targetYLo float32 // block 3
 }
 
 func main() {
@@ -120,7 +120,7 @@ func main() {
 			app.Quit()
 		}
 		if key == gpucontext.KeyW && mods.HasSuper() { // ⌘+w
-			if animToken.Load() != nil {                 // reduce GPU load by suspending animation while the primary window is hidden
+			if animToken.Load() != nil { // reduce GPU load by suspending animation while the primary window is hidden
 				animToken.Swap(nil)
 			}
 			app.PrimaryWindow().Hide()
@@ -147,7 +147,6 @@ func main() {
 				app.RequestRedraw() // renders at VSync frequency (~60 FPS)
 			}
 		}()
-
 	})
 
 	lastFrameTime = time.Now()
@@ -164,12 +163,12 @@ func newRenderer(coords coords) *renderer {
 	targetYHi, targetYLo := splitFloat64(coords.y)
 	return &renderer{
 		state: &state{
-			frameCounter: 0,
-			zoom:         initialZoom,
-			targetXHi:    targetXHi,
-			targetXLo:    targetXLo,
-			targetYHi:    targetYHi,
-			targetYLo:    targetYLo,
+			frameCount: 0,
+			zoom:       initialZoom,
+			targetXHi:  targetXHi,
+			targetXLo:  targetXLo,
+			targetYHi:  targetYHi,
+			targetYLo:  targetYLo,
 		},
 		gpu:    &gpu{},
 		assets: &assets{},
@@ -180,7 +179,9 @@ func newRenderer(coords coords) *renderer {
 func (r *renderer) init(app *gogpu.App) {
 	var err error
 	r.assets.fontSource, err = loadFontSource()
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	r.gpu.device = app.DeviceProvider().Device()
 
 	paletteColors,
@@ -190,29 +191,35 @@ func (r *renderer) init(app *gogpu.App) {
 		bgLayout1,
 		pipeline := initResources(r.gpu.device, baseIterations)
 
-	r.state.paletteColors  = paletteColors
+	r.state.paletteColors = paletteColors
 	r.gpu.paletteBuf = paletteBuf
 	r.gpu.uniformBuf = uniformBuf
-	r.gpu.bgLayout0  = bgLayout0
-	r.gpu.bgLayout1  = bgLayout1
-	r.gpu.pipeline   = pipeline
+	r.gpu.bgLayout0 = bgLayout0
+	r.gpu.bgLayout1 = bgLayout1
+	r.gpu.pipeline = pipeline
 
 	r.assets.canvas, err = ggcanvas.New(app.GPUContextProvider(), width, height)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	r.assets.canvas.Context().SetFont(r.assets.fontSource.Face(12))
 
-	err = r.gpu.device.Queue().WriteBuffer(r.gpu.paletteBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&r.state.paletteColors[0])), len(r.state.paletteColors) * 4))
-	if err != nil { panic(err) }
+	err = r.gpu.device.Queue().WriteBuffer(r.gpu.paletteBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&r.state.paletteColors[0])), len(r.state.paletteColors)*4))
+	if err != nil {
+		panic(err)
+	}
 
 	r.gpu.staticBindGroup, err = r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Layout:  r.gpu.bgLayout0,
+		Layout: r.gpu.bgLayout0,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Size: 48,                      Buffer: r.gpu.uniformBuf},
+			{Binding: 0, Size: 48, Buffer: r.gpu.uniformBuf},
 			{Binding: 1, Size: uint64(paletteSize * 4), Buffer: r.gpu.paletteBuf},
 		},
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	r.assets.fractalView, r.assets.relFractalView = r.assets.canvas.Context().CreateOffscreenTexture(width, height)
 	if r.assets.relFractalView == nil {
@@ -222,11 +229,13 @@ func (r *renderer) init(app *gogpu.App) {
 
 // draw renders a new frame to the canvas.
 func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.AnimationToken]) {
-	if r.assets.canvas.Context() == nil { return } // the call to c.release() below calls c.canvas.Close()
+	if r.assets.canvas.Context() == nil {
+		return // the call to c.release() below calls c.canvas.Close()
+	}
 
 	// TODO(jbunds): programmatically determine the value of the magic number 2745,
 	//               ideally by detecting the current frame == the previous frame
-	if r.state.frameCounter > 2745 {
+	if r.state.frameCount > 2745 {
 		token.Load().Stop()
 		r.release()
 		fmt.Println("stopped rendering (precision exhausted)")
@@ -236,65 +245,79 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	// per-frame state updates
 
 	r.state.zoom *= zoomFactor
-	r.state.frameCounter++
+	r.state.frameCount++
 
 	unis := updateUniforms( // magnification logic
-		r.state.frameCounter,
+		r.state.frameCount,
 		width, height,
 		r.state.targetXHi, r.state.targetXLo,
 		r.state.targetYHi, r.state.targetYLo,
 		r.state.zoom,
-		float64(baseIterations) + float64(r.state.frameCounter) * growthRate, // GPU fractal region-detection iterations
+		float64(baseIterations)+float64(r.state.frameCount)*growthRate, // GPU fractal region-detection iterations
 	)
 
 	err := r.gpu.device.Queue().WriteBuffer(r.gpu.uniformBuf, 0, unsafe.Slice((*byte)(unsafe.Pointer(&unis)), 48))
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	transientBindGroup, err := r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Layout:  r.gpu.bgLayout1,
+		Layout: r.gpu.bgLayout1,
 		Entries: []wgpu.BindGroupEntry{{
 			Binding:     0,
 			TextureView: (*wgpu.TextureView)(r.assets.fractalView.Pointer()),
 		}},
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	defer transientBindGroup.Release()
 
 	surfaceWidth, surfaceHeight := dc.SurfaceSize() // https://pkg.go.dev/github.com/gogpu/gogpu#App.ScaleFactor
 
 	// encode & dispatch
 	encoder, err := r.gpu.device.CreateCommandEncoder(nil)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	pass, err := encoder.BeginComputePass(nil)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	pass.SetPipeline(r.gpu.pipeline)
-	pass.SetBindGroup(0, r.gpu.staticBindGroup,  nil)
+	pass.SetBindGroup(0, r.gpu.staticBindGroup, nil)
 	pass.SetBindGroup(1, transientBindGroup, nil)
 	pass.Dispatch(((surfaceWidth + 15) / 16), ((surfaceHeight + 7) / 8), 1)
 
 	err = pass.End()
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	cmds, err := encoder.Finish()
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	r.gpu.device.Queue().Submit(cmds)
 
 	err = r.assets.canvas.Draw(func(cc *gg.Context) {
 		cc.DrawGPUTextureBase(r.assets.fractalView, 0, 0, width, height)
 		cc.SetRGBA(0, 0, 0, 0.15)
-		cc.DrawRoundedRectangle(10, height - 40, 336, 30, 4)
+		cc.DrawRoundedRectangle(10, height-40, 336, 30, 4)
 		cc.Fill()
 		cc.SetColor(gg.Red)
-		cc.DrawString(fmt.Sprintf("FPS: %.0f",             r.state.fps         ),  18, height - 20)
+		cc.DrawString(fmt.Sprintf("FPS: %.0f", r.state.fps), 18, height-20)
 		cc.SetColor(gg.Green)
-		cc.DrawString(fmt.Sprintf("magnification: %e", 1 / r.state.zoom        ),  72, height - 20)
+		cc.DrawString(fmt.Sprintf("magnification: %e", 1/r.state.zoom), 72, height-20)
 		cc.SetColor(gg.Yellow)
-		cc.DrawString(fmt.Sprintf("frames: %d",            r.state.frameCounter), 258, height - 20)
+		cc.DrawString(fmt.Sprintf("frames: %d", r.state.frameCount), 258, height-20)
 	})
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	err = r.assets.canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight)
 	if err != nil {
@@ -304,7 +327,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 // addPointsMenu creates a "Points" menu to allow users to select a new points of interest from a preset list of named target coordinates.
 func (r *renderer) addPointsMenu(app *gogpu.App, cc *atomic.Value, token *atomic.Pointer[gogpu.AnimationToken], item string) {
-	points     := pointsOfInterest()
+	points := pointsOfInterest()
 	pointsMenu := gogpu.NewMenuWithTitle("Points")
 
 	for _, v := range slices.Sorted(maps.Keys(points)) {
@@ -340,27 +363,26 @@ func (r *renderer) release() {
 
 // updateUniforms updates the per-frame uniforms passed to the GPU shader.
 func updateUniforms(
-	frameCounter                               int,
-	width,     height                          uint32,
+	frameCount int,
+	width, height uint32,
 	targetXHi, targetXLo, targetYHi, targetYLo float32,
-	zoom,      iterations                      float64) uniforms {
-
+	zoom, iterations float64) uniforms {
 	zoomHi, zoomLo := splitFloat64(zoom)
 
 	return uniforms{
-		paletteSize:  paletteSize,
-		width:        float32(width),
-		height:       float32(height),
-		iterations:   float32(iterations),
+		paletteSize: paletteSize,
+		width:       float32(width),
+		height:      float32(height),
+		iterations:  float32(iterations),
 
-		zoomHi:       zoomHi,
-		zoomLo:       zoomLo,
-		targetXHi:    targetXHi,
-		targetYHi:    targetYHi,
+		zoomHi:    zoomHi,
+		zoomLo:    zoomLo,
+		targetXHi: targetXHi,
+		targetYHi: targetYHi,
 
-		targetXLo:    targetXLo,
-		targetYLo:    targetYLo,
-		frameCounter: float32(frameCounter),
+		targetXLo:  targetXLo,
+		targetYLo:  targetYLo,
+		frameCount: float32(frameCount),
 	}
 }
 
@@ -377,6 +399,6 @@ func toggleAnimation(app *gogpu.App, token *atomic.Pointer[gogpu.AnimationToken]
 // splitFloat64 splits a float64 into two float32s.
 func splitFloat64(v float64) (float32, float32) {
 	high := float32(v)
-	low  := float32(v - float64(high))
+	low := float32(v - float64(high))
 	return high, low
 }

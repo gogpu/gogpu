@@ -17,12 +17,12 @@ type coords struct {
 // pointsOfInterest returns a slice of named x, y coordinates of canonical points of interest in the Mandelbrot set.
 func pointsOfInterest() map[string]coords {
 	return map[string]coords{
-		"spiral":    {name: "spiral",    x: -0.088,             y: 0.6555           }, // default
-		"elephant":  {name: "elephant",  x:  0.2777,            y: 0.0073           },
-		"lightning": {name: "lightning", x: -1.25066,           y: 0.02012          },
-		"seahorse":  {name: "seahorse",  x: -0.743643887037151, y: 0.131825904205330},
-		"scepter":   {name: "scepter",   x: -1.45,              y: 0.0              },
-		"spider":    {name: "spider",    x: -1.4063,            y: 0.0              },
+		"spiral":    {name: "spiral", x: -0.088, y: 0.6555}, // default
+		"elephant":  {name: "elephant", x: 0.2777, y: 0.0073},
+		"lightning": {name: "lightning", x: -1.25066, y: 0.02012},
+		"seahorse":  {name: "seahorse", x: -0.743643887037151, y: 0.131825904205330},
+		"scepter":   {name: "scepter", x: -1.45, y: 0.0},
+		"spider":    {name: "spider", x: -1.4063, y: 0.0},
 	}
 }
 
@@ -40,7 +40,7 @@ func flags(fs *flag.FlagSet, args []string) (coords, error) {
 		fs.Usage()
 		return coords{}, err
 	}
-	points     := pointsOfInterest()
+	points := pointsOfInterest()
 	target, ok := points[name]
 	if !ok {
 		fs.Usage()
@@ -61,7 +61,7 @@ func flags(fs *flag.FlagSet, args []string) (coords, error) {
 func filterArgs(args []string) []string {
 	for i, arg := range args {
 		if arg == "--" {
-			args = args[i + 1:]
+			args = args[i+1:]
 			break
 		}
 	}
