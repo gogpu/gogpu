@@ -1,28 +1,39 @@
 package gogpu
 
 // damageOverlayShaderSource is the WGSL shader for rendering flat-color quads
-// in the damage debug overlay. Uses the same pixel-to-NDC conversion pattern
-// as positionedQuadShaderSource in shader.go but without texture sampling —
-// output is a solid color from the uniform buffer.
+// via instanced draw. Each instance provides its own rect position, size, and
+// color through instance-rate vertex attributes. A single uniform buffer holds
+// only the screen dimensions for pixel-to-NDC conversion.
 //
-// Uniform layout (48 bytes, 16-byte aligned):
+// Uniform layout (16 bytes, 16-byte aligned):
 //
-//	rect:   vec4<f32>  — x, y, width, height in physical pixels
 //	screen: vec2<f32>  — surface width, height in physical pixels
 //	_pad:   vec2<f32>  — alignment padding (vec4 boundary)
-//	color:  vec4<f32>  — RGBA with pre-multiplied fade alpha
+//
+// Instance vertex layout (32 bytes per instance, VertexStepModeInstance):
+//
+//	rectXY: vec2<f32>  — top-left corner in physical pixels  (location 0)
+//	rectWH: vec2<f32>  — width, height in physical pixels    (location 1)
+//	color:  vec4<f32>  — RGBA with pre-multiplied fade alpha (location 2)
 const damageOverlayShaderSource = `
-struct RectUniforms {
-    rect:   vec4<f32>,
+struct ScreenUniforms {
     screen: vec2<f32>,
-    _pad:   vec2<f32>,
-    color:  vec4<f32>,
 }
 
-@group(0) @binding(0) var<uniform> uniforms: RectUniforms;
+@group(0) @binding(0) var<uniform> uniforms: ScreenUniforms;
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+}
 
 @vertex
-fn vs_main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
+fn vs_main(
+    @builtin(vertex_index) vertIdx: u32,
+    @location(0) rectXY: vec2<f32>,
+    @location(1) rectWH: vec2<f32>,
+    @location(2) color: vec4<f32>,
+) -> VertexOutput {
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0),
         vec2<f32>(0.0, 1.0),
@@ -32,16 +43,20 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
         vec2<f32>(1.0, 0.0)
     );
 
-    let corner = corners[idx];
-    let pixelX = uniforms.rect.x + corner.x * uniforms.rect.z;
-    let pixelY = uniforms.rect.y + corner.y * uniforms.rect.w;
-    let ndcX = (pixelX / uniforms.screen.x) * 2.0 - 1.0;
-    let ndcY = 1.0 - (pixelY / uniforms.screen.y) * 2.0;
-    return vec4<f32>(ndcX, ndcY, 0.0, 1.0);
+    let c = corners[vertIdx];
+    let px = rectXY.x + c.x * rectWH.x;
+    let py = rectXY.y + c.y * rectWH.y;
+    let ndcX = (px / uniforms.screen.x) * 2.0 - 1.0;
+    let ndcY = 1.0 - (py / uniforms.screen.y) * 2.0;
+
+    var out: VertexOutput;
+    out.position = vec4<f32>(ndcX, ndcY, 0.0, 1.0);
+    out.color = color;
+    return out;
 }
 
 @fragment
-fn fs_main() -> @location(0) vec4<f32> {
-    return uniforms.color;
+fn fs_main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
+    return color;
 }
 `

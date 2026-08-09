@@ -292,11 +292,18 @@ func TestDamageFlashDuration(t *testing.T) {
 	}
 }
 
-// --- damageOverlayUniformSize constant test ---
+// --- overlay constant tests ---
 
-func TestDamageOverlayUniformSize(t *testing.T) {
-	// rect(4f=16) + screen(2f=8) + pad(2f=8) + color(4f=16) = 48 bytes.
-	if damageOverlayUniformSize != 48 {
-		t.Errorf("damageOverlayUniformSize = %d, want 48", damageOverlayUniformSize)
+func TestOverlayUniformSize(t *testing.T) {
+	// screen(2f=8) + pad(2f=8) = 16 bytes.
+	if overlayUniformSize != 16 {
+		t.Errorf("overlayUniformSize = %d, want 16", overlayUniformSize)
+	}
+}
+
+func TestOverlayInstanceStride(t *testing.T) {
+	// rectXY(f32x2=8) + rectWH(f32x2=8) + color(f32x4=16) = 32 bytes.
+	if overlayInstanceStride != 32 {
+		t.Errorf("overlayInstanceStride = %d, want 32", overlayInstanceStride)
 	}
 }

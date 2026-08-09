@@ -1,11 +1,9 @@
 package gogpu
 
 import (
-	"encoding/binary"
 	"image"
 	"image/color"
 	"log/slog"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -18,10 +16,6 @@ import (
 
 // Compile-time interface check: damageDebugOverlay must implement DebugOverlay.
 var _ gpucontext.DebugOverlay = (*damageDebugOverlay)(nil)
-
-// damageOverlayUniformSize is the size of the uniform buffer for the damage
-// overlay shader. Layout: rect(4) + screen(2) + pad(2) + color(4) = 48 bytes.
-const damageOverlayUniformSize = 48
 
 // overlayNameDamage is the overlay identifier for the damage debug overlay.
 const overlayNameDamage = "damage"
@@ -256,7 +250,8 @@ func (o *damageDebugOverlay) refreshOrAddFlash(name string, c color.RGBA, rect i
 }
 
 // renderBuiltIn renders flat-color quads for all active flashes using the
-// built-in GPU pipeline.
+// built-in instanced GPU pipeline. All quads are packed into a single
+// instance buffer and drawn with one Draw(6, N) call.
 func (o *damageDebugOverlay) renderBuiltIn(ctx gpucontext.DebugOverlayContext) {
 	if len(o.flashes) == 0 {
 		return
@@ -275,6 +270,8 @@ func (o *damageDebugOverlay) renderBuiltIn(ctx gpucontext.DebugOverlayContext) {
 	encoder := (*wgpu.CommandEncoder)(ctx.Encoder.Pointer())
 	view := (*wgpu.TextureView)(ctx.SurfaceView.Pointer())
 
+	// Pack all instances into a staging buffer.
+	var instances []byte
 	for i := range o.flashes {
 		f := &o.flashes[i]
 		alpha := o.fadeAlpha(f, now)
@@ -290,13 +287,35 @@ func (o *damageDebugOverlay) renderBuiltIn(ctx gpucontext.DebugOverlayContext) {
 			continue
 		}
 
-		// Single fill rect with moderate alpha. Border rendering requires
-		// separate uniform buffers per draw (GPU race on shared buffer).
-		// Borders will be added by gg text-enhanced overlay (DamageOverlayRenderer).
-		// Chromium FadedGreen(60) fill = ~24% max alpha.
+		// Pre-multiply color by fade alpha for fill quad.
+		// Chromium FadedGreen(60) fill = ~24% max alpha; we use 18%.
 		fillAlpha := alpha * 0.18
-		o.drawRect(encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, rect, f.color, fillAlpha)
+		r := float32(f.color.R) / 255.0 * fillAlpha
+		g := float32(f.color.G) / 255.0 * fillAlpha
+		b := float32(f.color.B) / 255.0 * fillAlpha
+		appendInstance(&instances, rect, r, g, b, fillAlpha)
+
+		// Border quads: 3px-wide strips at ~70% alpha (visible outline).
+		const borderWidth = 3
+		if rect.Dx() > borderWidth*2 && rect.Dy() > borderWidth*2 {
+			borderAlpha := alpha * 0.7
+			br := float32(f.color.R) / 255.0 * borderAlpha
+			bg := float32(f.color.G) / 255.0 * borderAlpha
+			bb := float32(f.color.B) / 255.0 * borderAlpha
+
+			// Top border
+			appendInstance(&instances, image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+borderWidth), br, bg, bb, borderAlpha)
+			// Bottom border
+			appendInstance(&instances, image.Rect(rect.Min.X, rect.Max.Y-borderWidth, rect.Max.X, rect.Max.Y), br, bg, bb, borderAlpha)
+			// Left border (between top and bottom)
+			appendInstance(&instances, image.Rect(rect.Min.X, rect.Min.Y+borderWidth, rect.Min.X+borderWidth, rect.Max.Y-borderWidth), br, bg, bb, borderAlpha)
+			// Right border (between top and bottom)
+			appendInstance(&instances, image.Rect(rect.Max.X-borderWidth, rect.Min.Y+borderWidth, rect.Max.X, rect.Max.Y-borderWidth), br, bg, bb, borderAlpha)
+		}
 	}
+
+	// One render pass, one draw call for all quads.
+	o.renderInstances(o.device, encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, instances)
 }
 
 // fadeAlpha computes the current alpha for a flash based on elapsed time.
@@ -307,63 +326,6 @@ func (o *damageDebugOverlay) fadeAlpha(f *damageFlash, now time.Time) float32 {
 		return 0
 	}
 	return 1.0 - float32(elapsed.Seconds()/damageFlashDuration.Seconds())
-}
-
-// drawRect renders a single flat-color quad with the given rect and faded color.
-func (o *damageDebugOverlay) drawRect(
-	encoder *wgpu.CommandEncoder,
-	view *wgpu.TextureView,
-	surfW, surfH uint32,
-	rect image.Rectangle,
-	c color.RGBA,
-	alpha float32,
-) {
-	// Pre-multiply color by the caller-provided alpha.
-	// For fill: alpha ~0.12 (subtle tint). For border: alpha ~0.7 (visible outline).
-	r := float32(c.R) / 255.0 * alpha
-	g := float32(c.G) / 255.0 * alpha
-	b := float32(c.B) / 255.0 * alpha
-	baseAlpha := alpha
-
-	// Write uniforms: rect(4f) + screen(2f) + pad(2f) + color(4f) = 48 bytes
-	binary.LittleEndian.PutUint32(o.uniformData[0:4], math.Float32bits(float32(rect.Min.X)))
-	binary.LittleEndian.PutUint32(o.uniformData[4:8], math.Float32bits(float32(rect.Min.Y)))
-	binary.LittleEndian.PutUint32(o.uniformData[8:12], math.Float32bits(float32(rect.Dx())))
-	binary.LittleEndian.PutUint32(o.uniformData[12:16], math.Float32bits(float32(rect.Dy())))
-	binary.LittleEndian.PutUint32(o.uniformData[16:20], math.Float32bits(float32(surfW)))
-	binary.LittleEndian.PutUint32(o.uniformData[20:24], math.Float32bits(float32(surfH)))
-	// padding bytes 24-31 (zeroed at alloc, no write needed)
-	binary.LittleEndian.PutUint32(o.uniformData[32:36], math.Float32bits(r))
-	binary.LittleEndian.PutUint32(o.uniformData[36:40], math.Float32bits(g))
-	binary.LittleEndian.PutUint32(o.uniformData[40:44], math.Float32bits(b))
-	binary.LittleEndian.PutUint32(o.uniformData[44:48], math.Float32bits(baseAlpha))
-
-	if err := o.device.Queue().WriteBuffer(o.uniformBuffer, 0, o.uniformData); err != nil {
-		slog.Error("gogpu: damage overlay WriteBuffer failed", "err", err)
-		return
-	}
-
-	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		ColorAttachments: []wgpu.RenderPassColorAttachment{
-			{
-				View:    view,
-				LoadOp:  gputypes.LoadOpLoad,
-				StoreOp: gputypes.StoreOpStore,
-			},
-		},
-	})
-	if err != nil {
-		slog.Error("gogpu: damage overlay BeginRenderPass failed", "err", err)
-		return
-	}
-
-	renderPass.SetPipeline(o.pipeline)
-	renderPass.SetBindGroup(0, o.uniformBindGrp, nil)
-	renderPass.Draw(6, 1, 0, 0)
-
-	if err := renderPass.End(); err != nil {
-		slog.Error("gogpu: damage overlay End render pass failed", "err", err)
-	}
 }
 
 // logDamage emits structured slog output for the current frame's damage.

@@ -435,11 +435,12 @@ func TestDamagePalette_AllDistinct(t *testing.T) {
 }
 
 // TestDamagePalette_AllSemiTransparent verifies that all palette colors have
-// low alpha for overlay rendering.
+// non-zero alpha for border rendering. The palette stores BORDER alpha (high
+// visibility). Fill alpha is computed dynamically as borderAlpha * fraction.
 func TestDamagePalette_AllSemiTransparent(t *testing.T) {
 	for i, c := range damagePalette {
-		if c.A == 0 || c.A > 128 {
-			t.Errorf("palette[%d].A = %d, want semi-transparent (1-128)", i, c.A)
+		if c.A == 0 || c.A == 255 {
+			t.Errorf("palette[%d].A = %d, want semi-transparent (1-254)", i, c.A)
 		}
 	}
 }

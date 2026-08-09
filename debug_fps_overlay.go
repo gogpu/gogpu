@@ -1,11 +1,9 @@
 package gogpu
 
 import (
-	"encoding/binary"
 	"fmt"
 	"image"
 	"log/slog"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -200,7 +198,7 @@ func (o *fpsDebugOverlay) logFPS(now time.Time, frameNumber uint64) {
 }
 
 // renderBar draws the FPS bar (background + colored bar) in the top-right
-// corner of the surface.
+// corner of the surface via instanced draw (2 instances, 1 draw call).
 func (o *fpsDebugOverlay) renderBar(ctx gpucontext.DebugOverlayContext) {
 	if o.overlayPipeline == nil || !o.inited {
 		p, err := initOverlayPipeline(o.device, o.surfaceFormat, "FPS", damageOverlayShaderSource)
@@ -230,9 +228,12 @@ func (o *fpsDebugOverlay) renderBar(ctx gpucontext.DebugOverlayContext) {
 	encoder := (*wgpu.CommandEncoder)(ctx.Encoder.Pointer())
 	view := (*wgpu.TextureView)(ctx.SurfaceView.Pointer())
 
-	// 1. Background quad (semi-transparent dark).
+	// Pack both quads as instances.
+	var instances []byte
+
+	// 1. Background quad (semi-transparent dark, pre-multiplied: 0*0.5=0).
 	bgRect := image.Rect(int(barX)-2, int(barY)-2, int(barX)+fpsBarWidth+2, int(barY)+fpsBarMaxHeight+2)
-	o.drawQuad(encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, bgRect, 0.0, 0.0, 0.0, 0.5)
+	appendInstance(&instances, bgRect, 0.0, 0.0, 0.0, 0.5)
 
 	// 2. Colored bar: green >= 55fps, yellow 30-54, red < 30.
 	var r, g, b float32
@@ -249,62 +250,12 @@ func (o *fpsDebugOverlay) renderBar(ctx gpucontext.DebugOverlayContext) {
 	barBottom := barY + fpsBarMaxHeight
 	barTop := barBottom - barHeight
 	barRect := image.Rect(int(barX), int(barTop), int(barX)+fpsBarWidth, int(barBottom))
-	o.drawQuad(encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, barRect, r, g, b, 0.7)
-}
+	// Pre-multiply color by alpha (0.7).
+	const barAlpha = 0.7
+	appendInstance(&instances, barRect, r*barAlpha, g*barAlpha, b*barAlpha, barAlpha)
 
-// drawQuad renders a single flat-color quad with the given rect and
-// pre-multiplied RGBA color.
-func (o *fpsDebugOverlay) drawQuad(
-	encoder *wgpu.CommandEncoder,
-	view *wgpu.TextureView,
-	surfW, surfH uint32,
-	rect image.Rectangle,
-	r, g, b, a float32,
-) {
-	// Pre-multiply color by alpha.
-	pr := r * a
-	pg := g * a
-	pb := b * a
-
-	// Write uniforms: rect(4f) + screen(2f) + pad(2f) + color(4f) = 48 bytes
-	binary.LittleEndian.PutUint32(o.uniformData[0:4], math.Float32bits(float32(rect.Min.X)))
-	binary.LittleEndian.PutUint32(o.uniformData[4:8], math.Float32bits(float32(rect.Min.Y)))
-	binary.LittleEndian.PutUint32(o.uniformData[8:12], math.Float32bits(float32(rect.Dx())))
-	binary.LittleEndian.PutUint32(o.uniformData[12:16], math.Float32bits(float32(rect.Dy())))
-	binary.LittleEndian.PutUint32(o.uniformData[16:20], math.Float32bits(float32(surfW)))
-	binary.LittleEndian.PutUint32(o.uniformData[20:24], math.Float32bits(float32(surfH)))
-	// padding bytes 24-31 (zeroed at alloc, no write needed)
-	binary.LittleEndian.PutUint32(o.uniformData[32:36], math.Float32bits(pr))
-	binary.LittleEndian.PutUint32(o.uniformData[36:40], math.Float32bits(pg))
-	binary.LittleEndian.PutUint32(o.uniformData[40:44], math.Float32bits(pb))
-	binary.LittleEndian.PutUint32(o.uniformData[44:48], math.Float32bits(a))
-
-	if err := o.device.Queue().WriteBuffer(o.uniformBuffer, 0, o.uniformData); err != nil {
-		slog.Error("gogpu: fps overlay WriteBuffer failed", "err", err)
-		return
-	}
-
-	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		ColorAttachments: []wgpu.RenderPassColorAttachment{
-			{
-				View:    view,
-				LoadOp:  gputypes.LoadOpLoad,
-				StoreOp: gputypes.StoreOpStore,
-			},
-		},
-	})
-	if err != nil {
-		slog.Error("gogpu: fps overlay BeginRenderPass failed", "err", err)
-		return
-	}
-
-	renderPass.SetPipeline(o.pipeline)
-	renderPass.SetBindGroup(0, o.uniformBindGrp, nil)
-	renderPass.Draw(6, 1, 0, 0)
-
-	if err := renderPass.End(); err != nil {
-		slog.Error("gogpu: fps overlay End render pass failed", "err", err)
-	}
+	// One render pass, one draw call for both quads.
+	o.renderInstances(o.device, encoder, view, ctx.SurfaceWidth, ctx.SurfaceHeight, instances)
 }
 
 // initFPSOverlayIfNeeded checks the GOGPU_DEBUG_FPS env var and
