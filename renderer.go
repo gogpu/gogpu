@@ -97,7 +97,8 @@ type RenderTarget struct {
 	// signaling it needs another frame to complete visualization (e.g., fade
 	// animation, FPS counter). The caller (App frame loop) checks this and
 	// calls RequestRedraw for a self-sustaining render loop that automatically
-	// stops when all overlays return false (Chromium pattern).
+	// stops when all overlays return false (Chromium pattern). This is pending
+	// work for the next frame and intentionally survives lazy-state cleanup.
 	overlayNeedsRedraw bool
 
 	// hasGPUWork tracks whether any draw calls were issued this frame.
@@ -588,11 +589,17 @@ func (r *Renderer) EndFrame() {
 	r.pollSubmissions()
 }
 
+// frameEndResult reports whether the surface was reconfigured and whether all
+// work for the frame was successfully submitted and presented.
+type frameEndResult struct {
+	reconfigured bool
+	completed    bool
+}
+
 // endFrameForSurface flushes, presents, and releases frame resources for a
 // specific RenderTarget. Used by the multi-window frame loop. Unlike EndFrame,
 // it does NOT poll submissions -- the caller polls once after all windows.
-// Returns true if present() reconfigured an outdated surface (see present).
-func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
+func (r *Renderer) endFrameForSurface(ws *RenderTarget) frameEndResult {
 	// PresentPixels already presented — skip normal present path (ADR-052).
 	if ws.pixelPresented {
 		ws.discardFrameEncoder()
@@ -602,12 +609,12 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 			ws.platWindow.SyncFrame()
 		}
 		ws.releaseFrame()
-		return false
+		return frameEndResult{completed: true}
 	}
 
-	ws.flushClear(r.device, r)
+	clearOK := ws.flushClear(r.device, r)
 	ws.drawDebugOverlays()
-	ws.submitFrameEncoder(r)
+	submitOK := ws.submitFrameEncoder(r)
 	ws.frameNumber++
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
@@ -615,9 +622,10 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	if ws.platWindow != nil {
 		ws.platWindow.SyncFrame()
 	}
-	reconfigured := ws.present()
+	result := ws.present()
+	result.completed = clearOK && submitOK && result.completed
 	ws.releaseFrame()
-	return reconfigured
+	return result
 }
 
 // pollSubmissions performs non-blocking submission tracking: frees GPU resources
@@ -638,10 +646,11 @@ func (r *Renderer) pollSubmissions() {
 // wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
 // the main thread's DispatchDefaultQueue (ADR-041 Phase 2).
 //
-// Returns true if the surface was outdated and reconfigured — caller re-renders.
-func (ws *RenderTarget) present() (reconfigured bool) {
+// A reconfigured surface must be rendered again; completed is true only when
+// this frame was successfully presented.
+func (ws *RenderTarget) present() frameEndResult {
 	if ws.currentSurfaceTexture == nil {
-		return false
+		return frameEndResult{}
 	}
 	finalDamage := unionAllSources(ws.damageSources)
 	lockDisplay(ws.platWindow)
@@ -651,7 +660,7 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 		ds.reset()
 	}
 	if err == nil {
-		return false
+		return frameEndResult{completed: true}
 	}
 	// Mirror recoverFromAcquireError: outdated is expected (resize/DPI/monitor),
 	// not an error — reconfigure and signal the caller to re-render.
@@ -661,19 +670,19 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
 				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
 				ws.state = SurfaceLost
-				return false
+				return frameEndResult{}
 			}
-			return true
+			return frameEndResult{reconfigured: true}
 		}
-		return false
+		return frameEndResult{}
 	}
 	if errors.Is(err, wgpu.ErrSurfaceLost) {
 		slog.Error("gogpu: surface lost on present", "err", err)
 		ws.state = SurfaceLost
-		return false
+		return frameEndResult{}
 	}
 	slog.Error("PRESENT ERROR", "err", err)
-	return false
+	return frameEndResult{}
 }
 
 // setTransactionPresent toggles Core Animation transaction-based present on
@@ -732,7 +741,6 @@ func (ws *RenderTarget) resetLazyState() {
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
 	ws.acquireFailed = false
-	ws.overlayNeedsRedraw = false
 }
 
 // ensureFrameEncoder returns the framework-owned encoder for this surface
@@ -755,18 +763,18 @@ func (ws *RenderTarget) ensureFrameEncoder() (*wgpu.CommandEncoder, error) {
 }
 
 // submitFrameEncoder finishes and submits the framework-owned shared encoder.
-func (ws *RenderTarget) submitFrameEncoder(r *Renderer) {
+func (ws *RenderTarget) submitFrameEncoder(r *Renderer) bool {
 	encoder := ws.frameEncoder
 	ws.frameEncoder = nil
 	if encoder == nil {
-		return
+		return true
 	}
 	commands, err := encoder.Finish()
 	if err != nil {
 		slog.Error("finish shared frame encoder failed", "err", err)
-		return
+		return false
 	}
-	r.submitTracked(commands)
+	return r.submitTracked(commands)
 }
 
 // drawDebugOverlays iterates registered debug overlays and calls their Draw
@@ -788,12 +796,16 @@ func (ws *RenderTarget) drawDebugOverlays() {
 	initFPSOverlayIfNeeded(ws)
 
 	if len(ws.debugOverlays) == 0 {
+		ws.overlayNeedsRedraw = false
 		return
 	}
 	if ws.currentView == nil {
 		return
 	}
 
+	// Consume the prior request before recording this frame. A successful
+	// overlay can set it again; an encoder failure must not create a retry loop.
+	ws.overlayNeedsRedraw = false
 	encoder, err := ws.ensureFrameEncoder()
 	if err != nil {
 		slog.Error("gogpu: debug overlay encoder unavailable", "err", err)
@@ -808,7 +820,6 @@ func (ws *RenderTarget) drawDebugOverlays() {
 		FrameNumber:   ws.frameNumber,
 	}
 
-	ws.overlayNeedsRedraw = false
 	for _, overlay := range ws.debugOverlays {
 		if overlay.Draw(ctx) {
 			ws.overlayNeedsRedraw = true
@@ -913,20 +924,20 @@ func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) bool {
 		return false
 	}
 
-	r.submitTracked(commands)
-	return true
+	return r.submitTracked(commands)
 }
 
 // submitTracked submits commands with non-blocking tracking.
 // The command buffer is stored and released only when GPU finishes using it.
 // BUG-GOGPU-004: HAL manages fences internally — single vkQueueSubmit per frame.
-func (r *Renderer) submitTracked(commands *wgpu.CommandBuffer) {
+func (r *Renderer) submitTracked(commands *wgpu.CommandBuffer) bool {
 	subIdx, err := r.device.Queue().Submit(commands)
 	if err != nil {
 		slog.Error("submit failed", "err", err)
-		return
+		return false
 	}
 	r.tracker.track(subIdx, commands)
+	return true
 }
 
 // Size returns the current render target size.

@@ -106,6 +106,9 @@ func (c *Context) RemoveDebugOverlay(name string) {
 	for i, overlay := range ws.debugOverlays {
 		if overlay.Name() == name {
 			ws.debugOverlays = append(ws.debugOverlays[:i], ws.debugOverlays[i+1:]...)
+			if len(ws.debugOverlays) == 0 {
+				ws.overlayNeedsRedraw = false
+			}
 			return
 		}
 	}

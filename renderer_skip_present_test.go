@@ -45,10 +45,11 @@ func TestPrepareLazyAcquire_SetsState(t *testing.T) {
 	}
 }
 
-func TestResetLazyState_ClearsAll(t *testing.T) {
+func TestResetLazyState_ClearsPerFrameState(t *testing.T) {
 	ws := newTestWindowSurface()
 	ws.frameStarted = true
 	ws.hasGPUWork = true
+	ws.overlayNeedsRedraw = true
 
 	ws.resetLazyState()
 
@@ -57,6 +58,9 @@ func TestResetLazyState_ClearsAll(t *testing.T) {
 	}
 	if ws.hasGPUWork {
 		t.Error("resetLazyState should clear hasGPUWork")
+	}
+	if !ws.overlayNeedsRedraw {
+		t.Error("resetLazyState should preserve pending overlay work")
 	}
 }
 

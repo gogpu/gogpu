@@ -1113,6 +1113,15 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		ctx := newContextForSurface(a.renderer, ws, frame.scale)
 		frame.onDraw(ctx)
 
+		// An overlay that requested another frame is pending GPU work even when
+		// application content is clean. Start an overlay-only frame so the normal
+		// end-frame path can draw, submit, and present it.
+		overlayOnlyAcquire := !ws.frameStarted && !ws.pixelPresented &&
+			!ws.acquireFailed && ws.overlayNeedsRedraw
+		if overlayOnlyAcquire {
+			ws.ensureFrameStarted()
+		}
+
 		// No frame started. Two very different reasons:
 		//
 		// The callback issued no draw calls, so lazy acquire never acquired
@@ -1127,7 +1136,11 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// (surface outdated, not yet configured). Demand-driven mode already
 		// consumed the invalidation, so that one does need another frame.
 		if !ws.frameStarted {
-			if ws.acquireFailed {
+			// Content acquisition keeps the existing retry policy because its
+			// invalidation was consumed. Overlay-only work remains pending until
+			// the next external invalidation instead of spinning while a surface
+			// is minimized, unconfigured, or lost.
+			if ws.acquireFailed && !overlayOnlyAcquire {
 				a.RequestRedraw()
 			}
 			ws.resetLazyState()
@@ -1135,15 +1148,29 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 			continue
 		}
 
+		// WriteSurfacePixels has already presented and bypasses GPU overlays.
+		// Preserve their pending work, but do not self-schedule a frame that
+		// cannot composite them; a later non-pixel invalidation will retry.
+		overlayDeferred := ws.pixelPresented
+
 		// On outdated, present() reconfigured the surface; re-render once at the
 		// live scale (a DPI change is an outdated trigger, so frame.scale may be
 		// stale). One retry only — looping can livelock a live resize; if still
 		// outdated, request another frame since nothing else reschedules on-demand.
-		if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+		endResult := a.renderer.endFrameForSurface(ws)
+		if endResult.reconfigured {
 			ws.prepareLazyAcquire()
 			frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
-			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
-				a.RequestRedraw()
+			overlayDeferred = overlayDeferred || ws.pixelPresented
+			if !ws.frameStarted && !ws.pixelPresented &&
+				!ws.acquireFailed && ws.overlayNeedsRedraw {
+				ws.ensureFrameStarted()
+			}
+			if ws.frameStarted {
+				endResult = a.renderer.endFrameForSurface(ws)
+				if endResult.reconfigured && !overlayOnlyAcquire {
+					a.RequestRedraw()
+				}
 			}
 		}
 
@@ -1151,7 +1178,11 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// when any overlay returns true from Draw, request another frame so
 		// it can continue animating (FPS counter, fade effects). The loop
 		// automatically stops when all overlays return false.
-		if ws.overlayNeedsRedraw {
+		// A failed overlay-only submit/present keeps the overlay pending for an
+		// external invalidation, but must not turn a permanent GPU error into an
+		// unbounded redraw loop. Content frames retain their existing retry policy.
+		overlayCanSelfSchedule := !overlayOnlyAcquire || endResult.completed
+		if ws.overlayNeedsRedraw && !overlayDeferred && overlayCanSelfSchedule {
 			a.RequestRedraw()
 		}
 		ws.resetLazyState()

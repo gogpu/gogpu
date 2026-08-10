@@ -271,6 +271,20 @@ func TestRemoveDebugOverlay_NotFound(t *testing.T) {
 	}
 }
 
+func TestRemoveDebugOverlay_LastOverlayClearsPendingRedraw(t *testing.T) {
+	ws := newTestWindowSurface()
+	ctx := newContext(ws.renderer, 1.0)
+
+	ctx.RegisterDebugOverlay(&mockDebugOverlay{name: "fps"})
+	ws.overlayNeedsRedraw = true
+
+	ctx.RemoveDebugOverlay("fps")
+
+	if ws.overlayNeedsRedraw {
+		t.Error("removed last overlay remained pending")
+	}
+}
+
 // TestContextRenderTarget_PreserveContent verifies that the ggcanvas adapter
 // exposes the external-content state for the surface targeted by its Context.
 func TestContextRenderTarget_PreserveContent(t *testing.T) {

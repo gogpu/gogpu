@@ -12,7 +12,8 @@ import (
 
 type countingSubmitQueue struct {
 	noop.Queue
-	submits int
+	submits   int
+	submitErr error
 }
 
 type commandEncoderFailDevice struct{ noop.Device }
@@ -25,6 +26,9 @@ func (d *commandEncoderFailDevice) CreateCommandEncoder(
 
 func (q *countingSubmitQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
 	q.submits++
+	if q.submitErr != nil {
+		return 0, q.submitErr
+	}
 	return uint64(q.submits), nil
 }
 
@@ -96,7 +100,9 @@ func TestContextCommandEncoderReusesAndSubmitsFrameEncoderOnce(t *testing.T) {
 		t.Fatalf("encoder submitted before frame end: %d", queue.submits)
 	}
 
-	target.submitFrameEncoder(target.renderer)
+	if !target.submitFrameEncoder(target.renderer) {
+		t.Fatal("frame encoder submission failed")
+	}
 	if queue.submits != 1 {
 		t.Fatalf("frame submissions = %d, want 1", queue.submits)
 	}
@@ -219,12 +225,32 @@ func TestSubmitFrameEncoderDropsFinishFailure(t *testing.T) {
 	}
 	encoder.CopyBufferToBuffer(nil, 0, nil, 0, 1)
 
-	target.submitFrameEncoder(target.renderer)
+	if target.submitFrameEncoder(target.renderer) {
+		t.Fatal("invalid frame encoder was reported submitted")
+	}
 	if target.frameEncoder != nil {
 		t.Fatal("failed frame encoder was retained")
 	}
 	if queue.submits != 0 {
 		t.Fatalf("invalid frame submissions = %d, want 0", queue.submits)
+	}
+}
+
+func TestSubmitFrameEncoderReportsQueueFailure(t *testing.T) {
+	ctx, target, queue := newSharedEncoderTestContext(t)
+	if encoder := ctx.CommandEncoder(); encoder == nil {
+		t.Fatal("CommandEncoder returned nil")
+	}
+	queue.submitErr = errors.New("injected submit failure")
+
+	if target.submitFrameEncoder(target.renderer) {
+		t.Fatal("failed queue submission was reported successful")
+	}
+	if target.frameEncoder != nil {
+		t.Fatal("failed frame encoder was retained")
+	}
+	if queue.submits != 1 {
+		t.Fatalf("submission attempts = %d, want 1", queue.submits)
 	}
 }
 
@@ -235,8 +261,12 @@ func TestEndFrameDiscardsEncoderAfterPixelPresent(t *testing.T) {
 	}
 	target.pixelPresented = true
 
-	if target.renderer.endFrameForSurface(target) {
+	result := target.renderer.endFrameForSurface(target)
+	if result.reconfigured {
 		t.Fatal("pixel-presented frame unexpectedly reconfigured")
+	}
+	if !result.completed {
+		t.Fatal("pixel-presented frame was not reported complete")
 	}
 	if target.frameEncoder != nil {
 		t.Fatal("pixel-presented frame retained its encoder")
