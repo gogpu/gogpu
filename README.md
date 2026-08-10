@@ -167,7 +167,7 @@ All settings can be overridden via environment variables (no code changes needed
 GOGPU_GRAPHICS_API=vulkan ./myapp        # Force Vulkan
 GOGPU_GRAPHICS_API=software ./myapp      # Force software renderer
 GOGPU_RENDER_MODE=cpu ./myapp            # Force CPU rasterizer (benchmarking)
-GOGPU_DEBUG_DAMAGE=1 ./myapp             # Show green overlay on dirty regions
+GOGPU_DEBUG_DAMAGE=overlay ./myapp             # Show green overlay on dirty regions
 ```
 
 `Config.With*()` methods in code take precedence over environment variables.
