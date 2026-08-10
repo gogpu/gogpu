@@ -1146,6 +1146,14 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 				a.RequestRedraw()
 			}
 		}
+
+		// Self-sustaining debug overlay loop (ADR-066, Chromium pattern):
+		// when any overlay returns true from Draw, request another frame so
+		// it can continue animating (FPS counter, fade effects). The loop
+		// automatically stops when all overlays return false.
+		if ws.overlayNeedsRedraw {
+			a.RequestRedraw()
+		}
 		ws.resetLazyState()
 		a.renderer.currentSurface = nil
 	}

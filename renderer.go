@@ -9,10 +9,12 @@ import (
 	"math"
 	"os"
 	"sync"
+	"unsafe"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -74,13 +76,29 @@ type RenderTarget struct {
 	// when the adapter advertises support (ADR-060, gogpu#361).
 	transparent bool
 
-	// damageRects holds the dirty regions for the current frame (physical pixels,
-	// top-left origin). Set by Context.SetDamageRects(), consumed and cleared by
-	// present(). When nil, the full surface is presented (backward compatible).
-	// Passed to wgpu Surface.PresentWithDamage() which forwards to the platform
-	// compositor (Vulkan VK_KHR_incremental_present, DX12 Present1, GLES
-	// eglSwapBuffersWithDamageKHR, Software partial BitBlt/XPutImage).
-	damageRects []image.Rectangle
+	// damageSources holds all registered damage reporters for this surface.
+	// Each independent renderer (gg, g3d, video, compose) registers one source
+	// via Context.RegisterDamageSource. At present time, all sources are unioned
+	// into a single damage region (ADR-065). Sources are reset after present —
+	// each must report damage every frame that content changes.
+	damageSources []*DamageSource
+
+	// debugOverlays holds registered debug visualization layers (ADR-066).
+	// Overlays draw in registration order after all content renderers,
+	// before present. GTK4 GtkInspectorOverlay pattern.
+	debugOverlays []gpucontext.DebugOverlay
+
+	// frameNumber is a monotonic counter incremented each frame, exposed to
+	// debug overlays via DebugOverlayContext.FrameNumber for statistics,
+	// logging, and frame-based calculations (e.g., rolling FPS average).
+	frameNumber uint64
+
+	// overlayNeedsRedraw is set when any debug overlay's Draw returns true,
+	// signaling it needs another frame to complete visualization (e.g., fade
+	// animation, FPS counter). The caller (App frame loop) checks this and
+	// calls RequestRedraw for a self-sustaining render loop that automatically
+	// stops when all overlays return false (Chromium pattern).
+	overlayNeedsRedraw bool
 
 	// hasGPUWork tracks whether any draw calls were issued this frame.
 	// When false after OnDraw, no swapchain acquire/present happened
@@ -588,7 +606,9 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	}
 
 	ws.flushClear(r.device, r)
+	ws.drawDebugOverlays()
 	ws.submitFrameEncoder(r)
+	ws.frameNumber++
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
@@ -610,9 +630,9 @@ func (r *Renderer) pollSubmissions() {
 	r.tracker.triage(completedIdx, r.device)
 }
 
-// present presents the surface texture to the screen, passing any
-// damage rects to the platform compositor. Damage rects are consumed
-// (set to nil) after presentation so they don't leak to the next frame.
+// present presents the surface texture to the screen, passing the union of
+// all registered damage sources to the platform compositor. Damage sources
+// are reset after presentation so each must report again next frame.
 //
 // On Wayland, Vulkan WSI internally calls wl_surface_attach / wl_surface_commit /
 // wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
@@ -623,10 +643,13 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 	if ws.currentSurfaceTexture == nil {
 		return false
 	}
+	finalDamage := unionAllSources(ws.damageSources)
 	lockDisplay(ws.platWindow)
-	err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, ws.damageRects)
+	err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, finalDamage)
 	unlockDisplay(ws.platWindow)
-	ws.damageRects = nil
+	for _, ds := range ws.damageSources {
+		ds.reset()
+	}
 	if err == nil {
 		return false
 	}
@@ -709,6 +732,7 @@ func (ws *RenderTarget) resetLazyState() {
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
 	ws.acquireFailed = false
+	ws.overlayNeedsRedraw = false
 }
 
 // ensureFrameEncoder returns the framework-owned encoder for this surface
@@ -743,6 +767,53 @@ func (ws *RenderTarget) submitFrameEncoder(r *Renderer) {
 		return
 	}
 	r.submitTracked(commands)
+}
+
+// drawDebugOverlays iterates registered debug overlays and calls their Draw
+// method with the current frame's GPU context. Called after all content
+// renderers have finished and before submitFrameEncoder/present.
+//
+// Overlays use the shared frame encoder and surface view to record render
+// passes with LoadOp::Load (compositing on top of content). When any overlay
+// returns true (needs another frame), overlayNeedsRedraw is set so the caller
+// (App frame loop) can call RequestRedraw for a self-sustaining render loop
+// that automatically stops when all overlays return false.
+//
+// GTK4 pattern: GtkInspectorOverlay list iterated by gsk_renderer_render
+// after gsk_render_node_draw, before compositor flip.
+func (ws *RenderTarget) drawDebugOverlays() {
+	// Auto-register debug overlays if their env vars are set.
+	// Must run before the empty check so overlays can self-register.
+	initDamageOverlayIfNeeded(ws)
+	initFPSOverlayIfNeeded(ws)
+
+	if len(ws.debugOverlays) == 0 {
+		return
+	}
+	if ws.currentView == nil {
+		return
+	}
+
+	encoder, err := ws.ensureFrameEncoder()
+	if err != nil {
+		slog.Error("gogpu: debug overlay encoder unavailable", "err", err)
+		return
+	}
+
+	ctx := gpucontext.DebugOverlayContext{
+		SurfaceWidth:  ws.width,
+		SurfaceHeight: ws.height,
+		Encoder:       gpucontext.NewCommandEncoder(unsafe.Pointer(encoder)),     //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
+		SurfaceView:   gpucontext.NewTextureView(unsafe.Pointer(ws.currentView)), //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
+		FrameNumber:   ws.frameNumber,
+	}
+
+	ws.overlayNeedsRedraw = false
+	for _, overlay := range ws.debugOverlays {
+		if overlay.Draw(ctx) {
+			ws.overlayNeedsRedraw = true
+		}
+	}
 }
 
 // discardFrameEncoder abandons an unsubmitted shared encoder on cancellation.
@@ -907,11 +978,11 @@ func (r *Renderer) initTrianglePipeline() error {
 		Layout: r.trianglePipelineLayout,
 		Vertex: wgpu.VertexState{
 			Module:     r.triangleShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     r.triangleShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    r.surfaceFormat,
@@ -1060,7 +1131,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		Layout: r.texQuadPipelineLayout,
 		Vertex: wgpu.VertexState{
 			Module:     r.texQuadShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 		},
 		Primitive: gputypes.PrimitiveState{
 			Topology: gputypes.PrimitiveTopologyTriangleList,
@@ -1068,7 +1139,7 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     r.texQuadShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    r.surfaceFormat,

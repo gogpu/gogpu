@@ -224,7 +224,7 @@ func TestRenderFrameGPU_UnconfiguredSurface(t *testing.T) {
 		platWindow: nil,
 	}
 	frames := []windowFrame{
-		{window: &Window{surface: ws}, onDraw: func(c *Context) { c.MarkExternalContent() }, scale: 1.0},
+		{window: &Window{surface: ws}, onDraw: func(c *Context) { c.MarkPreserveContent() }, scale: 1.0},
 	}
 	app.renderFrameGPU(frames)
 

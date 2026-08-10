@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] - 2026-08-10
+
+### Added
+
+- **Damage source registration** (#437, ADR-065) — multi-renderer damage aggregation. Each renderer registers as a named damage source via `Context.RegisterDamageSource()` and reports per-frame damage rectangles. The compositor unions all sources at present time for `VkPresentRegionsKHR`. Replaces `SetDamageRects` + `MarkExternalContent`. Chromium `cc/DamageTracker` pattern.
+- **Pluggable debug overlay system** (ADR-066) — GTK4 Inspector-inspired overlay architecture. `Context.RegisterDebugOverlay()` for N overlays drawn in registration order after content, before present. Self-sustaining render loop via `Draw()` return value + `RequestRedraw()`.
+- **Damage debug overlay** — instanced flat-color quad pipeline (~500 LOC). Per-source palette colors, 400ms fade, fill + border in one `Draw(6,N)` call. Activated via `GOGPU_DEBUG_DAMAGE=overlay`.
+- **FPS debug overlay** — colored bar (green >55fps, yellow 30-55, red <30). 120-sample ring buffer. `GOGPU_DEBUG_FPS=overlay`.
+- **Shared overlay pipeline** — `overlayPipeline` with grow-on-demand instance buffer (gg SDF pattern). Reused by damage and FPS overlays.
+- **`Context.MarkPreserveContent()`** — signals that external content (g3d, video) is present and full-surface present is needed even without registered damage sources.
+
+### Fixed
+
+- **Windows: DComp per-pixel alpha for DX12** (#430, @shaolei) — two-tier transparency architecture. Explicit DX12: `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition. Vulkan/GLES/Auto: `DwmEnableBlurBehindWindow` legacy path. A/B tested on Windows 11 + RTX 4060. Enterprise research: winit, wgpu-rs, Ebitengine, Godot, Qt, SDL3, Firefox, VLC.
+- **FPS overlay infinite redraw** — `Draw()` returned `true` unconditionally, causing `RequestRedraw()` every frame even when overlay not visible. Now returns `true` only when overlay bar is displayed.
+
+### Changed
+
+- **deps:** gpucontext v0.24.0 → v0.26.0 (damage tracking interfaces ADR-065/066, Key enum redesign)
+- **deps:** wgpu v0.30.36 → v0.31.0 (core resource tracker ADR-060, inline present barrier, memory leak fix)
+
 ## [0.50.2] - 2026-08-07
 
 ### Added

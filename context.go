@@ -2,7 +2,6 @@ package gogpu
 
 import (
 	"fmt"
-	"image"
 	"log/slog"
 	"unsafe"
 
@@ -57,16 +56,98 @@ func (c *Context) activeSurface() *RenderTarget {
 	return c.renderer.primary
 }
 
-// SetDamageRects specifies which regions of the surface changed this frame.
-// Rects are in physical pixels with top-left origin (image.Rectangle).
-// The rects are passed to the platform compositor at present time, allowing it
-// to skip recompositing unchanged pixels. Callers must convert from logical DIP
-// using the window's scale factor before calling this method.
+// RegisterDamageSource registers a named damage source with the compositor.
+// Each independent renderer (gg, g3d, video, compose) registers once at init
+// and reports per-frame damage through the returned DamageSource.
 //
-// When rects is nil or empty, the full surface is presented (default behavior).
-// Rects are consumed after presentation and do not persist across frames.
-func (c *Context) SetDamageRects(rects []image.Rectangle) {
-	c.activeSurface().damageRects = rects
+// The returned *DamageSource implements gpucontext.DamageReporter. The source
+// is assigned a palette color for debug overlay rendering. Sources are unioned
+// at present time — if ANY source reports full damage, the entire surface is
+// presented. See ADR-065 for the multi-renderer damage tracking design.
+//
+// All damage operations happen on the render thread (same goroutine as OnDraw).
+func (c *Context) RegisterDamageSource(name string) *DamageSource {
+	ws := c.activeSurface()
+	ds := &DamageSource{
+		name:  name,
+		color: damagePalette[len(ws.damageSources)%len(damagePalette)],
+	}
+	ws.damageSources = append(ws.damageSources, ds)
+	return ds
+}
+
+// RegisterDebugOverlay adds a debug overlay to the active surface.
+// Overlays draw in registration order after all content renderers have
+// finished, before present. GTK4 pattern: GtkInspectorOverlay list
+// iterated by compositor.
+//
+// The overlay's Name must be unique among registered overlays. Registering
+// a duplicate name replaces the existing overlay (allowing hot-swap between
+// basic and text-enhanced versions, e.g., gogpu built-in -> gg override).
+//
+// Called once at init, not per-frame. Thread safety: render thread only
+// (same goroutine as OnDraw).
+func (c *Context) RegisterDebugOverlay(overlay gpucontext.DebugOverlay) {
+	ws := c.activeSurface()
+	name := overlay.Name()
+	for i, existing := range ws.debugOverlays {
+		if existing.Name() == name {
+			ws.debugOverlays[i] = overlay
+			return
+		}
+	}
+	ws.debugOverlays = append(ws.debugOverlays, overlay)
+}
+
+// RemoveDebugOverlay removes a debug overlay by name.
+// No-op if the name is not found. Thread safety: render thread only.
+func (c *Context) RemoveDebugOverlay(name string) {
+	ws := c.activeSurface()
+	for i, overlay := range ws.debugOverlays {
+		if overlay.Name() == name {
+			ws.debugOverlays = append(ws.debugOverlays[:i], ws.debugOverlays[i+1:]...)
+			return
+		}
+	}
+}
+
+// SetDamageOverlayRenderer registers a custom renderer for the damage debug
+// overlay. Libraries with text rendering capability (e.g., gg) use this to
+// provide anti-aliased borders, text labels per source, and richer visuals
+// than the built-in flat-color quads.
+//
+// When set, the built-in damage overlay delegates rendering to this renderer
+// instead of using its own GPU pipeline. The renderer receives a
+// DamageOverlayInfo snapshot each frame containing per-source damage data.
+//
+// If the damage overlay is not yet registered (GOGPU_DEBUG_DAMAGE not set),
+// calling this forces overlay activation so the custom renderer takes effect.
+//
+// Called once at init, not per-frame. Thread safety: render thread only
+// (same goroutine as OnDraw).
+func (c *Context) SetDamageOverlayRenderer(renderer gpucontext.DamageOverlayRenderer) {
+	ws := c.activeSurface()
+	ws.setCustomDamageRenderer(renderer)
+}
+
+// MarkPreserveContent signals that the active surface already contains GPU
+// content that subsequent render passes must preserve. This sets the internal
+// state so the next render pass uses LoadOp::Load instead of LoadOp::Clear.
+//
+// Use case: an external renderer (e.g., g3d) has submitted GPU commands to
+// the surface via CommandEncoder. Call MarkPreserveContent after the external
+// renderer finishes so subsequent renderers (gg, ui) draw on top instead of
+// clearing the surface.
+//
+// This is the GPU LoadOp concern split out from the removed MarkExternalContent
+// (ADR-065). Damage reporting is now handled separately via RegisterDamageSource.
+func (c *Context) MarkPreserveContent() {
+	ws := c.activeSurface()
+	if !ws.ensureFrameStarted() {
+		return
+	}
+	ws.frameCleared = true
+	ws.hasGPUWork = true
 }
 
 // Clear clears the framebuffer with the specified RGBA color.
@@ -79,28 +160,6 @@ func (c *Context) Clear(r, g, b, a float32) {
 // ClearColor clears the framebuffer with a Color value.
 func (c *Context) ClearColor(color gmath.Color) {
 	c.Clear(color.R, color.G, color.B, color.A)
-}
-
-// MarkExternalContent signals that an external renderer (e.g., g3d) has
-// submitted GPU commands to the active surface. Subsequent render passes
-// will use LoadOp::Load instead of LoadOp::Clear, preserving the content.
-//
-// Use case: fullscreen 3D scene with UI overlay (Scenario A). Call from a
-// PreRender hook after the external renderer has rendered to the surface,
-// so the UI compositor draws on top instead of clearing.
-//
-// For embedded 3D viewport widgets (Scenario B / CAD), use DrawGPUTexture
-// on an offscreen render target instead — no MarkExternalContent needed.
-//
-// Enterprise pattern: Flutter InlinePassContext pass_count > 0 → Load,
-// Qt6 QRhi beginExternal/endExternal.
-func (c *Context) MarkExternalContent() {
-	ws := c.activeSurface()
-	if !ws.ensureFrameStarted() {
-		return
-	}
-	ws.frameCleared = true
-	ws.hasGPUWork = true
 }
 
 // Size returns the window dimensions in logical points (DIP).
@@ -282,7 +341,7 @@ func (r *ContextRenderTarget) CommandEncoder() gpucontext.CommandEncoder {
 }
 
 // PreserveContent reports whether the active surface already contains content
-// that subsequent render passes must load. This exposes MarkExternalContent's
+// that subsequent render passes must load. This exposes MarkPreserveContent's
 // frame state to ggcanvas without introducing a dependency on gg.
 func (r *ContextRenderTarget) PreserveContent() bool {
 	ws := r.ctx.activeSurface()
@@ -304,12 +363,6 @@ func (r *ContextRenderTarget) SurfaceSize() (uint32, uint32) { return r.ctx.Surf
 // PresentTexture draws a texture filling the entire surface.
 func (r *ContextRenderTarget) PresentTexture(tex any) error { return r.ctx.PresentTexture(tex) }
 
-// SetDamageRects specifies which surface regions changed this frame.
-// See Context.SetDamageRects for details.
-func (r *ContextRenderTarget) SetDamageRects(rects []image.Rectangle) {
-	r.ctx.SetDamageRects(rects)
-}
-
 // WriteSurfacePixels writes RGBA pixel data directly to the surface and presents
 // in a single operation. On the software backend this bypasses the entire WebGPU
 // render pass pipeline — one RGBA→BGRA swizzle+copy into the DIB section,
@@ -319,7 +372,10 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 	if ws == nil || ws.surface == nil {
 		return fmt.Errorf("gogpu: no active surface")
 	}
-	err := ws.surface.PresentPixels(data, width, height, ws.damageRects)
+	err := ws.surface.PresentPixels(data, width, height, unionAllSources(ws.damageSources))
+	for _, ds := range ws.damageSources {
+		ds.reset()
+	}
 	if err != nil {
 		return err
 	}
@@ -331,6 +387,17 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 	}
 	ws.currentSurfaceTexture = nil
 	return nil
+}
+
+// RegisterDamageSource registers a named damage source with the compositor
+// and returns a DamageReporter for reporting per-frame damage rectangles.
+// This adapter enables ggcanvas (and other renderers) to register damage
+// sources without importing gogpu — they detect this capability via
+// interface assertion on the RenderTarget.
+//
+// See Context.RegisterDamageSource for full documentation.
+func (r *ContextRenderTarget) RegisterDamageSource(name string) gpucontext.DamageReporter {
+	return r.ctx.RegisterDamageSource(name)
 }
 
 // TextureCreator returns the texture creator for promoting pending textures.
