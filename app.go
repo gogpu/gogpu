@@ -1095,104 +1095,95 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 	a.renderer.DrainDeferredDestroys()
 
 	for _, frame := range frames {
-		ws := frame.window.surface
-		if ws == nil {
-			continue
-		}
-		a.syncFrameSurfaceSize(ws, frame.physW, frame.physH)
-
-		// Lazy acquire: reset per-frame state for deferred beginFrame.
-		// beginFrame is called on first draw call, not upfront.
-		// If OnDraw produces no GPU work → no acquire, no present.
-		ws.prepareLazyAcquire()
-
-		// Set renderer's currentSurface so draw methods target this window.
-		a.renderer.currentSurface = ws
-
-		// Call per-window draw callback.
-		ctx := newContextForSurface(a.renderer, ws, frame.scale)
-		frame.onDraw(ctx)
-
-		// An overlay that requested another frame is pending GPU work even when
-		// application content is clean. Start an overlay-only frame so the normal
-		// end-frame path can draw, submit, and present it.
-		overlayOnlyAcquire := !ws.frameStarted && !ws.pixelPresented &&
-			!ws.acquireFailed && ws.overlayNeedsRedraw
-		if overlayOnlyAcquire {
-			ws.ensureFrameStarted()
-		}
-
-		// No frame started. Two very different reasons:
-		//
-		// The callback issued no draw calls, so lazy acquire never acquired
-		// anything. That is what lazy acquire is for, not a failure — there is
-		// nothing to present and nothing to retry. Asking for another frame
-		// here is a loop with no exit: a demand-driven UI draws nothing when
-		// nothing changed, so the next frame draws nothing either, and the app
-		// spins at whatever rate the platform allows, burning CPU on an idle
-		// window (~27% of a core on X11, with no visible frames at all).
-		//
-		// Or a draw call did ask for the swapchain and could not have it
-		// (surface outdated, not yet configured). Demand-driven mode already
-		// consumed the invalidation, so that one does need another frame.
-		if !ws.frameStarted {
-			// Content acquisition keeps the existing retry policy because its
-			// invalidation was consumed. Overlay-only work remains pending until
-			// the next external invalidation instead of spinning while a surface
-			// is minimized, unconfigured, or lost.
-			if ws.acquireFailed && !overlayOnlyAcquire {
-				a.RequestRedraw()
-			}
-			ws.resetLazyState()
-			a.renderer.currentSurface = nil
-			continue
-		}
-
-		// WriteSurfacePixels has already presented and bypasses GPU overlays.
-		// Preserve their pending work, but do not self-schedule a frame that
-		// cannot composite them; a later non-pixel invalidation will retry.
-		overlayDeferred := ws.pixelPresented
-
-		// On outdated, present() reconfigured the surface; re-render once at the
-		// live scale (a DPI change is an outdated trigger, so frame.scale may be
-		// stale). One retry only — looping can livelock a live resize; if still
-		// outdated, request another frame since nothing else reschedules on-demand.
-		endResult := a.renderer.endFrameForSurface(ws)
-		if endResult.reconfigured {
-			ws.prepareLazyAcquire()
-			frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
-			overlayDeferred = overlayDeferred || ws.pixelPresented
-			if !ws.frameStarted && !ws.pixelPresented &&
-				!ws.acquireFailed && ws.overlayNeedsRedraw {
-				ws.ensureFrameStarted()
-			}
-			if ws.frameStarted {
-				endResult = a.renderer.endFrameForSurface(ws)
-				if endResult.reconfigured && !overlayOnlyAcquire {
-					a.RequestRedraw()
-				}
-			}
-		}
-
-		// Self-sustaining debug overlay loop (ADR-066, Chromium pattern):
-		// when any overlay returns true from Draw, request another frame so
-		// it can continue animating (FPS counter, fade effects). The loop
-		// automatically stops when all overlays return false.
-		// A failed overlay-only submit/present keeps the overlay pending for an
-		// external invalidation, but must not turn a permanent GPU error into an
-		// unbounded redraw loop. Content frames retain their existing retry policy.
-		overlayCanSelfSchedule := !overlayOnlyAcquire || endResult.completed
-		if ws.overlayNeedsRedraw && !overlayDeferred && overlayCanSelfSchedule {
-			a.RequestRedraw()
-		}
-		ws.resetLazyState()
-		a.renderer.currentSurface = nil
+		a.renderWindowFrame(frame)
 	}
 
 	// Poll submissions once after all windows are presented.
 	a.renderer.pollSubmissions()
 }
 
+// renderWindowFrame draws, finishes, and schedules follow-up work for one
+// window. Keeping this policy together makes the distinction between consumed
+// content invalidations and pending overlay work explicit.
+func (a *App) renderWindowFrame(frame windowFrame) {
+	ws := frame.window.surface
+	if ws == nil {
+		return
+	}
+	a.syncFrameSurfaceSize(ws, frame.physW, frame.physH)
+
+	// Lazy acquire: beginFrame is called on the first draw call. If OnDraw
+	// produces no GPU work, there is nothing to acquire or present.
+	ws.prepareLazyAcquire()
+	a.renderer.currentSurface = ws
+	defer func() {
+		ws.resetLazyState()
+		a.renderer.currentSurface = nil
+	}()
+	frame.onDraw(newContextForSurface(a.renderer, ws, frame.scale))
+
+	overlayOnlyAcquire := startPendingOverlayFrame(ws)
+	if !ws.frameStarted {
+		// Content acquisition consumed its invalidation and must retry. Failed
+		// overlay-only work remains pending for the next external invalidation.
+		if ws.acquireFailed && !overlayOnlyAcquire {
+			a.RequestRedraw()
+		}
+		return
+	}
+
+	// WriteSurfacePixels bypasses GPU overlays. Preserve pending overlay work,
+	// but do not self-schedule a frame which cannot composite it.
+	overlayDeferred := ws.pixelPresented
+	endResult := a.renderer.endFrameForSurface(ws)
+	if endResult.reconfigured {
+		endResult, overlayDeferred = a.retryReconfiguredFrame(
+			frame, ws, overlayOnlyAcquire, overlayDeferred,
+		)
+	}
+
+	// Overlay-only failures stay pending without turning a permanent GPU error
+	// into an unbounded redraw loop. Content frames keep their retry policy.
+	overlayCanSelfSchedule := !overlayOnlyAcquire || endResult.completed
+	if ws.overlayNeedsRedraw && !overlayDeferred && overlayCanSelfSchedule {
+		a.RequestRedraw()
+	}
+}
+
+// startPendingOverlayFrame acquires a frame when the application produced no
+// GPU work but a debug overlay still has animation work pending.
+func startPendingOverlayFrame(ws *RenderTarget) bool {
+	overlayOnly := !ws.frameStarted && !ws.pixelPresented &&
+		!ws.acquireFailed && ws.overlayNeedsRedraw
+	if overlayOnly {
+		ws.ensureFrameStarted()
+	}
+	return overlayOnly
+}
+
+// retryReconfiguredFrame replays a frame once after an outdated present. A
+// second outdated result is deferred to a future content frame; looping here
+// can livelock during a live resize.
+func (a *App) retryReconfiguredFrame(
+	frame windowFrame,
+	ws *RenderTarget,
+	overlayOnlyAcquire bool,
+	overlayDeferred bool,
+) (frameEndResult, bool) {
+	ws.prepareLazyAcquire()
+	frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
+	overlayDeferred = overlayDeferred || ws.pixelPresented
+	startPendingOverlayFrame(ws)
+	if !ws.frameStarted {
+		return frameEndResult{reconfigured: true}, overlayDeferred
+	}
+
+	result := a.renderer.endFrameForSurface(ws)
+	if result.reconfigured && !overlayOnlyAcquire {
+		a.RequestRedraw()
+	}
+	return result, overlayDeferred
+}
 func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
 	// initRenderer may leave the surface unconfigured when PhysicalSize was 0.
 	if !ws.CanRender() && ws.platWindow != nil {

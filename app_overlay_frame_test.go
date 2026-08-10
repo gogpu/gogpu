@@ -219,6 +219,56 @@ func TestRenderFrameGPU_FailedOverlayPresentDoesNotSelfSchedule(t *testing.T) {
 	}
 }
 
+func TestRetryReconfiguredFrameReplaysAtLiveScale(t *testing.T) {
+	renderer, ws := newHeadlessRenderTarget(t, true)
+	ws.platWindow = &mockWindow{width: 64, height: 64, scaleFactor: 2}
+	app := &App{renderLoop: &mockRenderLoop{}, renderer: renderer}
+	draws := 0
+	frame := windowFrame{
+		window: &Window{surface: ws},
+		onDraw: func(ctx *Context) {
+			draws++
+			if ctx.ScaleFactor() != 2 {
+				t.Errorf("retry scale = %v, want live scale 2", ctx.ScaleFactor())
+			}
+			ctx.MarkPreserveContent()
+		},
+		scale: 1,
+	}
+
+	result, overlayDeferred := app.retryReconfiguredFrame(frame, ws, false, false)
+
+	if !result.completed || result.reconfigured {
+		t.Errorf("retry result = %+v, want completed without another reconfigure", result)
+	}
+	if overlayDeferred {
+		t.Fatal("GPU retry unexpectedly deferred an overlay")
+	}
+	if draws != 1 {
+		t.Errorf("retry draw callbacks = %d, want 1", draws)
+	}
+}
+
+func TestRetryReconfiguredFrameWithoutGPUWorkDefers(t *testing.T) {
+	renderer, ws := newHeadlessRenderTarget(t, true)
+	ws.platWindow = &mockWindow{width: 64, height: 64, scaleFactor: 1}
+	app := &App{renderLoop: &mockRenderLoop{}, renderer: renderer}
+	frame := windowFrame{
+		window: &Window{surface: ws},
+		onDraw: func(*Context) {},
+		scale:  1,
+	}
+
+	result, overlayDeferred := app.retryReconfiguredFrame(frame, ws, false, false)
+
+	if !result.reconfigured || result.completed {
+		t.Errorf("retry result = %+v, want reconfigured and incomplete", result)
+	}
+	if overlayDeferred {
+		t.Fatal("retry without pixel presentation deferred an overlay")
+	}
+}
+
 func TestRenderFrameGPU_UnavailablePendingOverlayDoesNotSelfSchedule(t *testing.T) {
 	tests := []struct {
 		name string
