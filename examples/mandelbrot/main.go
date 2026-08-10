@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -27,13 +26,14 @@ import (
 var shaderCode string
 
 const (
-	width          = 800   // logical application window width
-	height         = 800   // logical application window height
-	baseIterations = 500   // initial number of iterations used to compute interior boundaries
-	paletteSize    = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
-	initialZoom    = 3.0   // initial magnification factor of the rendered image
-	zoomFactor     = 0.993 // multiplicative factor by which the rendering is iteratively magnified
-	growthRate     = 0.2   // multiplicative factor by which boundary calculation iterations increases per each successive magnification
+	width              = 800   // logical application window width
+	height             = 800   // logical application window height
+	baseIterations     = 500   // initial number of iterations used to compute interior boundaries
+	paletteSize        = 2000  // number of colors to pre-compute and pass to the GPU shader for fast lookup
+	initialZoom        = 3.0   // initial magnification factor of the rendered image
+	zoomFactor         = 0.993 // multiplicative factor by which the rendering is iteratively magnified
+	growthRate         = 0.2   // multiplicative factor by which boundary calculation iterations increases per each successive magnification
+	maxPrecisionFrames = 2745  // empirically-determined limit for the number of frames to render before reaching precision limit
 )
 
 // state stores the application state (uniforms, color palette, and FPS stats).
@@ -99,8 +99,6 @@ func main() {
 		WithTitle(fmt.Sprintf("mandelbrot - %s", coords.name)).
 		WithSize(width, height))
 
-	app.SetQuitOnLastWindowClosed(false)
-
 	currentRenderer.Store(newRenderer(coords))
 
 	// GoGPU callback registrations and definitions
@@ -133,7 +131,7 @@ func main() {
 
 		elapsed := time.Since(lastFrameTime).Milliseconds()
 		if elapsed > 0 {
-			r.state.fps = float64(1000 / elapsed)
+			r.state.fps = float64(1000.0 / elapsed)
 		}
 		lastFrameTime = time.Now()
 
@@ -141,12 +139,9 @@ func main() {
 			animToken.Store(app.StartAnimation())
 		})
 
-		go func() {
-			runtime.Gosched()
-			if animToken.Load() != nil {
-				app.RequestRedraw() // renders at VSync frequency (~60 FPS)
-			}
-		}()
+		if animToken.Load() != nil {
+			app.RequestRedraw() // renders at VSync frequency (~60 FPS)
+		}
 	})
 
 	lastFrameTime = time.Now()
@@ -233,10 +228,10 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		return // the call to c.release() below calls c.canvas.Close()
 	}
 
-	// TODO(jbunds): programmatically determine the value of the magic number 2745,
-	//               ideally by detecting the current frame == the previous frame
-	if r.state.frameCount > 2745 {
-		token.Load().Stop()
+	if r.state.frameCount > maxPrecisionFrames {
+		if t := token.Load(); t != nil {
+			token.Load().Stop()
+		}
 		r.release()
 		fmt.Println("stopped rendering (precision exhausted)")
 		return
@@ -261,17 +256,8 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 		panic(err)
 	}
 
-	transientBindGroup, err := r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Layout: r.gpu.bgLayout1,
-		Entries: []wgpu.BindGroupEntry{{
-			Binding:     0,
-			TextureView: (*wgpu.TextureView)(r.assets.fractalView.Pointer()),
-		}},
-	})
-	if err != nil {
-		panic(err)
-	}
-	defer transientBindGroup.Release()
+	fractalViewBindGroup := r.fractalViewBindGroup()
+	defer fractalViewBindGroup.Release()
 
 	surfaceWidth, surfaceHeight := dc.SurfaceSize() // https://pkg.go.dev/github.com/gogpu/gogpu#App.ScaleFactor
 
@@ -288,7 +274,7 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	pass.SetPipeline(r.gpu.pipeline)
 	pass.SetBindGroup(0, r.gpu.staticBindGroup, nil)
-	pass.SetBindGroup(1, transientBindGroup, nil)
+	pass.SetBindGroup(1, fractalViewBindGroup, nil)
 	pass.Dispatch(((surfaceWidth + 15) / 16), ((surfaceHeight + 7) / 8), 1)
 
 	err = pass.End()
@@ -303,7 +289,32 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 
 	r.gpu.device.Queue().Submit(cmds)
 
-	err = r.assets.canvas.Draw(func(cc *gg.Context) {
+	r.drawStats()
+
+	err = r.assets.canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+}
+
+// fractalViewBindGroup creates bind group holding the per-frame texture view of the rendered fractal.
+func (r *renderer) fractalViewBindGroup() *wgpu.BindGroup {
+	fractalViewBindGroup, err := r.gpu.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Layout: r.gpu.bgLayout1,
+		Entries: []wgpu.BindGroupEntry{{
+			Binding:     0,
+			TextureView: (*wgpu.TextureView)(r.assets.fractalView.Pointer()),
+		}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return fractalViewBindGroup
+}
+
+// drawStatus draws a rectangular box in the bottom-left corner of the main window showing some basic runtime stats.
+func (r *renderer) drawStats() {
+	err := r.assets.canvas.Draw(func(cc *gg.Context) {
 		cc.DrawGPUTextureBase(r.assets.fractalView, 0, 0, width, height)
 		cc.SetRGBA(0, 0, 0, 0.15)
 		cc.DrawRoundedRectangle(10, height-40, 336, 30, 4)
@@ -317,11 +328,6 @@ func (r *renderer) draw(dc *gogpu.Context, token *atomic.Pointer[gogpu.Animation
 	})
 	if err != nil {
 		panic(err)
-	}
-
-	err = r.assets.canvas.RenderDirect(dc.RenderTarget().SurfaceView(), surfaceWidth, surfaceHeight)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
 	}
 }
 

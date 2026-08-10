@@ -27,13 +27,6 @@ struct params { // field declaration order must cohere with the corresponding Go
 
 fn to_dd(val: f32) -> vec2<f32> { return vec2<f32>(val, 0.0); }
 
-fn primitive_sum(a: f32, b: f32) -> vec2<f32> {
-  let s = a + b;
-  let v = s - a;
-  let e = (a - (s - v)) + (b - v);
-  return vec2<f32>(s, e);
-}
-
 fn dd_add(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
   let s_x  =  a.x + b.x;
   let s_y  = (a.x - (s_x  - (s_x  - a.x))) + (b.x - (s_x - a.x));

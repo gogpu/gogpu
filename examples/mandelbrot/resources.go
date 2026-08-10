@@ -1,9 +1,10 @@
 package main
 
 import (
+	"math"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"math"
 )
 
 // initResources initializes all resources consumed by the GPU shader.
@@ -82,7 +83,7 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 			}, { // pre-computed 2000-color palette
 				Binding:    1,
 				Visibility: wgpu.ShaderStageCompute,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage},
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage},
 			},
 		},
 	})

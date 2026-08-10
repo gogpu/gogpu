@@ -1,4 +1,4 @@
-module github.com/gogpu/examples/mandelbrot
+module github.com/gogpu/gogpu/examples/mandelbrot
 
 go 1.25.0
 
