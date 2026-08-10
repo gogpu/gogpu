@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/input"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gogpu/internal/thread"
@@ -569,11 +570,13 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Fullscreen:  a.config.Fullscreen,
 		Frameless:   a.config.Frameless,
 		Transparent: a.config.Transparent,
-		MinWidth:    a.config.MinWidth,
-		MinHeight:   a.config.MinHeight,
-		MaxWidth:    a.config.MaxWidth,
-		MaxHeight:   a.config.MaxHeight,
-		Icon:        a.config.Icon,
+		UseDirectComposition: a.config.Transparent &&
+			a.config.GraphicsAPI == types.GraphicsAPIDX12,
+		MinWidth:  a.config.MinWidth,
+		MinHeight: a.config.MinHeight,
+		MaxWidth:  a.config.MaxWidth,
+		MaxHeight: a.config.MaxHeight,
+		Icon:      a.config.Icon,
 	})
 	if err != nil {
 		return nil, err

@@ -200,6 +200,10 @@ const (
 	swpNoZOrder     = 0x0004
 	swpFrameChanged = 0x0020
 
+	// DwmEnableBlurBehindWindow flags (DWM_BLURBEHIND)
+	dwmBBEnable     = 0x00000001 // DWM_BB_ENABLE
+	dwmBBBlurRegion = 0x00000002 // DWM_BB_BLURREGION
+
 	// GetWindowLongPtr index
 	gwlStyle = ^uintptr(15) // GWL_STYLE = -16 as unsigned uintptr
 
@@ -291,9 +295,10 @@ var (
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
 
 	// DWM (Desktop Window Manager) for frameless window shadow
-	dwmapi                       = windows.NewLazyDLL("dwmapi.dll")
-	procDwmExtendFrameIntoClient = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
-	procDwmFlush                 = dwmapi.NewProc("DwmFlush")
+	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
+	procDwmExtendFrameIntoClient  = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	procDwmEnableBlurBehindWindow = dwmapi.NewProc("DwmEnableBlurBehindWindow")
+	procDwmFlush                  = dwmapi.NewProc("DwmFlush")
 
 	// WaitEvents / WakeUp
 	procMsgWaitForMultipleObjectsEx = user32.NewProc("MsgWaitForMultipleObjectsEx")
@@ -356,6 +361,8 @@ var (
 	procReleaseDC         = user32.NewProc("ReleaseDC")
 	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
 	procGetStockObject    = gdi32.NewProc("GetStockObject")
+	procCreateRectRgn     = gdi32.NewProc("CreateRectRgn")
+	procDeleteObject      = gdi32.NewProc("DeleteObject")
 
 	// Shell32 (file drag-and-drop)
 	shell32DnD          = windows.NewLazyDLL("shell32.dll")
@@ -688,6 +695,43 @@ func adjustWindowRectForDpi(r *rect, style uintptr, dpi uint32) {
 	}
 }
 
+// dwmBlurBehind mirrors the native DWM_BLURBEHIND structure.
+type dwmBlurBehind struct {
+	dwFlags                uint32
+	fEnable                uint32
+	hRgnBlur               uintptr
+	fTransitionOnMaximized uint32
+}
+
+// enableDwmBlurBehind enables per-pixel-alpha compositing for the window
+// using DwmEnableBlurBehindWindow with an empty blur region — the winit/SDL3
+// pattern documented in ADR-060. WS_EX_LAYERED is intentionally NOT used:
+// it is GDI whole-window opacity, not per-pixel alpha with GPU rendering.
+func enableDwmBlurBehind(hwnd windows.HWND) {
+	if hwnd == 0 {
+		return
+	}
+	// CreateRectRgn(0, 0, -1, -1) creates an empty region.
+	rgn, _, _ := procCreateRectRgn.Call(0, 0, ^uintptr(0), ^uintptr(0))
+	if rgn == 0 {
+		return
+	}
+	defer procDeleteObject.Call(rgn)
+
+	bb := dwmBlurBehind{
+		dwFlags:  dwmBBEnable | dwmBBBlurRegion,
+		fEnable:  1, // TRUE
+		hRgnBlur: rgn,
+	}
+	hr, _, _ := procDwmEnableBlurBehindWindow.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&bb)))
+	if hr != 0 {
+		// Non-fatal: DWM can be unavailable (e.g. Server Core, DWM disabled);
+		// the window simply stays opaque.
+		slog.Debug("gogpu: DwmEnableBlurBehindWindow failed, window stays opaque",
+			"hr", hr)
+	}
+}
+
 // createWindowWin32 creates a new Win32 HWND window from the given config.
 // Shared between PlatformManager.CreateWindow and the legacy Init(config).
 func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error) {
@@ -703,12 +747,13 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 	style := uintptr(wsOverlappedWindow)
 
-	// Per-pixel alpha via DirectComposition requires the window to opt out of
-	// the DWM redirection bitmap; otherwise the DComp swap chain is composed
-	// behind/over an opaque window surface and transparency is not visible
-	// (gogpu#361, wgpu v0.30.35 release note).
+	// WS_EX_NOREDIRECTIONBITMAP is only safe for the DX12 DirectComposition
+	// path. Vulkan/GLES/Software and Auto present through the HWND and need
+	// the DWM redirection surface; for them Transparent uses the legacy
+	// DwmEnableBlurBehindWindow path below.
+	useDComp := config.Transparent && config.UseDirectComposition
 	dwExStyle := uintptr(0)
-	if config.Transparent {
+	if useDComp {
 		dwExStyle = wsExNoRedirectionBitmap
 	}
 
@@ -802,14 +847,20 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		w.updateSize()
 	}
 
-	// Transparent windows opt out of the DWM redirection bitmap above, so the
-	// DComp swapchain composites per-pixel alpha directly. DwmEnableBlurBehindWindow
-	// is intentionally NOT called here: with WS_EX_NOREDIRECTIONBITMAP it would
-	// paint an opaque blurred backdrop behind the swapchain and hide the desktop
-	// (winit skips blur-behind when no_redirection_bitmap is enabled).
+	// Transparent windows use one of two paths:
+	//   - DirectComposition (explicit DX12): WS_EX_NOREDIRECTIONBITMAP was set
+	//     at creation; blur-behind must NOT be enabled (winit skips it too).
+	//   - Legacy blur-behind: Vulkan/GLES/Software/Auto present through the
+	//     HWND and need the DWM redirection surface to stay visible.
 	if config.Transparent {
-		slog.Info("gogpu: transparent window created with WS_EX_NOREDIRECTIONBITMAP",
-			"hwnd", hwnd)
+		if useDComp {
+			slog.Debug("gogpu: transparent window created with WS_EX_NOREDIRECTIONBITMAP (DirectComposition)",
+				"hwnd", hwnd)
+		} else {
+			enableDwmBlurBehind(w.hwnd)
+			slog.Debug("gogpu: transparent window created (legacy blur-behind path)",
+				"hwnd", hwnd)
+		}
 	}
 
 	w.updateSize()

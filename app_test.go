@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/input"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
@@ -1409,5 +1410,38 @@ func TestInitPlatform_PropagatesIcon(t *testing.T) {
 	}
 	if capturing.got.Icon != img {
 		t.Error("initPlatform: Icon not propagated to platform.Config")
+	}
+}
+
+func TestInitPlatform_PropagatesUseDirectComposition(t *testing.T) {
+	tests := []struct {
+		name        string
+		api         types.GraphicsAPI
+		transparent bool
+		want        bool
+	}{
+		{"auto+transparent", types.GraphicsAPIAuto, true, false},
+		{"vulkan+transparent", types.GraphicsAPIVulkan, true, false},
+		{"dx12+transparent", types.GraphicsAPIDX12, true, true},
+		{"dx12+opaque", types.GraphicsAPIDX12, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := NewApp(DefaultConfig().
+				WithGraphicsAPI(tt.api).
+				WithTransparent(tt.transparent))
+
+			capturing := &configCapturingManager{}
+			old := newPlatformManagerFn
+			newPlatformManagerFn = func() platform.PlatformManager { return capturing }
+			defer func() { newPlatformManagerFn = old }()
+
+			if _, err := app.initPlatform(); err != nil {
+				t.Fatalf("initPlatform: %v", err)
+			}
+			if capturing.got.UseDirectComposition != tt.want {
+				t.Errorf("UseDirectComposition = %v, want %v", capturing.got.UseDirectComposition, tt.want)
+			}
+		})
 	}
 }
