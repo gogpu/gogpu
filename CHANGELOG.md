@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] - 2026-08-10
+
+### Added
+
+- **Compositor-owned render target** (ADR-067, #443) — fundamental architecture redesign. Compositor (gogpu) owns composition texture; drawing library (gg) renders into provided view. Enterprise pattern validated by Chromium cc/, GTK4 GSK, Flutter flow/ source code.
+  - `composView`: content cache texture — gg/g3d draw here, persists between frames
+  - Overlay draws on swapchain after blit — never accumulates, fade works on idle content
+  - `blitPipeline`: passthrough copy (composition → swapchain, no blend)
+  - `compositePipeline`: premultiplied alpha blend (MSAA overlay compositing)
+  - `tryOverlayOnlyFrame()`: overlay-only frames when content idle
+  - `externalContent` flag: separate from `frameCleared` (g3d → gg coordination)
+  - Persistent MSAA composite bind group on RenderTarget (not per-frame)
+  - `damage_scissor.go`: canonical damage scissor computation (moved from gg)
+  - `compositor_blit.go`: `SurfaceCompositor` implementation, `BlitDrawRecorder`, `CompositorBlitResources`
+  - 20+ tests for overlay lifecycle, damage scissor, compositor resources
+
+### Changed
+
+- **deps:** gpucontext v0.26.0 → v0.27.0 (SurfaceCompositor interface)
+
 ## [0.51.0] - 2026-08-10
 
 ### Added

@@ -119,8 +119,9 @@ func (o *fpsDebugOverlay) Name() string { return overlayNameFPS }
 
 // Draw renders the FPS overlay for the current frame.
 //
-// Always returns true because the FPS counter needs continuous frames to
-// maintain accurate statistics (self-sustaining render loop pattern).
+// Returns true when the visual overlay is active, requesting another frame
+// so the FPS counter stays updated (self-sustaining render loop pattern).
+// Returns false in log-only mode since no visual update is needed.
 func (o *fpsDebugOverlay) Draw(ctx gpucontext.DebugOverlayContext) bool {
 	now := time.Now()
 

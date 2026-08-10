@@ -57,6 +57,7 @@ type RenderTarget struct {
 	currentSurfaceTexture *wgpu.SurfaceTexture
 	currentView           *wgpu.TextureView
 	frameCleared          bool // Whether the frame has been cleared (for LoadOp selection)
+	externalContent       bool // External renderer (g3d) has content on surface (MarkPreserveContent)
 	// frameEncoder is borrowed by external renderers and owned by this surface.
 	// It is finished and submitted exactly once at frame end.
 	frameEncoder *wgpu.CommandEncoder
@@ -127,6 +128,33 @@ type RenderTarget struct {
 	// distinction the demand-driven loop reschedules itself forever against a
 	// UI that correctly draws nothing when nothing changed.
 	acquireFailed bool
+
+	// Compositor-owned composition texture (ADR-067).
+	// When debug overlays are active, content renderers draw into this
+	// intermediate texture instead of the swapchain image directly.
+	// gogpu composites the overlays on top, then blits the result to the
+	// swapchain. This isolates overlay rendering from content rendering,
+	// preventing bind group lifecycle conflicts.
+	// composTex is the per-frame composition surface. Content + overlay are
+	// drawn here, then blitted to swapchain. Rebuilt each frame from contentTex.
+	composTex  *wgpu.Texture
+	composView *wgpu.TextureView
+	composW    uint32
+	composH    uint32
+
+	// Note: contentTex is NOT needed. composView IS the content cache.
+	// Overlays draw on swapchain (after blit), not on composView.
+	// composView stays clean (content only) automatically.
+
+	// pendingBlitBindGroup holds the blit bind group created in blitComposToSwapchain.
+	// Released at next frame boundary (prepareLazyAcquire) after GPU completion.
+	pendingBlitBindGroup *wgpu.BindGroup
+
+	// Persistent MSAA composite bind group — recreated only when compositeView changes.
+	// Same pattern as old gg surfaceCompositeBindGroup.
+	compositeBindGroup      *wgpu.BindGroup
+	compositeBoundView      *wgpu.TextureView
+	pendingCompositeRelease *wgpu.BindGroup
 }
 
 // lockDisplay acquires the platform display lock if the window supports it.
@@ -181,6 +209,27 @@ type Renderer struct {
 	texQuadUniformBindGrp *wgpu.BindGroup
 	texQuadUniformData    []byte
 	texQuadPipelineInited bool
+
+	// Dedicated composition blit pipeline (ADR-067).
+	// This pipeline blits the composition texture to the swapchain image.
+	// It uses the SAME shader as texQuadPipeline (positionedQuadShaderSource)
+	// but has its OWN pipeline, layout, uniform buffer, and bind groups to
+	// prevent bind group lifetime conflicts with gg's render session.
+	blitPipeline       *wgpu.RenderPipeline
+	blitShader         *wgpu.ShaderModule
+	blitUniformLayout  *wgpu.BindGroupLayout
+	blitTextureLayout  *wgpu.BindGroupLayout
+	blitPipelineLayout *wgpu.PipelineLayout
+	blitSampler        *wgpu.Sampler
+	blitUniformBuf     *wgpu.Buffer
+	blitUniformBindGrp *wgpu.BindGroup
+	blitUniformData    []byte
+	blitPipelineInited bool
+
+	// compositePipeline is like blitPipeline but with premultiplied alpha blend.
+	// Used by encodeSurfaceCompositePass for MSAA overlay alpha-blending.
+	// Blit pipeline has NO blend (passthrough copy); composite pipeline blends.
+	compositePipeline *wgpu.RenderPipeline
 
 	// Texture bind group cache — device-level, shared across all windows.
 	texBindGroupCache map[*wgpu.TextureView]*wgpu.BindGroup
@@ -466,6 +515,10 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 	ws.width = uint32(width)   //nolint:gosec // G115: validated positive above
 	ws.height = uint32(height) //nolint:gosec // G115: validated positive above
 
+	// Release stale composition texture — it will be recreated at the new
+	// size during the next frame if overlays are active.
+	ws.releaseCompositionTexture()
+
 	// Configure surface with new dimensions.
 	if err := ws.configure(device, adapter); err != nil {
 		// Restore old dimensions to keep surface consistent with swapchain.
@@ -545,6 +598,7 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 
 	// Reset frame state for new frame
 	ws.frameCleared = false
+	ws.externalContent = false
 	ws.hasPendingClear = false
 	ws.hasGPUWork = false
 
@@ -605,8 +659,25 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 		return false
 	}
 
-	ws.flushClear(r.device, r)
+	// ADR-067: when composition texture is active, content renderers already
+	// handled the clear via their own render passes (LoadOpClear). Don't
+	// flush a pending clear here — it would wipe the rendered content.
+	// Only flush when rendering directly to swapchain (no composition texture).
+	if ws.composView == nil {
+		ws.flushClear(r.device, r)
+	} else {
+		ws.hasPendingClear = false
+	}
+
+	// ADR-067: blit cached content to swapchain FIRST, then overlays on top.
+	// composView = clean content cache (no overlay). Overlay draws on swapchain
+	// after blit → never accumulates. composView stays clean for next frame.
+	if ws.composView != nil {
+		r.blitComposToSwapchain(ws)
+	}
+
 	ws.drawDebugOverlays()
+
 	ws.submitFrameEncoder(r)
 	ws.frameNumber++
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
@@ -699,6 +770,15 @@ func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
 	ws.acquireFailed = false
+	// Release blit bind group from previous frame (GPU completed by VSync).
+	if ws.pendingBlitBindGroup != nil {
+		ws.pendingBlitBindGroup.Release()
+		ws.pendingBlitBindGroup = nil
+	}
+	if ws.pendingCompositeRelease != nil {
+		ws.pendingCompositeRelease.Release()
+		ws.pendingCompositeRelease = nil
+	}
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
@@ -727,12 +807,27 @@ func (ws *RenderTarget) ensureFrameStarted() bool {
 }
 
 // resetLazyState clears per-frame state after frame cycle.
+// Note: overlayNeedsRedraw is NOT cleared here — it survives into the app
+// frame loop so the self-sustaining render loop (ADR-066 Chromium pattern)
+// can call RequestRedraw. It is cleared at the start of drawDebugOverlays
+// each frame.
 func (ws *RenderTarget) resetLazyState() {
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
 	ws.acquireFailed = false
-	ws.overlayNeedsRedraw = false
+}
+
+// tryOverlayOnlyFrame attempts to start an overlay-only frame when the
+// composition texture holds content from a previous frame and an overlay
+// requests another draw (ADR-067). Returns true if a frame was successfully
+// started — the caller should fall through to endFrame. Returns false if
+// no overlay-only frame is possible.
+func (ws *RenderTarget) tryOverlayOnlyFrame() bool {
+	if !ws.overlayNeedsRedraw || ws.composView == nil {
+		return false
+	}
+	return ws.ensureFrameStarted()
 }
 
 // ensureFrameEncoder returns the framework-owned encoder for this surface
@@ -773,6 +868,12 @@ func (ws *RenderTarget) submitFrameEncoder(r *Renderer) {
 // method with the current frame's GPU context. Called after all content
 // renderers have finished and before submitFrameEncoder/present.
 //
+// When overlays are present and a composition texture exists, overlays draw
+// onto the composition texture (which already contains the content). The
+// caller then blits the composition texture to the swapchain. When no
+// composition texture is available (no overlays registered before draw),
+// overlays draw directly onto the swapchain as before.
+//
 // Overlays use the shared frame encoder and surface view to record render
 // passes with LoadOp::Load (compositing on top of content). When any overlay
 // returns true (needs another frame), overlayNeedsRedraw is set so the caller
@@ -800,11 +901,15 @@ func (ws *RenderTarget) drawDebugOverlays() {
 		return
 	}
 
+	// ADR-067: overlays ALWAYS draw on swapchain (currentView), AFTER
+	// blitComposToSwapchain copies cached content. composView stays clean
+	// (content-only cache). Overlay never accumulates on composView.
+	overlayView := ws.currentView
 	ctx := gpucontext.DebugOverlayContext{
 		SurfaceWidth:  ws.width,
 		SurfaceHeight: ws.height,
-		Encoder:       gpucontext.NewCommandEncoder(unsafe.Pointer(encoder)),     //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
-		SurfaceView:   gpucontext.NewTextureView(unsafe.Pointer(ws.currentView)), //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
+		Encoder:       gpucontext.NewCommandEncoder(unsafe.Pointer(encoder)),  //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
+		SurfaceView:   gpucontext.NewTextureView(unsafe.Pointer(overlayView)), //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer
 		FrameNumber:   ws.frameNumber,
 	}
 
@@ -834,6 +939,372 @@ func (ws *RenderTarget) releaseFrame() {
 	}
 	// SurfaceTexture is consumed by Present, no need to destroy it
 	ws.currentSurfaceTexture = nil
+}
+
+// renderView returns the view that content renderers should target.
+// When a composition texture is active (ADR-067), content goes to
+// the intermediate texture; otherwise directly to the swapchain.
+func (ws *RenderTarget) renderView() *wgpu.TextureView {
+	// ADR-067: ensure composition texture exists before returning the view.
+	// Content renderers call SurfaceView() → renderView() at frame start,
+	// BEFORE drawDebugOverlays. Without this, composView is nil and content
+	// renders directly to swapchain, then blitComposToSwapchain overwrites it.
+	ws.ensureCompositionTexture()
+	if ws.composView != nil {
+		return ws.composView
+	}
+	return ws.currentView
+}
+
+// ensureCompositionTexture creates the intermediate composition texture
+// lazily when debug overlays are present. The texture matches the surface
+// dimensions and format. It uses RenderAttachment (content draws into it)
+// and TextureBinding (blit samples from it).
+func (ws *RenderTarget) ensureCompositionTexture() {
+	if ws.renderer == nil || ws.renderer.device == nil {
+		return
+	}
+	if ws.currentView == nil {
+		return
+	}
+	// Only create when debug overlays are registered or env vars indicate
+	// they will be. Without overlays, render directly to swapchain (zero overhead).
+	if len(ws.debugOverlays) == 0 && !ws.hasRegisteredOverlayEnv() {
+		return
+	}
+
+	// Already sized correctly.
+	if ws.composView != nil && ws.composW == ws.width && ws.composH == ws.height {
+		return
+	}
+
+	// Release stale texture.
+	ws.releaseCompositionTexture()
+
+	tex, err := ws.renderer.device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "CompositionTexture",
+		Size:          wgpu.Extent3D{Width: ws.width, Height: ws.height, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     wgpu.TextureDimension2D,
+		Format:        ws.format,
+		Usage:         wgpu.TextureUsageRenderAttachment | wgpu.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		slog.Error("gogpu: create composition texture failed", "err", err)
+		return
+	}
+
+	view, err := ws.renderer.device.CreateTextureView(tex, nil)
+	if err != nil {
+		tex.Release()
+		slog.Error("gogpu: create composition texture view failed", "err", err)
+		return
+	}
+
+	ws.composTex = tex
+	ws.composView = view
+	ws.composW = ws.width
+	ws.composH = ws.height
+}
+
+// releaseCompositionTexture frees the intermediate composition texture.
+func (ws *RenderTarget) releaseCompositionTexture() {
+	if ws.composView != nil {
+		ws.composView.Release()
+		ws.composView = nil
+	}
+	if ws.composTex != nil {
+		ws.composTex.Release()
+		ws.composTex = nil
+	}
+	ws.composW = 0
+	ws.composH = 0
+}
+
+// hasRegisteredOverlayEnv checks if any debug overlay env vars are set,
+// indicating overlays will be registered during drawDebugOverlays. This
+// enables ensureCompositionTexture to be called proactively before overlays
+// self-register, so content renders into the composition texture from the
+// start of the frame.
+func (ws *RenderTarget) hasRegisteredOverlayEnv() bool {
+	mode := getDamageDebugMode()
+	if mode.overlay || mode.log {
+		return true
+	}
+	fpsMode := getFPSDebugMode()
+	return fpsMode.overlay || fpsMode.log
+}
+
+// initBlitPipeline creates the dedicated GPU pipeline for blitting the
+// composition texture to the swapchain. This pipeline uses the same shader
+// as texQuadPipeline (positionedQuadShaderSource) but has completely
+// independent resources to prevent bind group lifetime conflicts.
+//
+//nolint:funlen // pipeline init is inherently sequential setup code
+func (r *Renderer) initBlitPipeline() error {
+	if r.blitPipelineInited {
+		return nil
+	}
+
+	var err error
+
+	r.blitShader, err = r.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "Composition Blit Shader",
+		WGSL:  positionedQuadShaderSource,
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit shader: %w", err)
+	}
+
+	// Bind group 0: uniforms (rect, screen, alpha, premultiplied).
+	r.blitUniformLayout, err = r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "Blit Uniform Layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:           gputypes.BufferBindingTypeUniform,
+					MinBindingSize: texQuadUniformSize,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit uniform layout: %w", err)
+	}
+
+	// Bind group 1: sampler + texture.
+	r.blitTextureLayout, err = r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "Blit Texture Layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageFragment,
+				Sampler: &gputypes.SamplerBindingLayout{
+					Type: gputypes.SamplerBindingTypeFiltering,
+				},
+			},
+			{
+				Binding:    1,
+				Visibility: gputypes.ShaderStageFragment,
+				Texture: &gputypes.TextureBindingLayout{
+					SampleType:    gputypes.TextureSampleTypeFloat,
+					ViewDimension: gputypes.TextureViewDimension2D,
+					Multisampled:  false,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit texture layout: %w", err)
+	}
+
+	r.blitPipelineLayout, err = r.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
+		Label:            "Blit Pipeline Layout",
+		BindGroupLayouts: []*wgpu.BindGroupLayout{r.blitUniformLayout, r.blitTextureLayout},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit pipeline layout: %w", err)
+	}
+
+	// No blending needed: composition texture is the final image;
+	// copy it 1:1 to the swapchain.
+	r.blitPipeline, err = r.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "Composition Blit Pipeline",
+		Layout: r.blitPipelineLayout,
+		Vertex: wgpu.VertexState{
+			Module:     r.blitShader,
+			EntryPoint: shaderEntryVS,
+		},
+		Primitive: gputypes.PrimitiveState{
+			Topology: gputypes.PrimitiveTopologyTriangleList,
+			CullMode: gputypes.CullModeNone,
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     r.blitShader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    r.surfaceFormat,
+					WriteMask: gputypes.ColorWriteMaskAll,
+					// No blending: composition texture is the final composited
+					// image — copy 1:1 to swapchain (passthrough). Content was
+					// already alpha-blended during Stage 1 (gg blit into composView).
+					// MSAA composite uses encodeSurfaceCompositePass which must
+					// use its own pipeline with premultiplied alpha blend.
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit pipeline: %w", err)
+	}
+
+	r.blitSampler, err = r.device.CreateSampler(&wgpu.SamplerDescriptor{
+		Label:        "Blit Sampler",
+		MagFilter:    gputypes.FilterModeNearest,
+		MinFilter:    gputypes.FilterModeNearest,
+		MipmapFilter: gputypes.FilterModeNearest,
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit sampler: %w", err)
+	}
+
+	r.blitUniformBuf, err = r.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "Blit Uniforms",
+		Size:  texQuadUniformSize,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit uniform buffer: %w", err)
+	}
+
+	r.blitUniformBindGrp, err = r.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "Blit Uniform Bind Group",
+		Layout: r.blitUniformLayout,
+		Entries: []wgpu.BindGroupEntry{
+			{
+				Binding: 0,
+				Buffer:  r.blitUniformBuf,
+				Size:    texQuadUniformSize,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: blit uniform bind group: %w", err)
+	}
+
+	r.blitUniformData = make([]byte, texQuadUniformSize)
+
+	// Composite pipeline — same as blit but WITH premultiplied alpha blend.
+	// Used by encodeSurfaceCompositePass for MSAA overlay alpha-compositing.
+	r.compositePipeline, err = r.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "MSAA Composite Pipeline",
+		Layout: r.blitPipelineLayout,
+		Vertex: wgpu.VertexState{
+			Module:     r.blitShader,
+			EntryPoint: shaderEntryVS,
+		},
+		Primitive: gputypes.PrimitiveState{
+			Topology: gputypes.PrimitiveTopologyTriangleList,
+			CullMode: gputypes.CullModeNone,
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     r.blitShader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    r.surfaceFormat,
+					WriteMask: gputypes.ColorWriteMaskAll,
+					Blend: &gputypes.BlendState{
+						Color: gputypes.BlendComponent{
+							Operation: gputypes.BlendOperationAdd,
+							SrcFactor: gputypes.BlendFactorOne,
+							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+						},
+						Alpha: gputypes.BlendComponent{
+							Operation: gputypes.BlendOperationAdd,
+							SrcFactor: gputypes.BlendFactorOne,
+							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: composite pipeline: %w", err)
+	}
+
+	r.blitPipelineInited = true
+	return nil
+}
+
+// blitComposToSwapchain draws a full-screen quad sampling the composition
+// texture onto the swapchain image. Uses the dedicated blit pipeline (NOT
+// the shared texQuadPipeline) to avoid bind group lifetime conflicts with
+// gg's render session. See ADR-067.
+func (r *Renderer) blitComposToSwapchain(ws *RenderTarget) {
+	if ws.composView == nil || ws.currentView == nil {
+		return
+	}
+	if !r.blitPipelineInited {
+		if err := r.initBlitPipeline(); err != nil {
+			slog.Error("gogpu: blit pipeline init failed", "err", err)
+			return
+		}
+	}
+
+	encoder, err := ws.ensureFrameEncoder()
+	if err != nil {
+		slog.Error("gogpu: blit encoder unavailable", "err", err)
+		return
+	}
+
+	// Create per-frame bind group for the composition texture view.
+	texBindGrp, err := r.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "Blit Texture Bind Group",
+		Layout: r.blitTextureLayout,
+		Entries: []wgpu.BindGroupEntry{
+			{
+				Binding: 0,
+				Sampler: r.blitSampler,
+			},
+			{
+				Binding:     1,
+				TextureView: ws.composView,
+			},
+		},
+	})
+	if err != nil {
+		slog.Error("gogpu: create blit texture bind group failed", "err", err)
+		return
+	}
+	// Bind group is consumed by the shared frame encoder — do NOT defer
+	// Release() here. The encoder is submitted in submitFrameEncoder AFTER
+	// this function returns. Track for release at next frame boundary
+	// (BeginFrame), where VSync guarantees GPU completion.
+	ws.pendingBlitBindGroup = texBindGrp
+
+	// Upload full-screen quad uniforms: rect = (0,0,width,height), alpha = 1.
+	binary.LittleEndian.PutUint32(r.blitUniformData[0:4], math.Float32bits(0))                    // x
+	binary.LittleEndian.PutUint32(r.blitUniformData[4:8], math.Float32bits(0))                    // y
+	binary.LittleEndian.PutUint32(r.blitUniformData[8:12], math.Float32bits(float32(ws.width)))   // width
+	binary.LittleEndian.PutUint32(r.blitUniformData[12:16], math.Float32bits(float32(ws.height))) // height
+	binary.LittleEndian.PutUint32(r.blitUniformData[16:20], math.Float32bits(float32(ws.width)))  // screenWidth
+	binary.LittleEndian.PutUint32(r.blitUniformData[20:24], math.Float32bits(float32(ws.height))) // screenHeight
+	binary.LittleEndian.PutUint32(r.blitUniformData[24:28], math.Float32bits(1.0))                // alpha
+	binary.LittleEndian.PutUint32(r.blitUniformData[28:32], math.Float32bits(1.0))                // premultiplied
+	if err := r.device.Queue().WriteBuffer(r.blitUniformBuf, 0, r.blitUniformData); err != nil {
+		slog.Error("gogpu: blit WriteBuffer uniform failed", "err", err)
+		return
+	}
+
+	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{
+			{
+				View:       ws.currentView,
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+			},
+		},
+	})
+	if err != nil {
+		slog.Error("gogpu: blit BeginRenderPass failed", "err", err)
+		return
+	}
+
+	renderPass.SetPipeline(r.blitPipeline)
+	renderPass.SetBindGroup(0, r.blitUniformBindGrp, nil)
+	renderPass.SetBindGroup(1, texBindGrp, nil)
+	renderPass.Draw(6, 1, 0, 0) // 6 vertices (2 triangles) for full-screen quad
+
+	if err := renderPass.End(); err != nil {
+		slog.Error("gogpu: blit EndRenderPass failed", "err", err)
+	}
 }
 
 // Clear defers a clear command to be applied at the start of the next render pass.
@@ -875,7 +1346,7 @@ func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) bool {
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       ws.currentView,
+				View:       ws.renderView(),
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
 				ClearValue: ws.pendingClearColor,
@@ -1023,7 +1494,7 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       ws.currentView,
+				View:       ws.renderView(),
 				LoadOp:     gputypes.LoadOpClear,
 				StoreOp:    gputypes.StoreOpStore,
 				ClearValue: gputypes.Color{R: clearR, G: clearG, B: clearB, A: clearA},
@@ -1313,7 +1784,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
-				View:       ws.currentView,
+				View:       ws.renderView(),
 				LoadOp:     loadOp,
 				StoreOp:    gputypes.StoreOpStore,
 				ClearValue: clearValue,
@@ -1575,6 +2046,8 @@ func (r *Renderer) Destroy() {
 		delete(r.texBindGroupCache, view)
 	}
 
+	r.destroyBlitPipeline()
+
 	// Release textured quad pipeline resources (reverse order)
 	if r.texQuadUniformBindGrp != nil {
 		r.texQuadUniformBindGrp.Release()
@@ -1642,9 +2115,51 @@ func (r *Renderer) ReleaseInstance() {
 	}
 }
 
+// destroyBlitPipeline releases the dedicated composition blit pipeline
+// resources. Extracted from Destroy to keep cyclomatic complexity bounded.
+func (r *Renderer) destroyBlitPipeline() {
+	if r.blitUniformBindGrp != nil {
+		r.blitUniformBindGrp.Release()
+		r.blitUniformBindGrp = nil
+	}
+	if r.blitUniformBuf != nil {
+		r.blitUniformBuf.Release()
+		r.blitUniformBuf = nil
+	}
+	if r.blitSampler != nil {
+		r.blitSampler.Release()
+		r.blitSampler = nil
+	}
+	if r.blitPipelineLayout != nil {
+		r.blitPipelineLayout.Release()
+		r.blitPipelineLayout = nil
+	}
+	if r.blitTextureLayout != nil {
+		r.blitTextureLayout.Release()
+		r.blitTextureLayout = nil
+	}
+	if r.blitUniformLayout != nil {
+		r.blitUniformLayout.Release()
+		r.blitUniformLayout = nil
+	}
+	if r.blitShader != nil {
+		r.blitShader.Release()
+		r.blitShader = nil
+	}
+	if r.blitPipeline != nil {
+		r.blitPipeline.Release()
+		r.blitPipeline = nil
+	}
+	if r.compositePipeline != nil {
+		r.compositePipeline.Release()
+		r.compositePipeline = nil
+	}
+}
+
 // destroy releases all resources owned by this window surface.
 func (ws *RenderTarget) destroy() {
 	ws.discardFrameEncoder()
+	ws.releaseCompositionTexture()
 	if ws.currentView != nil {
 		ws.currentView.Release()
 		ws.currentView = nil
