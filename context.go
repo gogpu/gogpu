@@ -147,6 +147,7 @@ func (c *Context) MarkPreserveContent() {
 		return
 	}
 	ws.frameCleared = true
+	ws.externalContent = true
 	ws.hasGPUWork = true
 }
 
@@ -250,19 +251,21 @@ func (c *Context) Renderer() *Renderer {
 	return c.renderer
 }
 
-// SurfaceView returns the current frame's surface texture view.
-// This is the GPU texture view that will be presented to the screen.
+// SurfaceView returns the current frame's render target texture view.
+// When a composition texture is active (ADR-067, debug overlays present),
+// this returns the composition view so content renders into the intermediate
+// texture. Otherwise it returns the swapchain view directly.
 // Returns nil if no frame is in progress.
 //
 // Use this with ggcanvas.RenderDirect for zero-copy GPU rendering,
-// bypassing the GPU→CPU→GPU readback path.
+// bypassing the GPU->CPU->GPU readback path.
 func (c *Context) SurfaceView() *wgpu.TextureView {
 	ws := c.activeSurface()
 	if !ws.ensureFrameStarted() {
 		return nil
 	}
 	ws.hasGPUWork = true
-	return ws.currentView
+	return ws.renderView()
 }
 
 // CommandEncoder returns the framework-owned command encoder for the active
@@ -345,16 +348,17 @@ func (r *ContextRenderTarget) CommandEncoder() gpucontext.CommandEncoder {
 // frame state to ggcanvas without introducing a dependency on gg.
 func (r *ContextRenderTarget) PreserveContent() bool {
 	ws := r.ctx.activeSurface()
-	return ws != nil && ws.frameCleared
+	return ws != nil && ws.externalContent
 }
 
-// SurfaceView returns the surface texture view as a type-safe opaque handle.
+// SurfaceView returns the render target texture view as a type-safe opaque handle.
+// When a composition texture is active (ADR-067), returns the composition view.
 func (r *ContextRenderTarget) SurfaceView() gpucontext.TextureView {
 	tv := r.ctx.SurfaceView()
 	if tv == nil {
 		return gpucontext.TextureView{}
 	}
-	return gpucontext.NewTextureView(unsafe.Pointer(tv)) //nolint:gosec // Go spec Rule 1: *T → unsafe.Pointer (ADR-018 opaque handle)
+	return gpucontext.NewTextureView(unsafe.Pointer(tv)) //nolint:gosec // Go spec Rule 1: *T -> unsafe.Pointer (ADR-018 opaque handle)
 }
 
 // SurfaceSize returns the surface dimensions.
@@ -405,6 +409,18 @@ func (r *ContextRenderTarget) RegisterDamageSource(name string) gpucontext.Damag
 // to create real GPU textures from raw pixel data.
 func (r *ContextRenderTarget) TextureCreator() gpucontext.TextureCreator {
 	return &rendererTextureCreator{renderer: r.ctx.renderer}
+}
+
+// Compositor returns the surface compositor for this render target.
+// Content renderers (gg, g3d) use this to query compositor state:
+// LoadOp decisions, damage rects, and MSAA overlay compositing.
+// Returns nil if no active surface exists.
+func (r *ContextRenderTarget) Compositor() gpucontext.SurfaceCompositor {
+	ws := r.ctx.activeSurface()
+	if ws == nil {
+		return nil
+	}
+	return ws
 }
 
 // CheckDeviceHealth returns nil if the GPU device is operational, or an error
