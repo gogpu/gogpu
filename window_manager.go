@@ -335,13 +335,15 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 
 	// Create platform window via PlatformManager.
 	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:             config.Title,
-		Width:             config.Width,
-		Height:            config.Height,
-		Resizable:         config.Resizable,
-		Fullscreen:        config.Fullscreen,
-		Frameless:         config.Frameless,
-		Transparent:       config.Transparent,
+		Title:       config.Title,
+		Width:       config.Width,
+		Height:      config.Height,
+		Resizable:   config.Resizable,
+		Fullscreen:  config.Fullscreen,
+		Frameless:   config.Frameless,
+		Transparent: config.Transparent,
+		UseDirectComposition: config.Transparent &&
+			a.config.GraphicsAPI == GraphicsAPIDX12,
 		TabbingMode:       int(config.TabbingMode),
 		TabbingIdentifier: config.TabbingIdentifier,
 	})

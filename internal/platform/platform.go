@@ -20,20 +20,21 @@ func NewWindowID() WindowID {
 
 // Config holds platform-agnostic window configuration.
 type Config struct {
-	Title             string
-	Width             int
-	Height            int
-	Resizable         bool
-	Fullscreen        bool
-	Frameless         bool
-	Transparent       bool
-	TabbingMode       int
-	TabbingIdentifier string
-	MinWidth          int // 0 = no minimum constraint
-	MinHeight         int // 0 = no minimum constraint
-	MaxWidth          int // 0 = no maximum constraint
-	MaxHeight         int // 0 = no maximum constraint
-	Icon              image.Image
+	Title                string
+	Width                int
+	Height               int
+	Resizable            bool
+	Fullscreen           bool
+	Frameless            bool
+	Transparent          bool
+	UseDirectComposition bool // Windows DX12 only: set WS_EX_NOREDIRECTIONBITMAP at creation
+	TabbingMode          int
+	TabbingIdentifier    string
+	MinWidth             int // 0 = no minimum constraint
+	MinHeight            int // 0 = no minimum constraint
+	MaxWidth             int // 0 = no maximum constraint
+	MaxHeight            int // 0 = no maximum constraint
+	Icon                 image.Image
 }
 
 // Event represents a platform event.

@@ -292,6 +292,16 @@ func (c Config) WithFrameless(frameless bool) Config {
 // supported and the platform window is created with its native transparency
 // style. Falls back to an opaque surface when the backend does not support
 // premultiplied alpha.
+//
+// Windows backend matrix (see docs/windows-transparency.md):
+//   - DX12 (explicit): DirectComposition + WS_EX_NOREDIRECTIONBITMAP, full
+//     per-pixel alpha against the desktop.
+//   - Vulkan/GLES: DwmEnableBlurBehindWindow legacy path; per-pixel alpha
+//     works through the DWM redirection surface.
+//   - Software: not currently supported — GDI BitBlt/StretchDIBits does not
+//     preserve alpha. Use a GPU backend or UpdateLayeredWindow.
+//   - Auto: uses the legacy blur-behind path so all backends stay visible;
+//     if wgpu selects DX12, per-pixel alpha may not composite (see docs).
 func (c Config) WithTransparent(transparent bool) Config {
 	c.Transparent = transparent
 	return c

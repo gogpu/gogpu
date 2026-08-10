@@ -162,17 +162,22 @@ const (
 	hkeyLocalMachine uintptr = 0x80000002
 
 	// Frameless window constants
-	wsPopup            = 0x80000000 // WS_POPUP
-	wsThickFrame       = 0x00040000 // WS_THICKFRAME (for resize in frameless)
-	wsCaption          = 0x00C00000 // WS_CAPTION (title bar)
-	wmNCHitTest        = 0x0084     // WM_NCHITTEST
-	wmNCCalcSize       = 0x0083     // WM_NCCALCSIZE
-	wmNCPaint          = 0x0085     // WM_NCPAINT
-	wmNCActivate       = 0x0086     // WM_NCACTIVATE
-	wmNCUAHDrawCaption = 0x00AE     // Undocumented: UxTheme caption draw
-	wmNCUAHDrawFrame   = 0x00AF     // Undocumented: UxTheme frame draw
-	swMinimize         = 6          // SW_MINIMIZE
-	swMaximize         = 3          // SW_MAXIMIZE
+	wsPopup      = 0x80000000 // WS_POPUP
+	wsThickFrame = 0x00040000 // WS_THICKFRAME (for resize in frameless)
+	wsCaption    = 0x00C00000 // WS_CAPTION (title bar)
+	// WS_EX_NOREDIRECTIONBITMAP: DComp per-pixel alpha requires disabling the
+	// DWM redirection bitmap; otherwise the swap chain is composed onto an
+	// opaque redirection surface and transparency is not visible
+	// (wgpu v0.30.35 release note; winit/wgpu-rs precedent).
+	wsExNoRedirectionBitmap = 0x00200000
+	wmNCHitTest             = 0x0084 // WM_NCHITTEST
+	wmNCCalcSize            = 0x0083 // WM_NCCALCSIZE
+	wmNCPaint               = 0x0085 // WM_NCPAINT
+	wmNCActivate            = 0x0086 // WM_NCACTIVATE
+	wmNCUAHDrawCaption      = 0x00AE // Undocumented: UxTheme caption draw
+	wmNCUAHDrawFrame        = 0x00AF // Undocumented: UxTheme frame draw
+	swMinimize              = 6      // SW_MINIMIZE
+	swMaximize              = 3      // SW_MAXIMIZE
 
 	// WM_NCHITTEST return values
 	htCaption     = 2
@@ -209,6 +214,7 @@ const (
 	// GetSystemMetrics / MonitorFromWindow constants
 	smCXSizeFrame           = 32 // SM_CXSIZEFRAME
 	smCYSizeFrame           = 33 // SM_CYSIZEFRAME
+	smCYCaption             = 4  // SM_CYCAPTION
 	smCXPaddedBorder        = 92 // SM_CXPADDEDBORDERWIDTH
 	monitorDefaultToNearest = 2  // MONITOR_DEFAULTTONEAREST
 
@@ -741,6 +747,16 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 	style := uintptr(wsOverlappedWindow)
 
+	// WS_EX_NOREDIRECTIONBITMAP is only safe for the DX12 DirectComposition
+	// path. Vulkan/GLES/Software and Auto present through the HWND and need
+	// the DWM redirection surface; for them Transparent uses the legacy
+	// DwmEnableBlurBehindWindow path below.
+	useDComp := config.Transparent && config.UseDirectComposition
+	dwExStyle := uintptr(0)
+	if useDComp {
+		dwExStyle = wsExNoRedirectionBitmap
+	}
+
 	// Best-guess DPI before HWND exists (SDL3 hybrid pattern).
 	// Position is CW_USEDEFAULT → query primary monitor.
 	guessDpi := monitorDpiFromPoint(0, 0, true)
@@ -759,7 +775,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 	// Create window with pre-scaled outer dimensions.
 	hwnd, _, _ := procCreateWindowExW.Call(
-		0,
+		dwExStyle,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(titlePtr)),
 		style,
@@ -810,23 +826,41 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	// Enable file drag-and-drop (WM_DROPFILES from shell32).
 	procDragAcceptFiles.Call(uintptr(w.hwnd), 1) // TRUE
 
-	// Enable DWM shadow for frameless windows
+	// Enable DWM shadow for frameless windows. Transparent windows must skip
+	// the DwmExtendFrameIntoClientArea call: it switches the window onto the
+	// DWM glass composition path, which overrides DirectComposition per-pixel
+	// alpha (semi-transparent content renders as an opaque tint — verified on
+	// Windows 11 with gogpu#361). Frameless transparent windows therefore lose
+	// the DWM system shadow; apps should draw their own shadow in-content.
+	// SetWindowPos(swpFrameChanged) + updateSize are still required so the
+	// WM_NCCALCSIZE JBR path removes the title bar.
 	if config.Frameless {
 		type margins struct {
 			cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight int32
 		}
-		m := margins{0, 0, 0, 1}
-		procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+		if !config.Transparent {
+			m := margins{0, 0, 0, 1}
+			procDwmExtendFrameIntoClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+		}
 		procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0, 0, 0,
 			swpNoMove|swpNoSize|swpNoZOrder|swpFrameChanged)
 		w.updateSize()
 	}
 
-	// Enable DWM blur-behind for per-pixel-alpha transparency (ADR-060).
-	// Independent of frameless mode — a transparent window keeps its chrome
-	// unless the application also opts into WithFrameless.
+	// Transparent windows use one of two paths:
+	//   - DirectComposition (explicit DX12): WS_EX_NOREDIRECTIONBITMAP was set
+	//     at creation; blur-behind must NOT be enabled (winit skips it too).
+	//   - Legacy blur-behind: Vulkan/GLES/Software/Auto present through the
+	//     HWND and need the DWM redirection surface to stay visible.
 	if config.Transparent {
-		enableDwmBlurBehind(w.hwnd)
+		if useDComp {
+			slog.Debug("gogpu: transparent window created with WS_EX_NOREDIRECTIONBITMAP (DirectComposition)",
+				"hwnd", hwnd)
+		} else {
+			enableDwmBlurBehind(w.hwnd)
+			slog.Debug("gogpu: transparent window created (legacy blur-behind path)",
+				"hwnd", hwnd)
+		}
 	}
 
 	w.updateSize()
@@ -1059,6 +1093,19 @@ func (w *win32Window) RequestSize(width, height int) {
 
 	outerW := uintptr(outerRect.right - outerRect.left)
 	outerH := uintptr(outerRect.bottom - outerRect.top)
+	if w.frameless {
+		// JBR: WM_NCCALCSIZE removes the top NC area (title bar + top frame
+		// + padded border) and folds it into the client area, but
+		// AdjustWindowRect still included it in the outer height. Subtract it
+		// here so the client area matches the requested logical size.
+		cyCaption, _, _ := procGetSystemMetrics.Call(smCYCaption)
+		cyFrame, _, _ := procGetSystemMetrics.Call(smCYSizeFrame)
+		cyPadded, _, _ := procGetSystemMetrics.Call(smCXPaddedBorder)
+		topNC := cyCaption + cyFrame + cyPadded
+		if topNC < outerH {
+			outerH -= topNC
+		}
+	}
 
 	procSetWindowPos.Call(uintptr(w.hwnd), 0, 0, 0,
 		outerW, outerH,
