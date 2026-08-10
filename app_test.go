@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/gogpu/gogpu/gpu/types"
+	gpu_types "github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/input"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
@@ -1416,14 +1416,14 @@ func TestInitPlatform_PropagatesIcon(t *testing.T) {
 func TestInitPlatform_PropagatesUseDirectComposition(t *testing.T) {
 	tests := []struct {
 		name        string
-		api         types.GraphicsAPI
+		api         gpu_types.GraphicsAPI
 		transparent bool
 		want        bool
 	}{
-		{"auto+transparent", types.GraphicsAPIAuto, true, false},
-		{"vulkan+transparent", types.GraphicsAPIVulkan, true, false},
-		{"dx12+transparent", types.GraphicsAPIDX12, true, true},
-		{"dx12+opaque", types.GraphicsAPIDX12, false, false},
+		{"auto+transparent", gpu_types.GraphicsAPIAuto, true, false},
+		{"vulkan+transparent", gpu_types.GraphicsAPIVulkan, true, false},
+		{"dx12+transparent", gpu_types.GraphicsAPIDX12, true, true},
+		{"dx12+opaque", gpu_types.GraphicsAPIDX12, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
