@@ -143,7 +143,7 @@ func (o *fpsDebugOverlay) Draw(ctx gpucontext.DebugOverlayContext) bool {
 		o.renderBar(ctx)
 	}
 
-	return true
+	return o.mode.overlay
 }
 
 // fpsStats holds computed frame time statistics.
