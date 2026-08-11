@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -1625,6 +1626,11 @@ func (p *darwinPlatform) SetApplicationMenu(items []MenuItem) {
 // regular items via initWithTitle:action:keyEquivalent: and linked to their
 // Go callback through the application delegate (handleMenuItem:).
 //
+// macOS menu bar only renders items that have submenus. Leaf items with an
+// App Menu role (About, Quit, Preferences, etc.) are routed to the App Menu
+// submenu automatically. Leaf items without a role or submenu are logged and
+// skipped — they would be invisible on macOS.
+//
 // Must only be called after NSApplication has been initialized.
 func (p *darwinPlatform) applyMenu(items []MenuItem) {
 	nsApp := p.app.NSApp()
@@ -1644,9 +1650,21 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 		mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), appMenuItem.Ptr())
 	}
 
-	// Add items as separate menu items.
+	appMenu := p.getAppMenu()
+
 	for _, item := range items {
-		p.addPlatformItem(mainMenu, item)
+		if item.Separator || len(item.Submenu) > 0 {
+			p.addPlatformItem(mainMenu, item)
+			continue
+		}
+		if item.Role != MenuRoleNone {
+			if !appMenu.IsNil() {
+				p.addPlatformItem(appMenu, item)
+			}
+			continue
+		}
+		slog.Warn("gogpu: macOS menu bar requires submenus — leaf item skipped",
+			"title", item.Title)
 	}
 }
 
@@ -1656,7 +1674,11 @@ func (p *darwinPlatform) addPlatformItem(parentMenu darwin.ID, item MenuItem) {
 		return
 	}
 
-	if item.Role != MenuRoleNone && item.Action == nil {
+	if item.Role != MenuRoleNone {
+		if item.Action != nil {
+			darwin.AddMenuItemWithCallback(parentMenu, item.Title, item.Action, roleKeyEquivalent(item.Role))
+			return
+		}
 		roleStr := roleToString(item.Role)
 		if roleStr != "" {
 			darwin.AddMenuItemWithRole(parentMenu, item.Title, roleStr)
@@ -1715,6 +1737,27 @@ func roleToString(role MenuRole) string {
 	return ""
 }
 
+// roleKeyEquivalent returns the standard macOS keyboard shortcut for a menu
+// role. Used when a custom Action overrides the role's default selector but
+// the item should still show the expected key equivalent in the menu.
+func roleKeyEquivalent(role MenuRole) string {
+	switch role {
+	case MenuRoleQuit:
+		return "q"
+	case MenuRoleClose:
+		return "w"
+	case MenuRoleMinimize:
+		return "m"
+	case MenuRolePreferences:
+		return ","
+	case MenuRoleHide:
+		return "h"
+	case MenuRoleFullScreen:
+		return "f"
+	}
+	return ""
+}
+
 // AddToSystemMenu adds items to a standard system menu (e.g., the Apple menu
 // or the Window menu). This enables the Godot-style system menu extension:
 // users can add custom items to existing menus without replacing them entirely.
@@ -1737,18 +1780,7 @@ func (p *darwinPlatform) AddToSystemMenu(menu SystemMenu, items []MenuItem) bool
 	}
 
 	for _, item := range items {
-		if item.Separator {
-			darwin.AddSeparatorItem(nsMenu)
-			continue
-		}
-		if item.Role != MenuRoleNone {
-			roleStr := roleToString(item.Role)
-			if roleStr != "" {
-				darwin.AddMenuItemWithRole(nsMenu, item.Title, roleStr)
-				continue
-			}
-		}
-		darwin.AddMenuItemWithCallback(nsMenu, item.Title, item.Action, "")
+		p.addPlatformItem(nsMenu, item)
 	}
 	return true
 }
