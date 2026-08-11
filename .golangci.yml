@@ -134,6 +134,13 @@ linters:
           - goconst
           - dupl
           - gocognit
+      # SA5011 false positives in tests: staticcheck does not model
+      # t.Fatal → runtime.Goexit as a terminating statement, even with
+      # an explicit return. Reproducible only on Linux CI (Go 1.25.12).
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA5011"
 
       # Backend implementations - many similar methods
       - path: gpu/backend/.*\.go
