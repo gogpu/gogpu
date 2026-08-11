@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.1] - 2026-08-11
+
+### Changed
+
+- **refactor: extract `internal/compositor/` package** (ADR-069, #446) — compositor code extracted from root package using Struct Ownership + Callback Interface pattern (Flutter `flow/` + Go stdlib `ssa.Func`). Root package retains public API + thin wiring; compositor owns all implementation.
+  - `DamageSource`, `ComputeDamageScissor`, `UnionAllSources` → `internal/compositor/`
+  - `OverlayPipeline`, damage/FPS debug overlays → `internal/compositor/`
+  - `BlitPipeline` struct (14 fields from Renderer), `BlitResources`, `CompositeState` → `internal/compositor/`
+  - `Context.RegisterDamageSource()` return type: `*DamageSource` → `gpucontext.DamageReporter` (interface)
+  - Zero type aliases, zero wrapper functions, direct `compositor.*` calls
+  - Unidirectional deps: root → compositor (compositor never imports root)
+  - `renderer.go` reduced by ~320 LOC
+- **deps:** wgpu v0.31.0 → v0.31.2
+- **ci:** `go mod tidy` drift check + compositor unidirectional deps guard
+
 ## [0.52.0] - 2026-08-10
 
 ### Added

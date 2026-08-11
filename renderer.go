@@ -13,15 +13,21 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
-// texQuadUniformSize is the size of the uniform buffer for textured quads.
-// Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + premultiplied(1 float) = 32 bytes
-const texQuadUniformSize = 32
+const (
+	shaderEntryVS = "vs_main"
+	shaderEntryFS = "fs_main"
+
+	// texQuadUniformSize is the size of the uniform buffer for textured quads.
+	// Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + premultiplied(1 float) = 32 bytes
+	texQuadUniformSize = 32
+)
 
 // SurfaceState tracks the lifecycle state of a GPU surface.
 // Transitions follow the WebGPU spec + wgpu framework.rs recovery pattern:
@@ -82,7 +88,7 @@ type RenderTarget struct {
 	// via Context.RegisterDamageSource. At present time, all sources are unioned
 	// into a single damage region (ADR-065). Sources are reset after present —
 	// each must report damage every frame that content changes.
-	damageSources []*DamageSource
+	damageSources []*compositor.DamageSource
 
 	// debugOverlays holds registered debug visualization layers (ADR-066).
 	// Overlays draw in registration order after all content renderers,
@@ -150,11 +156,9 @@ type RenderTarget struct {
 	// Released at next frame boundary (prepareLazyAcquire) after GPU completion.
 	pendingBlitBindGroup *wgpu.BindGroup
 
-	// Persistent MSAA composite bind group — recreated only when compositeView changes.
-	// Same pattern as old gg surfaceCompositeBindGroup.
-	compositeBindGroup      *wgpu.BindGroup
-	compositeBoundView      *wgpu.TextureView
-	pendingCompositeRelease *wgpu.BindGroup
+	// compositeState holds per-surface persistent bind group state for the MSAA
+	// overlay alpha-composite path (compositor.CompositeState).
+	compositeState compositor.CompositeState
 }
 
 // lockDisplay acquires the platform display lock if the window supports it.
@@ -211,25 +215,9 @@ type Renderer struct {
 	texQuadPipelineInited bool
 
 	// Dedicated composition blit pipeline (ADR-067).
-	// This pipeline blits the composition texture to the swapchain image.
-	// It uses the SAME shader as texQuadPipeline (positionedQuadShaderSource)
-	// but has its OWN pipeline, layout, uniform buffer, and bind groups to
-	// prevent bind group lifetime conflicts with gg's render session.
-	blitPipeline       *wgpu.RenderPipeline
-	blitShader         *wgpu.ShaderModule
-	blitUniformLayout  *wgpu.BindGroupLayout
-	blitTextureLayout  *wgpu.BindGroupLayout
-	blitPipelineLayout *wgpu.PipelineLayout
-	blitSampler        *wgpu.Sampler
-	blitUniformBuf     *wgpu.Buffer
-	blitUniformBindGrp *wgpu.BindGroup
-	blitUniformData    []byte
-	blitPipelineInited bool
-
-	// compositePipeline is like blitPipeline but with premultiplied alpha blend.
-	// Used by encodeSurfaceCompositePass for MSAA overlay alpha-blending.
-	// Blit pipeline has NO blend (passthrough copy); composite pipeline blends.
-	compositePipeline *wgpu.RenderPipeline
+	// Owns blit + composite pipelines, shader, layouts, sampler, uniform buffer.
+	// Lives in internal/compositor to keep renderer.go focused on frame orchestration.
+	blitPipeline compositor.BlitPipeline
 
 	// Texture bind group cache — device-level, shared across all windows.
 	texBindGroupCache map[*wgpu.TextureView]*wgpu.BindGroup
@@ -714,12 +702,12 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 	if ws.currentSurfaceTexture == nil {
 		return false
 	}
-	finalDamage := unionAllSources(ws.damageSources)
+	finalDamage := compositor.UnionAllSources(ws.damageSources)
 	lockDisplay(ws.platWindow)
 	err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, finalDamage)
 	unlockDisplay(ws.platWindow)
 	for _, ds := range ws.damageSources {
-		ds.reset()
+		ds.Reset()
 	}
 	if err == nil {
 		return false
@@ -775,10 +763,7 @@ func (ws *RenderTarget) prepareLazyAcquire() {
 		ws.pendingBlitBindGroup.Release()
 		ws.pendingBlitBindGroup = nil
 	}
-	if ws.pendingCompositeRelease != nil {
-		ws.pendingCompositeRelease.Release()
-		ws.pendingCompositeRelease = nil
-	}
+	ws.compositeState.Release()
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).
@@ -1028,198 +1013,18 @@ func (ws *RenderTarget) releaseCompositionTexture() {
 // self-register, so content renders into the composition texture from the
 // start of the frame.
 func (ws *RenderTarget) hasRegisteredOverlayEnv() bool {
-	mode := getDamageDebugMode()
-	if mode.overlay || mode.log {
+	mode := compositor.GetDamageDebugMode()
+	if mode.Overlay || mode.Log {
 		return true
 	}
-	fpsMode := getFPSDebugMode()
-	return fpsMode.overlay || fpsMode.log
+	fpsMode := compositor.GetFPSDebugMode()
+	return fpsMode.Overlay || fpsMode.Log
 }
 
-// initBlitPipeline creates the dedicated GPU pipeline for blitting the
-// composition texture to the swapchain. This pipeline uses the same shader
-// as texQuadPipeline (positionedQuadShaderSource) but has completely
-// independent resources to prevent bind group lifetime conflicts.
-//
-//nolint:funlen // pipeline init is inherently sequential setup code
+// initBlitPipeline delegates to the compositor BlitPipeline.Init with the
+// shared positionedQuadShaderSource (which stays in root — used by texQuadPipeline too).
 func (r *Renderer) initBlitPipeline() error {
-	if r.blitPipelineInited {
-		return nil
-	}
-
-	var err error
-
-	r.blitShader, err = r.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
-		Label: "Composition Blit Shader",
-		WGSL:  positionedQuadShaderSource,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit shader: %w", err)
-	}
-
-	// Bind group 0: uniforms (rect, screen, alpha, premultiplied).
-	r.blitUniformLayout, err = r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Label: "Blit Uniform Layout",
-		Entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-				Buffer: &gputypes.BufferBindingLayout{
-					Type:           gputypes.BufferBindingTypeUniform,
-					MinBindingSize: texQuadUniformSize,
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit uniform layout: %w", err)
-	}
-
-	// Bind group 1: sampler + texture.
-	r.blitTextureLayout, err = r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Label: "Blit Texture Layout",
-		Entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: gputypes.ShaderStageFragment,
-				Sampler: &gputypes.SamplerBindingLayout{
-					Type: gputypes.SamplerBindingTypeFiltering,
-				},
-			},
-			{
-				Binding:    1,
-				Visibility: gputypes.ShaderStageFragment,
-				Texture: &gputypes.TextureBindingLayout{
-					SampleType:    gputypes.TextureSampleTypeFloat,
-					ViewDimension: gputypes.TextureViewDimension2D,
-					Multisampled:  false,
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit texture layout: %w", err)
-	}
-
-	r.blitPipelineLayout, err = r.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
-		Label:            "Blit Pipeline Layout",
-		BindGroupLayouts: []*wgpu.BindGroupLayout{r.blitUniformLayout, r.blitTextureLayout},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit pipeline layout: %w", err)
-	}
-
-	// No blending needed: composition texture is the final image;
-	// copy it 1:1 to the swapchain.
-	r.blitPipeline, err = r.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
-		Label:  "Composition Blit Pipeline",
-		Layout: r.blitPipelineLayout,
-		Vertex: wgpu.VertexState{
-			Module:     r.blitShader,
-			EntryPoint: shaderEntryVS,
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Fragment: &wgpu.FragmentState{
-			Module:     r.blitShader,
-			EntryPoint: shaderEntryFS,
-			Targets: []gputypes.ColorTargetState{
-				{
-					Format:    r.surfaceFormat,
-					WriteMask: gputypes.ColorWriteMaskAll,
-					// No blending: composition texture is the final composited
-					// image — copy 1:1 to swapchain (passthrough). Content was
-					// already alpha-blended during Stage 1 (gg blit into composView).
-					// MSAA composite uses encodeSurfaceCompositePass which must
-					// use its own pipeline with premultiplied alpha blend.
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit pipeline: %w", err)
-	}
-
-	r.blitSampler, err = r.device.CreateSampler(&wgpu.SamplerDescriptor{
-		Label:        "Blit Sampler",
-		MagFilter:    gputypes.FilterModeNearest,
-		MinFilter:    gputypes.FilterModeNearest,
-		MipmapFilter: gputypes.FilterModeNearest,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit sampler: %w", err)
-	}
-
-	r.blitUniformBuf, err = r.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "Blit Uniforms",
-		Size:  texQuadUniformSize,
-		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit uniform buffer: %w", err)
-	}
-
-	r.blitUniformBindGrp, err = r.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  "Blit Uniform Bind Group",
-		Layout: r.blitUniformLayout,
-		Entries: []wgpu.BindGroupEntry{
-			{
-				Binding: 0,
-				Buffer:  r.blitUniformBuf,
-				Size:    texQuadUniformSize,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: blit uniform bind group: %w", err)
-	}
-
-	r.blitUniformData = make([]byte, texQuadUniformSize)
-
-	// Composite pipeline — same as blit but WITH premultiplied alpha blend.
-	// Used by encodeSurfaceCompositePass for MSAA overlay alpha-compositing.
-	r.compositePipeline, err = r.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
-		Label:  "MSAA Composite Pipeline",
-		Layout: r.blitPipelineLayout,
-		Vertex: wgpu.VertexState{
-			Module:     r.blitShader,
-			EntryPoint: shaderEntryVS,
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Fragment: &wgpu.FragmentState{
-			Module:     r.blitShader,
-			EntryPoint: shaderEntryFS,
-			Targets: []gputypes.ColorTargetState{
-				{
-					Format:    r.surfaceFormat,
-					WriteMask: gputypes.ColorWriteMaskAll,
-					Blend: &gputypes.BlendState{
-						Color: gputypes.BlendComponent{
-							Operation: gputypes.BlendOperationAdd,
-							SrcFactor: gputypes.BlendFactorOne,
-							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
-						},
-						Alpha: gputypes.BlendComponent{
-							Operation: gputypes.BlendOperationAdd,
-							SrcFactor: gputypes.BlendFactorOne,
-							DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
-						},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: composite pipeline: %w", err)
-	}
-
-	r.blitPipelineInited = true
-	return nil
+	return r.blitPipeline.Init(r.device, r.surfaceFormat, positionedQuadShaderSource)
 }
 
 // blitComposToSwapchain draws a full-screen quad sampling the composition
@@ -1230,7 +1035,7 @@ func (r *Renderer) blitComposToSwapchain(ws *RenderTarget) {
 	if ws.composView == nil || ws.currentView == nil {
 		return
 	}
-	if !r.blitPipelineInited {
+	if !r.blitPipeline.Inited {
 		if err := r.initBlitPipeline(); err != nil {
 			slog.Error("gogpu: blit pipeline init failed", "err", err)
 			return
@@ -1243,68 +1048,16 @@ func (r *Renderer) blitComposToSwapchain(ws *RenderTarget) {
 		return
 	}
 
-	// Create per-frame bind group for the composition texture view.
-	texBindGrp, err := r.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  "Blit Texture Bind Group",
-		Layout: r.blitTextureLayout,
-		Entries: []wgpu.BindGroupEntry{
-			{
-				Binding: 0,
-				Sampler: r.blitSampler,
-			},
-			{
-				Binding:     1,
-				TextureView: ws.composView,
-			},
-		},
-	})
-	if err != nil {
-		slog.Error("gogpu: create blit texture bind group failed", "err", err)
-		return
-	}
 	// Bind group is consumed by the shared frame encoder — do NOT defer
 	// Release() here. The encoder is submitted in submitFrameEncoder AFTER
 	// this function returns. Track for release at next frame boundary
 	// (BeginFrame), where VSync guarantees GPU completion.
-	ws.pendingBlitBindGroup = texBindGrp
-
-	// Upload full-screen quad uniforms: rect = (0,0,width,height), alpha = 1.
-	binary.LittleEndian.PutUint32(r.blitUniformData[0:4], math.Float32bits(0))                    // x
-	binary.LittleEndian.PutUint32(r.blitUniformData[4:8], math.Float32bits(0))                    // y
-	binary.LittleEndian.PutUint32(r.blitUniformData[8:12], math.Float32bits(float32(ws.width)))   // width
-	binary.LittleEndian.PutUint32(r.blitUniformData[12:16], math.Float32bits(float32(ws.height))) // height
-	binary.LittleEndian.PutUint32(r.blitUniformData[16:20], math.Float32bits(float32(ws.width)))  // screenWidth
-	binary.LittleEndian.PutUint32(r.blitUniformData[20:24], math.Float32bits(float32(ws.height))) // screenHeight
-	binary.LittleEndian.PutUint32(r.blitUniformData[24:28], math.Float32bits(1.0))                // alpha
-	binary.LittleEndian.PutUint32(r.blitUniformData[28:32], math.Float32bits(1.0))                // premultiplied
-	if err := r.device.Queue().WriteBuffer(r.blitUniformBuf, 0, r.blitUniformData); err != nil {
-		slog.Error("gogpu: blit WriteBuffer uniform failed", "err", err)
-		return
-	}
-
-	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		ColorAttachments: []wgpu.RenderPassColorAttachment{
-			{
-				View:       ws.currentView,
-				LoadOp:     gputypes.LoadOpClear,
-				StoreOp:    gputypes.StoreOpStore,
-				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 0},
-			},
-		},
-	})
+	texBindGrp, err := r.blitPipeline.BlitToSwapchain(encoder, ws.currentView, ws.composView, ws.width, ws.height)
 	if err != nil {
-		slog.Error("gogpu: blit BeginRenderPass failed", "err", err)
+		slog.Error("gogpu: blit to swapchain failed", "err", err)
 		return
 	}
-
-	renderPass.SetPipeline(r.blitPipeline)
-	renderPass.SetBindGroup(0, r.blitUniformBindGrp, nil)
-	renderPass.SetBindGroup(1, texBindGrp, nil)
-	renderPass.Draw(6, 1, 0, 0) // 6 vertices (2 triangles) for full-screen quad
-
-	if err := renderPass.End(); err != nil {
-		slog.Error("gogpu: blit EndRenderPass failed", "err", err)
-	}
+	ws.pendingBlitBindGroup = texBindGrp
 }
 
 // Clear defers a clear command to be applied at the start of the next render pass.
@@ -2118,42 +1871,7 @@ func (r *Renderer) ReleaseInstance() {
 // destroyBlitPipeline releases the dedicated composition blit pipeline
 // resources. Extracted from Destroy to keep cyclomatic complexity bounded.
 func (r *Renderer) destroyBlitPipeline() {
-	if r.blitUniformBindGrp != nil {
-		r.blitUniformBindGrp.Release()
-		r.blitUniformBindGrp = nil
-	}
-	if r.blitUniformBuf != nil {
-		r.blitUniformBuf.Release()
-		r.blitUniformBuf = nil
-	}
-	if r.blitSampler != nil {
-		r.blitSampler.Release()
-		r.blitSampler = nil
-	}
-	if r.blitPipelineLayout != nil {
-		r.blitPipelineLayout.Release()
-		r.blitPipelineLayout = nil
-	}
-	if r.blitTextureLayout != nil {
-		r.blitTextureLayout.Release()
-		r.blitTextureLayout = nil
-	}
-	if r.blitUniformLayout != nil {
-		r.blitUniformLayout.Release()
-		r.blitUniformLayout = nil
-	}
-	if r.blitShader != nil {
-		r.blitShader.Release()
-		r.blitShader = nil
-	}
-	if r.blitPipeline != nil {
-		r.blitPipeline.Release()
-		r.blitPipeline = nil
-	}
-	if r.compositePipeline != nil {
-		r.compositePipeline.Release()
-		r.compositePipeline = nil
-	}
+	r.blitPipeline.Destroy()
 }
 
 // destroy releases all resources owned by this window surface.

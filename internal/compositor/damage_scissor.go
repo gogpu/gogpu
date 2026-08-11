@@ -1,16 +1,12 @@
-package gogpu
+package compositor
 
 import "image"
 
-// computeDamageScissor computes the effective scissor rect as the intersection
+// ComputeDamageScissor computes the effective scissor rect as the intersection
 // of group clip and frame damage rect, clamped to surface bounds.
 // Returns (x, y, w, h, valid). When valid=false, the intersection is empty
 // and all fragments should be discarded.
-//
-// This is the canonical surface-level damage scissor computation used by
-// the compositor blit path (ADR-016). Content renderers (gg, g3d) produce
-// damage rects; gogpu's compositor converts them to GPU scissor rects.
-func computeDamageScissor(groupClip *[4]uint32, surfaceW, surfaceH uint32, damage image.Rectangle) (x, y, w, h uint32, valid bool) {
+func ComputeDamageScissor(groupClip *[4]uint32, surfaceW, surfaceH uint32, damage image.Rectangle) (x, y, w, h uint32, valid bool) {
 	sx, sy := damage.Min.X, damage.Min.Y
 	sx2, sy2 := damage.Max.X, damage.Max.Y
 
@@ -36,9 +32,9 @@ func computeDamageScissor(groupClip *[4]uint32, surfaceW, surfaceH uint32, damag
 	return uint32(sx), uint32(sy), uint32(sx2 - sx), uint32(sy2 - sy), true //nolint:gosec // clamped above
 }
 
-// damageRectsUnion returns the bounding box of all damage rects.
+// DamageRectsUnion returns the bounding box of all damage rects.
 // Returns empty rect if slice is empty.
-func damageRectsUnion(rects []image.Rectangle) image.Rectangle {
+func DamageRectsUnion(rects []image.Rectangle) image.Rectangle {
 	if len(rects) == 0 {
 		return image.Rectangle{}
 	}

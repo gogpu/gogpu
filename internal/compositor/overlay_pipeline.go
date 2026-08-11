@@ -1,4 +1,4 @@
-package gogpu
+package compositor
 
 import (
 	"encoding/binary"
@@ -11,31 +11,17 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// Shader entry point names shared by all pipelines in the package (renderer,
-// damage overlay, FPS overlay). Defined once to satisfy goconst.
-const (
-	shaderEntryVS = "vs_main"
-	shaderEntryFS = "fs_main"
-)
+// OverlayUniformSize is the uniform buffer size (vec2<f32> + padding = 16 bytes).
+const OverlayUniformSize = 16
 
-// Debug mode string constants shared by damage and FPS overlay parsers.
-const (
-	overlayModeOverlay = "overlay"
-	overlayModeLog     = "log"
-)
-
-// overlayUniformSize is the uniform buffer size for the instanced overlay
-// shader: screen dimensions (vec2<f32>) + padding = 16 bytes.
-const overlayUniformSize = 16
-
-// overlayInstanceStride is the per-instance byte stride.
+// OverlayInstanceStride is the per-instance byte stride.
 // Layout: rectXY(f32x2=8) + rectWH(f32x2=8) + color(f32x4=16) = 32 bytes.
-const overlayInstanceStride = 32
+const OverlayInstanceStride = 32
 
-// overlayPipeline holds the GPU resources shared by all debug overlay
-// pipelines (damage, FPS). Uses instanced draw: one Draw(6, N, 0, 0) call
+// OverlayPipeline holds the GPU resources shared by all debug overlay
+// renderers (damage, FPS). Uses instanced draw: one Draw(6, N) call
 // renders N flat-color quads from per-instance vertex data.
-type overlayPipeline struct {
+type OverlayPipeline struct {
 	shader         *wgpu.ShaderModule
 	uniformLayout  *wgpu.BindGroupLayout
 	pipelineLayout *wgpu.PipelineLayout
@@ -44,28 +30,24 @@ type overlayPipeline struct {
 	uniformBindGrp *wgpu.BindGroup
 	uniformData    []byte
 
-	// Instance buffer — grow-on-demand (gg SDF pattern).
 	instanceBuf     *wgpu.Buffer
 	instanceBufSize uint64
 
-	inited bool
+	Inited bool
 }
 
-// initOverlayPipeline creates the GPU pipeline resources for a debug overlay.
-// Both damage and FPS overlays share the same instanced pipeline structure:
-// flat-color quads with premultiplied alpha blending, per-instance rect and
-// color data via VertexStepModeInstance.
-func initOverlayPipeline(
+// InitOverlayPipeline creates the GPU pipeline resources for a debug overlay.
+func InitOverlayPipeline(
 	device *wgpu.Device,
 	surfaceFormat gputypes.TextureFormat,
 	label string,
 	shaderSource string,
-) (*overlayPipeline, error) {
+) (*OverlayPipeline, error) {
 	if device == nil {
-		return nil, fmt.Errorf("gogpu: %s overlay: no GPU device", label)
+		return nil, fmt.Errorf("compositor: %s overlay: no GPU device", label)
 	}
 
-	p := &overlayPipeline{}
+	p := &OverlayPipeline{}
 	var err error
 
 	p.shader, err = device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
@@ -73,9 +55,30 @@ func initOverlayPipeline(
 		WGSL:  shaderSource,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: %s overlay shader: %w", label, err)
+		return nil, fmt.Errorf("compositor: %s overlay shader: %w", label, err)
 	}
 
+	if err := p.initLayouts(device, label); err != nil {
+		return nil, err
+	}
+
+	p.pipeline, err = p.createRenderPipeline(device, surfaceFormat, label)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.initUniforms(device, label); err != nil {
+		return nil, err
+	}
+
+	p.uniformData = make([]byte, OverlayUniformSize)
+	p.Inited = true
+	return p, nil
+}
+
+// initLayouts creates the bind group layout and pipeline layout.
+func (p *OverlayPipeline) initLayouts(device *wgpu.Device, label string) error {
+	var err error
 	p.uniformLayout, err = device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: label + " Overlay Uniform Layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
@@ -84,13 +87,13 @@ func initOverlayPipeline(
 				Visibility: gputypes.ShaderStageVertex,
 				Buffer: &gputypes.BufferBindingLayout{
 					Type:           gputypes.BufferBindingTypeUniform,
-					MinBindingSize: overlayUniformSize,
+					MinBindingSize: OverlayUniformSize,
 				},
 			},
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: %s overlay uniform layout: %w", label, err)
+		return fmt.Errorf("compositor: %s overlay uniform layout: %w", label, err)
 	}
 
 	p.pipelineLayout, err = device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
@@ -98,25 +101,31 @@ func initOverlayPipeline(
 		BindGroupLayouts: []*wgpu.BindGroupLayout{p.uniformLayout},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: %s overlay pipeline layout: %w", label, err)
+		return fmt.Errorf("compositor: %s overlay pipeline layout: %w", label, err)
 	}
+	return nil
+}
 
-	// Alpha blending: premultiplied source over destination.
-	// SrcFactor=One because color is pre-multiplied by the caller.
-	p.pipeline, err = device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+// createRenderPipeline creates the render pipeline with instanced vertex layout.
+func (p *OverlayPipeline) createRenderPipeline(
+	device *wgpu.Device,
+	surfaceFormat gputypes.TextureFormat,
+	label string,
+) (*wgpu.RenderPipeline, error) {
+	return device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  label + " Overlay Pipeline",
 		Layout: p.pipelineLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: shaderEntryVS,
+			EntryPoint: ShaderEntryVS,
 			Buffers: []gputypes.VertexBufferLayout{
 				{
-					ArrayStride: overlayInstanceStride,
+					ArrayStride: OverlayInstanceStride,
 					StepMode:    gputypes.VertexStepModeInstance,
 					Attributes: []gputypes.VertexAttribute{
-						{ShaderLocation: 0, Offset: 0, Format: gputypes.VertexFormatFloat32x2},  // rectXY
-						{ShaderLocation: 1, Offset: 8, Format: gputypes.VertexFormatFloat32x2},  // rectWH
-						{ShaderLocation: 2, Offset: 16, Format: gputypes.VertexFormatFloat32x4}, // color
+						{ShaderLocation: 0, Offset: 0, Format: gputypes.VertexFormatFloat32x2},
+						{ShaderLocation: 1, Offset: 8, Format: gputypes.VertexFormatFloat32x2},
+						{ShaderLocation: 2, Offset: 16, Format: gputypes.VertexFormatFloat32x4},
 					},
 				},
 			},
@@ -127,7 +136,7 @@ func initOverlayPipeline(
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: shaderEntryFS,
+			EntryPoint: ShaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    surfaceFormat,
@@ -148,17 +157,18 @@ func initOverlayPipeline(
 			},
 		},
 	})
-	if err != nil {
-		return nil, fmt.Errorf("gogpu: %s overlay pipeline: %w", label, err)
-	}
+}
 
+// initUniforms creates the uniform buffer and bind group.
+func (p *OverlayPipeline) initUniforms(device *wgpu.Device, label string) error {
+	var err error
 	p.uniformBuffer, err = device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: label + " Overlay Uniforms",
-		Size:  overlayUniformSize,
+		Size:  OverlayUniformSize,
 		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: %s overlay uniform buffer: %w", label, err)
+		return fmt.Errorf("compositor: %s overlay uniform buffer: %w", label, err)
 	}
 
 	p.uniformBindGrp, err = device.CreateBindGroup(&wgpu.BindGroupDescriptor{
@@ -168,24 +178,19 @@ func initOverlayPipeline(
 			{
 				Binding: 0,
 				Buffer:  p.uniformBuffer,
-				Size:    overlayUniformSize,
+				Size:    OverlayUniformSize,
 			},
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: %s overlay uniform bind group: %w", label, err)
+		return fmt.Errorf("compositor: %s overlay uniform bind group: %w", label, err)
 	}
-
-	p.uniformData = make([]byte, overlayUniformSize)
-	p.inited = true
-	return p, nil
+	return nil
 }
 
-// appendInstance packs one instance (32 bytes) into the staging buffer.
-// Rect position and size are in physical surface pixels. Color components
-// must already be pre-multiplied by the desired alpha.
-func appendInstance(buf *[]byte, rect image.Rectangle, r, g, b, a float32) {
-	var inst [overlayInstanceStride]byte
+// AppendInstance packs one instance (32 bytes) into the staging buffer.
+func AppendInstance(buf *[]byte, rect image.Rectangle, r, g, b, a float32) {
+	var inst [OverlayInstanceStride]byte
 	binary.LittleEndian.PutUint32(inst[0:4], math.Float32bits(float32(rect.Min.X)))
 	binary.LittleEndian.PutUint32(inst[4:8], math.Float32bits(float32(rect.Min.Y)))
 	binary.LittleEndian.PutUint32(inst[8:12], math.Float32bits(float32(rect.Dx())))
@@ -197,32 +202,26 @@ func appendInstance(buf *[]byte, rect image.Rectangle, r, g, b, a float32) {
 	*buf = append(*buf, inst[:]...)
 }
 
-// renderInstances uploads instance data, writes the screen-size uniform,
-// and issues a single Draw(6, instanceCount) inside one render pass.
-// The instance buffer is persistent with grow-on-demand (gg SDF pattern)
-// to avoid per-frame buffer creation.
-func (p *overlayPipeline) renderInstances(
+// RenderInstances uploads instance data and issues Draw(6, N) in one render pass.
+func (p *OverlayPipeline) RenderInstances(
 	device *wgpu.Device,
 	encoder *wgpu.CommandEncoder,
 	view *wgpu.TextureView,
 	surfW, surfH uint32,
 	instanceData []byte,
 ) {
-	instanceCount := uint32(len(instanceData) / overlayInstanceStride) //nolint:gosec // always positive
+	instanceCount := uint32(len(instanceData) / OverlayInstanceStride) //nolint:gosec // always positive
 	if instanceCount == 0 {
 		return
 	}
 
-	// Write screen dimensions to uniform buffer.
 	binary.LittleEndian.PutUint32(p.uniformData[0:4], math.Float32bits(float32(surfW)))
 	binary.LittleEndian.PutUint32(p.uniformData[4:8], math.Float32bits(float32(surfH)))
-	// Padding bytes 8-15 remain zero.
 	if err := device.Queue().WriteBuffer(p.uniformBuffer, 0, p.uniformData); err != nil {
-		slog.Error("gogpu: overlay WriteBuffer (uniform) failed", "err", err)
+		slog.Error("compositor: overlay WriteBuffer (uniform) failed", "err", err)
 		return
 	}
 
-	// Grow-on-demand instance buffer (gg SDF pattern).
 	needed := uint64(len(instanceData))
 	if p.instanceBuf == nil || p.instanceBufSize < needed {
 		if p.instanceBuf != nil {
@@ -235,14 +234,14 @@ func (p *overlayPipeline) renderInstances(
 			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 		})
 		if err != nil {
-			slog.Error("gogpu: overlay CreateBuffer (instances) failed", "err", err)
+			slog.Error("compositor: overlay CreateBuffer (instances) failed", "err", err)
 			return
 		}
 		p.instanceBufSize = needed
 	}
 
 	if err := device.Queue().WriteBuffer(p.instanceBuf, 0, instanceData); err != nil {
-		slog.Error("gogpu: overlay WriteBuffer (instances) failed", "err", err)
+		slog.Error("compositor: overlay WriteBuffer (instances) failed", "err", err)
 		return
 	}
 
@@ -256,7 +255,7 @@ func (p *overlayPipeline) renderInstances(
 		},
 	})
 	if err != nil {
-		slog.Error("gogpu: overlay BeginRenderPass failed", "err", err)
+		slog.Error("compositor: overlay BeginRenderPass failed", "err", err)
 		return
 	}
 
@@ -266,6 +265,6 @@ func (p *overlayPipeline) renderInstances(
 	renderPass.Draw(6, instanceCount, 0, 0)
 
 	if err := renderPass.End(); err != nil {
-		slog.Error("gogpu: overlay End render pass failed", "err", err)
+		slog.Error("compositor: overlay End render pass failed", "err", err)
 	}
 }
