@@ -131,6 +131,7 @@ const (
 	KeyPrintScreen
 	KeyScrollLock
 	KeyPause
+	KeyCancel // Win32 Ctrl+Break (VK_CANCEL); distinct from KeyPause
 
 	KeyCount // Number of keys
 )

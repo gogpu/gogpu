@@ -2021,6 +2021,8 @@ func gpucontextKeyToInputKey(key gpucontext.Key) input.Key {
 		return input.KeyNumLock
 	case gpucontext.KeyPause:
 		return input.KeyPause
+	case gpucontext.KeyCancel:
+		return input.KeyCancel
 
 	default:
 		return input.KeyUnknown
