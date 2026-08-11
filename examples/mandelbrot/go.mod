@@ -3,11 +3,11 @@ module github.com/gogpu/gogpu/examples/mandelbrot
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.50.14
-	github.com/gogpu/gogpu v0.50.2
-	github.com/gogpu/gpucontext v0.24.0
+	github.com/gogpu/gg v0.52.1
+	github.com/gogpu/gogpu v0.52.0
+	github.com/gogpu/gpucontext v0.27.0
 	github.com/gogpu/gputypes v0.5.1
-	github.com/gogpu/wgpu v0.30.37
+	github.com/gogpu/wgpu v0.31.0
 )
 
 require (
