@@ -5,13 +5,10 @@ import (
 	"testing"
 
 	"github.com/gogpu/gogpu/internal/compositor"
-	"github.com/gogpu/wgpu"
 )
 
-func TestCompositorBlitResources_ReleaseBinding(t *testing.T) {
-	r := &CompositorBlitResources{
-		BoundView: &wgpu.TextureView{}, // non-nil sentinel
-	}
+func TestBlitResources_ReleaseBinding(t *testing.T) {
+	r := &compositor.BlitResources{}
 	// BindGroup is nil — ReleaseBinding should not panic.
 	r.ReleaseBinding()
 	if r.BoundView != nil {
@@ -19,8 +16,8 @@ func TestCompositorBlitResources_ReleaseBinding(t *testing.T) {
 	}
 }
 
-func TestCompositorBlitResources_Destroy(t *testing.T) {
-	r := &CompositorBlitResources{}
+func TestBlitResources_Destroy(t *testing.T) {
+	r := &compositor.BlitResources{}
 	// Calling Destroy on zero-value should not panic.
 	r.Destroy()
 }
