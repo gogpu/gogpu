@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **macOS: `SetMenu` leaf items invisible on menu bar** (#449) — `applyMenu` added bare `NSMenuItems` to the main menu bar; macOS only renders items with submenus. Role-based leaf items (About, Quit, Preferences) are now routed to the App Menu submenu automatically. Non-role leaf items log a warning.
+- **macOS: `Role + Action` items dropped** (#449) — `addPlatformItem` required `item.Action == nil` for role dispatch. Custom `Action` now takes precedence over the system selector while preserving the role's key equivalent (Cmd+Q, Cmd+W, etc.).
+- **macOS: `AddToSystemMenu` inconsistency** (#449) — unified with `addPlatformItem` for a single code path. Role+Action items now work consistently in both `SetMenu` and `GetSystemMenu().AddItem()`.
+
 ## [0.52.1] - 2026-08-11
 
 ### Changed
