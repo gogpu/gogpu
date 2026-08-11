@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -92,7 +93,7 @@ type damageDebugOverlay struct {
 	// damageSources is a reference to the RenderTarget's damage sources.
 	// Set during auto-registration. The overlay reads snapshots before
 	// sources are reset by present().
-	damageSources *[]*DamageSource
+	damageSources *[]*compositor.DamageSource
 
 	// hasGPUWork is a reference to the RenderTarget's hasGPUWork flag.
 	// When true and no external sources reported damage, the overlay
@@ -175,7 +176,7 @@ func (o *damageDebugOverlay) collectSnapshots() []gpucontext.DamageSourceSnapsho
 		if o.hasGPUWork != nil && *o.hasGPUWork {
 			return []gpucontext.DamageSourceSnapshot{{
 				Name:  "gogpu",
-				Color: damagePalette[0], // green
+				Color: compositor.DamagePalette[0], // green
 				Full:  true,
 			}}
 		}
@@ -185,15 +186,15 @@ func (o *damageDebugOverlay) collectSnapshots() []gpucontext.DamageSourceSnapsho
 	sources := *o.damageSources
 	snapshots := make([]gpucontext.DamageSourceSnapshot, len(sources))
 	for i, ds := range sources {
-		rects := append([]image.Rectangle(nil), ds.rects...)
+		rects := append([]image.Rectangle(nil), ds.Rects...)
 		// NOTE: gg's trackDamage() already scales logical → physical via deviceScale.
 		// Do NOT scale again here — double scaling causes wrong overlay positions.
 		snapshots[i] = gpucontext.DamageSourceSnapshot{
-			Name:   ds.name,
-			Color:  ds.color,
+			Name:   ds.Name,
+			Color:  ds.Color,
 			Rects:  rects,
-			Full:   ds.full,
-			Reason: ds.reason,
+			Full:   ds.Full,
+			Reason: ds.Reason,
 		}
 	}
 	return snapshots

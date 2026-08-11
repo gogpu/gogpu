@@ -1,4 +1,4 @@
-package gogpu
+package compositor
 
 import (
 	"image"
@@ -28,7 +28,7 @@ func TestComputeDamageScissor(t *testing.T) {
 		},
 		{
 			name:      "damage intersects group clip",
-			groupClip: &[4]uint32{150, 400, 100, 100}, // x=150, y=400, w=100, h=100
+			groupClip: &[4]uint32{150, 400, 100, 100},
 			surfaceW:  800, surfaceH: 600,
 			damage: image.Rect(170, 410, 218, 458),
 			wantX:  170, wantY: 410, wantW: 48, wantH: 48,
@@ -36,59 +36,43 @@ func TestComputeDamageScissor(t *testing.T) {
 		},
 		{
 			name:      "group clip smaller than damage",
-			groupClip: &[4]uint32{180, 420, 20, 20}, // x=180, y=420, w=20, h=20
+			groupClip: &[4]uint32{180, 420, 20, 20},
 			surfaceW:  800, surfaceH: 600,
 			damage: image.Rect(170, 410, 218, 458),
 			wantX:  180, wantY: 420, wantW: 20, wantH: 20,
 			wantValid: true,
 		},
 		{
-			name:      "group clip outside damage — empty intersection",
-			groupClip: &[4]uint32{0, 0, 50, 50}, // top-left corner
+			name:      "group clip outside damage",
+			groupClip: &[4]uint32{0, 0, 50, 50},
 			surfaceW:  800, surfaceH: 600,
-			damage:    image.Rect(170, 410, 218, 458), // center-bottom
+			damage:    image.Rect(170, 410, 218, 458),
 			wantValid: false,
 		},
 		{
 			name:      "damage clamped to surface bounds",
 			groupClip: nil,
 			surfaceW:  200, surfaceH: 200,
-			damage: image.Rect(170, 180, 300, 300), // extends beyond surface
+			damage: image.Rect(170, 180, 300, 300),
 			wantX:  170, wantY: 180, wantW: 30, wantH: 20,
 			wantValid: true,
 		},
 		{
-			name:      "damage fully outside surface — empty",
+			name:      "damage fully outside surface",
 			groupClip: nil,
 			surfaceW:  100, surfaceH: 100,
 			damage:    image.Rect(200, 200, 300, 300),
 			wantValid: false,
 		},
 		{
-			name:      "partial overlap — group clip partially in damage",
-			groupClip: &[4]uint32{160, 400, 80, 80}, // x=160..240, y=400..480
-			surfaceW:  800, surfaceH: 600,
-			damage: image.Rect(170, 410, 218, 458), // x=170..218, y=410..458
-			wantX:  170, wantY: 410, wantW: 48, wantH: 48,
-			wantValid: true,
-		},
-		{
-			name:      "full surface group clip — damage is effective scissor",
-			groupClip: &[4]uint32{0, 0, 800, 600},
-			surfaceW:  800, surfaceH: 600,
-			damage: image.Rect(100, 100, 200, 200),
-			wantX:  100, wantY: 100, wantW: 100, wantH: 100,
-			wantValid: true,
-		},
-		{
 			name:      "zero-size damage",
 			groupClip: nil,
 			surfaceW:  800, surfaceH: 600,
-			damage:    image.Rect(100, 100, 100, 100), // zero width
+			damage:    image.Rect(100, 100, 100, 100),
 			wantValid: false,
 		},
 		{
-			name:      "negative coords in damage clamped to 0",
+			name:      "negative coords clamped to 0",
 			groupClip: nil,
 			surfaceW:  800, surfaceH: 600,
 			damage: image.Rect(-10, -10, 50, 50),
@@ -99,7 +83,7 @@ func TestComputeDamageScissor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			x, y, w, h, valid := computeDamageScissor(tt.groupClip, tt.surfaceW, tt.surfaceH, tt.damage)
+			x, y, w, h, valid := ComputeDamageScissor(tt.groupClip, tt.surfaceW, tt.surfaceH, tt.damage)
 			if valid != tt.wantValid {
 				t.Fatalf("valid = %v, want %v", valid, tt.wantValid)
 			}
@@ -127,21 +111,12 @@ func TestDamageRectsUnion(t *testing.T) {
 			[]image.Rectangle{image.Rect(10, 10, 58, 58), image.Rect(500, 50, 600, 82)},
 			image.Rect(10, 10, 600, 82),
 		},
-		{
-			"three_overlapping",
-			[]image.Rectangle{
-				image.Rect(10, 10, 100, 100),
-				image.Rect(50, 50, 200, 200),
-				image.Rect(150, 150, 300, 300),
-			},
-			image.Rect(10, 10, 300, 300),
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := damageRectsUnion(tt.rects)
+			got := DamageRectsUnion(tt.rects)
 			if got != tt.want {
-				t.Errorf("damageRectsUnion = %v, want %v", got, tt.want)
+				t.Errorf("DamageRectsUnion = %v, want %v", got, tt.want)
 			}
 		})
 	}

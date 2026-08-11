@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/wgpu"
 )
 
@@ -28,7 +29,7 @@ func TestApplyOverlayScissorWithDamage_ViaScissorCompute(t *testing.T) {
 	// ApplyOverlayScissorWithDamage requires a *wgpu.RenderPassEncoder
 	// (not mockable without GPU). Verify the underlying damage scissor
 	// computation that drives the overlay scissor logic.
-	x, y, w, h, valid := computeDamageScissor(nil, 800, 600, image.Rect(0, 0, 800, 600))
+	x, y, w, h, valid := compositor.ComputeDamageScissor(nil, 800, 600, image.Rect(0, 0, 800, 600))
 	if !valid {
 		t.Error("full-surface damage should be valid")
 	}

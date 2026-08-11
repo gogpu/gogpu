@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -86,7 +87,7 @@ func TestCollectSnapshots_NilSources(t *testing.T) {
 }
 
 func TestCollectSnapshots_EmptySources(t *testing.T) {
-	sources := []*DamageSource{}
+	sources := []*compositor.DamageSource{}
 	overlay := &damageDebugOverlay{damageSources: &sources}
 
 	snapshots := overlay.collectSnapshots()
@@ -96,14 +97,14 @@ func TestCollectSnapshots_EmptySources(t *testing.T) {
 }
 
 func TestCollectSnapshots_CopiesRects(t *testing.T) {
-	ds := &DamageSource{
-		name:  "gg",
-		color: color.RGBA{R: 0, G: 200, B: 0, A: 80},
+	ds := &compositor.DamageSource{
+		Name:  "gg",
+		Color: color.RGBA{R: 0, G: 200, B: 0, A: 80},
 	}
 	r := image.Rect(10, 20, 30, 40)
 	ds.ReportDamage(r)
 
-	sources := []*DamageSource{ds}
+	sources := []*compositor.DamageSource{ds}
 	overlay := &damageDebugOverlay{damageSources: &sources}
 
 	snapshots := overlay.collectSnapshots()
@@ -115,25 +116,25 @@ func TestCollectSnapshots_CopiesRects(t *testing.T) {
 	if snap.Name != "gg" {
 		t.Errorf("Name = %q, want %q", snap.Name, "gg")
 	}
-	if snap.Color != ds.color {
-		t.Errorf("Color = %v, want %v", snap.Color, ds.color)
+	if snap.Color != ds.Color {
+		t.Errorf("Color = %v, want %v", snap.Color, ds.Color)
 	}
 	if len(snap.Rects) != 1 || snap.Rects[0] != r {
 		t.Errorf("Rects = %v, want [%v]", snap.Rects, r)
 	}
 
 	// Verify snapshot rects are a copy (modifying source doesn't affect snapshot).
-	ds.rects[0] = image.Rect(99, 99, 999, 999)
-	if snap.Rects[0] == ds.rects[0] {
+	ds.Rects[0] = image.Rect(99, 99, 999, 999)
+	if snap.Rects[0] == ds.Rects[0] {
 		t.Error("snapshot rects should be a copy, not share underlying slice")
 	}
 }
 
 func TestCollectSnapshots_FullDamage(t *testing.T) {
-	ds := &DamageSource{name: "g3d"}
+	ds := &compositor.DamageSource{Name: "g3d"}
 	ds.ReportDamage() // full damage
 
-	sources := []*DamageSource{ds}
+	sources := []*compositor.DamageSource{ds}
 	overlay := &damageDebugOverlay{damageSources: &sources}
 
 	snapshots := overlay.collectSnapshots()
@@ -147,14 +148,14 @@ func TestCollectSnapshots_FullDamage(t *testing.T) {
 }
 
 func TestCollectSnapshots_Reason(t *testing.T) {
-	ds := &DamageSource{name: "g3d"}
+	ds := &compositor.DamageSource{Name: "g3d"}
 	reason := gpucontext.DamageReason{
 		Category: gpucontext.DamageCategoryAnimation,
 		Detail:   "camera pan",
 	}
 	ds.ReportDamageWithReason(reason, image.Rect(0, 0, 800, 600))
 
-	sources := []*DamageSource{ds}
+	sources := []*compositor.DamageSource{ds}
 	overlay := &damageDebugOverlay{damageSources: &sources}
 
 	snapshots := overlay.collectSnapshots()

@@ -13,6 +13,7 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
@@ -82,7 +83,7 @@ type RenderTarget struct {
 	// via Context.RegisterDamageSource. At present time, all sources are unioned
 	// into a single damage region (ADR-065). Sources are reset after present —
 	// each must report damage every frame that content changes.
-	damageSources []*DamageSource
+	damageSources []*compositor.DamageSource
 
 	// debugOverlays holds registered debug visualization layers (ADR-066).
 	// Overlays draw in registration order after all content renderers,
@@ -714,12 +715,12 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 	if ws.currentSurfaceTexture == nil {
 		return false
 	}
-	finalDamage := unionAllSources(ws.damageSources)
+	finalDamage := compositor.UnionAllSources(ws.damageSources)
 	lockDisplay(ws.platWindow)
 	err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, finalDamage)
 	unlockDisplay(ws.platWindow)
 	for _, ds := range ws.damageSources {
-		ds.reset()
+		ds.Reset()
 	}
 	if err == nil {
 		return false

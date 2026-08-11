@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gogpu/gmath"
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -58,20 +59,17 @@ func (c *Context) activeSurface() *RenderTarget {
 
 // RegisterDamageSource registers a named damage source with the compositor.
 // Each independent renderer (gg, g3d, video, compose) registers once at init
-// and reports per-frame damage through the returned DamageSource.
+// and reports per-frame damage through the returned DamageReporter.
 //
-// The returned *DamageSource implements gpucontext.DamageReporter. The source
+// The returned DamageReporter implements gpucontext.DamageReporter. The source
 // is assigned a palette color for debug overlay rendering. Sources are unioned
 // at present time — if ANY source reports full damage, the entire surface is
 // presented. See ADR-065 for the multi-renderer damage tracking design.
 //
 // All damage operations happen on the render thread (same goroutine as OnDraw).
-func (c *Context) RegisterDamageSource(name string) *DamageSource {
+func (c *Context) RegisterDamageSource(name string) gpucontext.DamageReporter {
 	ws := c.activeSurface()
-	ds := &DamageSource{
-		name:  name,
-		color: damagePalette[len(ws.damageSources)%len(damagePalette)],
-	}
+	ds := compositor.NewDamageSource(name, len(ws.damageSources))
 	ws.damageSources = append(ws.damageSources, ds)
 	return ds
 }
@@ -376,9 +374,9 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 	if ws == nil || ws.surface == nil {
 		return fmt.Errorf("gogpu: no active surface")
 	}
-	err := ws.surface.PresentPixels(data, width, height, unionAllSources(ws.damageSources))
+	err := ws.surface.PresentPixels(data, width, height, compositor.UnionAllSources(ws.damageSources))
 	for _, ds := range ws.damageSources {
-		ds.reset()
+		ds.Reset()
 	}
 	if err != nil {
 		return err

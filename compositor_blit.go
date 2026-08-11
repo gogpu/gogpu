@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -115,7 +116,7 @@ func (r *Renderer) recordBaseBlitDraws(rp *wgpu.RenderPassEncoder, base BlitDraw
 	}
 	if hasDamage {
 		for _, dr := range rects {
-			dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, dr)
+			dx, dy, dw, dh, valid := compositor.ComputeDamageScissor(nil, w, h, dr)
 			if valid {
 				rp.SetScissorRect(dx, dy, dw, dh)
 				base.RecordBlitDraws(rp)
@@ -131,7 +132,7 @@ func (r *Renderer) recordOverlayBlitDraws(rp *wgpu.RenderPassEncoder, overlays [
 	if len(overlays) == 0 {
 		return
 	}
-	damageUnion := damageRectsUnion(rects)
+	damageUnion := compositor.DamageRectsUnion(rects)
 	for _, overlay := range overlays {
 		if ApplyOverlayScissorWithDamage(rp, overlay.ScissorRect, w, h, damageUnion) {
 			overlay.Recorder.RecordBlitDraws(rp)
@@ -161,7 +162,7 @@ func ApplyOverlayScissorWithDamage(rp *wgpu.RenderPassEncoder, rect *[4]uint32, 
 		}
 		return true
 	}
-	dx, dy, dw, dh, valid := computeDamageScissor(rect, w, h, damage)
+	dx, dy, dw, dh, valid := compositor.ComputeDamageScissor(rect, w, h, damage)
 	if !valid {
 		return false
 	}
@@ -277,7 +278,7 @@ func (ws *RenderTarget) ShouldPreserveContent() bool {
 // DamageRects returns the damage rectangles for the current frame by
 // unioning all registered damage sources.
 func (ws *RenderTarget) DamageRects() []image.Rectangle {
-	union := unionAllSources(ws.damageSources)
+	union := compositor.UnionAllSources(ws.damageSources)
 	return union
 }
 
