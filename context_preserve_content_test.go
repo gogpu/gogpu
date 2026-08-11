@@ -286,17 +286,17 @@ func TestContextRenderTarget_PreserveContent(t *testing.T) {
 		t.Error("PreserveContent() = true before external content is marked")
 	}
 
-	primary.frameCleared = true
+	primary.externalContent = true
 	if !rt.PreserveContent() {
-		t.Error("PreserveContent() = false with frameCleared=true")
+		t.Error("PreserveContent() = false with externalContent=true")
 	}
 
 	secondary := &RenderTarget{
-		renderer:     primary.renderer,
-		format:       gputypes.TextureFormatBGRA8Unorm,
-		frameCleared: true,
+		renderer:        primary.renderer,
+		format:          gputypes.TextureFormatBGRA8Unorm,
+		externalContent: true,
 	}
-	primary.frameCleared = false
+	primary.externalContent = false
 	secondaryRT := newContextForSurface(primary.renderer, secondary, 1.0).RenderTarget()
 	if !secondaryRT.PreserveContent() {
 		t.Error("PreserveContent() did not read the Context's secondary surface")

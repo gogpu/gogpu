@@ -1126,7 +1126,14 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// Or a draw call did ask for the swapchain and could not have it
 		// (surface outdated, not yet configured). Demand-driven mode already
 		// consumed the invalidation, so that one does need another frame.
-		if !ws.frameStarted {
+		//
+		// ADR-067: overlay-only frame. If the composition texture still holds
+		// content from the previous frame (composView != nil) and an overlay
+		// needs another frame (e.g., FPS counter, fade animation), acquire the
+		// swapchain and run endFrame to blit the preserved composition texture
+		// with updated overlays. This enables self-sustaining overlay animation
+		// even when the application's OnDraw callback draws nothing.
+		if !ws.frameStarted && !ws.tryOverlayOnlyFrame() {
 			if ws.acquireFailed {
 				a.RequestRedraw()
 			}
