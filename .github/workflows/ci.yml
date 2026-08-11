@@ -224,3 +224,19 @@ jobs:
 
         [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated. Run: go get <dep>@latest"
         exit 0  # Non-blocking
+
+    - name: Verify go.mod is tidy
+      run: |
+        go mod tidy
+        if ! git diff --exit-code go.mod go.sum; then
+          echo "::error::go.mod/go.sum are not tidy — run 'go mod tidy' and commit"
+          exit 1
+        fi
+
+    - name: Verify compositor unidirectional deps
+      run: |
+        if grep -rn '"github.com/gogpu/gogpu"' internal/compositor/*.go 2>/dev/null; then
+          echo "::error::internal/compositor imports root package — circular dependency!"
+          exit 1
+        fi
+        echo "✅ internal/compositor has no reverse imports"
