@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Zero type aliases, zero wrapper functions, direct `compositor.*` calls
   - Unidirectional deps: root → compositor (compositor never imports root)
   - `renderer.go` reduced by ~320 LOC
+- **deps:** wgpu v0.31.0 → v0.31.2
 - **ci:** `go mod tidy` drift check + compositor unidirectional deps guard
 
 ## [0.52.0] - 2026-08-10
