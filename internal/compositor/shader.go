@@ -1,21 +1,21 @@
-package gogpu
+package compositor
 
-// damageOverlayShaderSource is the WGSL shader for rendering flat-color quads
+// ShaderEntryVS is the vertex shader entry point name.
+const ShaderEntryVS = "vs_main"
+
+// ShaderEntryFS is the fragment shader entry point name.
+const ShaderEntryFS = "fs_main"
+
+// ModeOverlay is the debug mode string for visual overlay rendering.
+const ModeOverlay = "overlay"
+
+// ModeLog is the debug mode string for structured log output.
+const ModeLog = "log"
+
+// OverlayShaderSource is the WGSL shader for rendering flat-color quads
 // via instanced draw. Each instance provides its own rect position, size, and
-// color through instance-rate vertex attributes. A single uniform buffer holds
-// only the screen dimensions for pixel-to-NDC conversion.
-//
-// Uniform layout (16 bytes, 16-byte aligned):
-//
-//	screen: vec2<f32>  — surface width, height in physical pixels
-//	_pad:   vec2<f32>  — alignment padding (vec4 boundary)
-//
-// Instance vertex layout (32 bytes per instance, VertexStepModeInstance):
-//
-//	rectXY: vec2<f32>  — top-left corner in physical pixels  (location 0)
-//	rectWH: vec2<f32>  — width, height in physical pixels    (location 1)
-//	color:  vec4<f32>  — RGBA with pre-multiplied fade alpha (location 2)
-const damageOverlayShaderSource = `
+// color through instance-rate vertex attributes.
+const OverlayShaderSource = `
 struct ScreenUniforms {
     screen: vec2<f32>,
 }

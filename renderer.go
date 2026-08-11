@@ -20,9 +20,14 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// texQuadUniformSize is the size of the uniform buffer for textured quads.
-// Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + premultiplied(1 float) = 32 bytes
-const texQuadUniformSize = 32
+const (
+	shaderEntryVS = "vs_main"
+	shaderEntryFS = "fs_main"
+
+	// texQuadUniformSize is the size of the uniform buffer for textured quads.
+	// Layout: rect(4 floats) + screen(2 floats) + alpha(1 float) + premultiplied(1 float) = 32 bytes
+	texQuadUniformSize = 32
+)
 
 // SurfaceState tracks the lifecycle state of a GPU surface.
 // Transitions follow the WebGPU spec + wgpu framework.rs recovery pattern:
@@ -1029,12 +1034,12 @@ func (ws *RenderTarget) releaseCompositionTexture() {
 // self-register, so content renders into the composition texture from the
 // start of the frame.
 func (ws *RenderTarget) hasRegisteredOverlayEnv() bool {
-	mode := getDamageDebugMode()
-	if mode.overlay || mode.log {
+	mode := compositor.GetDamageDebugMode()
+	if mode.Overlay || mode.Log {
 		return true
 	}
-	fpsMode := getFPSDebugMode()
-	return fpsMode.overlay || fpsMode.log
+	fpsMode := compositor.GetFPSDebugMode()
+	return fpsMode.Overlay || fpsMode.Log
 }
 
 // initBlitPipeline creates the dedicated GPU pipeline for blitting the
