@@ -107,6 +107,9 @@ type LibwaylandHandle struct {
 	// Prevents render loop from outrunning the compositor's presentation rate.
 	// 0=None, 1=Requested, 2=Received. Atomic — no mutex needed for reads.
 	frameCallbackState int32
+	// frameCallbackProxy is the in-flight wl_callback, or zero. It lets a
+	// failed presentation cancel a request that was prepared before commit.
+	frameCallbackProxy atomic.Uintptr
 	// frameCallbackReady is set to true when the compositor fires done.
 	// Consumed by ConsumeFrameCallbackReady to trigger RequestRedraw.
 	frameCallbackReady atomic.Bool
@@ -384,6 +387,8 @@ func (h *LibwaylandHandle) Close() {
 	if h == nil {
 		return
 	}
+
+	h.CancelFrameCallback()
 
 	// Remove from per-proxy callback maps before destroying proxies.
 	h.UnregisterXdgProxies()

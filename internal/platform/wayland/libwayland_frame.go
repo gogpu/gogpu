@@ -113,6 +113,7 @@ func frameCallbackDoneCb(data, callback, callbackData uintptr) {
 	if h == nil {
 		return
 	}
+	h.frameCallbackProxy.Store(0)
 
 	slog.Debug("wl_surface.frame done", "callback_data", uint32(callbackData))
 
@@ -128,18 +129,19 @@ func frameCallbackDoneCb(data, callback, callbackData uintptr) {
 }
 
 // RequestFrameCallback sends a wl_surface.frame request to the compositor.
-// Idempotent: if state is already Requested, this is a no-op.
+// It returns true only when this call created a new callback. If state is
+// already Requested, it is an idempotent no-op and returns false.
 //
-// Must be called from the render thread (after present) or main thread.
+// Must be called from the render thread (before present) or main thread.
 // The C libwayland calls require displayMu, which is acquired internally.
 //
 // Follows the winit pattern (state.rs:273-282): only send frame() if
 // current state is None or Received (never double-request).
-func (h *LibwaylandHandle) RequestFrameCallback() {
+func (h *LibwaylandHandle) RequestFrameCallback() bool {
 	// Fast path: already requested — no-op (idempotent, winit pattern).
 	state := atomic.LoadInt32(&h.frameCallbackState)
 	if state == FrameCallbackRequested {
-		return
+		return false
 	}
 
 	initFrameCallbackIface()
@@ -150,7 +152,7 @@ func (h *LibwaylandHandle) RequestFrameCallback() {
 	// Double-check under lock (another thread may have raced).
 	state = atomic.LoadInt32(&h.frameCallbackState)
 	if state == FrameCallbackRequested {
-		return
+		return false
 	}
 
 	// wl_surface.frame (opcode 3) creates a new wl_callback.
@@ -158,7 +160,7 @@ func (h *LibwaylandHandle) RequestFrameCallback() {
 	callback, err := h.marshalConstructor(h.surface, 3, unsafe.Pointer(&frameCallbackIface.iface))
 	if err != nil {
 		slog.Warn("wayland: wl_surface.frame failed", "err", err)
-		return
+		return false
 	}
 
 	// Register callback → handle mapping for the done handler.
@@ -174,8 +176,9 @@ func (h *LibwaylandHandle) RequestFrameCallback() {
 		delete(frameCallbackHandles, callback)
 		frameCallbackHandlesMu.Unlock()
 		h.proxyDestroy(callback)
-		return
+		return false
 	}
+	h.frameCallbackProxy.Store(callback)
 
 	// wl_surface.frame is double-buffered (Wayland spec: "The frame request
 	// will take effect on the next wl_surface.commit"). RequestFrameCallback
@@ -196,6 +199,38 @@ func (h *LibwaylandHandle) RequestFrameCallback() {
 	runtime.KeepAlive(&frameCallbackIface.listener)
 
 	slog.Debug("wl_surface.frame requested")
+	return true
+}
+
+// CancelFrameCallback cancels an in-flight callback prepared for a surface
+// commit that failed. The display lock excludes the done callback, which runs
+// during dispatch while the same lock is held.
+func (h *LibwaylandHandle) CancelFrameCallback() {
+	if h == nil {
+		return
+	}
+	h.displayMu.Lock()
+	defer h.displayMu.Unlock()
+
+	if callback := h.detachFrameCallback(); callback != 0 {
+		h.proxyDestroy(callback)
+	}
+}
+
+// detachFrameCallback removes the current callback from Go-side routing and
+// resets the frame gate. The caller must hold displayMu and destroy the returned
+// proxy, if non-zero. Kept separate from the FFI destroy for state-machine tests.
+func (h *LibwaylandHandle) detachFrameCallback() uintptr {
+	callback := h.frameCallbackProxy.Swap(0)
+	if callback == 0 {
+		return 0
+	}
+	frameCallbackHandlesMu.Lock()
+	delete(frameCallbackHandles, callback)
+	frameCallbackHandlesMu.Unlock()
+	atomic.StoreInt32(&h.frameCallbackState, FrameCallbackNone)
+	h.frameCallbackReady.Store(false)
+	return callback
 }
 
 // FrameCallbackReady reports whether the render loop may submit a frame.

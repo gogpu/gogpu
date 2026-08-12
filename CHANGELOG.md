@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One-shot presentation synchronization** — `Context.RequestPresentationSync()` gates rendering after the next successfully presented frame without enabling continuous compositor pacing. Wayland supports forced `wl_surface.frame` callbacks for GPU and software presentation, including secondary windows; failed presentations cancel and retain the request for retry.
+
 ### Fixed
 
 - **macOS: `SetMenu` leaf items invisible on menu bar** (#449) — `applyMenu` added bare `NSMenuItems` to the main menu bar; macOS only renders items with submenus. Role-based leaf items (About, Quit, Preferences) are now routed to the App Menu submenu automatically. Non-role leaf items log a warning.

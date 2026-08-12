@@ -827,12 +827,30 @@ func (w *waylandPlatformWindow) CursorMode() int {
 }
 
 // SyncFrame on Wayland requests the next frame callback from the compositor.
-// Called after present on the render thread. The frame callback gates the
+// Called before present on the render thread. The frame callback gates the
 // next render: FrameCallbackReady() returns false until the compositor fires
 // the done event (FRAME-001 / BUG-WL-006, winit pattern).
 func (w *waylandPlatformWindow) SyncFrame() {
-	if libwl := w.libwayland(); libwl != nil && wayland.FrameCallbackEnabled() {
-		libwl.RequestFrameCallback()
+	w.PrepareFrameSync(false)
+}
+
+// PrepareFrameSync requests compositor acknowledgement before the next surface
+// commit. A forced request bypasses GOGPU_WAYLAND_FRAME_CALLBACK=0 for one
+// presentation. The bool reports whether this call created a callback that can
+// be canceled if presentation fails.
+func (w *waylandPlatformWindow) PrepareFrameSync(force bool) bool {
+	if !force && !wayland.FrameCallbackEnabled() {
+		return false
+	}
+	libwl := w.libwayland()
+	return libwl != nil && libwl.RequestFrameCallback()
+}
+
+// CancelFrameSync rolls back a callback prepared for a presentation that did
+// not commit successfully.
+func (w *waylandPlatformWindow) CancelFrameSync() {
+	if libwl := w.libwayland(); libwl != nil {
+		libwl.CancelFrameCallback()
 	}
 }
 
@@ -910,9 +928,12 @@ func (w *waylandPlatformWindow) DisplayUnlock() {
 // event (FRAME-001 / BUG-WL-006, winit 3-state pattern).
 func (w *waylandPlatformWindow) FrameCallbackReady() bool {
 	libwl := w.libwayland()
-	if libwl == nil || !wayland.FrameCallbackEnabled() {
-		return true // Not initialized or gating disabled
+	if libwl == nil {
+		return true
 	}
+	// Usually no callback exists when continuous gating is disabled, so the
+	// state is ready. A one-shot presentation sync must still gate while its
+	// callback is pending.
 	return libwl.FrameCallbackReady()
 }
 

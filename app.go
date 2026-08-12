@@ -1315,8 +1315,33 @@ func (a *App) Quit() {
 // On all other platforms, this always returns true.
 func (a *App) frameCallbackReady() bool {
 	if fg, ok := a.platWindow.(platform.FrameGater); ok {
-		return fg.FrameCallbackReady()
+		if !fg.FrameCallbackReady() {
+			return false
+		}
 	}
+
+	// Preserve the single-window fast path. Secondary windows are scanned only
+	// after one of them has actually prepared compositor frame gating.
+	if a.renderer == nil || !a.renderer.secondaryFrameGatePending.Load() {
+		return true
+	}
+	if a.windowManager == nil {
+		a.renderer.secondaryFrameGatePending.Store(false)
+		return true
+	}
+
+	a.windowManager.mu.RLock()
+	defer a.windowManager.mu.RUnlock()
+	for _, id := range a.windowManager.order {
+		w := a.windowManager.windows[id]
+		if w == nil || !w.visible || w.platWindow == nil {
+			continue
+		}
+		if fg, ok := w.platWindow.(platform.FrameGater); ok && !fg.FrameCallbackReady() {
+			return false
+		}
+	}
+	a.renderer.secondaryFrameGatePending.Store(false)
 	return true
 }
 

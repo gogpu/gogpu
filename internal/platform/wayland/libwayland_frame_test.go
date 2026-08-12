@@ -149,6 +149,15 @@ func TestFrameCallbackReadyStateTransitions(t *testing.T) {
 	}
 }
 
+func TestRequestFrameCallbackAlreadyPendingIsNotPrepared(t *testing.T) {
+	h := &LibwaylandHandle{}
+	atomic.StoreInt32(&h.frameCallbackState, FrameCallbackRequested)
+
+	if h.RequestFrameCallback() {
+		t.Fatal("already-pending callback was reported as newly prepared")
+	}
+}
+
 // TestFrameCallbackDoneCbRouting verifies that the done callback correctly
 // routes to the LibwaylandHandle via the per-proxy map.
 func TestFrameCallbackDoneCbRouting(t *testing.T) {
@@ -178,6 +187,40 @@ func TestFrameCallbackDoneCbRouting(t *testing.T) {
 	frameCallbackHandlesMu.Lock()
 	delete(frameCallbackHandles, fakeProxy)
 	frameCallbackHandlesMu.Unlock()
+}
+
+func TestDetachFrameCallbackResetsGateAndRouting(t *testing.T) {
+	h := &LibwaylandHandle{}
+	fakeProxy := uintptr(0xCAFE_BABE)
+	h.frameCallbackProxy.Store(fakeProxy)
+	atomic.StoreInt32(&h.frameCallbackState, FrameCallbackRequested)
+	h.frameCallbackReady.Store(true)
+	frameCallbackHandlesMu.Lock()
+	frameCallbackHandles[fakeProxy] = h
+	frameCallbackHandlesMu.Unlock()
+
+	if got := h.detachFrameCallback(); got != fakeProxy {
+		t.Fatalf("detached proxy = %#x, want %#x", got, fakeProxy)
+	}
+	if got := h.frameCallbackProxy.Load(); got != 0 {
+		t.Fatalf("current callback proxy = %#x, want 0", got)
+	}
+	if got := atomic.LoadInt32(&h.frameCallbackState); got != FrameCallbackNone {
+		t.Fatalf("frame callback state = %d, want None", got)
+	}
+	if h.frameCallbackReady.Load() {
+		t.Fatal("canceled frame callback retained its ready signal")
+	}
+	frameCallbackHandlesMu.Lock()
+	_, routed := frameCallbackHandles[fakeProxy]
+	frameCallbackHandlesMu.Unlock()
+	if routed {
+		t.Fatal("canceled frame callback remained in the routing table")
+	}
+
+	if got := h.detachFrameCallback(); got != 0 {
+		t.Fatalf("second detach returned %#x, want 0", got)
+	}
 }
 
 // TestFrameCallbackGateNotTrigger documents the gate-not-trigger contract
