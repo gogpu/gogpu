@@ -365,6 +365,23 @@ type FrameGater interface {
 	FrameCallbackReady() bool
 }
 
+// PresentationSyncer is an optional transactional interface for platforms
+// whose compositor synchronization must be prepared before presentation.
+// It lets the renderer force synchronization for one frame independently of
+// the platform's normal frame-pacing policy and cancel the preparation if
+// presentation fails.
+type PresentationSyncer interface {
+	// PrepareFrameSync prepares compositor synchronization for the next
+	// presentation. When force is false, the platform's normal pacing policy
+	// applies. It returns true only when a synchronization request was prepared
+	// by this call and can therefore be canceled.
+	PrepareFrameSync(force bool) bool
+
+	// CancelFrameSync cancels the synchronization request most recently
+	// prepared by PrepareFrameSync.
+	CancelFrameSync()
+}
+
 type MenuRole int
 
 const (

@@ -57,6 +57,20 @@ func (c *Context) activeSurface() *RenderTarget {
 	return c.renderer.primary
 }
 
+// RequestPresentationSync asks the platform compositor to acknowledge the next
+// successfully presented frame before another frame is rendered. It is useful
+// for infrequent visual state transitions in applications that otherwise
+// render without compositor pacing. Repeated calls before that presentation
+// are idempotent.
+//
+// Call this during OnDraw, before the frame is presented. This method neither
+// requests a redraw nor forces an otherwise empty OnDraw to present; the request
+// remains pending until a later frame is presented. Platforms that already
+// synchronize every frame need no additional work.
+func (c *Context) RequestPresentationSync() {
+	c.activeSurface().presentationSyncRequested = true
+}
+
 // RegisterDamageSource registers a named damage source with the compositor.
 // Each independent renderer (gg, g3d, video, compose) registers once at init
 // and reports per-frame damage through the returned DamageReporter.
@@ -374,7 +388,14 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 	if ws == nil || ws.surface == nil {
 		return fmt.Errorf("gogpu: no active surface")
 	}
+	syncAttempt, syncedBeforePresent := syncFrameBeforePixelPresent(ws)
+	lockDisplay(ws.platWindow)
 	err := ws.surface.PresentPixels(data, width, height, compositor.UnionAllSources(ws.damageSources))
+	unlockDisplay(ws.platWindow)
+	finishPresentationSync(ws, syncAttempt, err == nil)
+	if err == nil && !syncedBeforePresent {
+		syncFrameAfterPixelPresent(ws)
+	}
 	for _, ds := range ws.damageSources {
 		ds.Reset()
 	}

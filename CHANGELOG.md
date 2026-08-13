@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One-shot presentation synchronization** — `Context.RequestPresentationSync()` gates rendering after the next successfully presented frame without enabling continuous compositor pacing. Wayland supports forced `wl_surface.frame` callbacks for GPU and software presentation, including secondary windows; failed presentations cancel and retain the request for retry.
+
 ### Fixed
 
 - **macOS: outgoing drag crashes with `NSRangeException`** (#429, #453) — `NSDraggingItem` was created without `setDraggingFrame:contents:`, leaving `draggingFrame` at `{{0,0},{0,0}}`. AppKit aborts the process on zero-size frames (`beginDraggingSessionWithItems:`). Fixed by centering a 32pt frame on the pointer (view coords via `convertPoint:fromView:`) and attaching `NSWorkspace.iconForFile:` preview. Hardening (Qt/JUCE/Flax): local `NSAutoreleasePool`, skip relative paths (`NSPasteboardWriting` rejects them), re-entrancy guard (one active drag per view), HFA return buffer `[4]float64` for `ConvertPointFromView`, defensive `[icon copy]` before `setSize:`. `examples/drag_source` shows OUT/IN panes with HiDPI-correct hit testing.

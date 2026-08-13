@@ -240,6 +240,88 @@ func TestApp_FrameCallbackReady_FrameGater(t *testing.T) {
 	}
 }
 
+func TestApp_FrameCallbackReady_SecondaryFrameGater(t *testing.T) {
+	primaryPlatform := &mockFrameGaterWindow{ready: true}
+	secondaryPlatform := &mockFrameGaterWindow{ready: false}
+	renderer := &Renderer{primary: &RenderTarget{}}
+	renderer.secondaryFrameGatePending.Store(true)
+	manager := newWindowManager()
+	manager.add(&Window{id: 1, platWindow: primaryPlatform, visible: true})
+	manager.add(&Window{id: 2, platWindow: secondaryPlatform, visible: true})
+	app := &App{
+		platWindow:    primaryPlatform,
+		renderer:      renderer,
+		windowManager: manager,
+	}
+
+	if app.frameCallbackReady() {
+		t.Fatal("frameCallbackReady ignored a pending secondary callback")
+	}
+	if !renderer.secondaryFrameGatePending.Load() {
+		t.Fatal("secondary gate marker was cleared while a callback was pending")
+	}
+
+	secondaryPlatform.ready = true
+	if !app.frameCallbackReady() {
+		t.Fatal("frameCallbackReady remained closed after all callbacks completed")
+	}
+	if renderer.secondaryFrameGatePending.Load() {
+		t.Fatal("secondary gate marker remained set after all callbacks completed")
+	}
+}
+
+func TestApp_FrameCallbackReady_SecondaryFastPath(t *testing.T) {
+	primaryPlatform := &mockFrameGaterWindow{ready: true}
+	secondaryPlatform := &mockFrameGaterWindow{ready: false}
+	renderer := &Renderer{primary: &RenderTarget{}}
+	manager := newWindowManager()
+	manager.add(&Window{id: 1, platWindow: primaryPlatform, visible: true})
+	manager.add(&Window{id: 2, platWindow: secondaryPlatform, visible: true})
+	app := &App{
+		platWindow:    primaryPlatform,
+		renderer:      renderer,
+		windowManager: manager,
+	}
+
+	if !app.frameCallbackReady() {
+		t.Fatal("inactive secondary gate affected the normal rendering path")
+	}
+}
+
+func TestApp_FrameCallbackReady_ClearsOrphanedSecondaryGate(t *testing.T) {
+	renderer := &Renderer{}
+	renderer.secondaryFrameGatePending.Store(true)
+	app := &App{renderer: renderer}
+
+	if !app.frameCallbackReady() {
+		t.Fatal("orphaned secondary gate blocked rendering")
+	}
+	if renderer.secondaryFrameGatePending.Load() {
+		t.Fatal("orphaned secondary gate marker was not cleared")
+	}
+}
+
+func TestApp_FrameCallbackReady_SkipsWindowsWithoutPendingGates(t *testing.T) {
+	renderer := &Renderer{}
+	renderer.secondaryFrameGatePending.Store(true)
+	manager := newWindowManager()
+	manager.order = []WindowID{1, 2, 3, 4}
+	manager.windows[2] = &Window{id: 2, platWindow: &mockFrameGaterWindow{ready: false}}
+	manager.windows[3] = &Window{id: 3, visible: true}
+	manager.windows[4] = &Window{id: 4, platWindow: &mockWindow{}, visible: true}
+	app := &App{
+		renderer:      renderer,
+		windowManager: manager,
+	}
+
+	if !app.frameCallbackReady() {
+		t.Fatal("window without an active frame gate blocked rendering")
+	}
+	if renderer.secondaryFrameGatePending.Load() {
+		t.Fatal("inactive secondary gate marker was not cleared")
+	}
+}
+
 // =============================================================================
 // SetAppName
 // =============================================================================

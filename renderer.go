@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/gogpu/gogpu/gpu/backend/native"
@@ -82,6 +83,11 @@ type RenderTarget struct {
 	// transparent requests CompositeAlphaModePremultiplied for this surface
 	// when the adapter advertises support (ADR-060, gogpu#361).
 	transparent bool
+
+	// presentationSyncRequested asks the platform to gate the frame following
+	// the next successful present until the compositor acknowledges it. It is
+	// retained across empty or failed frames.
+	presentationSyncRequested bool
 
 	// damageSources holds all registered damage reporters for this surface.
 	// Each independent renderer (gg, g3d, video, compose) registers one source
@@ -236,6 +242,11 @@ type Renderer struct {
 	// currentSurface is the RenderTarget being drawn in the current frame.
 	// Set by the multi-window frame loop before each window's draw callback.
 	currentSurface *RenderTarget
+
+	// secondaryFrameGatePending avoids scanning the window list in the common
+	// single-window path. It is set only when a secondary platform window
+	// actually prepares compositor frame gating.
+	secondaryFrameGatePending atomic.Bool
 }
 
 // newRenderer creates and initializes a new renderer.
@@ -640,9 +651,6 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 		ws.discardFrameEncoder()
 		ws.pixelPresented = false
 		ws.hasPendingClear = false
-		if ws.platWindow != nil {
-			ws.platWindow.SyncFrame()
-		}
 		ws.releaseFrame()
 		return false
 	}
@@ -671,12 +679,88 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	// Request frame callback BEFORE present (winit pre_present_notify pattern).
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
-	if ws.platWindow != nil {
-		ws.platWindow.SyncFrame()
-	}
-	reconfigured := ws.present()
+	syncAttempt := syncFrameForPresent(ws)
+	reconfigured, presented := ws.present()
+	finishPresentationSync(ws, syncAttempt, presented)
 	ws.releaseFrame()
 	return reconfigured
+}
+
+type presentationSyncAttempt struct {
+	consumedRequest bool
+	cancelable      bool
+}
+
+// syncFrameForPresent applies the platform's normal frame policy, unless the
+// surface has a pending one-shot request. Platforms with pre-present semantics
+// report whether they actually prepared a cancelable synchronization request.
+func syncFrameForPresent(ws *RenderTarget) presentationSyncAttempt {
+	if ws == nil || ws.platWindow == nil {
+		return presentationSyncAttempt{}
+	}
+	force := ws.presentationSyncRequested
+	if syncer, ok := ws.platWindow.(platform.PresentationSyncer); ok {
+		prepared := syncer.PrepareFrameSync(force)
+		if prepared {
+			markSecondaryFrameGatePending(ws)
+		}
+		if force && !prepared {
+			// A failed preparation must not consume the request. This also covers
+			// an unexpected already-pending callback; the frame gate normally
+			// prevents rendering in that state.
+			return presentationSyncAttempt{}
+		}
+		ws.presentationSyncRequested = false
+		return presentationSyncAttempt{consumedRequest: force, cancelable: prepared}
+	}
+
+	ws.platWindow.SyncFrame()
+	if force {
+		ws.presentationSyncRequested = false
+	}
+	return presentationSyncAttempt{consumedRequest: force}
+}
+
+// syncFrameBeforePixelPresent prepares frame synchronization only on platforms
+// that require it before the surface commit (Wayland). Other platforms retain
+// their existing post-present SyncFrame timing.
+func syncFrameBeforePixelPresent(ws *RenderTarget) (presentationSyncAttempt, bool) {
+	if ws == nil || ws.platWindow == nil {
+		return presentationSyncAttempt{}, false
+	}
+	if _, ok := ws.platWindow.(platform.PresentationSyncer); !ok {
+		return presentationSyncAttempt{}, false
+	}
+	return syncFrameForPresent(ws), true
+}
+
+func syncFrameAfterPixelPresent(ws *RenderTarget) {
+	if ws == nil || ws.platWindow == nil {
+		return
+	}
+	ws.platWindow.SyncFrame()
+	ws.presentationSyncRequested = false
+}
+
+func finishPresentationSync(ws *RenderTarget, attempt presentationSyncAttempt, presented bool) {
+	if ws == nil || presented {
+		return
+	}
+	if attempt.cancelable {
+		if syncer, ok := ws.platWindow.(platform.PresentationSyncer); ok {
+			syncer.CancelFrameSync()
+		}
+	}
+	if attempt.consumedRequest {
+		ws.presentationSyncRequested = true
+	}
+}
+
+func markSecondaryFrameGatePending(ws *RenderTarget) {
+	if ws == nil || ws.renderer == nil || ws == ws.renderer.primary {
+		return
+	}
+	ws.renderer.secondaryFrameGatePending.Store(true)
 }
 
 // pollSubmissions performs non-blocking submission tracking: frees GPU resources
@@ -697,10 +781,11 @@ func (r *Renderer) pollSubmissions() {
 // wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
 // the main thread's DispatchDefaultQueue (ADR-041 Phase 2).
 //
-// Returns true if the surface was outdated and reconfigured — caller re-renders.
-func (ws *RenderTarget) present() (reconfigured bool) {
+// Returns whether the surface was outdated and reconfigured and whether the
+// submitted frame was successfully presented.
+func (ws *RenderTarget) present() (reconfigured, presented bool) {
 	if ws.currentSurfaceTexture == nil {
-		return false
+		return false, false
 	}
 	finalDamage := compositor.UnionAllSources(ws.damageSources)
 	lockDisplay(ws.platWindow)
@@ -710,7 +795,7 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 		ds.Reset()
 	}
 	if err == nil {
-		return false
+		return false, true
 	}
 	// Mirror recoverFromAcquireError: outdated is expected (resize/DPI/monitor),
 	// not an error — reconfigure and signal the caller to re-render.
@@ -720,19 +805,19 @@ func (ws *RenderTarget) present() (reconfigured bool) {
 			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
 				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
 				ws.state = SurfaceLost
-				return false
+				return false, false
 			}
-			return true
+			return true, false
 		}
-		return false
+		return false, false
 	}
 	if errors.Is(err, wgpu.ErrSurfaceLost) {
 		slog.Error("gogpu: surface lost on present", "err", err)
 		ws.state = SurfaceLost
-		return false
+		return false, false
 	}
 	slog.Error("PRESENT ERROR", "err", err)
-	return false
+	return false, false
 }
 
 // setTransactionPresent toggles Core Animation transaction-based present on
