@@ -5,18 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.53.0] - 2026-08-13
 
 ### Added
 
-- **One-shot presentation synchronization** — `Context.RequestPresentationSync()` gates rendering after the next successfully presented frame without enabling continuous compositor pacing. Wayland supports forced `wl_surface.frame` callbacks for GPU and software presentation, including secondary windows; failed presentations cancel and retain the request for retry.
+- **One-shot presentation synchronization** (#452, @kivutar) — `Context.RequestPresentationSync()` gates rendering after the next successfully presented frame without enabling continuous compositor pacing. Wayland supports forced `wl_surface.frame` callbacks for GPU and software presentation, including secondary windows; failed presentations cancel and retain the request for retry.
 
 ### Fixed
 
-- **macOS: outgoing drag crashes with `NSRangeException`** (#429, #453) — `NSDraggingItem` was created without `setDraggingFrame:contents:`, leaving `draggingFrame` at `{{0,0},{0,0}}`. AppKit aborts the process on zero-size frames (`beginDraggingSessionWithItems:`). Fixed by centering a 32pt frame on the pointer (view coords via `convertPoint:fromView:`) and attaching `NSWorkspace.iconForFile:` preview. Hardening (Qt/JUCE/Flax): local `NSAutoreleasePool`, skip relative paths (`NSPasteboardWriting` rejects them), re-entrancy guard (one active drag per view), HFA return buffer `[4]float64` for `ConvertPointFromView`, defensive `[icon copy]` before `setSize:`. `examples/drag_source` shows OUT/IN panes with HiDPI-correct hit testing.
+- **macOS: outgoing drag crashes with `NSRangeException`** (#429, #453, @lkmavi) — `NSDraggingItem` was created without `setDraggingFrame:contents:`, leaving `draggingFrame` at `{{0,0},{0,0}}`. AppKit aborts the process on zero-size frames (`beginDraggingSessionWithItems:`). Fixed by centering a 32pt frame on the pointer (view coords via `convertPoint:fromView:`) and attaching `NSWorkspace.iconForFile:` preview. Hardening (Qt/JUCE/Flax): local `NSAutoreleasePool`, skip relative paths (`NSPasteboardWriting` rejects them), re-entrancy guard (one active drag per view), HFA return buffer `[4]float64` for `ConvertPointFromView`, defensive `[icon copy]` before `setSize:`. `examples/drag_source` shows OUT/IN panes with HiDPI-correct hit testing.
 - **macOS: `SetMenu` leaf items invisible on menu bar** (#449) — `applyMenu` added bare `NSMenuItems` to the main menu bar; macOS only renders items with submenus. Role-based leaf items (About, Quit, Preferences) are now routed to the App Menu submenu automatically. Non-role leaf items log a warning.
 - **macOS: `Role + Action` items dropped** (#449) — `addPlatformItem` required `item.Action == nil` for role dispatch. Custom `Action` now takes precedence over the system selector while preserving the role's key equivalent (Cmd+Q, Cmd+W, etc.).
 - **macOS: `AddToSystemMenu` inconsistency** (#449) — unified with `addPlatformItem` for a single code path. Role+Action items now work consistently in both `SetMenu` and `GetSystemMenu().AddItem()`.
+
+### Changed
+
+- **deps:** gpucontext v0.27.0 → v0.28.0, wgpu v0.31.2 → v0.31.4
+- **ci:** exclude SA5011 false positives in test files (staticcheck limitation with `t.Fatal` + `return`)
 
 ## [0.52.1] - 2026-08-11
 
