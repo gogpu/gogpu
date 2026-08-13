@@ -742,6 +742,135 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 	return ret
 }
 
+// SendRectPtr sends a message with an NSRect and a pointer argument.
+// Used for -[NSDraggingItem setDraggingFrame:contents:].
+func (id ID) SendRectPtr(sel SEL, rect NSRect, arg uintptr) ID {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		nsRectType,                  // rect
+		types.PointerTypeDescriptor, // arg
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self uintptr
+		sel  uintptr
+		rect NSRect
+		arg  uintptr
+	}{
+		self: uintptr(id),
+		sel:  uintptr(sel),
+		rect: rect,
+		arg:  arg,
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.rect),
+		unsafe.Pointer(&argBox.arg),
+	}
+
+	var result uintptr
+	_, err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return ID(result)
+}
+
+// ConvertPointFromView calls -[NSView convertPoint:fromView:].
+// Pass fromView=0 (nil) to convert from window coordinates into the receiver.
+func (id ID) ConvertPointFromView(point NSPoint, fromView ID) NSPoint {
+	if id == 0 {
+		return point
+	}
+
+	if err := initRuntime(); err != nil {
+		return point
+	}
+
+	sel := RegisterSelector("convertPoint:fromView:")
+	if sel == 0 {
+		return point
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		nsPointType,                 // point
+		types.PointerTypeDescriptor, // fromView
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		nsPointType,
+		argTypes,
+	)
+	if err != nil {
+		return point
+	}
+
+	argBox := &struct {
+		self     uintptr
+		sel      uintptr
+		point    NSPoint
+		fromView uintptr
+	}{
+		self:     uintptr(id),
+		sel:      uintptr(sel),
+		point:    point,
+		fromView: uintptr(fromView),
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.point),
+		unsafe.Pointer(&argBox.fromView),
+	}
+
+	var result [2]float64
+	_, err = ffi.CallFunction(
+		cif,
+		objcMsgSendFn(nsPointType),
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return point
+	}
+
+	return NSPoint{X: result[0], Y: result[1]}
+}
+
 // SendRectUintUintBool sends a message for initWithContentRect:styleMask:backing:defer:
 // This is the standard NSWindow initialization method.
 func (id ID) SendRectUintUintBool(sel SEL, rect NSRect, style NSUInteger, backing NSBackingStoreType, deferFlag bool) ID {
