@@ -136,6 +136,7 @@ var dragSourceSelectors struct {
 	currentEvent             SEL
 	iconForFile              SEL
 	setSize                  SEL
+	copy                     SEL
 }
 
 func initDragSourceSelectors() {
@@ -153,6 +154,7 @@ func initDragSourceSelectors() {
 		dragSourceSelectors.currentEvent = RegisterSelector("currentEvent")
 		dragSourceSelectors.iconForFile = RegisterSelector("iconForFile:")
 		dragSourceSelectors.setSize = RegisterSelector("setSize:")
+		dragSourceSelectors.copy = RegisterSelector("copy")
 	})
 }
 
@@ -169,10 +171,12 @@ func draggingFrameAt(loc NSPoint, size CGFloat, index int) NSRect {
 }
 
 // fileDragIcon returns an NSImage for path sized to points, or 0 on failure.
-// The image is autoreleased (NSWorkspace.iconForFile:); do not release it.
-func fileDragIcon(path string, points CGFloat) ID {
+// The returned image is owned by the caller (+1) when copy succeeds — release
+// after setDraggingFrame:contents: retains it. Falls back to the autoreleased
+// NSWorkspace icon when copy fails.
+func fileDragIcon(path string, points CGFloat) (icon ID, owned bool) {
 	if path == "" || classes.NSWorkspace == 0 {
-		return 0
+		return 0, false
 	}
 	if points < 1 {
 		points = defaultDragIconPoints
@@ -180,21 +184,27 @@ func fileDragIcon(path string, points CGFloat) ID {
 
 	workspace := msgSend(ID(classes.NSWorkspace), selectors.sharedWorkspace)
 	if workspace == 0 {
-		return 0
+		return 0, false
 	}
 
 	nsPath := makeDragNSString(path)
 	if nsPath == 0 {
-		return 0
+		return 0, false
 	}
 	defer msgSend(nsPath, selectors.release)
 
-	icon := msgSend(workspace, dragSourceSelectors.iconForFile, uintptr(nsPath))
+	icon = msgSend(workspace, dragSourceSelectors.iconForFile, uintptr(nsPath))
 	if icon == 0 {
-		return 0
+		return 0, false
+	}
+	// Defensive copy — setSize: must not mutate NSWorkspace's shared cache
+	// (Qt/JUCE pattern: [[icon copy] setSize:]).
+	if copied := msgSend(icon, dragSourceSelectors.copy); copied != 0 {
+		icon = copied
+		owned = true
 	}
 	icon.SendSize(dragSourceSelectors.setSize, MakeSize(points, points))
-	return icon
+	return icon, owned
 }
 
 // StartDrag initiates an outgoing file drag from the window's content view.
@@ -284,8 +294,11 @@ func (w *Window) StartDrag(paths []string, done func(DragOperation)) {
 
 			// REQUIRED: non-zero draggingFrame. Zero size → NSRangeException + process abort.
 			frame := draggingFrameAt(viewLoc, defaultDragIconPoints, itemIndex)
-			icon := fileDragIcon(path, defaultDragIconPoints)
+			icon, owned := fileDragIcon(path, defaultDragIconPoints)
 			item.SendRectPtr(dragSourceSelectors.setDraggingFrameContents, frame, uintptr(icon))
+			if owned {
+				msgSend(icon, selectors.release)
+			}
 
 			msgSend(array, dragSourceSelectors.addObject, uintptr(item))
 			msgSend(item, selectors.release)

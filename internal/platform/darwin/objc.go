@@ -743,7 +743,9 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 }
 
 // SendRectPtr sends a message with an NSRect and a pointer argument.
-// Used for -[NSDraggingItem setDraggingFrame:contents:].
+// Used for -[NSDraggingItem setDraggingFrame:contents:], which returns void.
+// The ID return is the objc_msgSend register result and must be ignored for
+// void selectors.
 func (id ID) SendRectPtr(sel SEL, rect NSRect, arg uintptr) ID {
 	if id == 0 || sel == 0 {
 		return 0
@@ -857,7 +859,10 @@ func (id ID) ConvertPointFromView(point NSPoint, fromView ID) NSPoint {
 		unsafe.Pointer(&argBox.fromView),
 	}
 
-	var result [2]float64
+	// Result buffer sized to [4]float64 because goffi's handleHFAReturn always
+	// casts rvalue to *[4]float64 regardless of the actual element count, and
+	// Go 1.26's checkptr (enabled by -race) rejects a smaller allocation.
+	var result [4]float64
 	_, err = ffi.CallFunction(
 		cif,
 		objcMsgSendFn(nsPointType),
