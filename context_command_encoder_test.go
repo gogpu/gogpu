@@ -207,17 +207,85 @@ func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
 		t.Fatalf("submissions before EndFrame = %d, want 0", queue.submits)
 	}
 
-	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{
-		gputypes.LoadOpClear,
-		gputypes.LoadOpLoad,
-		gputypes.LoadOpLoad,
-	}; !equalLoadOps(got, want) {
+	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{gputypes.LoadOpClear}; !equalLoadOps(got, want) {
 		t.Fatalf("render-pass load ops = %v, want %v", got, want)
 	}
 	if got, want := halDevice.encoders[0].uniformOffsets, [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
 		t.Fatalf("uniform dynamic offsets = %v, want %v", got, want)
 	}
 
+	target.submitFrameEncoder(target.renderer)
+	if queue.submits != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	}
+}
+
+func TestTexturedQuadPassPreservesExternalAndClearBoundaries(t *testing.T) {
+	halDevice := &recordingCommandEncoderDevice{}
+	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	target.format = gputypes.TextureFormatBGRA8Unorm
+	target.width = 1
+	target.height = 1
+
+	tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	t.Cleanup(tex.Destroy)
+
+	target.clear(0.1, 0.2, 0.3, 1)
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("first DrawTextureEx: %v", err)
+	}
+
+	// Lending the frame encoder to an external renderer must close the current
+	// quad pass, then the next quad resumes with LoadOpLoad in call order.
+	encoder := ctx.CommandEncoder()
+	if encoder == nil {
+		t.Fatal("CommandEncoder returned nil")
+	}
+	externalPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:    target.renderView(),
+			LoadOp:  gputypes.LoadOpLoad,
+			StoreOp: gputypes.StoreOpStore,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("external BeginRenderPass: %v", err)
+	}
+	if err := externalPass.End(); err != nil {
+		t.Fatalf("external End: %v", err)
+	}
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{X: 1, Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("second DrawTextureEx: %v", err)
+	}
+
+	// An explicit clear is another pass boundary. It must not be folded into
+	// the already-open pass or reorder the clear relative to the next draw.
+	target.clear(0.4, 0.5, 0.6, 1)
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{X: 2, Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("third DrawTextureEx: %v", err)
+	}
+
+	if got := len(halDevice.encoders); got != 1 {
+		t.Fatalf("frame command encoders created = %d, want 1", got)
+	}
+	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{
+		gputypes.LoadOpClear,
+		gputypes.LoadOpLoad,
+		gputypes.LoadOpLoad,
+		gputypes.LoadOpClear,
+	}; !equalLoadOps(got, want) {
+		t.Fatalf("render-pass load ops = %v, want %v", got, want)
+	}
+	if got, want := halDevice.encoders[0].uniformOffsets, [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
+		t.Fatalf("uniform dynamic offsets = %v, want %v", got, want)
+	}
+	if queue.submits != 0 {
+		t.Fatalf("submissions before EndFrame = %d, want 0", queue.submits)
+	}
 	target.submitFrameEncoder(target.renderer)
 	if queue.submits != 1 {
 		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
@@ -282,6 +350,9 @@ func BenchmarkDrawTexturedQuadsSharedFrameEncoder(b *testing.B) {
 						b.Fatalf("DrawTextureEx(%d): %v", j, err)
 					}
 				}
+				if got := len(halDevice.encoders[i].loadOps); got != 1 {
+					b.Fatalf("render passes for %d draws = %d, want 1", draws, got)
+				}
 				target.submitFrameEncoder(target.renderer)
 				target.renderer.pollSubmissions()
 				target.releaseTexQuadUniformChunks()
@@ -294,6 +365,10 @@ func BenchmarkDrawTexturedQuadsSharedFrameEncoder(b *testing.B) {
 			if got := queue.submits; got != b.N {
 				b.Fatalf("frame submissions = %d, want %d", got, b.N)
 			}
+			b.ReportMetric(float64(draws), "draws/frame")
+			b.ReportMetric(1, "passes/frame")
+			b.ReportMetric(1, "encoders/frame")
+			b.ReportMetric(1, "submits/frame")
 		})
 	}
 }
