@@ -308,6 +308,8 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 // primary window as much as any secondary one — were silently never
 // invoked on Linux. Resize is unaffected either way: classifyEvent treats
 // WindowID==0 or ==primaryWindow.platformID as equally "primary".
+//
+//nolint:gocritic // PlatformEvent is copied into the platform-neutral Event.
 func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID WindowID) Event {
 	switch event.Type {
 	case x11.EventTypeClose:
@@ -2313,6 +2315,8 @@ func (w *waylandWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Mod
 // stamping it with this window's WindowID (see the winID field doc comment)
 // so App's dispatch* methods route it to the right window's callbacks
 // instead of only ever the primary window's.
+//
+//nolint:gocritic // Event is copied into the ring buffer to transfer ownership.
 func (w *waylandWindow) queueEvent(event Event) {
 	event.WindowID = w.winID
 	w.events.Push(event)

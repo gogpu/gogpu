@@ -289,8 +289,8 @@ func (w *waylandWindow) handleWaylandTextInputDone(update wayland.TextInputUpdat
 	w.imeComposing = composing
 	w.imeMu.Unlock()
 
-	for _, event := range events {
-		w.queueEvent(event)
+	for index := range events {
+		w.queueEvent(events[index])
 	}
 }
 

@@ -4,7 +4,7 @@ package wayland
 
 // libwayland_text_input.go implements the optional zwp_text_input_v3 protocol.
 //
-// The protocol is intentionally modelled as a transaction: preedit, commit,
+// The protocol is intentionally modeled as a transaction: preedit, commit,
 // and delete-surrounding events are accumulated until done(serial), then one
 // Go callback receives the complete update. This prevents observers from
 // seeing partially-applied state and gives the platform adapter one place to

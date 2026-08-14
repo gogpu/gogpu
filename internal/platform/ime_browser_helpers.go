@@ -9,6 +9,11 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
+const (
+	browserInputModeNumeric   = "numeric"
+	browserAutoCapitalizeNone = "none"
+)
+
 func validBrowserIMEArea(area gpucontext.IMECursorArea) bool {
 	return area.X >= 0 && area.Y >= 0 && area.Width >= 0 && area.Height >= 0 &&
 		!math.IsNaN(area.X) && !math.IsNaN(area.Y) && !math.IsNaN(area.Width) && !math.IsNaN(area.Height) &&
@@ -29,7 +34,7 @@ func browserIMEComposition(data string) gpucontext.IMEComposition {
 func browserInputMode(purpose gpucontext.ContentPurpose) string {
 	switch purpose {
 	case gpucontext.ContentPurposeDigits, gpucontext.ContentPurposePin:
-		return "numeric"
+		return browserInputModeNumeric
 	case gpucontext.ContentPurposeNumber:
 		return "decimal"
 	case gpucontext.ContentPurposePhone:
@@ -39,9 +44,9 @@ func browserInputMode(purpose gpucontext.ContentPurpose) string {
 	case gpucontext.ContentPurposeEmail:
 		return "email"
 	case gpucontext.ContentPurposeDate:
-		return "numeric"
+		return browserInputModeNumeric
 	case gpucontext.ContentPurposeTime:
-		return "numeric"
+		return browserInputModeNumeric
 	case gpucontext.ContentPurposeDateTime:
 		return "datetime"
 	default:
@@ -52,7 +57,7 @@ func browserInputMode(purpose gpucontext.ContentPurpose) string {
 func browserAutoCapitalize(hints gpucontext.ContentHint) string {
 	switch {
 	case hints.Has(gpucontext.ContentHintLowercase):
-		return "none"
+		return browserAutoCapitalizeNone
 	case hints.Has(gpucontext.ContentHintUppercase):
 		return "characters"
 	case hints.Has(gpucontext.ContentHintTitlecase):
@@ -60,7 +65,7 @@ func browserAutoCapitalize(hints gpucontext.ContentHint) string {
 	case hints.Has(gpucontext.ContentHintAutoCapitalization):
 		return "sentences"
 	default:
-		return "none"
+		return browserAutoCapitalizeNone
 	}
 }
 

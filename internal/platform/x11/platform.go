@@ -986,12 +986,16 @@ func (w *x11Window) dequeueEvent() (PlatformEvent, bool) {
 }
 
 // queueEvent pushes a platform event to the window's ring buffer queue.
+//
+//nolint:gocritic // PlatformEvent is copied into the ring buffer to transfer ownership.
 func (w *x11Window) queueEvent(event PlatformEvent) {
 	w.events.Push(event)
 }
 
 // QueueEvent is an exported wrapper for queueEvent, used by the platform
 // layer's WaitEvents to enqueue events read during idle wait.
+//
+//nolint:gocritic // PlatformEvent is copied into the ring buffer to transfer ownership.
 func (p *Platform) QueueEvent(event PlatformEvent) {
 	p.primary.queueEvent(event)
 }

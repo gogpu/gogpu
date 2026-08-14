@@ -36,9 +36,9 @@ func TestTextInputDoneAggregatesAndDeduplicates(t *testing.T) {
 	})
 
 	preedit := make([]byte, 1<<20)
-	copy(preedit, []byte("日本"))
+	copy(preedit, "日本")
 	commit := make([]byte, 1<<20)
-	copy(commit, []byte("に"))
+	copy(commit, "に")
 	textInputPreeditCb(0, proxy, uintptr(unsafe.Pointer(&preedit[0])), 0, 6)
 	textInputCommitCb(0, proxy, uintptr(unsafe.Pointer(&commit[0])))
 	// A duplicate commit in one transaction is ignored.

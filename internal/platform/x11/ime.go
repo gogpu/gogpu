@@ -414,14 +414,15 @@ func (x *x11XIM) createIC(window ResourceID, clientData uintptr) (uintptr, bool)
 	im := x.im
 	windowStyle, windowClient, windowFocus := style, clientWindow, focusWindow
 	try := func(preeditAttrs uintptr) uintptr {
-		args := []unsafe.Pointer{
+		args := make([]unsafe.Pointer, 0, 10)
+		args = append(args,
 			unsafe.Pointer(&im),
 			unsafe.Pointer(&stylePtr), unsafe.Pointer(&windowStyle),
 			unsafe.Pointer(&clientPtr), unsafe.Pointer(&windowClient),
 			unsafe.Pointer(&focusPtr), unsafe.Pointer(&windowFocus),
-		}
-		args = append(args, unsafe.Pointer(&preeditNamePtr), unsafe.Pointer(&preeditAttrs))
-		args = append(args, unsafe.Pointer(new(uintptr)))
+			unsafe.Pointer(&preeditNamePtr), unsafe.Pointer(&preeditAttrs),
+			unsafe.Pointer(new(uintptr)),
+		)
 		var result uintptr
 		_, _ = ffi.CallFunction(x.cifCreateIC, x.fnCreateIC, unsafe.Pointer(&result), args)
 		return result
@@ -882,6 +883,7 @@ func (i *x11IME) preeditDraw(callData uintptr) {
 	if callData == 0 {
 		return
 	}
+	//nolint:govet // XIM callback data is an ABI-owned struct pointer.
 	draw := (*ximPreeditDrawData)(unsafe.Pointer(callData))
 	text := ximTextString(draw.Text)
 	i.mu.Lock()
@@ -928,6 +930,8 @@ func (i *x11IME) queue(eventType EventType) {
 
 // queueLocked is intentionally a method on x11IME; the owner window is found
 // through the callback registry without storing a Go pointer in native memory.
+//
+//nolint:gocritic // PlatformEvent is queued by value to transfer ownership into the ring.
 func (i *x11IME) queueLocked(event PlatformEvent) {
 	if i.queueFn != nil {
 		i.queueFn(event)
@@ -938,6 +942,7 @@ func ximTextString(pointer uintptr) string {
 	if pointer == 0 {
 		return ""
 	}
+	//nolint:govet // XIM callback data is an ABI-owned struct pointer.
 	text := (*ximText)(unsafe.Pointer(pointer))
 	if text.String == 0 || text.Length == 0 || text.EncodingWide != 0 {
 		return ""
@@ -951,6 +956,7 @@ func ximTextString(pointer uintptr) string {
 	if maxBytes >= 4096 {
 		maxBytes = 4095
 	}
+	//nolint:govet // XIM callback data points to an ABI-owned NUL-terminated buffer.
 	bytes := unsafe.Slice((*byte)(unsafe.Pointer(text.String)), maxBytes+1)
 	limit := 0
 	for limit < len(bytes) && bytes[limit] != 0 {
