@@ -1703,30 +1703,6 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		ws.hasPendingClear = false
 	}
 
-	// Upload uniform data only after the render pass has been accepted. Queue
-	// writes may be deferred in a staging encoder; keeping them after the begin
-	// check avoids leaving a write targeting an unreferenced frame buffer when a
-	// released attachment rejects the pass.
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(ws.width)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
-	if err := r.device.Queue().WriteBuffer(uniform.buffer, uint64(uniform.offset), r.texQuadUniformData); err != nil {
-		// The pass has no useful draw without its parameters. Close and discard
-		// the shared encoder so the clear/pass cannot reach the surface, while
-		// preserving the frame's previous resources for the next frame boundary.
-		_ = renderPass.End()
-		if consumePendingClear {
-			ws.hasPendingClear = true
-		}
-		ws.discardFrameEncoder()
-		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
-	}
-
 	// Set pipeline and bind groups
 	renderPass.SetPipeline(r.texQuadPipeline)
 	renderPass.SetBindGroup(0, uniform.bindGrp, []uint32{uniform.offset})
@@ -1737,8 +1713,34 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 
 	// End render pass
 	if err := renderPass.End(); err != nil {
+		if consumePendingClear {
+			ws.hasPendingClear = true
+		}
 		ws.discardFrameEncoder()
 		return fmt.Errorf("gogpu: failed to end render pass: %w", err)
+	}
+
+	// Upload uniform data only after the render pass has fully recorded. Queue
+	// writes may be deferred in a staging encoder and are prepended before user
+	// command buffers at Submit, so this ordering avoids leaving a write
+	// targeting an unreferenced frame buffer when pass validation fails.
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(ws.width)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
+	if err := r.device.Queue().WriteBuffer(uniform.buffer, uint64(uniform.offset), r.texQuadUniformData); err != nil {
+		// The pass has no useful draw without its parameters. Discard the shared
+		// encoder so the clear/pass cannot reach the surface, while preserving the
+		// frame's previous resources for the next frame boundary.
+		if consumePendingClear {
+			ws.hasPendingClear = true
+		}
+		ws.discardFrameEncoder()
+		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
 	}
 
 	// Mark frame as having content (for subsequent LoadOp)
