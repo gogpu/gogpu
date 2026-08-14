@@ -131,6 +131,11 @@ There are **two different** software rendering options:
 
 ## Backend Selection
 
+The legacy `Config.Backend` field, `WithBackend` builder, and backend
+constants are retained only as deprecated source-compatibility shims. They
+are ignored at runtime; select the wgpu implementation with build tags and
+the graphics API with `GraphicsAPI` or `GOGPU_GRAPHICS_API`.
+
 ### Multi-Backend Auto-Selection (v0.44.0)
 
 When `GraphicsAPIAuto` is used (the default), gogpu creates a wgpu Instance with a
@@ -152,12 +157,9 @@ selection (`GOGPU_GRAPHICS_API=dx12`) bypasses auto and uses only the requested 
 ### gogpu
 
 ```go
-// Default: Pure Go backend, auto-select graphics API
+// Default: the wgpu build selects the Pure Go backend and gogpu auto-selects
+// the graphics API.
 app := gogpu.NewApp(gogpu.DefaultConfig())
-
-// Explicit backend selection
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
 
 // Explicit graphics API selection (added in v0.18.0)
 // Options: GraphicsAPIAuto, GraphicsAPIVulkan, GraphicsAPIDX12,
@@ -169,11 +171,6 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 // On Windows: renders to screen via GDI. Linux/macOS: headless (no screen output yet).
 app := gogpu.NewApp(gogpu.DefaultConfig().
     WithGraphicsAPI(gogpu.GraphicsAPISoftware))
-
-// Combined: specific backend + specific graphics API
-app := gogpu.NewApp(gogpu.DefaultConfig().
-    WithBackend(gogpu.BackendNative).
-    WithGraphicsAPI(gogpu.GraphicsAPIDX12))
 
 // 2D render mode: CPU rasterizer vs GPU accelerator (ADR-020)
 app := gogpu.NewApp(gogpu.DefaultConfig().

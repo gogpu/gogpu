@@ -41,10 +41,10 @@ type Config struct {
 	// Title is the window title.
 	Title string
 
-	// Width is the initial window width in pixels.
+	// Width is the initial window width in logical points (DIP).
 	Width int
 
-	// Height is the initial window height in pixels.
+	// Height is the initial window height in logical points (DIP).
 	Height int
 
 	// Resizable allows the window to be resized.
@@ -56,8 +56,10 @@ type Config struct {
 	// Fullscreen starts in fullscreen mode.
 	Fullscreen bool
 
-	// Backend specifies which WebGPU implementation to use.
-	// BackendAuto (default) selects the best available.
+	// Backend is retained for source compatibility but is ignored.
+	//
+	// Deprecated: backend selection is controlled by wgpu build tags. Use
+	// GraphicsAPI or the documented build-tag configuration instead.
 	Backend types.BackendType
 
 	// GraphicsAPI specifies which graphics API to use (Vulkan, DX12, Metal).
@@ -233,10 +235,10 @@ func (c Config) WithSize(width, height int) Config {
 	return c
 }
 
-// WithBackend returns a copy with the backend set.
-// Use types.BackendRust for maximum performance (requires gpu library).
-// Use types.BackendNative for zero dependencies (pure Go, may be slower).
-// Use types.BackendAuto (default) to automatically select the best available.
+// WithBackend returns a copy retaining the legacy backend value.
+//
+// Deprecated: backend selection is controlled by wgpu build tags. This
+// method is retained for source compatibility and has no runtime effect.
 func (c Config) WithBackend(backend types.BackendType) Config {
 	c.Backend = backend
 	return c
@@ -387,12 +389,18 @@ func (c Config) WithIcon(img image.Image) Config {
 	return c
 }
 
-// Re-export backend types for convenience.
+// Deprecated backend constants are retained for source compatibility. Backend
+// selection is controlled by wgpu build tags; use GraphicsAPI constants for
+// runtime graphics API selection.
 const (
-	BackendAuto   = types.BackendAuto
-	BackendRust   = types.BackendRust
+	// Deprecated: backend selection is controlled by wgpu build tags.
+	BackendAuto = types.BackendAuto
+	// Deprecated: backend selection is controlled by wgpu build tags.
+	BackendRust = types.BackendRust
+	// Deprecated: backend selection is controlled by wgpu build tags.
 	BackendNative = types.BackendNative
-	BackendGo     = types.BackendGo // Alias for BackendNative
+	// Deprecated: backend selection is controlled by wgpu build tags.
+	BackendGo = types.BackendGo // Alias for BackendNative
 )
 
 // Re-export graphics API types for convenience.
