@@ -29,6 +29,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -88,9 +89,10 @@ type dbusMsg struct {
 // dbusConn is a D-Bus session bus connection that has completed SASL auth and
 // the Hello handshake.  Close rw when done.
 type dbusConn struct {
-	rw     net.Conn
-	serial uint32
-	name   string // unique bus name assigned by Hello (e.g. ":1.42")
+	rw      net.Conn
+	serial  uint32
+	name    string     // unique bus name assigned by Hello (e.g. ":1.42")
+	writeMu sync.Mutex // serializes complete D-Bus writes and serial allocation
 }
 
 // dbusConnect opens the session bus socket, performs SASL EXTERNAL authentication,
@@ -122,6 +124,20 @@ func dbusConnectContext(ctx context.Context) (*dbusConn, error) {
 		raw.Close()
 		return nil, err
 	}
+	// Authentication and Hello are synchronous wire exchanges.  Close the
+	// socket from a short-lived watcher when the caller cancels so either phase
+	// returns promptly instead of waiting for its five-second deadline.
+	stopCancel := make(chan struct{})
+	if done := ctx.Done(); done != nil {
+		go func() {
+			select {
+			case <-done:
+				_ = raw.Close()
+			case <-stopCancel:
+			}
+		}()
+	}
+	defer close(stopCancel)
 	// auth() has no context parameter because it is also used by the existing
 	// file chooser path.  A bounded socket deadline keeps this setup phase
 	// cancellable in practice while the dial itself observes ctx directly.
@@ -263,11 +279,46 @@ func (c *dbusConn) sendCall(dest, path, iface, member, sig string, body []byte) 
 	return c.sendCallWithFDs(dest, path, iface, member, sig, body, nil)
 }
 
+// sendCallContext makes the setup-phase method call interruptible.  A portal
+// connection is not handed to a PrintJob until PreparePrint has been written,
+// so there is no cancellation watcher that can close a blocked write yet.  On
+// context cancellation, closing the socket unblocks the writer and prevents a
+// request that cannot be tracked from outliving its temporary document.
+func (c *dbusConn) sendCallContext(ctx context.Context, dest, path, iface, member, sig string, body []byte) (uint32, error) {
+	if ctx == nil {
+		return c.sendCall(dest, path, iface, member, sig, body)
+	}
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	type result struct {
+		serial uint32
+		err    error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		serial, err := c.sendCall(dest, path, iface, member, sig, body)
+		resultCh <- result{serial: serial, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		return result.serial, result.err
+	case <-ctx.Done():
+		_ = c.rw.Close()
+		return 0, ctx.Err()
+	}
+}
+
 // sendCallWithFDs is sendCall with optional Unix file descriptors attached via
 // SCM_RIGHTS.  D-Bus represents each descriptor in the body as an `h` value
 // containing its zero-based index and announces the count in the UNIX_FDS
 // header field.  The portal Print API uses this to receive the document.
 func (c *dbusConn) sendCallWithFDs(dest, path, iface, member, sig string, body []byte, fds []int) (uint32, error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	c.serial++
 	raw := dbusEncodeMsgWithFDs(dbusMsgCall, c.serial, dest, path, iface, member, sig, body, uint32(len(fds)))
 	var err error
@@ -289,6 +340,34 @@ func (c *dbusConn) sendCallWithFDs(dest, path, iface, member, sig string, body [
 		}
 	}
 	return c.serial, err
+}
+
+// closeRequest asks the portal to end a user interaction.  Cancellation also
+// closes the session socket, which is the fallback when a concurrent write is
+// in progress; TryLock keeps the cancellation path from waiting behind a
+// blocked D-Bus write that the socket close is about to interrupt.
+func (c *dbusConn) closeRequest(handlePath string) {
+	if c == nil || c.rw == nil || handlePath == "" || !c.writeMu.TryLock() {
+		return
+	}
+	defer c.writeMu.Unlock()
+	c.serial++
+	raw := dbusEncodeMsg(
+		dbusMsgCall,
+		c.serial,
+		"org.freedesktop.portal.Desktop",
+		handlePath,
+		"org.freedesktop.portal.Request",
+		"Close",
+		"",
+		nil,
+	)
+	// Never let cancellation wait indefinitely for a portal socket reader.  A
+	// subsequent connection close still aborts the request when this best-effort
+	// Close call cannot be delivered.
+	_ = c.rw.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+	_, _ = c.rw.Write(raw)
+	_ = c.rw.SetWriteDeadline(time.Time{})
 }
 
 // waitResponse reads incoming messages and waits in two stages:

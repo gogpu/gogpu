@@ -180,7 +180,7 @@ func startLinuxPortalPrint(ctx context.Context, request PrintRequest, parent str
 
 	prepareToken := dbusNewToken()
 	prepareBody := encodePortalPreparePrintBody(parent, request.Options.Title, request, prepareToken)
-	prepareSerial, err := conn.sendCall(
+	prepareSerial, err := conn.sendCallContext(operationCtx,
 		"org.freedesktop.portal.Desktop",
 		"/org/freedesktop/portal/desktop",
 		"org.freedesktop.portal.Print",
@@ -210,6 +210,7 @@ func startLinuxPortalPrint(ctx context.Context, request PrintRequest, parent str
 		title:         request.Options.Title,
 	}
 	job.setCancel(func() {
+		job.closeRequests()
 		cancel()
 		job.closeConn()
 	})
@@ -271,6 +272,7 @@ type linuxPrintJob struct {
 
 	prepareSerial uint32
 	preparePath   string
+	printPath     string
 	parent        string
 	title         string
 
@@ -283,6 +285,20 @@ func (j *linuxPrintJob) closeConn() {
 	j.mu.Unlock()
 	if conn != nil && conn.rw != nil {
 		_ = conn.rw.Close()
+	}
+}
+
+func (j *linuxPrintJob) closeRequests() {
+	j.mu.Lock()
+	conn := j.conn
+	preparePath, printPath := j.preparePath, j.printPath
+	j.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	conn.closeRequest(preparePath)
+	if printPath != preparePath {
+		conn.closeRequest(printPath)
 	}
 }
 
@@ -331,6 +347,9 @@ func (j *linuxPrintJob) run() {
 		return
 	}
 	printPath := dbusHandlePath(conn.name, printToken)
+	j.mu.Lock()
+	j.printPath = printPath
+	j.mu.Unlock()
 	body, err = conn.waitResponseBody(printSerial, printPath)
 	if err != nil {
 		j.finish(j.contextualError(err))

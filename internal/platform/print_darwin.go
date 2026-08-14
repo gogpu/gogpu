@@ -74,7 +74,16 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 		setupErr error
 	)
 	setup := func() {
-		parent, setupErr = p.printParent(request.Options.Parent)
+		// Retain the parent while setup crosses the platform lock boundary. A
+		// window may be destroyed concurrently after printParent returns; the
+		// temporary retain keeps the NSWindow alive until NewPrintHandle has
+		// installed its own lifetime retain.
+		p.mu.RLock()
+		parent, setupErr = p.printParentLocked(request.Options.Parent)
+		if setupErr == nil && parent != 0 {
+			parent.Send(darwin.RegisterSelector("retain"))
+		}
+		p.mu.RUnlock()
 		if setupErr != nil {
 			return
 		}
@@ -85,6 +94,11 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 			Copies:     request.Options.Copies,
 			PageRanges: toDarwinPrintRanges(request.Options.PageRanges),
 		}, parent)
+		if parent != 0 {
+			// NewPrintHandle retains the parent for the asynchronous operation;
+			// release only the lookup retain above, including on setup errors.
+			parent.Send(darwin.RegisterSelector("release"))
+		}
 	}
 
 	// AppKit's main-thread check is cheap and avoids a needless selector hop
@@ -101,6 +115,10 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 	if handle == nil {
 		return nil, ErrPrintUnavailable
 	}
+	if err := ctx.Err(); err != nil {
+		handle.Close()
+		return nil, err
+	}
 
 	job.setCancel(func() {
 		// NSPPrintOperation has no public cancel method. Sending cancel: to its
@@ -109,9 +127,14 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 		// the caller's cancellation request to context.Canceled.
 		_ = darwin.PerformOnMain(handle.Cancel, false)
 	})
+	// Install the context watcher before queueing Run.  Otherwise a context
+	// that is canceled while the asynchronous main-thread invocation is still
+	// pending can miss the pre-start cancellation check and launch a panel
+	// after the caller has already withdrawn the request.
+	watchPrintContext(ctx, job)
 
 	run := func() {
-		if job.canceled() {
+		if ctx.Err() != nil || job.canceled() {
 			handle.Close()
 			job.complete(context.Canceled)
 			return
@@ -134,9 +157,9 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 	}
 	if err := darwin.PerformOnMain(run, false); err != nil {
 		handle.Close()
+		job.complete(fmt.Errorf("%w: %w", ErrPrintUnavailable, err))
 		return nil, fmt.Errorf("%w: %w", ErrPrintUnavailable, err)
 	}
-	watchPrintContext(ctx, job)
 	return job, nil
 }
 
@@ -157,6 +180,13 @@ func (p *darwinPlatform) printParent(parent WindowID) (darwin.ID, error) {
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.printParentLocked(parent)
+}
+
+func (p *darwinPlatform) printParentLocked(parent WindowID) (darwin.ID, error) {
+	if p == nil {
+		return 0, ErrPrintUnavailable
+	}
 	if p.app == nil || !p.app.IsInitialized() {
 		return 0, ErrPrintUnavailable
 	}
@@ -166,11 +196,19 @@ func (p *darwinPlatform) printParent(parent WindowID) (darwin.ID, error) {
 			// valid when a caller submits a document before creating a window.
 			return 0, nil //nolint:nilnil // zero parent intentionally requests an application-modal panel.
 		}
-		return p.primary.window.NSID(), nil
+		id := p.primary.window.NSWindow()
+		if id == 0 {
+			return 0, fmt.Errorf("%w: primary window has no NSWindow", ErrPrintParentUnavailable)
+		}
+		return id, nil
 	}
 	for _, w := range p.windows {
 		if w != nil && w.id == parent && w.window != nil {
-			return w.window.NSID(), nil
+			id := w.window.NSWindow()
+			if id == 0 {
+				return 0, fmt.Errorf("%w: window %d has no NSWindow", ErrPrintParentUnavailable, parent)
+			}
+			return id, nil
 		}
 	}
 	return 0, fmt.Errorf("%w: %d", ErrPrintParentUnavailable, parent)

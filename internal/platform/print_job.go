@@ -38,11 +38,13 @@ func (j *printJob) setCancel(fn func()) {
 		return
 	}
 	j.cancelFn = fn
-	canceled := j.cancelRequested
-	j.mu.Unlock()
-	if canceled && fn != nil {
+	if j.cancelRequested && fn != nil {
+		// Keep the lifecycle lock held while running a late-installed hook.  A
+		// concurrent completion must not publish Done (and release the native
+		// handle) before this hook has finished touching it.
 		fn()
 	}
+	j.mu.Unlock()
 }
 
 // clearCancel removes the native cancellation hook once the backend has
@@ -63,10 +65,13 @@ func (j *printJob) Cancel() {
 	}
 	j.cancelRequested = true
 	fn := j.cancelFn
-	j.mu.Unlock()
 	if fn != nil {
+		// Cancellation hooks are bounded native abort/close calls. Serialize them
+		// with completion so a hook cannot run after the backend has released and
+		// possibly recycled its native resource.
 		fn()
 	}
+	j.mu.Unlock()
 }
 
 func (j *printJob) canceled() bool {

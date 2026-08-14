@@ -5,6 +5,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -261,6 +262,64 @@ func TestDBusSendCallWithFDsPassesDescriptor(t *testing.T) {
 		t.Fatalf("passed descriptors = %d, want 1", len(passed))
 	}
 	defer unix.Close(passed[0])
+}
+
+func TestDBusSendCallContextClosesBlockedSetupWrite(t *testing.T) {
+	client, server := net.Pipe()
+	defer server.Close()
+	conn := &dbusConn{rw: client}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := conn.sendCallContext(ctx, "dest", "/path", "iface", "PreparePrint", "s", make([]byte, 1<<20))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sendCallContext() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDBusCloseRequestWritesPortalCloseMethod(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	conn := &dbusConn{rw: client}
+	handlePath := "/org/freedesktop/portal/desktop/request/1_2/gogpu_close"
+	done := make(chan struct{})
+	go func() {
+		conn.closeRequest(handlePath)
+		close(done)
+	}()
+	var fixed [16]byte
+	if _, err := io.ReadFull(server, fixed[:]); err != nil {
+		t.Fatal(err)
+	}
+	if fixed[1] != dbusMsgCall {
+		t.Fatalf("message type = %d, want method call", fixed[1])
+	}
+	hdrLen := int(binaryLE32(fixed[12:16]))
+	hdr := make([]byte, hdrLen)
+	if _, err := io.ReadFull(server, hdr); err != nil {
+		t.Fatal(err)
+	}
+	if pad := (8 - (16+hdrLen)%8) % 8; pad > 0 {
+		padding := make([]byte, pad)
+		if _, err := io.ReadFull(server, padding); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msg := &dbusMsg{}
+	dbusParseHdrFields(hdr, msg)
+	if msg.Path != handlePath || msg.Interface != "org.freedesktop.portal.Request" || msg.Member != "Close" {
+		t.Fatalf("close request headers = path:%q iface:%q member:%q", msg.Path, msg.Interface, msg.Member)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("closeRequest did not return")
+	}
 }
 
 func TestCreateLinuxPrintDocumentOwnsAndCleansFile(t *testing.T) {

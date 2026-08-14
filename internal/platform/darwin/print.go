@@ -3,6 +3,7 @@
 package darwin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -130,6 +131,7 @@ type PrintHandle struct {
 	parent        ID
 	callbackToken uintptr
 	started       bool
+	canceled      bool
 	closed        bool
 	done          func(success bool)
 
@@ -182,7 +184,11 @@ func NewPrintHandle(request PrintRequest, parent ID) (*PrintHandle, error) {
 
 	allocSel := selectors.alloc
 	initWithDataSel := RegisterSelector("initWithData:")
-	document := ID(pdfClass).Send(allocSel).SendPtr(initWithDataSel, data.Ptr())
+	documentAlloc := ID(pdfClass).Send(allocSel)
+	if documentAlloc == 0 {
+		return nil, fmt.Errorf("%w: PDFDocument allocation failed", ErrPrintSetup)
+	}
+	document := documentAlloc.SendPtr(initWithDataSel, data.Ptr())
 	if document == 0 {
 		return nil, fmt.Errorf("%w: PDFDocument rejected data", ErrPrintSetup)
 	}
@@ -247,7 +253,17 @@ func NewPrintHandle(request PrintRequest, parent ID) (*PrintHandle, error) {
 		document.Send(selectors.release)
 		return nil, fmt.Errorf("%w: delegate: %w", ErrPrintSetup, err)
 	}
-	delegate := ID(printDelegateState.class).Send(selectors.alloc).Send(selectors.init)
+	delegateAlloc := ID(printDelegateState.class).Send(selectors.alloc)
+	if delegateAlloc == 0 {
+		operation.Send(selectors.release)
+		printInfo.Send(selectors.release)
+		if filtered != document {
+			filtered.Send(selectors.release)
+		}
+		document.Send(selectors.release)
+		return nil, fmt.Errorf("%w: delegate allocation failed", ErrPrintSetup)
+	}
+	delegate := delegateAlloc.Send(selectors.init)
 	if delegate == 0 {
 		operation.Send(selectors.release)
 		printInfo.Send(selectors.release)
@@ -284,8 +300,16 @@ func (h *PrintHandle) Run(done func(success bool)) error {
 	}
 	h.mu.Lock()
 	if h.closed || h.started {
+		if h.closed {
+			h.mu.Unlock()
+			return context.Canceled
+		}
 		h.mu.Unlock()
 		return fmt.Errorf("%w: operation already started", ErrPrintSetup)
+	}
+	if h.canceled {
+		h.mu.Unlock()
+		return context.Canceled
 	}
 	h.started = true
 	h.done = done
@@ -318,7 +342,12 @@ func (h *PrintHandle) Cancel() {
 		return
 	}
 	h.mu.Lock()
-	if h.closed || !h.started {
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.canceled = true
+	if !h.started {
 		h.mu.Unlock()
 		return
 	}
@@ -401,11 +430,19 @@ func newPrintInfo(copies int) (ID, error) {
 	key := NewNSString("NSPrintCopies")
 	if number == 0 || key == nil {
 		mutable.Send(selectors.release)
+		if key != nil {
+			key.Release()
+		}
 		return 0, fmt.Errorf("%w: NSPrintCopies value failed", ErrPrintSetup)
 	}
 	mutable.SendPtrs(RegisterSelector("setObject:forKey:"), number.Ptr(), key.ID().Ptr())
 	key.Release()
-	info := ID(infoClass).Send(selectors.alloc).SendPtrs(
+	infoAlloc := ID(infoClass).Send(selectors.alloc)
+	if infoAlloc == 0 {
+		mutable.Send(selectors.release)
+		return 0, fmt.Errorf("%w: NSPrintInfo allocation failed", ErrPrintSetup)
+	}
+	info := infoAlloc.SendPtrs(
 		RegisterSelector("initWithDictionary:"), mutable.Ptr())
 	mutable.Send(selectors.release)
 	if info == 0 {
@@ -447,7 +484,11 @@ func filterPDFDocument(document ID, ranges []PrintPageRange) (ID, error) {
 	}
 
 	pdfClass := GetClass("PDFDocument")
-	filtered := ID(pdfClass).Send(selectors.alloc).Send(selectors.init)
+	filteredAlloc := ID(pdfClass).Send(selectors.alloc)
+	if filteredAlloc == 0 {
+		return 0, fmt.Errorf("%w: filtered PDFDocument allocation failed", ErrPrintSetup)
+	}
+	filtered := filteredAlloc.Send(selectors.init)
 	if filtered == 0 {
 		return 0, fmt.Errorf("%w: filtered PDFDocument allocation failed", ErrPrintSetup)
 	}

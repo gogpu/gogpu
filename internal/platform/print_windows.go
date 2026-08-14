@@ -205,6 +205,12 @@ func (p *windowsPlatform) StartPrint(ctx context.Context, request PrintRequest) 
 	if ctx == nil {
 		return nil, errors.New("windows print: nil context")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, ErrPrintUnavailable
+	}
 	if request.Document.MIMEType == "" || len(request.Document.Data) == 0 {
 		return nil, errors.New("windows print: empty document")
 	}
@@ -224,6 +230,13 @@ func (p *windowsPlatform) StartPrint(ctx context.Context, request PrintRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if parent == 0 {
+		// PrintDlgExW requires a valid owner HWND (NULL is not accepted).  A
+		// caller may submit a document before Run creates the primary window;
+		// reject that request synchronously rather than launching an orphaned
+		// dialog whose native setup error would arrive on PrintJob.Done.
+		return nil, errors.New("windows print: parent window is unavailable")
+	}
 
 	// App.Print already copies the request, but keep this boundary explicit for
 	// direct internal callers and for the worker's asynchronous lifetime.
@@ -239,6 +252,9 @@ func (p *windowsPlatform) StartPrint(ctx context.Context, request PrintRequest) 
 // printParent resolves the backend-neutral WindowID to its owning HWND while
 // retaining the parent relationship for the complete native operation.
 func (p *windowsPlatform) printParent(id WindowID) (uintptr, error) {
+	if p == nil {
+		return 0, ErrPrintUnavailable
+	}
 	p.windowMu.RLock()
 	defer p.windowMu.RUnlock()
 	if id == 0 {
@@ -261,6 +277,12 @@ func (p *windowsPlatform) printParent(id WindowID) (uintptr, error) {
 func (p *windowsPlatform) runPrint(ctx context.Context, parent uintptr, request PrintRequest, job *windowsPrintJob) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	// PrintDlgExW may create COM-backed property sheets.  This goroutine is
+	// deliberately pinned to one OS thread, so initialize an STA on that same
+	// thread and balance it before the thread is released.
+	if hr, _, _ := procCoInitializeEx.Call(0, coinitApartmentThreaded); hr == comSOK || hr == comSFalse {
+		defer procCoUninitialize.Call()
+	}
 
 	if ctx.Err() != nil || job.isCanceled() {
 		job.finish(context.Canceled)
@@ -394,7 +416,13 @@ func spoolWindowsDocument(ctx context.Context, request PrintRequest, hdc uintptr
 	if hdc == 0 {
 		return errors.New("windows print: nil printer DC")
 	}
-	defer calls.deleteDC(hdc)
+	// The cancellation hook may call AbortDoc on this HDC from another
+	// goroutine.  Clear it before DeleteDC so a cancellation racing cleanup
+	// cannot touch a released (and potentially recycled) handle.
+	defer func() {
+		job.clearAbort()
+		calls.deleteDC(hdc)
+	}()
 	if ctx.Err() != nil || job.isCanceled() {
 		calls.abortDoc(hdc)
 		return context.Canceled

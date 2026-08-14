@@ -142,6 +142,34 @@ func TestSpoolWindowsDocumentCancellationAbortsBeforeStart(t *testing.T) {
 	}
 }
 
+func TestSpoolWindowsDocumentClearsAbortBeforeDeletingHDC(t *testing.T) {
+	job := newWindowsPrintJob()
+	var abortCalls, deleteCalls int
+	job.setAbort(func() { abortCalls++ })
+	calls := windowsPrintSyscalls{
+		startDoc:  func(uintptr, *printDocInfo) int32 { return 1 },
+		startPage: func(uintptr) int32 { return 1 },
+		escape:    func(uintptr, int32, uint32, uintptr, uintptr) int32 { return 1 },
+		endPage:   func(uintptr) int32 { return 1 },
+		endDoc:    func(uintptr) int32 { return 1 },
+		deleteDC: func(uintptr) int32 {
+			deleteCalls++
+			// If clearAbort ran after DeleteDC, this cancellation would invoke the
+			// hook against the released HDC.
+			job.Cancel()
+			return 1
+		},
+	}
+	if err := spoolWindowsDocument(context.Background(), PrintRequest{
+		Document: PrintDocument{MIMEType: "application/pdf", Data: []byte("pdf")},
+	}, 12, job, calls); err != nil {
+		t.Fatalf("spoolWindowsDocument() error = %v", err)
+	}
+	if abortCalls != 0 || deleteCalls != 1 {
+		t.Fatalf("abort calls=%d delete calls=%d, want 0/1", abortCalls, deleteCalls)
+	}
+}
+
 func bytesForPrintTest(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {

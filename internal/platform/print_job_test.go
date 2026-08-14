@@ -105,3 +105,41 @@ func TestPrintJobConcurrentCancelCallsOneHook(t *testing.T) {
 		t.Fatalf("Done() = %v, want context.Canceled", got)
 	}
 }
+
+func TestPrintJobCompletionWaitsForCancellationHook(t *testing.T) {
+	job := newPrintJob()
+	hookStarted := make(chan struct{})
+	releaseHook := make(chan struct{})
+	job.setCancel(func() {
+		close(hookStarted)
+		<-releaseHook
+	})
+
+	go job.Cancel()
+	select {
+	case <-hookStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation hook did not start")
+	}
+
+	completed := make(chan struct{})
+	go func() {
+		job.complete(nil)
+		close(completed)
+	}()
+	select {
+	case <-completed:
+		t.Fatal("completion published while cancellation hook was still running")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseHook)
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("completion remained blocked after cancellation hook returned")
+	}
+	if got := <-job.Done(); !errors.Is(got, context.Canceled) {
+		t.Fatalf("Done() = %v, want context.Canceled", got)
+	}
+}
