@@ -1,6 +1,15 @@
 package platform
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrPrintUnavailable means that the selected native print service is not
+// available in the current process/session.  The public App.Print boundary
+// maps this setup condition to gogpu.ErrPrintUnsupported while preserving
+// backend detail for direct platform callers.
+var ErrPrintUnavailable = errors.New("gogpu: native printing unavailable")
 
 // PrintDocument is the platform-layer representation of a complete document.
 // The app layer copies Data before passing a request to an asynchronous

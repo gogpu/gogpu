@@ -37,12 +37,11 @@ if err := <-job.Done(); err != nil {
 - Passing a canceled context, or calling `PrintJob.Cancel`, requests
   cancellation. A canceled job reports `context.Canceled`; cancellation is
   idempotent and has no effect after completion.
-- Validation, unsupported platforms, and setup failures are returned by
-  `App.Print` and do not create a job. Native dialog/spool failures are
+- Validation and unavailable print services are returned by `App.Print` and do
+  not create a job (`ErrPrintUnsupported`); native dialog/spool failures are
   reported through `Done`.
 
 The platform capability is the optional `internal/platform.PrintManager`
-interface. Existing backends intentionally do not implement it yet; native
-Windows, macOS, and Linux portal work can be added independently without
-changing this contract. Browser remains unsupported until it has a matching
-print API.
+interface. Windows uses the native PrintDlgEx/GDI path, macOS uses PDFKit and
+AppKit, and Linux X11/Wayland use xdg-desktop-portal. Browser remains
+unsupported until it has a matching print API.

@@ -8,6 +8,8 @@ import (
 	"github.com/gogpu/gogpu/internal/platform"
 )
 
+type printRequestContextKey struct{}
+
 type printTestJob struct {
 	done     chan error
 	canceled bool
@@ -32,6 +34,16 @@ type printTestManager struct {
 	ctx     context.Context
 	job     *printTestJob
 	err     error
+}
+
+type printCancelDuringStartManager struct {
+	mockManager
+	cancel context.CancelFunc
+}
+
+func (m *printCancelDuringStartManager) StartPrint(_ context.Context, _ platform.PrintRequest) (platform.PrintJob, error) {
+	m.cancel()
+	return nil, errors.New("backend setup raced cancellation")
 }
 
 func (m *printTestManager) StartPrint(ctx context.Context, request platform.PrintRequest) (platform.PrintJob, error) {
@@ -61,7 +73,8 @@ func TestPrintRejectsInvalidRequests(t *testing.T) {
 	if _, err := app.Print(context.Background(), PrintDocument{}, PrintOptions{}); !errors.Is(err, ErrInvalidPrintDocument) {
 		t.Fatalf("invalid document error = %v, want ErrInvalidPrintDocument", err)
 	}
-	if _, err := app.Print(nil, NewPDFDocument("x.pdf", []byte("pdf")), PrintOptions{}); !errors.Is(err, ErrNilPrintContext) {
+	var nilContext context.Context
+	if _, err := app.Print(nilContext, NewPDFDocument("x.pdf", []byte("pdf")), PrintOptions{}); !errors.Is(err, ErrNilPrintContext) {
 		t.Fatalf("nil context error = %v, want ErrNilPrintContext", err)
 	}
 	if _, err := app.Print(context.Background(), NewPDFDocument("x.pdf", []byte("pdf")), PrintOptions{Copies: -1}); !errors.Is(err, ErrInvalidPrintOptions) {
@@ -80,6 +93,10 @@ func TestPrintUnsupportedWithoutPlatformCapability(t *testing.T) {
 	if _, err := (&App{manager: &mockManager{}}).Print(context.Background(), doc, PrintOptions{}); !errors.Is(err, ErrPrintUnsupported) {
 		t.Fatalf("manager without PrintManager error = %v, want ErrPrintUnsupported", err)
 	}
+	managerUnavailable := &printTestManager{err: platform.ErrPrintUnavailable}
+	if _, err := (&App{manager: managerUnavailable}).Print(context.Background(), doc, PrintOptions{}); !errors.Is(err, ErrPrintUnsupported) {
+		t.Fatalf("unavailable native service error = %v, want ErrPrintUnsupported", err)
+	}
 }
 
 func TestPrintDelegatesCopiedRequestAndPrimaryParent(t *testing.T) {
@@ -90,7 +107,7 @@ func TestPrintDelegatesCopiedRequestAndPrimaryParent(t *testing.T) {
 	}
 	pdf := []byte("pdf bytes")
 	ranges := []PrintPageRange{{From: 1, To: 2}}
-	ctx := context.WithValue(context.Background(), struct{}{}, "request")
+	ctx := context.WithValue(context.Background(), printRequestContextKey{}, "request")
 	job, err := app.Print(ctx, PrintDocument{Name: "x.pdf", MIMEType: PrintMIMETypePDF, Data: pdf}, PrintOptions{
 		Title:      "Print x",
 		PageRanges: ranges,
@@ -138,6 +155,16 @@ func TestPrintCanceledContextDoesNotStartJob(t *testing.T) {
 	}
 	if mgr.job != nil {
 		t.Fatal("pre-canceled request should not start a print job")
+	}
+}
+
+func TestPrintNormalizesCancellationDuringBackendAcceptance(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr := &printCancelDuringStartManager{cancel: cancel}
+	app := &App{manager: mgr}
+	_, err := app.Print(ctx, NewPDFDocument("x.pdf", []byte("pdf")), PrintOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Print() error = %v, want context.Canceled", err)
 	}
 }
 

@@ -139,6 +139,8 @@ type PrintHandle struct {
 // NewPrintHandle parses the complete PDF with PDFKit and prepares an
 // NSPrintOperation. It does not show the native print panel; Run starts the
 // asynchronous modal operation. Call on AppKit's main thread.
+//
+//nolint:gocognit // PDFKit/AppKit setup must retain and unwind one native lifecycle.
 func NewPrintHandle(request PrintRequest, parent ID) (*PrintHandle, error) {
 	if !IsMainThread() {
 		return nil, ErrPrintMainThread
@@ -155,7 +157,7 @@ func NewPrintHandle(request PrintRequest, parent ID) (*PrintHandle, error) {
 		return nil, fmt.Errorf("%w: empty PDF data", ErrPrintSetup)
 	}
 	if err := initPDFKit(); err != nil {
-		return nil, fmt.Errorf("%w: PDFKit: %v", ErrPrintSetup, err)
+		return nil, fmt.Errorf("%w: PDFKit: %w", ErrPrintSetup, err)
 	}
 	initSelectors()
 	initClasses()
@@ -243,7 +245,7 @@ func NewPrintHandle(request PrintRequest, parent ID) (*PrintHandle, error) {
 			filtered.Send(selectors.release)
 		}
 		document.Send(selectors.release)
-		return nil, fmt.Errorf("%w: delegate: %v", ErrPrintSetup, err)
+		return nil, fmt.Errorf("%w: delegate: %w", ErrPrintSetup, err)
 	}
 	delegate := ID(printDelegateState.class).Send(selectors.alloc).Send(selectors.init)
 	if delegate == 0 {
@@ -383,11 +385,11 @@ func newPrintInfo(copies int) (ID, error) {
 		return 0, fmt.Errorf("%w: shared NSPrintInfo unavailable", ErrPrintSetup)
 	}
 	if copies == 0 {
-		copy := shared.Send(RegisterSelector("copy"))
-		if copy == 0 {
+		printInfoCopy := shared.Send(RegisterSelector("copy"))
+		if printInfoCopy == 0 {
 			return 0, fmt.Errorf("%w: NSPrintInfo copy failed", ErrPrintSetup)
 		}
-		return copy, nil
+		return printInfoCopy, nil
 	}
 
 	dictionary := shared.Send(RegisterSelector("dictionary"))

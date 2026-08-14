@@ -11,9 +11,6 @@ import (
 )
 
 var (
-	// ErrPrintUnavailable means the AppKit application has not been initialized
-	// (or was already torn down) when a print request arrived.
-	ErrPrintUnavailable = errors.New("gogpu: macOS print backend unavailable")
 	// ErrPrintUnsupportedMIME means this backend cannot consume the submitted
 	// document format. PDFKit is the first native format supported by P1M.
 	ErrPrintUnsupportedMIME = errors.New("gogpu: macOS print backend unsupported document type")
@@ -27,6 +24,8 @@ var (
 	// public App.Print validator.
 	ErrPrintInvalidOptions = errors.New("gogpu: macOS print options invalid")
 )
+
+const darwinPrintMIMETypePDF = "application/pdf"
 
 var _ PrintManager = (*darwinPlatform)(nil)
 
@@ -44,7 +43,7 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if request.Document.MIMEType != "application/pdf" {
+	if request.Document.MIMEType != darwinPrintMIMETypePDF {
 		return nil, fmt.Errorf("%w: %q", ErrPrintUnsupportedMIME, request.Document.MIMEType)
 	}
 	if len(request.Document.Data) == 0 {
@@ -94,7 +93,7 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 	if darwin.IsMainThread() {
 		setup()
 	} else if err := darwin.PerformOnMain(setup, true); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPrintUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrPrintUnavailable, err)
 	}
 	if setupErr != nil {
 		return nil, setupErr
@@ -135,7 +134,7 @@ func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (
 	}
 	if err := darwin.PerformOnMain(run, false); err != nil {
 		handle.Close()
-		return nil, fmt.Errorf("%w: %v", ErrPrintUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrPrintUnavailable, err)
 	}
 	watchPrintContext(ctx, job)
 	return job, nil
@@ -165,7 +164,7 @@ func (p *darwinPlatform) printParent(parent WindowID) (darwin.ID, error) {
 		if p.primary == nil || p.primary.window == nil {
 			// nil docWindow requests an application-modal print panel, which is
 			// valid when a caller submits a document before creating a window.
-			return 0, nil
+			return 0, nil //nolint:nilnil // zero parent intentionally requests an application-modal panel.
 		}
 		return p.primary.window.NSID(), nil
 	}

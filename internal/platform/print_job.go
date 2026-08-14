@@ -45,6 +45,16 @@ func (j *printJob) setCancel(fn func()) {
 	}
 }
 
+// clearCancel removes the native cancellation hook once the backend has
+// released the resource it protects.  A terminal job ignores later Cancel
+// calls, but clearing the hook before completion also prevents a concurrent
+// cancellation from touching a recycled native handle during cleanup.
+func (j *printJob) clearCancel() {
+	j.mu.Lock()
+	j.cancelFn = nil
+	j.mu.Unlock()
+}
+
 func (j *printJob) Cancel() {
 	j.mu.Lock()
 	if j.terminal || j.cancelRequested {

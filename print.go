@@ -75,8 +75,9 @@ type PrintJob interface {
 }
 
 var (
-	// ErrPrintUnsupported means the selected platform has no native print
-	// implementation yet. It is returned synchronously and no job is created.
+	// ErrPrintUnsupported means the selected platform has no usable native print
+	// implementation or service. It is returned synchronously and no job is
+	// created.
 	ErrPrintUnsupported = errors.New("gogpu: native printing unsupported")
 	// ErrInvalidPrintDocument means the document has no media type or bytes.
 	ErrInvalidPrintDocument = errors.New("gogpu: invalid print document")
@@ -155,5 +156,19 @@ func (a *App) Print(ctx context.Context, document PrintDocument, opts PrintOptio
 			request.Options.PageRanges[i] = platform.PrintPageRange{From: r.From, To: r.To}
 		}
 	}
-	return manager.StartPrint(ctx, request)
+	job, err := manager.StartPrint(ctx, request)
+	if err != nil {
+		// A backend may discover cancellation while its synchronous acceptance
+		// work is in flight. Keep the public boundary deterministic: once the
+		// caller's context is canceled, Print reports context.Canceled rather
+		// than leaking a platform setup error from that race.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if errors.Is(err, platform.ErrPrintUnavailable) {
+			return nil, ErrPrintUnsupported
+		}
+		return nil, err
+	}
+	return job, nil
 }

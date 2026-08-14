@@ -26,7 +26,7 @@ import (
 const linuxPrintMIMETypePDF = "application/pdf"
 
 var (
-	errLinuxPrintUnsupported = errors.New("gogpu: Linux portal printing unavailable")
+	errLinuxPrintUnsupported = ErrPrintUnavailable
 	errLinuxPrintMIME        = errors.New("gogpu: Linux portal printing supports PDF documents only")
 )
 
@@ -199,7 +199,7 @@ func startLinuxPortalPrint(ctx context.Context, request PrintRequest, parent str
 	}
 
 	job := &linuxPrintJob{
-		done:          make(chan error, 1),
+		printJob:      newPrintJob(),
 		ctx:           operationCtx,
 		cancel:        cancel,
 		conn:          conn,
@@ -208,9 +208,12 @@ func startLinuxPortalPrint(ctx context.Context, request PrintRequest, parent str
 		preparePath:   dbusHandlePath(conn.name, prepareToken),
 		parent:        parent,
 		title:         request.Options.Title,
-		watchDone:     make(chan struct{}),
 	}
-	go job.watchCancellation()
+	job.setCancel(func() {
+		cancel()
+		job.closeConn()
+	})
+	watchPrintContext(ctx, job.printJob)
 	go job.run()
 	return job, nil
 }
@@ -258,14 +261,13 @@ func closeLinuxPrintDocument(f *os.File) {
 }
 
 type linuxPrintJob struct {
-	done   chan error
+	*printJob
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu        sync.Mutex
-	conn      *dbusConn
-	document  *os.File
-	watchDone chan struct{}
+	mu       sync.Mutex
+	conn     *dbusConn
+	document *os.File
 
 	prepareSerial uint32
 	preparePath   string
@@ -273,19 +275,6 @@ type linuxPrintJob struct {
 	title         string
 
 	finishOnce sync.Once
-	watchOnce  sync.Once
-}
-
-func (j *linuxPrintJob) Done() <-chan error { return j.done }
-
-// Cancel is idempotent.  Closing the D-Bus socket interrupts a blocked portal
-// response read; the run goroutine then performs resource cleanup before
-// publishing context.Canceled on Done.
-func (j *linuxPrintJob) Cancel() {
-	if j.cancel != nil {
-		j.cancel()
-	}
-	j.closeConn()
 }
 
 func (j *linuxPrintJob) closeConn() {
@@ -294,14 +283,6 @@ func (j *linuxPrintJob) closeConn() {
 	j.mu.Unlock()
 	if conn != nil && conn.rw != nil {
 		_ = conn.rw.Close()
-	}
-}
-
-func (j *linuxPrintJob) watchCancellation() {
-	select {
-	case <-j.ctx.Done():
-		j.closeConn()
-	case <-j.watchDone:
 	}
 }
 
@@ -367,7 +348,6 @@ func (j *linuxPrintJob) contextualError(err error) error {
 
 func (j *linuxPrintJob) finish(err error) {
 	j.finishOnce.Do(func() {
-		j.watchOnce.Do(func() { close(j.watchDone) })
 		j.mu.Lock()
 		conn := j.conn
 		document := j.document
@@ -381,8 +361,8 @@ func (j *linuxPrintJob) finish(err error) {
 		if j.cancel != nil {
 			j.cancel()
 		}
-		j.done <- err
-		close(j.done)
+		j.clearCancel()
+		j.complete(err)
 	})
 }
 

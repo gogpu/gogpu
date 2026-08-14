@@ -164,78 +164,38 @@ var windowsPrintCalls = windowsPrintSyscalls{
 	},
 }
 
-// windowsPrintJob owns the asynchronous operation and its terminal signal.
-// abort is installed only while a native GDI job is active; this keeps Cancel
-// idempotent and prevents an after-Done cancellation from touching a recycled
-// HDC.
+// windowsPrintJob adds the native abort hook to the shared print lifecycle.
+// The shared state machine makes cancellation and terminal publication match
+// the macOS/Linux backends; abort is installed only while a native GDI job is
+// active so a later Cancel cannot touch a recycled HDC.
 type windowsPrintJob struct {
-	done     chan error
-	finished chan struct{}
-
-	cancelOnce sync.Once
-	finishOnce sync.Once
-	mu         sync.Mutex
-	canceled   bool
-	abort      func()
+	*printJob
 }
 
 func newWindowsPrintJob() *windowsPrintJob {
 	return &windowsPrintJob{
-		done:     make(chan error, 1),
-		finished: make(chan struct{}),
+		printJob: newPrintJob(),
 	}
-}
-
-func (j *windowsPrintJob) Done() <-chan error { return j.done }
-
-func (j *windowsPrintJob) Cancel() {
-	j.cancelOnce.Do(func() {
-		j.mu.Lock()
-		j.canceled = true
-		abort := j.abort
-		j.mu.Unlock()
-		if abort != nil {
-			abort()
-		}
-	})
 }
 
 func (j *windowsPrintJob) setAbort(abort func()) {
-	j.mu.Lock()
-	if j.canceled {
-		j.mu.Unlock()
-		if abort != nil {
-			abort()
-		}
-		return
-	}
-	j.abort = abort
-	j.mu.Unlock()
+	j.setCancel(abort)
 }
 
 func (j *windowsPrintJob) clearAbort() {
-	j.mu.Lock()
-	j.abort = nil
-	j.mu.Unlock()
+	j.clearCancel()
 }
 
 func (j *windowsPrintJob) isCanceled() bool {
-	j.mu.Lock()
-	canceled := j.canceled
-	j.mu.Unlock()
-	return canceled
+	return j.canceled()
 }
 
 func (j *windowsPrintJob) finish(err error) {
-	j.finishOnce.Do(func() {
-		if j.isCanceled() || errors.Is(err, context.Canceled) {
-			err = context.Canceled
-		}
-		j.clearAbort()
-		j.done <- err
-		close(j.done)
-		close(j.finished)
-	})
+	if errors.Is(err, context.Canceled) {
+		err = context.Canceled
+	}
+	j.clearAbort()
+	j.complete(err)
 }
 
 // StartPrint implements PrintManager for the Win32 platform.  The request is
@@ -272,13 +232,7 @@ func (p *windowsPlatform) StartPrint(ctx context.Context, request PrintRequest) 
 
 	job := newWindowsPrintJob()
 	go p.runPrint(ctx, parent, request, job)
-	go func() {
-		select {
-		case <-ctx.Done():
-			job.Cancel()
-		case <-job.finished:
-		}
-	}()
+	watchPrintContext(ctx, job.printJob)
 	return job, nil
 }
 

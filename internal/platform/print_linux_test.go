@@ -303,16 +303,18 @@ func TestLinuxPrintJobCancelClosesConnectionAndDocument(t *testing.T) {
 	name := document.Name()
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &linuxPrintJob{
-		done:          make(chan error, 1),
+		printJob:      newPrintJob(),
 		ctx:           ctx,
 		cancel:        cancel,
 		conn:          &dbusConn{rw: client},
 		document:      document,
 		prepareSerial: 1,
 		preparePath:   "/org/freedesktop/portal/desktop/request/1_1/gogpu_1",
-		watchDone:     make(chan struct{}),
 	}
-	go job.watchCancellation()
+	job.setCancel(func() {
+		cancel()
+		job.closeConn()
+	})
 	go job.run()
 	job.Cancel()
 
