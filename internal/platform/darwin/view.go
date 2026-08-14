@@ -21,6 +21,8 @@ import (
 
 var (
 	goGPUViewClass     Class
+	goGPUViewSuper     Class
+	goGPUViewTextInput bool
 	goGPUViewClassOnce sync.Once
 	errGoGPUViewClass  error
 )
@@ -76,6 +78,65 @@ var (
 	viewDragMu       sync.RWMutex
 )
 
+// TextInputHandler is the Go side of the NSTextInputClient bridge installed
+// on each GoGPUView. AppKit invokes these callbacks on the main thread while
+// interpreting a key event. NSRange values are passed as UTF-16 location and
+// length pairs because that is the Cocoa ABI; the platform layer converts
+// them to gpucontext's UTF-8 byte offsets before queueing events.
+type TextInputHandler struct {
+	KeyDown func(event ID)
+
+	SetMarkedText func(text ID, selectedLocation, selectedLength,
+		replacementLocation, replacementLength uintptr)
+	InsertText func(text ID, replacementLocation, replacementLength uintptr)
+	UnmarkText func()
+
+	// AttributedSubstring returns an autoreleased NSAttributedString.
+	// actualRange is a pointer to Cocoa's NSRange storage and may be zero.
+	AttributedSubstring func(location, length, actualRange uintptr) ID
+}
+
+var (
+	viewTextInputHandlers = make(map[uintptr]TextInputHandler)
+	viewTextInputForward  = make(map[uintptr]int)
+	viewTextInputMu       sync.RWMutex
+)
+
+// SetViewTextInputHandler installs the NSTextInputClient bridge callbacks for
+// a view. Passing a zero handler removes the entry and releases the Go closure
+// from the view-side registry; the ObjC class itself remains process-lived.
+func SetViewTextInputHandler(view ID, handler TextInputHandler) {
+	viewTextInputMu.Lock()
+	defer viewTextInputMu.Unlock()
+	if handler.KeyDown == nil && handler.SetMarkedText == nil &&
+		handler.InsertText == nil && handler.UnmarkText == nil &&
+		handler.AttributedSubstring == nil {
+		delete(viewTextInputHandlers, view.Ptr())
+		delete(viewTextInputForward, view.Ptr())
+		return
+	}
+	viewTextInputHandlers[view.Ptr()] = handler
+}
+
+// ClearViewTextInputHandler removes the bridge callbacks for a destroyed
+// window content view. Call this before releasing the underlying ObjC object.
+func ClearViewTextInputHandler(view ID) {
+	SetViewTextInputHandler(view, TextInputHandler{})
+}
+
+func getViewTextInputHandler(viewPtr uintptr) (TextInputHandler, bool) {
+	viewTextInputMu.RLock()
+	defer viewTextInputMu.RUnlock()
+	h, ok := viewTextInputHandlers[viewPtr]
+	return h, ok
+}
+
+func isViewTextInputForwarding(viewPtr uintptr) bool {
+	viewTextInputMu.RLock()
+	defer viewTextInputMu.RUnlock()
+	return viewTextInputForward[viewPtr] != 0
+}
+
 // SetViewDragHandler installs a DragHandler on a GoGPUView instance.
 // The handler receives drag events from macOS NSDragging protocol callbacks.
 // Pass nil to remove the handler.
@@ -118,22 +179,39 @@ func registerGoGPUViewClass() (Class, error) {
 		return 0, err
 	}
 
-	nsViewClass := GetClass("NSView")
-	if nsViewClass == 0 {
+	// NSTextView already provides the struct-returning portions of
+	// NSTextInputClient (markedRange, selectedRange, firstRect, and the
+	// character-coordinate methods). Go callbacks cannot portably return
+	// NSRange/NSRect on every supported macOS ABI, so the custom class extends
+	// NSTextView and observes only the void/pointer-returning methods below.
+	// The NSView fallback preserves window creation if AppKit class lookup is
+	// unavailable during an early runtime probe.
+	superClass := GetClass("NSTextView")
+	textInput := superClass != 0
+	if superClass == 0 {
+		superClass = GetClass("NSView")
+	}
+	if superClass == 0 {
 		return 0, ErrClassNotFound
 	}
 
-	cls := AllocateClassPair(nsViewClass, "GoGPUView")
+	cls := AllocateClassPair(superClass, "GoGPUView")
 	if cls == 0 {
 		return 0, ErrClassNotFound
 	}
+	goGPUViewSuper = superClass
+	goGPUViewTextInput = textInput
 
 	// keyDown: — handle keyboard event, prevent default NSBeep chain.
 	// ObjC signature: -(void)keyDown:(NSEvent*)event → "v@:@"
 	keyDownIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
-		// Event is already handled by our handleEvent Go function
-		// which runs before sendEvent:. Nothing to do here —
-		// the override itself prevents [super keyDown:] from running.
+		if handler, ok := getViewTextInputHandler(self); ok && handler.KeyDown != nil {
+			handler.KeyDown(ID(event))
+		}
+		// Event dispatch is intentionally not forwarded to NSTextView's
+		// keyDown:. The bridge calls interpretKeyEvents: explicitly when IME
+		// input is enabled; disabled input follows the existing platform event
+		// path and cannot produce duplicate committed text.
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("keyDown:"), keyDownIMP, "v@:@")
@@ -162,6 +240,111 @@ func registerGoGPUViewClass() (Class, error) {
 		return 1 // YES
 	})
 	ClassAddMethod(cls, RegisterSelector("acceptsFirstResponder"), acceptsIMP, "B@:")
+
+	if textInput {
+		// NSTextInputClient mutators. NSRange is two NSUInteger values in the
+		// Cocoa ABI, so the callback receives location/length pairs rather than
+		// a Go struct (goffi callbacks intentionally restrict struct arguments
+		// on arm64).
+		setMarkedTextIMP := ffi.NewCallback(func(self, sel, text, selectedLocation,
+			selectedLength, replacementLocation, replacementLength uintptr) uintptr {
+			textID := ID(text)
+			if !isViewTextInputForwarding(self) {
+				if handler, ok := getViewTextInputHandler(self); ok && handler.SetMarkedText != nil {
+					handler.SetMarkedText(textID, selectedLocation, selectedLength,
+						replacementLocation, replacementLength)
+				}
+			}
+			callGoGPUViewSuperVoid(
+				ID(self),
+				"setMarkedText:selectedRange:replacementRange:",
+				&textID,
+				[2]uintptr{selectedLocation, selectedLength},
+				[2]uintptr{replacementLocation, replacementLength},
+			)
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("setMarkedText:selectedRange:replacementRange:"),
+			setMarkedTextIMP, "v@:@{_NSRange=QQ}{_NSRange=QQ}")
+
+		// Older input methods still send the two-argument spelling. Keep it as
+		// a compatibility shim and forward it to NSTextView's implementation.
+		setMarkedTextLegacyIMP := ffi.NewCallback(func(self, sel, text,
+			selectedLocation, selectedLength uintptr) uintptr {
+			textID := ID(text)
+			if !isViewTextInputForwarding(self) {
+				if handler, ok := getViewTextInputHandler(self); ok && handler.SetMarkedText != nil {
+					handler.SetMarkedText(textID, selectedLocation, selectedLength,
+						^uintptr(0), ^uintptr(0))
+				}
+			}
+			callGoGPUViewSuperVoid(
+				ID(self),
+				"setMarkedText:selectedRange:",
+				&textID,
+				[2]uintptr{selectedLocation, selectedLength},
+			)
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("setMarkedText:selectedRange:"),
+			setMarkedTextLegacyIMP, "v@:@{_NSRange=QQ}")
+
+		insertTextIMP := ffi.NewCallback(func(self, sel, text,
+			replacementLocation, replacementLength uintptr) uintptr {
+			textID := ID(text)
+			if !isViewTextInputForwarding(self) {
+				if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
+					handler.InsertText(textID, replacementLocation, replacementLength)
+				}
+			}
+			callGoGPUViewSuperVoid(
+				ID(self),
+				"insertText:replacementRange:",
+				&textID,
+				[2]uintptr{replacementLocation, replacementLength},
+			)
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("insertText:replacementRange:"),
+			insertTextIMP, "v@:@{_NSRange=QQ}")
+
+		// Compatibility with the pre-10.6 insertText: spelling.
+		insertTextLegacyIMP := ffi.NewCallback(func(self, sel, text uintptr) uintptr {
+			textID := ID(text)
+			if !isViewTextInputForwarding(self) {
+				if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
+					handler.InsertText(textID, ^uintptr(0), ^uintptr(0))
+				}
+			}
+			callGoGPUViewSuperVoid(ID(self), "insertText:", &textID)
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("insertText:"), insertTextLegacyIMP, "v@:@")
+
+		unmarkTextIMP := ffi.NewCallback(func(self, sel uintptr) uintptr {
+			if !isViewTextInputForwarding(self) {
+				if handler, ok := getViewTextInputHandler(self); ok && handler.UnmarkText != nil {
+					handler.UnmarkText()
+				}
+			}
+			callGoGPUViewSuperVoid(ID(self), "unmarkText", nil)
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("unmarkText"), unmarkTextIMP, "v@:")
+
+		// Surrounding text is supplied by the focused widget rather than by
+		// NSTextView's internal text storage. This callback returns an
+		// autoreleased NSString, which is a valid NSAttributedString result.
+		attributedSubstringIMP := ffi.NewCallback(func(self, sel, location,
+			length, actualRange uintptr) uintptr {
+			if handler, ok := getViewTextInputHandler(self); ok && handler.AttributedSubstring != nil {
+				return uintptr(handler.AttributedSubstring(location, length, actualRange))
+			}
+			return 0
+		})
+		ClassAddMethod(cls, RegisterSelector("attributedSubstringForProposedRange:actualRange:"),
+			attributedSubstringIMP, "@@:{_NSRange=QQ}^{_NSRange=QQ}")
+	}
 
 	// --- NSDraggingDestination protocol methods ---
 	// These handle OS file drag-and-drop onto the view.
@@ -428,7 +611,7 @@ func nsStringToGoString(nsStr ID) string {
 }
 
 // CreateGoGPUView creates an instance of GoGPUView with the given frame rect.
-// The returned ID is an allocated, initialized NSView subclass instance.
+// The returned ID is an allocated, initialized AppKit view subclass instance.
 // The view is automatically registered to accept file drag-and-drop.
 func CreateGoGPUView(frame NSRect) (ID, error) {
 	cls, err := GoGPUViewClass()
@@ -445,6 +628,19 @@ func CreateGoGPUView(frame NSRect) (ID, error) {
 	view := alloc.SendRect(RegisterSelector("initWithFrame:"), frame)
 	if view.IsNil() {
 		return 0, ErrViewCreationFailed
+	}
+
+	if goGPUViewTextInput {
+		// NSTextView defaults to an opaque background and renders its internal
+		// text storage. GoGPU owns the pixels and draws preedit text itself, so
+		// keep the native text view as an invisible input/geometry surface while
+		// retaining its NSTextInputClient state for AppKit's input manager.
+		initSelectors()
+		initClasses()
+		view.SendBool(selectors.setDrawsBackground, false)
+		if clearColor := classes.NSColor.Send(selectors.clearColor); clearColor != 0 {
+			view.SendPtr(selectors.setTextColor, clearColor.Ptr())
+		}
 	}
 
 	// Register the view to accept file drag-and-drop.

@@ -25,6 +25,8 @@ type darwinWindow struct {
 	shouldClose bool
 	events      *eventqueue.Queue[Event]
 	eventMu     sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
+	imeMu       sync.Mutex // guards AppKit NSTextInputClient state
+	ime         macIMEState
 
 	// Mouse state tracking
 	pointerX      float64
@@ -203,12 +205,36 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 			}
 			darwin.WakeEventLoop()
 		})
+
+		// AppKit invokes these callbacks on the main thread while routing a
+		// key event through NSTextInputClient. Keep the native bridge thin and
+		// convert Cocoa's UTF-16 ranges at the platform boundary.
+		darwin.SetViewTextInputHandler(contentView, darwin.TextInputHandler{
+			KeyDown: func(event darwin.ID) {
+				w.handleIMEKeyDown(contentView, event)
+			},
+			SetMarkedText: func(text darwin.ID, selectedLocation, selectedLength,
+				replacementLocation, replacementLength uintptr) {
+				w.handleMacSetMarkedText(text, selectedLocation, selectedLength,
+					replacementLocation, replacementLength)
+			},
+			InsertText: func(text darwin.ID, replacementLocation, replacementLength uintptr) {
+				w.handleMacInsertText(text, replacementLocation, replacementLength)
+			},
+			UnmarkText: func() {
+				w.handleMacUnmarkText()
+			},
+			AttributedSubstring: func(location, length, actualRange uintptr) darwin.ID {
+				return w.handleMacAttributedSubstring(location, length, actualRange)
+			},
+		})
 	}
 
 	dw := &darwinPlatformWindow{
 		platform:  p,
 		id:        id,
 		window:    w.window,
+		owner:     w,
 		frameless: config.Frameless,
 	}
 
@@ -300,11 +326,12 @@ func (p *darwinPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Clean up drag handlers for all windows before destroying them.
+	// Clean up native handlers for all windows before destroying them.
 	for _, w := range p.windows {
 		if w.window != nil {
 			cv := w.window.ContentView()
 			if !cv.IsNil() {
+				darwin.ClearViewTextInputHandler(cv)
 				darwin.ClearViewDragHandler(cv)
 			}
 		}
@@ -336,6 +363,7 @@ type darwinPlatformWindow struct {
 	platform        *darwinPlatform
 	id              WindowID
 	window          *darwin.Window
+	owner           *darwinWindow
 	lastScale       float64
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -628,6 +656,12 @@ func (dw *darwinPlatformWindow) Destroy() {
 func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 	w.eventMu.Lock()
 	defer w.eventMu.Unlock()
+	if w.window != nil {
+		// Controller calls may cancel IME from a worker goroutine. Flush the
+		// corresponding native marked range only after returning to AppKit's
+		// main-thread event loop.
+		w.flushNativeIMEReset(w.window.ContentView())
+	}
 
 	// Return queued event first (from previous processing).
 	if e, ok := w.events.Pop(); ok {
@@ -705,8 +739,16 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 		if !w.focusInited {
 			w.lastKeyWindow = isKey
 			w.focusInited = true
+			if !isKey {
+				w.SetIMEEnabled(false)
+				w.flushNativeIMEReset(w.window.ContentView())
+			}
 		} else if isKey != w.lastKeyWindow {
 			w.lastKeyWindow = isKey
+			if !isKey {
+				w.SetIMEEnabled(false)
+				w.flushNativeIMEReset(w.window.ContentView())
+			}
 			w.events.Push(Event{WindowID: w.id, Type: EventFocus, Focused: isKey})
 		}
 	}
@@ -891,9 +933,14 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 		key := macKeyCodeToKey(keyCode)
 		w.dispatchKeyEvent(key, w.modifiers, true)
 
-		// Dispatch character input from [NSEvent characters].
-		// This handles all keyboard layouts, IME, and dead key sequences.
-		w.dispatchCharFromEvent(event)
+		// When NSTextInputClient is enabled, AppKit's keyDown callback calls
+		// interpretKeyEvents:, which delivers committed text and preedit updates
+		// through the bridge. Dispatching NSEvent.characters here as well would
+		// duplicate committed text. The disabled path retains the existing
+		// direct character dispatch for ordinary keyboard input.
+		if !w.imeEnabled() {
+			w.dispatchCharFromEvent(event)
+		}
 
 	case darwin.NSEventTypeKeyUp:
 		keyCode := darwin.GetKeyCode(event)
