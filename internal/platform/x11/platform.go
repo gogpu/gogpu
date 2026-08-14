@@ -59,6 +59,15 @@ const (
 	EventTypeDragMove  // Files moving over window
 	EventTypeDragDrop  // Files dropped on window
 	EventTypeDragLeave // Files left window area
+
+	// IME lifecycle events. These remain distinct from EventTypeChar so XIM
+	// preedit and commit dispatch cannot be double-counted by xkb fallback.
+	EventTypeIMECompositionStart
+	EventTypeIMECompositionUpdate
+	EventTypeIMECompositionEnd
+	EventTypeIMECanceled
+	EventTypeIMEDisabled
+	EventTypeIMEDeleteSurrounding
 )
 
 // PlatformEvent represents a platform event.
@@ -75,6 +84,13 @@ type PlatformEvent struct {
 
 	// Character input (EventTypeChar)
 	Char rune
+
+	// IME composition events. Composition ranges use UTF-8 byte offsets as
+	// defined by gpucontext.IMEComposition. A commit is carried on the end
+	// event instead of being emitted as duplicate EventTypeChar values.
+	IMEComposition gpucontext.IMEComposition
+	IMECommitted   string
+	IMEDelete      gpucontext.IMEDeleteSurroundingEvent
 
 	// Pointer (EventTypePointer*)
 	Pointer gpucontext.PointerEvent
@@ -158,6 +174,10 @@ type x11Window struct {
 
 	// XDND drag-and-drop state for this window.
 	xdndState xdndState
+
+	// Optional XIM/XIC state. It is nil when libX11/XIM is unavailable; the
+	// existing pure-Go xkb text path remains the locale-independent fallback.
+	ime *x11IME
 }
 
 // Platform implements X11 windowing support.
@@ -458,12 +478,25 @@ func (p *Platform) Init(config Config) error {
 		fmt.Fprintf(os.Stderr, "gogpu: warning: %v (GPU rendering unavailable)\n", err)
 	}
 	p.xlib = xlib
+	if xlib != nil {
+		w.ime = newX11IME(xlib, w.window, p.scaleFactor, w.queueEvent)
+		if w.ime == nil {
+			logger().Info("x11 XIM unavailable; using xkb text fallback")
+		} else {
+			logger().Info("x11 XIM enabled", "preedit", w.ime.preeditSupported)
+		}
+	}
 
 	// Refine DPI scale factor using Xlib screen info (fallback for systems without Xft.dpi).
 	// queryScaleFactor re-checks Xft.dpi (fast, same result) then tries screen physical dimensions.
 	refinedScale := p.queryScaleFactor()
 	if refinedScale != p.scaleFactor && refinedScale != 1.0 {
 		p.scaleFactor = refinedScale
+	}
+	if w.ime != nil {
+		w.ime.mu.Lock()
+		w.ime.scale = p.scaleFactor
+		w.ime.mu.Unlock()
 	}
 	if p.scaleFactor != 1.0 {
 		logger().Info("x11 DPI scale", "factor", p.scaleFactor)
@@ -1031,10 +1064,10 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		w.eventMu.Unlock()
 
 	case *KeyPressEvent:
-		p.handleKeyEvent(w, e.Detail, e.State, true)
+		p.handleKeyEventForEvent(w, &e.KeyEvent, true)
 
 	case *KeyReleaseEvent:
-		p.handleKeyEvent(w, e.Detail, e.State, false)
+		p.handleKeyEventForEvent(w, &e.KeyEvent, false)
 
 	case *MotionNotifyEvent:
 		p.handleMotionNotify(w, e)
@@ -1631,6 +1664,52 @@ func (p *Platform) SetTitle(title string) {
 	_ = p.conn.SetWindowTitle(p.primary.window, title, p.atoms)
 }
 
+// Optional gpucontext v2 IME methods for the primary window. Keeping these on
+// Platform lets the Linux wrapper expose them without coupling PlatformWindow
+// to the versioned contract.
+func (p *Platform) IMECapabilities() gpucontext.IMECapabilities {
+	if p == nil || p.primary == nil {
+		return gpucontext.IMECapabilities{Version: gpucontext.IMEContractVersion}
+	}
+	return p.primary.IMECapabilities()
+}
+
+func (p *Platform) SetIMEPosition(x, y int) {
+	if p != nil && p.primary != nil {
+		p.primary.SetIMEPosition(x, y)
+	}
+}
+
+func (p *Platform) SetIMEEnabled(enabled bool) {
+	if p != nil && p.primary != nil {
+		p.primary.SetIMEEnabled(enabled)
+	}
+}
+
+func (p *Platform) SetIMECursorArea(area gpucontext.IMECursorArea) {
+	if p != nil && p.primary != nil {
+		p.primary.SetIMECursorArea(area)
+	}
+}
+
+func (p *Platform) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
+	if p != nil && p.primary != nil {
+		p.primary.SetIMEContentType(purpose, hints)
+	}
+}
+
+func (p *Platform) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
+	if p != nil && p.primary != nil {
+		p.primary.SetIMESurroundingText(text)
+	}
+}
+
+func (p *Platform) CancelIME() {
+	if p != nil && p.primary != nil {
+		p.primary.CancelIME()
+	}
+}
+
 func (p *Platform) SetMinSize(width, height int) {
 	if p.primary == nil || p.conn == nil {
 		return
@@ -1717,6 +1796,10 @@ func (p *Platform) Destroy() {
 	}
 
 	// Close Xlib Display* (Vulkan surface handle)
+	if w != nil && w.ime != nil {
+		w.ime.close()
+		w.ime = nil
+	}
 	if p.xlib != nil {
 		p.xlib.close()
 		p.xlib = nil
@@ -1851,12 +1934,68 @@ func (w *x11Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifie
 	w.queueEvent(PlatformEvent{Type: evType, Key: key, Mods: mods})
 }
 
+// IME capabilities and controller methods are intentionally optional on the
+// X11 window. A missing XIM/XIC leaves these methods as no-ops and keeps the
+// existing pure-Go xkb text path active.
+func (w *x11Window) IMECapabilities() gpucontext.IMECapabilities {
+	if w == nil || w.ime == nil {
+		return gpucontext.IMECapabilities{Version: gpucontext.IMEContractVersion}
+	}
+	return w.ime.capabilities()
+}
+
+func (w *x11Window) SetIMEPosition(x, y int) {
+	if w != nil && w.ime != nil {
+		w.ime.setLegacyPosition(x, y)
+	}
+}
+
+func (w *x11Window) SetIMEEnabled(enabled bool) {
+	if w != nil && w.ime != nil {
+		w.ime.setEnabled(enabled)
+	}
+}
+
+func (w *x11Window) SetIMECursorArea(area gpucontext.IMECursorArea) {
+	if w != nil && w.ime != nil {
+		w.ime.setCursorArea(area)
+	}
+}
+
+func (w *x11Window) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
+	if w != nil && w.ime != nil {
+		w.ime.setContentType(purpose, hints)
+	}
+}
+
+func (w *x11Window) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
+	if w != nil && w.ime != nil {
+		w.ime.setSurroundingText(text)
+	}
+}
+
+func (w *x11Window) CancelIME() {
+	if w != nil && w.ime != nil {
+		w.ime.cancel()
+	}
+}
+
 // handleKeyEvent processes a key press or release event.
 // X11 keycodes = evdev keycodes + 8.
 //
 // Text input uses xkbcommon when available (handles AltGr/Level3 correctly).
 // Falls back to manual KeycodeToKeysymGroup (no AltGr support) if xkbcommon is unavailable.
 func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pressed bool) {
+	p.handleKeyEventForEvent(w, &KeyEvent{Detail: keycode, State: state, Event: w.window}, pressed)
+}
+
+// handleKeyEventForEvent is the event-aware keyboard path used by the X11
+// dispatcher. When XIM is enabled it filters the native key event and obtains
+// UTF-8 lookup text from the XIC; the xkb/server mapping path is then skipped
+// so a direct commit cannot be emitted twice.
+func (p *Platform) handleKeyEventForEvent(w *x11Window, keyEvent *KeyEvent, pressed bool) {
+	keycode := keyEvent.Detail
+	state := keyEvent.State
 	mods := extractModifiers(state)
 
 	w.eventMu.Lock()
@@ -1865,11 +2004,19 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 
 	// X11 keycodes are evdev keycodes offset by 8
 	key := x11KeycodeToKey(keycode)
+	if key != gpucontext.KeyUnknown {
+		w.dispatchKeyEvent(key, mods, pressed)
+	}
+
+	// XIM owns text translation while enabled. Do this before rejecting an
+	// unmapped key so composition control keys (which have no gogpu.Key) still
+	// reach the native input method.
+	if pressed && w.ime != nil && w.ime.handleKey(keyEvent) {
+		return
+	}
 	if key == gpucontext.KeyUnknown {
 		return
 	}
-
-	w.dispatchKeyEvent(key, mods, pressed)
 
 	// Evdev keycode for xkbcommon: X11 keycode - 8
 	evdevKey := uint32(keycode) - 8
@@ -2640,6 +2787,9 @@ func (p *Platform) handleFocusIn(w *x11Window) {
 	if mode != 0 {
 		p.SetCursorMode(mode)
 	}
+	if w.ime != nil {
+		w.ime.setFocus(true)
+	}
 }
 
 // handleFocusOut releases cursor grab when window loses focus.
@@ -2650,6 +2800,9 @@ func (p *Platform) handleFocusOut(w *x11Window) {
 	if w.cursorGrabbed && p.conn != nil {
 		_ = p.conn.UngrabPointer(0)
 		w.cursorGrabbed = false
+	}
+	if w.ime != nil {
+		w.ime.setFocus(false)
 	}
 }
 

@@ -339,6 +339,18 @@ func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID Wi
 		return Event{Type: EventKeyUp, Key: event.Key, Mods: event.Mods, WindowID: windowID}
 	case x11.EventTypeChar:
 		return Event{Type: EventChar, Char: event.Char, WindowID: windowID}
+	case x11.EventTypeIMECompositionStart:
+		return Event{Type: EventIMECompositionStart, WindowID: windowID}
+	case x11.EventTypeIMECompositionUpdate:
+		return Event{Type: EventIMECompositionUpdate, IMEComposition: event.IMEComposition, WindowID: windowID}
+	case x11.EventTypeIMECompositionEnd:
+		return Event{Type: EventIMECompositionEnd, IMECommitted: event.IMECommitted, WindowID: windowID}
+	case x11.EventTypeIMECanceled:
+		return Event{Type: EventIMECanceled, WindowID: windowID}
+	case x11.EventTypeIMEDisabled:
+		return Event{Type: EventIMEDisabled, WindowID: windowID}
+	case x11.EventTypeIMEDeleteSurrounding:
+		return Event{Type: EventIMEDeleteSurrounding, IMEDelete: event.IMEDelete, WindowID: windowID}
 	case x11.EventTypePointerDown:
 		return Event{Type: EventPointerDown, Pointer: event.Pointer, WindowID: windowID}
 	case x11.EventTypePointerUp:
@@ -523,6 +535,9 @@ type x11PlatformWindow struct {
 	lastScale float64           // DPI scale change detection (ADR-059)
 }
 
+var _ gpucontext.IMEControllerV2 = (*x11PlatformWindow)(nil)
+var _ gpucontext.IMECapabilityProviderV2 = (*x11PlatformWindow)(nil)
+
 // inner returns the *x11.Platform connection backing this window: the
 // secondary's own independent connection if this is a secondary window,
 // otherwise the shared primary connection. Every method below goes through
@@ -538,6 +553,37 @@ func (w *x11PlatformWindow) inner() *x11.Platform {
 
 func (w *x11PlatformWindow) ID() WindowID                  { return w.id }
 func (w *x11PlatformWindow) GetHandle() (uintptr, uintptr) { return w.inner().GetHandle() }
+
+// IME methods are optional gpucontext v2 capabilities. They deliberately do
+// not become part of PlatformWindow so existing third-party implementations
+// remain source-compatible.
+func (w *x11PlatformWindow) IMECapabilities() gpucontext.IMECapabilities {
+	return w.inner().IMECapabilities()
+}
+
+func (w *x11PlatformWindow) SetIMEPosition(x, y int) {
+	w.inner().SetIMEPosition(x, y)
+}
+
+func (w *x11PlatformWindow) SetIMEEnabled(enabled bool) {
+	w.inner().SetIMEEnabled(enabled)
+}
+
+func (w *x11PlatformWindow) SetIMECursorArea(area gpucontext.IMECursorArea) {
+	w.inner().SetIMECursorArea(area)
+}
+
+func (w *x11PlatformWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
+	w.inner().SetIMEContentType(purpose, hints)
+}
+
+func (w *x11PlatformWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
+	w.inner().SetIMESurroundingText(text)
+}
+
+func (w *x11PlatformWindow) CancelIME() {
+	w.inner().CancelIME()
+}
 
 // LogicalSize returns the window size in logical units (DIP/platform points).
 // On HiDPI, divides physical pixels by the scale factor.
