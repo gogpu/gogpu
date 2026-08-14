@@ -500,6 +500,16 @@ func (id ID) SendPtr(sel SEL, arg uintptr) ID {
 	return msgSend(id, sel, arg)
 }
 
+// SendPtrs sends a message with a variable number of pointer-sized arguments.
+// Objective-C uses pointer-sized registers for object, selector, integer, and
+// boolean arguments on the supported 64-bit macOS ABIs, so this helper is used
+// for selectors whose argument count is not covered by the fixed-arity helpers.
+// It is intentionally limited by msgSend to six arguments, which keeps all
+// call sites on the existing dynamically prepared FFI path.
+func (id ID) SendPtrs(sel SEL, args ...uintptr) ID {
+	return msgSend(id, sel, args...)
+}
+
 // Send5Ptr calls objc_msgSend with three additional pointer arguments.
 func (id ID) Send5Ptr(sel SEL, arg0, arg1, arg2 uintptr) ID {
 	if id == 0 || sel == 0 {
