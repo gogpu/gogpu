@@ -20,6 +20,11 @@ var menuSels struct {
 	initWithTitleActionKeyEquiv  SEL
 	addItemWithTitleActionKey    SEL
 	setWindowsMenu               SEL
+	setTarget                    SEL
+	copy                         SEL
+	numberOfItems                SEL
+	itemAtIndex                  SEL
+	submenu                      SEL
 	orderFrontStandardAboutPanel SEL
 	orderFrontPreferencesPanel   SEL
 	performClose                 SEL
@@ -44,6 +49,11 @@ func initMenuSelectors() {
 	menuSels.initWithTitleActionKeyEquiv = RegisterSelector("initWithTitle:action:keyEquivalent:")
 	menuSels.addItemWithTitleActionKey = RegisterSelector("addItemWithTitle:action:keyEquivalent:")
 	menuSels.setWindowsMenu = RegisterSelector("setWindowsMenu:")
+	menuSels.setTarget = RegisterSelector("setTarget:")
+	menuSels.copy = RegisterSelector("copy")
+	menuSels.numberOfItems = RegisterSelector("numberOfItems")
+	menuSels.itemAtIndex = RegisterSelector("itemAtIndex:")
+	menuSels.submenu = RegisterSelector("submenu")
 	menuSels.orderFrontStandardAboutPanel = RegisterSelector("orderFrontStandardAboutPanel:")
 	menuSels.orderFrontPreferencesPanel = RegisterSelector("orderFrontPreferencesPanel:")
 	menuSels.performClose = RegisterSelector("performClose:")
@@ -162,6 +172,24 @@ func (a *Application) updateMenuBar(appName string) {
 	}
 }
 
+// newSeparatorItem returns a fresh separator NSMenuItem.
+//
+// +[NSMenuItem separatorItem] is a shared singleton. Adding the same instance
+// more than once moves it (or no-ops) — only the last insertion remains.
+// AppKit expects callers to copy the singleton for each separator in a menu.
+func newSeparatorItem(nsMenuItemClass Class) ID {
+	initMenuSelectors()
+	sep := ID(nsMenuItemClass).Send(menuSels.separatorItem)
+	if sep.IsNil() {
+		return 0
+	}
+	copied := sep.Send(menuSels.copy)
+	if copied.IsNil() {
+		return 0
+	}
+	return copied
+}
+
 // createAppMenu builds the application (App) menu with standard items.
 func (a *Application) createAppMenu(appName string, nsMenuClass, nsMenuItemClass Class) ID {
 	// === App Menu ===
@@ -183,9 +211,8 @@ func (a *Application) createAppMenu(appName string, nsMenuClass, nsMenuItemClass
 	}
 
 	// Separator after About
-	sepAbout := ID(nsMenuItemClass).Send(menuSels.separatorItem)
-	if !sepAbout.IsNil() {
-		appMenu.SendPtr(menuSels.addItem, sepAbout.Ptr())
+	if sep := newSeparatorItem(nsMenuItemClass); !sep.IsNil() {
+		appMenu.SendPtr(menuSels.addItem, sep.Ptr())
 	}
 
 	// Preferences… (Cmd+,)
@@ -195,21 +222,27 @@ func (a *Application) createAppMenu(appName string, nsMenuClass, nsMenuItemClass
 	}
 
 	// Separator before Services
-	sepPrefs := ID(nsMenuItemClass).Send(menuSels.separatorItem)
-	if !sepPrefs.IsNil() {
-		appMenu.SendPtr(menuSels.addItem, sepPrefs.Ptr())
+	if sep := newSeparatorItem(nsMenuItemClass); !sep.IsNil() {
+		appMenu.SendPtr(menuSels.addItem, sep.Ptr())
 	}
 
-	// Services submenu – filled by the system automatically.
+	// Services submenu – filled by the system automatically (GLFW pattern).
 	servicesMenu := ID(nsMenuClass).Send(selectors.alloc).Send(selectors.init)
 	if !servicesMenu.IsNil() {
 		a.nsApp.SendPtr(menuSels.setServicesMenu, servicesMenu.Ptr())
+		servicesTitle := NewNSString("Services")
+		if servicesTitle != nil {
+			servicesItem := createMenuItem(nsMenuItemClass, servicesTitle.ID(), 0, "")
+			if !servicesItem.IsNil() {
+				servicesItem.SendPtr(menuSels.setSubmenu, servicesMenu.Ptr())
+				appMenu.SendPtr(menuSels.addItem, servicesItem.Ptr())
+			}
+		}
 	}
 
 	// Separator after Services
-	sepServices := ID(nsMenuItemClass).Send(menuSels.separatorItem)
-	if !sepServices.IsNil() {
-		appMenu.SendPtr(menuSels.addItem, sepServices.Ptr())
+	if sep := newSeparatorItem(nsMenuItemClass); !sep.IsNil() {
+		appMenu.SendPtr(menuSels.addItem, sep.Ptr())
 	}
 
 	// "Hide {appName}" — Cmd+H
@@ -236,8 +269,7 @@ func (a *Application) createAppMenu(appName string, nsMenuClass, nsMenuItemClass
 	}
 
 	// Separator
-	sep := ID(nsMenuItemClass).Send(menuSels.separatorItem)
-	if !sep.IsNil() {
+	if sep := newSeparatorItem(nsMenuItemClass); !sep.IsNil() {
 		appMenu.SendPtr(menuSels.addItem, sep.Ptr())
 	}
 
@@ -274,9 +306,8 @@ func (a *Application) createWindowMenu(nsMenuClass, nsMenuItemClass Class) ID {
 	}
 
 	// Separator before Close/Full Screen/Bring All
-	sepWindow := ID(nsMenuItemClass).Send(menuSels.separatorItem)
-	if !sepWindow.IsNil() {
-		windowMenu.SendPtr(menuSels.addItem, sepWindow.Ptr())
+	if sep := newSeparatorItem(nsMenuItemClass); !sep.IsNil() {
+		windowMenu.SendPtr(menuSels.addItem, sep.Ptr())
 	}
 
 	// Close (Cmd+W)
@@ -338,6 +369,28 @@ func addMenuItem(nsMenuItemClass Class, menu ID, title ID, action SEL, keyEquiv 
 
 var appDelegateClassOnce sync.Once
 var menuActionMap sync.Map
+var appDelegateID ID
+
+// roleActionSelectors are the AppKit actions used by AddMenuItemWithRole.
+// Registering them on GoGPUAppDelegate lets Role+Action items keep the system
+// selector (so AppKit still renders role icons such as ⓘ for About) while
+// setTarget: routes clicks to our Go callback instead of NSApp’s default.
+func roleActionSelectors() []SEL {
+	initMenuSelectors()
+	return []SEL{
+		menuSels.orderFrontStandardAboutPanel,
+		menuSels.orderFrontPreferencesPanel,
+		menuSels.hide,
+		menuSels.hideOtherApplications,
+		menuSels.unhideAllApplications,
+		menuSels.terminate,
+		menuSels.performClose,
+		menuSels.performMiniaturize,
+		menuSels.performZoom,
+		menuSels.toggleFullScreen,
+		menuSels.arrangeInFront,
+	}
+}
 
 func ensureAppDelegate() {
 	appDelegateClassOnce.Do(func() {
@@ -349,18 +402,30 @@ func ensureAppDelegate() {
 		if cls == 0 {
 			return
 		}
-		handleMenuItemIMP := ffi.NewCallback(func(self, sel, sender uintptr) uintptr {
+		dispatchMenuAction := ffi.NewCallback(func(self, sel, sender uintptr) uintptr {
 			fn := getMenuItemAction(ID(sender))
 			if fn != nil {
 				fn()
+				return 0
+			}
+			// No Go callback — forward to NSApp (system default for the role).
+			nsApp := GetClass("NSApplication").Send(RegisterSelector("sharedApplication"))
+			if !nsApp.IsNil() && sel != 0 {
+				nsApp.SendPtr(SEL(sel), sender)
 			}
 			return 0
 		})
-		ClassAddMethod(cls, RegisterSelector("handleMenuItem:"), handleMenuItemIMP, "v@:@")
+		ClassAddMethod(cls, RegisterSelector("handleMenuItem:"), dispatchMenuAction, "v@:@")
+		for _, roleSel := range roleActionSelectors() {
+			if roleSel != 0 {
+				ClassAddMethod(cls, roleSel, dispatchMenuAction, "v@:@")
+			}
+		}
 		RegisterClassPair(cls)
 
 		alloc := ID(cls).Send(RegisterSelector("alloc"))
 		delegate := alloc.Send(RegisterSelector("init"))
+		appDelegateID = delegate
 		nsApp := GetClass("NSApplication").Send(RegisterSelector("sharedApplication"))
 		nsApp.SendPtr(RegisterSelector("setDelegate:"), delegate.Ptr())
 	})
@@ -376,6 +441,37 @@ func getMenuItemAction(item ID) func() {
 		return nil
 	}
 	return val.(func())
+}
+
+func deleteMenuItemAction(item ID) {
+	menuActionMap.Delete(uintptr(item))
+}
+
+// ClearMenuActions drops Go callbacks stored for every item in menu,
+// including nested submenus. Call before NSMenu.removeAllItems so
+// menuActionMap does not retain stale pointers after AppKit deallocates
+// the items (SetMenu replace can reuse those addresses).
+func ClearMenuActions(menu ID) {
+	if menu.IsNil() {
+		return
+	}
+	initMenuSelectors()
+	clearMenuActionsRecursive(menu)
+}
+
+func clearMenuActionsRecursive(menu ID) {
+	count := menu.GetInt64(menuSels.numberOfItems)
+	for i := int64(0); i < count; i++ {
+		item := menu.SendInt(menuSels.itemAtIndex, i)
+		if item.IsNil() {
+			continue
+		}
+		deleteMenuItemAction(item)
+		submenu := item.Send(menuSels.submenu)
+		if !submenu.IsNil() {
+			clearMenuActionsRecursive(submenu)
+		}
+	}
 }
 
 // NewMainMenu creates an empty NSMenu, sets it as the main menu of NSApp,
@@ -412,11 +508,16 @@ func NewMainMenu() ID {
 }
 
 // AddSeparatorItem adds a separator to the given menu.
+// Copies +[NSMenuItem separatorItem] so multiple separators can coexist.
 func AddSeparatorItem(menu ID) {
 	if menu.IsNil() {
 		return
 	}
-	sep := GetClass("NSMenuItem").Send(RegisterSelector("separatorItem"))
+	initMenuSelectors()
+	sep := newSeparatorItem(GetClass("NSMenuItem"))
+	if sep.IsNil() {
+		return
+	}
 	menu.SendPtr(menuSels.addItem, sep.Ptr())
 }
 
@@ -507,8 +608,8 @@ func AddMenuItemWithRole(menu ID, title string, role string) ID {
 		action = menuSels.orderFrontPreferencesPanel
 		keyEquiv = ","
 	case "services":
-		// Services is usually a submenu
-		return 0
+		// GLFW/Electron: empty submenu registered via setServicesMenu:.
+		return addServicesMenuItem(menu, title)
 	case "hide":
 		action = menuSels.hide
 		keyEquiv = "h"
@@ -549,6 +650,80 @@ func AddMenuItemWithRole(menu ID, title string, role string) ID {
 		}
 		menu.SendPtr(menuSels.addItem, item.Ptr())
 	}
+	return item
+}
+
+// addServicesMenuItem creates the standard macOS Services submenu item and
+// registers it with NSApp via setServicesMenu: (GLFW cocoa_init.m pattern).
+func addServicesMenuItem(menu ID, title string) ID {
+	if menu.IsNil() {
+		return 0
+	}
+	initMenuSelectors()
+
+	if title == "" {
+		title = "Services"
+	}
+
+	nsMenuClass := GetClass("NSMenu")
+	if nsMenuClass == 0 {
+		return 0
+	}
+	// GLFW uses [[NSMenu alloc] init] (untitled); the item title is separate.
+	servicesMenu := ID(nsMenuClass).Send(selectors.alloc).Send(selectors.init)
+	if servicesMenu.IsNil() {
+		return 0
+	}
+
+	nsApp := GetClass("NSApplication").Send(RegisterSelector("sharedApplication"))
+	if !nsApp.IsNil() {
+		nsApp.SendPtr(menuSels.setServicesMenu, servicesMenu.Ptr())
+	}
+
+	item := NewMenuItemWithSubmenu(title, servicesMenu)
+	if item.IsNil() {
+		return 0
+	}
+	menu.SendPtr(menuSels.addItem, item.Ptr())
+	return item
+}
+
+// AddMenuItemWithRoleAndCallback creates a role-based menu item that keeps the
+// system action selector (preserving AppKit role chrome such as the About ⓘ
+// icon) while dispatching activation to action via setTarget: on our app
+// delegate.
+//
+// Matches Electron/Qt: appearance from the role selector, behavior from the
+// custom handler. Falls back to AddMenuItemWithCallback when the role cannot
+// be materialized.
+func AddMenuItemWithRoleAndCallback(menu ID, title string, role string, action func()) ID {
+	if action == nil {
+		return AddMenuItemWithRole(menu, title, role)
+	}
+	if menu.IsNil() {
+		return 0
+	}
+
+	// Services is a system-populated submenu — custom Action is ignored.
+	if role == "services" {
+		return addServicesMenuItem(menu, title)
+	}
+
+	item := AddMenuItemWithRole(menu, title, role)
+	if item.IsNil() {
+		return AddMenuItemWithCallback(menu, title, action, "")
+	}
+
+	ensureAppDelegate()
+	if appDelegateID.IsNil() {
+		// Delegate unavailable — keep the item but switch to callback action.
+		item.SendPtr(RegisterSelector("setAction:"), uintptr(RegisterSelector("handleMenuItem:")))
+		setMenuItemAction(item, action)
+		return item
+	}
+
+	item.SendPtr(menuSels.setTarget, appDelegateID.Ptr())
+	setMenuItemAction(item, action)
 	return item
 }
 
