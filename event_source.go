@@ -28,6 +28,14 @@ type eventSourceAdapter struct {
 	onIMECompositionUpdate func(gpucontext.IMEState)
 	onIMECompositionEnd    func(string)
 
+	// Optional versioned IME callbacks. These are deliberately kept separate
+	// from EventSource so older consumers and third-party implementors remain
+	// source-compatible with gpucontext's legacy contract.
+	onIMECompositionUpdateV2 func(gpucontext.IMEComposition)
+	onIMECanceled            func()
+	onIMEDisabled            func()
+	onIMEDeleteSurrounding   func(gpucontext.IMEDeleteSurroundingEvent)
+
 	// Registered callbacks for PointerEventSource
 	onPointer func(gpucontext.PointerEvent)
 
@@ -101,6 +109,30 @@ func (e *eventSourceAdapter) OnIMECompositionEnd(fn func(string)) {
 	e.onIMECompositionEnd = fn
 }
 
+// OnIMECompositionUpdateV2 registers a callback for a full-fidelity
+// composition update. Ranges in the payload are UTF-8 byte offsets.
+func (e *eventSourceAdapter) OnIMECompositionUpdateV2(fn func(gpucontext.IMEComposition)) {
+	e.onIMECompositionUpdateV2 = fn
+}
+
+// OnIMECanceled registers a callback delivered when the platform cancels an
+// active composition without committing its preedit text.
+func (e *eventSourceAdapter) OnIMECanceled(fn func()) {
+	e.onIMECanceled = fn
+}
+
+// OnIMEDisabled registers a callback delivered when the platform disables
+// text input (for example after focus loss or selecting a password field).
+func (e *eventSourceAdapter) OnIMEDisabled(fn func()) {
+	e.onIMEDisabled = fn
+}
+
+// OnIMEDeleteSurrounding registers a callback for an IME request to delete
+// text around the current insertion point.
+func (e *eventSourceAdapter) OnIMEDeleteSurrounding(fn func(gpucontext.IMEDeleteSurroundingEvent)) {
+	e.onIMEDeleteSurrounding = fn
+}
+
 // OnPointer registers a callback for unified pointer events.
 // This provides W3C Pointer Events Level 3 compliant input handling,
 // unifying mouse, touch, and pen input into a single event stream.
@@ -161,6 +193,12 @@ var _ gpucontext.ScrollEventSource = (*eventSourceAdapter)(nil)
 
 // Ensure eventSourceAdapter implements gpucontext.GestureEventSource.
 var _ gpucontext.GestureEventSource = (*eventSourceAdapter)(nil)
+
+// Optional v2 IME interfaces are implemented by the adapter as well as App,
+// allowing consumers that retain only EventSource to discover and subscribe
+// to the richer callbacks.
+var _ gpucontext.IMEEventSourceV2 = (*eventSourceAdapter)(nil)
+var _ gpucontext.IMECapabilityProviderV2 = (*eventSourceAdapter)(nil)
 
 // EventSource returns a gpucontext.EventSource for use with UI frameworks.
 // This enables UI frameworks to receive input events from the gogpu application.
@@ -282,6 +320,63 @@ func (e *eventSourceAdapter) dispatchFocus(focused bool) {
 	if e.onFocus != nil {
 		e.onFocus(focused)
 	}
+}
+
+func (e *eventSourceAdapter) dispatchIMECompositionStart() {
+	if e.onIMECompositionStart != nil {
+		e.onIMECompositionStart()
+	}
+}
+
+func (e *eventSourceAdapter) dispatchIMECompositionUpdate(composition gpucontext.IMEComposition) {
+	if e.onIMECompositionUpdateV2 != nil {
+		e.onIMECompositionUpdateV2(composition)
+	}
+	if e.onIMECompositionUpdate != nil {
+		e.onIMECompositionUpdate(gpucontext.IMEState{
+			Composing:       true,
+			CompositionText: composition.CompositionText,
+			CursorPos:       composition.CursorBegin,
+			CursorBegin:     composition.CursorBegin,
+			CursorEnd:       composition.CursorEnd,
+			SelectionStart:  composition.SelectionStart,
+			SelectionEnd:    composition.SelectionEnd,
+		})
+	}
+}
+
+func (e *eventSourceAdapter) dispatchIMECompositionEnd(committed string) {
+	if e.onIMECompositionEnd != nil {
+		e.onIMECompositionEnd(committed)
+	}
+}
+
+func (e *eventSourceAdapter) dispatchIMECanceled() {
+	if e.onIMECanceled != nil {
+		e.onIMECanceled()
+	}
+}
+
+func (e *eventSourceAdapter) dispatchIMEDisabled() {
+	if e.onIMEDisabled != nil {
+		e.onIMEDisabled()
+	}
+}
+
+func (e *eventSourceAdapter) dispatchIMEDeleteSurrounding(event gpucontext.IMEDeleteSurroundingEvent) {
+	if e.onIMEDeleteSurrounding != nil {
+		e.onIMEDeleteSurrounding(event)
+	}
+}
+
+// IMECapabilities advertises the optional IME operations supported by the
+// application's active platform. Before Run, App supplies the platform
+// default so capability discovery remains deterministic.
+func (e *eventSourceAdapter) IMECapabilities() gpucontext.IMECapabilities {
+	if e.app == nil {
+		return gpucontext.IMECapabilities{}
+	}
+	return e.app.IMECapabilities()
 }
 
 // dispatchPointerEvent dispatches a pointer event to registered callbacks.
