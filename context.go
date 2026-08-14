@@ -297,6 +297,13 @@ func (c *Context) CommandEncoder() *wgpu.CommandEncoder {
 		slog.Error("gogpu: shared frame encoder unavailable", "err", err)
 		return nil
 	}
+	// A textured-quad run may keep its render pass open for batching. Close it
+	// before lending the encoder to an external renderer so its pass can be
+	// recorded in the exact call-order position requested by the caller.
+	if err := ws.endTexturedQuadPass(); err != nil {
+		slog.Error("gogpu: shared frame encoder unavailable after textured quad pass", "err", err)
+		return nil
+	}
 	// Deferred clears must precede every externally recorded pass. Flushing
 	// here preserves call order; waiting until EndFrame would clear overlays.
 	if !ws.flushClear(ws.renderer.device, ws.renderer) {
