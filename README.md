@@ -38,7 +38,7 @@ Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU p
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), 0% CPU when idle (lazy acquire), zero-copy surface rendering, damage-aware presentation |
 | **Input Models** | Three coexisting models: callbacks (`EventSource`), state polling (`Input()`, Ebiten-style), SDL-style event queue (`PollInputEvent()`) |
-| **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, runtime window resize (`RequestSize`), mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), OS drag-and-drop: incoming (all 4 desktop platforms) + outgoing drag source (`StartDrag`, all 5 platforms), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog) |
+| **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, runtime window resize (`RequestSize`), mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), OS drag-and-drop: incoming (all 4 desktop platforms) + outgoing drag source (`StartDrag`, all 5 platforms), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog), additive native print contract (backend-neutral; implementations staged separately) |
 | **Scroll** | ScrollPhase + IsMomentum for macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes |
 | **Sound** | 12 UI sound types (UWP ElementSoundPlayer parity): Click, Invoke, Focus, Navigate, Show/Hide, feedback. winmm, NSSound, canberra |
 | **Compute** | Full compute shader support |
@@ -309,6 +309,27 @@ if app.ReduceMotion() { /* disable animations */ }
 if app.HighContrast() { /* increase contrast */ }
 fontMul := app.FontScale() // user's font size preference
 ```
+
+### Native printing contract
+
+Applications provide complete PDF/document bytes and can submit them to the
+future native print backends without coupling UI code to an operating system:
+
+```go
+job, err := app.Print(ctx, gogpu.NewPDFDocument("report.pdf", pdfBytes), gogpu.PrintOptions{})
+if err != nil {
+	// Invalid input or this platform has no print backend yet.
+	return err
+}
+if err := <-job.Done(); err != nil {
+	// context.Canceled means cancellation; other errors are native/spool errors.
+	return err
+}
+```
+
+See [docs/PRINTING.md](docs/PRINTING.md) for parent-window, ownership, and
+lifecycle semantics. This contract does not generate documents or claim native
+backend support yet.
 
 ### macOS System Menu
 

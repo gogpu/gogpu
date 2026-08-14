@@ -721,6 +721,7 @@ inherit the logger configuration when registered.
 | **GPU Backends** | Vulkan, DX12, GLES, Software | Metal, Software | Vulkan, GLES, Software | Vulkan, GLES | WebGPU |
 | **Input** | Keyboard, mouse, pointer lock | Keyboard, mouse | Keyboard, mouse, pointer lock | Keyboard, mouse, pointer lock, CSD | Planned |
 | **File Dialogs** | ✅ IFileOpenDialog COM | ✅ NSOpenPanel/NSSavePanel | ✅ D-Bus portal + zenity/kdialog | ✅ D-Bus portal + zenity/kdialog | Stub |
+| **Native Printing** | Contract only | Contract only | Contract only | Contract only | Unsupported |
 | **Native Menus** | ✅ Win32 HMENU | ✅ NSMenu | ✅ D-Bus AppMenu (KDE/Unity) | ✅ D-Bus AppMenu (KDE/Unity) | — |
 | **Clipboard** | ✅ | ✅ | ✅ ICCCM | ✅ wl_data_device | ✅ Clipboard API |
 | **Drag & Drop (in)** | ✅ WM_DROPFILES | ✅ NSDragging | ✅ XDND v5 | ✅ wl_data_device | — |
@@ -730,5 +731,6 @@ inherit the logger configuration when registered.
 ## See Also
 
 - [README.md](../README.md) — Quick start guide
+- [PRINTING.md](PRINTING.md) — Native printing contract and lifecycle semantics
 - [CHANGELOG.md](../CHANGELOG.md) — Version history
 - [Examples](../examples/) — Code examples
