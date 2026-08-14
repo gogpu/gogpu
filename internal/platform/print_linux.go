@@ -175,7 +175,7 @@ func startLinuxPortalPrint(ctx context.Context, request PrintRequest, parent str
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		return nil, fmt.Errorf("%w: connect session bus: %v", errLinuxPrintUnsupported, err)
+		return nil, fmt.Errorf("%w: connect session bus: %w", errLinuxPrintUnsupported, err)
 	}
 
 	prepareToken := dbusNewToken()
@@ -195,7 +195,7 @@ func startLinuxPortalPrint(ctx context.Context, request PrintRequest, parent str
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		return nil, fmt.Errorf("%w: send PreparePrint: %v", errLinuxPrintUnsupported, err)
+		return nil, fmt.Errorf("%w: send PreparePrint: %w", errLinuxPrintUnsupported, err)
 	}
 
 	job := &linuxPrintJob{

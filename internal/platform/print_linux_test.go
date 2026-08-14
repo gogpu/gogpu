@@ -261,7 +261,7 @@ func TestDBusSendCallWithFDsPassesDescriptor(t *testing.T) {
 	if len(passed) != 1 {
 		t.Fatalf("passed descriptors = %d, want 1", len(passed))
 	}
-	defer unix.Close(passed[0])
+	_ = unix.Close(passed[0])
 }
 
 func TestDBusSendCallContextClosesBlockedSetupWrite(t *testing.T) {

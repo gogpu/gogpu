@@ -526,9 +526,10 @@ func dbusParseHdrFields(hdrData []byte, msg *dbusMsg) {
 			if err != nil {
 				break
 			}
-			if code == dbusFieldReplySerial {
+			switch code {
+			case dbusFieldReplySerial:
 				msg.ReplyTo = v
-			} else if code == dbusFieldUnixFds {
+			case dbusFieldUnixFds:
 				msg.UnixFDs = v
 			}
 		case "g":
