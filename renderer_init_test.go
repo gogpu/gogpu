@@ -1,12 +1,15 @@
 package gogpu
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
+
+var errTestRenderer = errors.New("renderer test error")
 
 // TestConfigureSurface_ZeroDimensionsSkips verifies that configureSurface
 // returns nil and leaves state at SurfaceReady when the window reports (0,0).
@@ -122,6 +125,67 @@ func TestInitSurface_ZeroDimMakesConfigureNoOp(t *testing.T) {
 func TestNewRenderer_GLESAPIIsDistinct(t *testing.T) {
 	if types.GraphicsAPIGLES == types.GraphicsAPIAuto {
 		t.Error("GraphicsAPIGLES must differ from GraphicsAPIAuto for GLES init branching to work")
+	}
+}
+
+func TestNewHeadlessRendererValidationAndCleanup(t *testing.T) {
+	if _, err := NewHeadlessRenderer(types.GraphicsAPISoftware, types.GraphicsAPIAuto); err == nil {
+		t.Fatal("NewHeadlessRenderer accepted more than one graphics API")
+	}
+
+	calledAdapter := false
+	runtime := headlessRuntime{
+		initInstance: func(*Renderer, types.GraphicsAPI) error { return errTestRenderer },
+		initAdapterDevice: func(*Renderer) error {
+			calledAdapter = true
+			return nil
+		},
+	}
+	if renderer, err := newHeadlessRendererWithRuntime(nil, runtime); !errors.Is(err, errTestRenderer) || renderer != nil {
+		t.Fatalf("instance failure = renderer %v, error %v", renderer, err)
+	}
+	if calledAdapter {
+		t.Fatal("adapter initialization ran after instance failure")
+	}
+
+	gotAPI := types.GraphicsAPIAuto
+	runtime = headlessRuntime{
+		initInstance: func(_ *Renderer, api types.GraphicsAPI) error {
+			gotAPI = api
+			return nil
+		},
+		initAdapterDevice: func(*Renderer) error { return errTestRenderer },
+	}
+	if renderer, err := newHeadlessRendererWithRuntime([]types.GraphicsAPI{types.GraphicsAPIGLES}, runtime); !errors.Is(err, errTestRenderer) || renderer != nil {
+		t.Fatalf("adapter failure = renderer %v, error %v", renderer, err)
+	}
+	if gotAPI != types.GraphicsAPIGLES {
+		t.Fatalf("explicit graphics API = %v, want GLES", gotAPI)
+	}
+
+	runtime.initAdapterDevice = func(*Renderer) error { return nil }
+	renderer, err := newHeadlessRendererWithRuntime(nil, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAPI != types.GraphicsAPISoftware {
+		t.Fatalf("default graphics API = %v, want software", gotAPI)
+	}
+	renderer.Destroy()
+	renderer.ReleaseInstance()
+}
+
+func TestRenderToImageRejectsNilDraw(t *testing.T) {
+	renderer, err := NewHeadlessRenderer(types.GraphicsAPISoftware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		renderer.Destroy()
+		renderer.ReleaseInstance()
+	})
+	if _, err := renderer.RenderToImage(1, 1, nil); err == nil {
+		t.Fatal("RenderToImage accepted a nil draw callback")
 	}
 }
 

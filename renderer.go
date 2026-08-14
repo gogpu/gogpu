@@ -297,6 +297,24 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 // the headless frame boundary; it is not safe to call concurrently on one
 // renderer.
 func NewHeadlessRenderer(graphicsAPI ...types.GraphicsAPI) (*Renderer, error) {
+	return newHeadlessRendererWithRuntime(graphicsAPI, defaultHeadlessRuntime)
+}
+
+type headlessRuntime struct {
+	initInstance      func(*Renderer, types.GraphicsAPI) error
+	initAdapterDevice func(*Renderer) error
+}
+
+var defaultHeadlessRuntime = headlessRuntime{
+	initInstance: func(r *Renderer, api types.GraphicsAPI) error {
+		return r.initInstance(api)
+	},
+	initAdapterDevice: func(r *Renderer) error {
+		return r.initAdapterDevice(nil)
+	},
+}
+
+func newHeadlessRendererWithRuntime(graphicsAPI []types.GraphicsAPI, runtime headlessRuntime) (*Renderer, error) {
 	api := types.GraphicsAPISoftware
 	if len(graphicsAPI) > 1 {
 		return nil, errors.New("gogpu: NewHeadlessRenderer accepts at most one graphics API")
@@ -310,11 +328,11 @@ func NewHeadlessRenderer(graphicsAPI ...types.GraphicsAPI) (*Renderer, error) {
 	}
 	r.primary = &RenderTarget{renderer: r}
 
-	if err := r.initInstance(api); err != nil {
+	if err := runtime.initInstance(r, api); err != nil {
 		r.ReleaseInstance()
 		return nil, err
 	}
-	if err := r.initAdapterDevice(nil); err != nil {
+	if err := runtime.initAdapterDevice(r); err != nil {
 		r.Destroy()
 		r.ReleaseInstance()
 		return nil, err
