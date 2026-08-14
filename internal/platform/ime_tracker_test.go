@@ -139,3 +139,25 @@ func TestIMETrackerPostEndCharResult(t *testing.T) {
 		t.Fatalf("post-END commit = (%q, %v), want 你好", committed, ok)
 	}
 }
+
+func TestIMETrackerBoundaryPaths(t *testing.T) {
+	var tracker imeTracker
+	if tracker.ensureActive() {
+		t.Fatal("disabled tracker became active")
+	}
+	tracker.setEnabled(true)
+	tracker.addResult("")
+	if tracker.consumeCharResultUnit('x') || tracker.consumeCharResultUnits(nil) {
+		t.Fatal("inactive post-END result consumed input")
+	}
+	if committed, ok := tracker.finishCharResult(); ok || committed != "" {
+		t.Fatalf("inactive finish = (%q, %v)", committed, ok)
+	}
+	tracker.beginCharResult()
+	if tracker.consumeCharResultUnits(nil) {
+		t.Fatal("empty post-END unit list consumed")
+	}
+	if committed, ok := tracker.finishCharResult(); !ok || committed != "" {
+		t.Fatalf("empty post-END finish = (%q, %v)", committed, ok)
+	}
+}

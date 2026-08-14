@@ -47,16 +47,83 @@ func TestBrowserIMEDeleteLengthsAreUTF8Bytes(t *testing.T) {
 }
 
 func TestBrowserIMEContentMappingAndAreaValidation(t *testing.T) {
-	if got := browserInputMode(gpucontext.ContentPurposeEmail); got != "email" {
-		t.Fatalf("email input mode = %q", got)
+	for _, test := range []struct {
+		purpose gpucontext.ContentPurpose
+		want    string
+	}{
+		{gpucontext.ContentPurposeDigits, browserInputModeNumeric},
+		{gpucontext.ContentPurposePin, browserInputModeNumeric},
+		{gpucontext.ContentPurposeNumber, "decimal"},
+		{gpucontext.ContentPurposePhone, "tel"},
+		{gpucontext.ContentPurposeURL, "url"},
+		{gpucontext.ContentPurposeEmail, "email"},
+		{gpucontext.ContentPurposeDate, browserInputModeNumeric},
+		{gpucontext.ContentPurposeTime, browserInputModeNumeric},
+		{gpucontext.ContentPurposeDateTime, "datetime"},
+		{gpucontext.ContentPurposeName, "text"},
+	} {
+		if got := browserInputMode(test.purpose); got != test.want {
+			t.Errorf("purpose %v input mode = %q, want %q", test.purpose, got, test.want)
+		}
 	}
-	if got := browserAutoCapitalize(gpucontext.ContentHintUppercase); got != "characters" {
-		t.Fatalf("uppercase autocapitalize = %q", got)
+	for _, test := range []struct {
+		hints gpucontext.ContentHint
+		want  string
+	}{
+		{gpucontext.ContentHintLowercase, browserAutoCapitalizeNone},
+		{gpucontext.ContentHintUppercase, "characters"},
+		{gpucontext.ContentHintTitlecase, "words"},
+		{gpucontext.ContentHintAutoCapitalization, "sentences"},
+		{gpucontext.ContentHintNone, browserAutoCapitalizeNone},
+	} {
+		if got := browserAutoCapitalize(test.hints); got != test.want {
+			t.Errorf("hints %v autocapitalize = %q, want %q", test.hints, got, test.want)
+		}
 	}
 	if !validBrowserIMEArea(gpucontext.IMECursorArea{X: 1, Y: 2, Width: 3, Height: 4}) {
 		t.Fatal("valid cursor area rejected")
 	}
-	if validBrowserIMEArea(gpucontext.IMECursorArea{X: math.NaN()}) {
-		t.Fatal("NaN cursor area accepted")
+	for _, area := range []gpucontext.IMECursorArea{
+		{X: -1}, {Y: -1}, {Width: -1}, {Height: -1},
+		{X: math.NaN()}, {Y: math.NaN()}, {Width: math.NaN()}, {Height: math.NaN()},
+		{X: math.Inf(1)}, {Y: math.Inf(-1)}, {Width: math.Inf(1)}, {Height: math.Inf(-1)},
+	} {
+		if validBrowserIMEArea(area) {
+			t.Errorf("invalid cursor area accepted: %+v", area)
+		}
+	}
+}
+
+func TestBrowserIMEHelperBoundaryCases(t *testing.T) {
+	if !browserIMEComposition("").IsValid() {
+		t.Fatal("empty composition should be valid")
+	}
+	text := "a😀中"
+	if got := utf8OffsetToUTF16(text, -1); got != 0 {
+		t.Fatalf("negative UTF-8 offset = %d, want 0", got)
+	}
+	if got := utf8OffsetToUTF16(text, len(text)); got != len([]rune(text))+1 {
+		t.Fatalf("terminal UTF-8 offset = %d, want UTF-16 length %d", got, len([]rune(text))+1)
+	}
+	if got := utf16OffsetToUTF8(text, -1); got != 0 {
+		t.Fatalf("negative UTF-16 offset = %d, want 0", got)
+	}
+	if got := utf16OffsetToUTF8(text, 2); got != 1 {
+		t.Fatalf("surrogate UTF-16 offset = %d, want 1", got)
+	}
+	if got := utf16OffsetToUTF8(text, 99); got != len(text) {
+		t.Fatalf("terminal UTF-16 offset = %d, want %d", got, len(text))
+	}
+	if previousRuneBytes(text, 0) != 0 || previousRuneBytes(text, len(text)+1) != 0 {
+		t.Fatal("invalid previous-rune cursors were not rejected")
+	}
+	if nextRuneBytes(text, -1) != 0 || nextRuneBytes(text, len(text)) != 0 {
+		t.Fatal("invalid next-rune cursors were not rejected")
+	}
+	if got := previousWordStart("   hello", len("   hello")); got != len("   ") {
+		t.Fatalf("leading-space previous word start = %d, want %d", got, len("   "))
+	}
+	if got := nextWordEnd("   hello", 0); got != len("   ")+len("hello") {
+		t.Fatalf("leading-space next word end = %d, want %d", got, len("   hello"))
 	}
 }

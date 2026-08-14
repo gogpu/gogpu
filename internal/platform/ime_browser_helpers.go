@@ -99,9 +99,6 @@ func previousRuneBytes(text string, cursor int) int {
 		return 0
 	}
 	_, size := utf8.DecodeLastRuneInString(text[:cursor])
-	if size <= 0 {
-		return 0
-	}
 	return size
 }
 
@@ -110,19 +107,12 @@ func nextRuneBytes(text string, cursor int) int {
 		return 0
 	}
 	_, size := utf8.DecodeRuneInString(text[cursor:])
-	if size <= 0 {
-		return 0
-	}
 	return size
 }
 
 func previousWordStart(text string, cursor int) int {
 	for cursor > 0 {
 		start := cursor - previousRuneBytes(text, cursor)
-		_, size := utf8.DecodeRuneInString(text[start:cursor])
-		if size <= 0 {
-			return cursor
-		}
 		r, _ := utf8.DecodeRuneInString(text[start:cursor])
 		if !unicode.IsSpace(r) {
 			break

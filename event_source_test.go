@@ -11,6 +11,13 @@ func TestEventSourceAdapterInterface(t *testing.T) {
 	var _ gpucontext.EventSource = (*eventSourceAdapter)(nil)
 }
 
+func TestEventSourceIMECapabilitiesWithoutApp(t *testing.T) {
+	adapter := &eventSourceAdapter{}
+	if got := adapter.IMECapabilities(); got != (gpucontext.IMECapabilities{}) {
+		t.Fatalf("nil-app capabilities = %+v, want zero capabilities", got)
+	}
+}
+
 // TestEventSourceReturnsConsistentInstance verifies EventSource returns the same instance.
 func TestEventSourceReturnsConsistentInstance(t *testing.T) {
 	app := NewApp(DefaultConfig())

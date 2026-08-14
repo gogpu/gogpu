@@ -40,9 +40,6 @@ func macUTF16RangeToUTF8(text string, location, length uintptr) (start, end int,
 	}
 	start = utf16IndexToUTF8Offset(text, int(location))
 	end = utf16IndexToUTF8Offset(text, int(location+length))
-	if start < 0 || end < start || end > len(text) {
-		return 0, 0, false, false
-	}
 	return start, end, false, true
 }
 
@@ -66,9 +63,6 @@ func (s *macIMEState) setMarked(text string, selectedLocation, selectedLength ui
 		CursorEnd:       cursorEnd,
 		SelectionStart:  0,
 		SelectionEnd:    len(text),
-	}
-	if !composition.IsValid() {
-		return false, gpucontext.IMEComposition{}
 	}
 	started = !s.marked
 	s.marked = true

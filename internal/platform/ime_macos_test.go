@@ -28,6 +28,9 @@ func TestMacUTF16RangeToUTF8(t *testing.T) {
 			}
 		})
 	}
+	if _, _, hidden, ok := macUTF16RangeToUTF8("bad\xff", 0, 0); hidden || ok {
+		t.Fatal("invalid UTF-8 surrounding text was accepted")
+	}
 }
 
 func TestMacIMEStateLifecycle(t *testing.T) {
@@ -69,5 +72,26 @@ func TestMacIMEStateLifecycle(t *testing.T) {
 	}
 	if state.marked || state.composition != (gpucontext.IMEComposition{}) {
 		t.Fatalf("disabled state retained composition: %+v", state.composition)
+	}
+}
+
+func TestMacIMEStateNilAndInvalidPaths(t *testing.T) {
+	var nilState *macIMEState
+	if started, composition := nilState.setMarked("x", 0, 0); started || !composition.IsValid() {
+		t.Fatalf("nil setMarked = (started=%v, composition=%+v)", started, composition)
+	}
+	if nilState.insert("x") || nilState.unmark() || nilState.setEnabled(false) {
+		t.Fatal("nil IME state reported a transition")
+	}
+
+	state := &macIMEState{enabled: true}
+	if started, _ := state.setMarked("bad\xff", 0, 0); started {
+		t.Fatal("invalid UTF-8 marked text started composition")
+	}
+	if started, _ := state.setMarked("x", 2, 1); started {
+		t.Fatal("out-of-range marked selection started composition")
+	}
+	if state.setEnabled(true) {
+		t.Fatal("enabling inactive state reported cancellation")
 	}
 }

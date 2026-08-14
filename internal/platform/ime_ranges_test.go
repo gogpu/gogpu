@@ -38,4 +38,7 @@ func TestIMESelectionRangeConvertsUTF16Attributes(t *testing.T) {
 	if start, end := imeSelectionRange("bad\xff", []byte{1, 1, 1, 1}); start != 0 || end != 0 {
 		t.Fatalf("invalid UTF-8 target = (%d, %d), want (0, 0)", start, end)
 	}
+	if start, end := imeSelectionRange(text, []byte{imeAttrTargetConverted}); start != 0 || end != 1 {
+		t.Fatalf("short target attributes = (%d, %d), want (0, 1)", start, end)
+	}
 }

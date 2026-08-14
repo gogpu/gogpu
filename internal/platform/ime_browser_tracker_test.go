@@ -69,3 +69,31 @@ func TestBrowserIMETrackerDisableCancelsAndDropsState(t *testing.T) {
 		t.Fatalf("disabled input = (%q, %v), want ignored", text, consumed)
 	}
 }
+
+func TestBrowserIMETrackerBoundaryPaths(t *testing.T) {
+	var tracker browserIMETracker
+	if tracker.ensureActive() {
+		t.Fatal("disabled tracker became active")
+	}
+	tracker.setEnabled(true)
+	if text, consumed := tracker.input("insertText", ""); text != "" || !consumed {
+		t.Fatalf("empty input = (%q, %v), want consumed", text, consumed)
+	}
+	if committed, canceled, ok := tracker.end(""); ok || canceled || committed != "" {
+		t.Fatalf("inactive end = (%q, canceled=%v, ok=%v)", committed, canceled, ok)
+	}
+	if !tracker.ensureActive() {
+		t.Fatal("enabled tracker did not recover missing compositionstart")
+	}
+	if tracker.ensureActive() {
+		t.Fatal("active tracker reopened composition")
+	}
+	tracker.cancel()
+	if tracker.cancel() {
+		t.Fatal("inactive tracker canceled")
+	}
+	tracker.start()
+	if committed, canceled, ok := tracker.end(""); !ok || !canceled || committed != "" {
+		t.Fatalf("empty active end = (%q, canceled=%v, ok=%v)", committed, canceled, ok)
+	}
+}

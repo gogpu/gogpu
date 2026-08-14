@@ -13,6 +13,22 @@ type imeTestWindow struct {
 	calls []string
 }
 
+// bareIMEWindow deliberately exposes none of the IME interfaces. It lets the
+// App controller tests exercise the optional-controller no-op paths without
+// coupling them to a native backend.
+type bareIMEWindow struct {
+	platform.PlatformWindow
+}
+
+type imeCapabilityWindow struct {
+	bareIMEWindow
+	caps gpucontext.IMECapabilities
+}
+
+func (w *imeCapabilityWindow) IMECapabilities() gpucontext.IMECapabilities {
+	return w.caps
+}
+
 func (w *imeTestWindow) SetIMEPosition(x, y int) {
 	w.calls = append(w.calls, "position")
 }
@@ -144,4 +160,56 @@ func TestAppIMEControllerStateReplayAndPrivacyLifecycle(t *testing.T) {
 	if got, want := recreated.calls, []string{"enabled:false", "position", "area", "content", "surrounding"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("replayed controller calls = %#v, want %#v", got, want)
 	}
+}
+
+func TestAppIMEControllerOptionalAndNilPaths(t *testing.T) {
+	var nilApp *App
+	nilApp.SetIMEPosition(1, 2)
+	nilApp.SetIMEEnabled(true)
+	nilApp.SetIMECursorArea(gpucontext.IMECursorArea{X: 1, Y: 2})
+	nilApp.SetIMEContentType(gpucontext.ContentPurposeName, gpucontext.ContentHintNone)
+	nilApp.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "x", Cursor: 1, Anchor: 1})
+	nilApp.SetIMESurroundingText(gpucontext.IMESurroundingText{})
+	nilApp.CancelIME()
+	nilApp.applyIMEControllerState(nil)
+	if got := nilApp.IMECapabilities(); got.Version != gpucontext.IMEContractVersion {
+		t.Fatalf("nil app capabilities = %+v, want default version %d", got, gpucontext.IMEContractVersion)
+	}
+	if got := nilApp.IMEController(); got == nil || !reflect.ValueOf(got).IsNil() {
+		t.Fatalf("nil app controller = %v, want nil receiver", got)
+	}
+
+	app := NewApp(DefaultConfig())
+	app.platWindow = &bareIMEWindow{}
+	// Invalid surrounding text is rejected before it is retained.
+	app.SetIMESurroundingText(gpucontext.IMESurroundingText{})
+	app.SetIMEPosition(1, 2)
+	app.SetIMEEnabled(true)
+	app.SetIMECursorArea(gpucontext.IMECursorArea{X: 1, Y: 2})
+	app.SetIMEContentType(gpucontext.ContentPurposeName, gpucontext.ContentHintNone)
+	app.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "x", Cursor: 1, Anchor: 1})
+	app.SetIMEEnabled(false)
+	app.CancelIME()
+	app.applyIMEControllerState(&bareIMEWindow{})
+	if got := app.IMEController(); got != app {
+		t.Fatalf("app controller = %v, want app", got)
+	}
+
+	active := &imeTestWindow{}
+	app.platWindow = active
+	app.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "x", Cursor: 1, Anchor: 1})
+	app.SetIMEEnabled(true)
+	app.CancelIME()
+
+	caps := gpucontext.IMECapabilities{Version: gpucontext.IMEContractVersion, Features: gpucontext.IMECapabilityCommit}
+	app.platWindow = &imeCapabilityWindow{caps: caps}
+	if got := app.IMECapabilities(); got != caps {
+		t.Fatalf("provider capabilities = %+v, want %+v", got, caps)
+	}
+
+	// Exercise the App registration helpers, which forward to the adapter.
+	app.OnIMECompositionUpdateV2(func(gpucontext.IMEComposition) {})
+	app.OnIMECanceled(func() {})
+	app.OnIMEDisabled(func() {})
+	app.OnIMEDeleteSurrounding(func(gpucontext.IMEDeleteSurroundingEvent) {})
 }
