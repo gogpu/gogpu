@@ -244,6 +244,7 @@ type Renderer struct {
 	texQuadUniformLayout  *wgpu.BindGroupLayout
 	texQuadTextureLayout  *wgpu.BindGroupLayout
 	texQuadPipelineLayout *wgpu.PipelineLayout
+	texQuadUniformData    []byte
 	texQuadPipelineInited bool
 
 	// Dedicated composition blit pipeline (ADR-067).
@@ -1567,6 +1568,11 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		return fmt.Errorf("gogpu: failed to create render pipeline: %w", err)
 	}
 
+	// Reuse the CPU-side payload while Queue.WriteBuffer copies it into the
+	// backend's staging/direct-write path. The GPU-visible data is still kept
+	// in per-draw dynamic slots above, so this scratch buffer is safe to reuse
+	// between calls on the render thread.
+	r.texQuadUniformData = make([]byte, texQuadUniformSize)
 	r.texQuadPipelineInited = true
 	return nil
 }
@@ -1661,16 +1667,15 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	}
 
 	// Upload uniform data — screen dimensions come from per-window state
-	var uniformData [texQuadUniformSize]byte
-	binary.LittleEndian.PutUint32(uniformData[0:4], math.Float32bits(opts.X))
-	binary.LittleEndian.PutUint32(uniformData[4:8], math.Float32bits(opts.Y))
-	binary.LittleEndian.PutUint32(uniformData[8:12], math.Float32bits(opts.Width))
-	binary.LittleEndian.PutUint32(uniformData[12:16], math.Float32bits(opts.Height))
-	binary.LittleEndian.PutUint32(uniformData[16:20], math.Float32bits(float32(ws.width)))
-	binary.LittleEndian.PutUint32(uniformData[20:24], math.Float32bits(float32(ws.height)))
-	binary.LittleEndian.PutUint32(uniformData[24:28], math.Float32bits(opts.Alpha))
-	binary.LittleEndian.PutUint32(uniformData[28:32], math.Float32bits(premulFlag))
-	if err := r.device.Queue().WriteBuffer(uniform.buffer, uint64(uniform.offset), uniformData[:]); err != nil {
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(ws.width)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
+	if err := r.device.Queue().WriteBuffer(uniform.buffer, uint64(uniform.offset), r.texQuadUniformData); err != nil {
 		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
 	}
 
@@ -1963,6 +1968,7 @@ func (r *Renderer) Destroy() {
 		r.texQuadUniformLayout.Release()
 		r.texQuadUniformLayout = nil
 	}
+	r.texQuadUniformData = nil
 	if r.texQuadShader != nil {
 		r.texQuadShader.Release()
 		r.texQuadShader = nil
