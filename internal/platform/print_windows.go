@@ -31,6 +31,11 @@ const (
 	pdResultPrint  = 1
 	pdResultCancel = 2
 
+	// START_PAGE_GENERAL selects the General tab in the PRINTDLGEXW property
+	// sheet. Zero means the first driver-defined page and is not deterministic
+	// across printer drivers.
+	startPageGeneral uint32 = 0xFFFFFFFF
+
 	// The PASSTHROUGH escape sends caller-owned bytes directly to the printer
 	// driver's spool stream.  It is supported by the Win32 GDI print contract.
 	passthroughEscape = 19
@@ -348,6 +353,7 @@ func showWindowsPrintDialog(parent uintptr, request PrintRequest, calls windowsP
 		nMinPage:       1,
 		nMaxPage:       printDialogMaxPage,
 		nCopies:        1,
+		nStartPage:     startPageGeneral,
 	}
 	if len(request.Options.PageRanges) > 0 {
 		dlg.flags |= pdPageNums

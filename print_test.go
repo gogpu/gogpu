@@ -99,6 +99,15 @@ func TestPrintUnsupportedWithoutPlatformCapability(t *testing.T) {
 	}
 }
 
+func TestPrintReturnsBackendError(t *testing.T) {
+	backendErr := errors.New("printer setup failed")
+	app := &App{manager: &printTestManager{err: backendErr}}
+
+	if _, err := app.Print(context.Background(), NewPDFDocument("x.pdf", []byte("pdf")), PrintOptions{}); !errors.Is(err, backendErr) {
+		t.Fatalf("backend error = %v, want %v", err, backendErr)
+	}
+}
+
 func TestPrintDelegatesCopiedRequestAndPrimaryParent(t *testing.T) {
 	mgr := &printTestManager{}
 	app := &App{

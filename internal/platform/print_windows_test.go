@@ -48,6 +48,9 @@ func TestShowWindowsPrintDialogCopiesRangesAndReleasesDialogMemory(t *testing.T)
 	if got.nCopies != 3 {
 		t.Fatalf("nCopies = %d, want 3", got.nCopies)
 	}
+	if got.nStartPage != startPageGeneral {
+		t.Fatalf("nStartPage = %#x, want START_PAGE_GENERAL %#x", got.nStartPage, startPageGeneral)
+	}
 	if !reflect.DeepEqual(freed, []uintptr{42, 43}) {
 		t.Fatalf("freed handles = %v, want [42 43]", freed)
 	}

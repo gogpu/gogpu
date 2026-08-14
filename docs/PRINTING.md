@@ -3,8 +3,10 @@
 `App.Print` is the backend-neutral seam for native print dialogs and spoolers.
 It accepts a complete document; gogpu does not render pages or generate PDF
 bytes. `NewPDFDocument` is the portable helper for the common PDF case.
-Platform implementations own format-specific rendering/spooling (for example,
-Windows may render PDF before submitting a printer job).
+Windows sends raw PDF bytes through the GDI `PASSTHROUGH` escape and does not
+render them. Only compatible PostScript/PCL or virtual PDF printer drivers that
+accept the raw document format can print it; typical consumer inkjet drivers
+may fail.
 
 ```go
 document := gogpu.NewPDFDocument("invoice.pdf", pdfBytes)
