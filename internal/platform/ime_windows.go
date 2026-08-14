@@ -18,6 +18,20 @@ func (w *win32Window) IMECapabilities() gpucontext.IMECapabilities {
 	return DefaultIMECapabilities()
 }
 
+// destroyIMEState severs controller/native callbacks before HWND teardown.
+// IMM32 can deliver queued messages after DestroyWindow begins; those messages
+// must not resurrect a composition or retain surrounding text.
+func (w *win32Window) destroyIMEState() {
+	if w == nil {
+		return
+	}
+	w.imeMu.Lock()
+	w.imeDestroyed = true
+	w.ime.setEnabled(false)
+	w.imeSurrounding = gpucontext.IMESurroundingText{}
+	w.imeMu.Unlock()
+}
+
 func (p *windowsPlatform) IMECapabilities() gpucontext.IMECapabilities {
 	return DefaultIMECapabilities()
 }
@@ -28,6 +42,10 @@ func (w *win32Window) SetIMEPosition(x, y int) {
 
 func (w *win32Window) SetIMEEnabled(enabled bool) {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	wasEnabled := w.ime.enabled
 	canceled := w.ime.setEnabled(enabled)
 	if !enabled {
@@ -60,6 +78,10 @@ func (w *win32Window) SetIMECursorArea(area gpucontext.IMECursorArea) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	w.imeArea = area
 	w.imeAreaSet = true
 	enabled := w.ime.enabled
@@ -71,8 +93,20 @@ func (w *win32Window) SetIMECursorArea(area gpucontext.IMECursorArea) {
 
 func (w *win32Window) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	w.imePurpose, w.imeHints = purpose, hints
+	enabled := w.ime.enabled
 	w.imeMu.Unlock()
+	// IMM32 has no surrounding-text API, but an active composition can still
+	// expose sensitive preedit/result data to the native IME. Match the other
+	// backends' privacy boundary by terminating an enabled session as soon as
+	// password/hidden/sensitive content is selected.
+	if enabled && imeContentIsSensitive(purpose, hints) {
+		w.SetIMEEnabled(false)
+	}
 }
 
 func (w *win32Window) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
@@ -80,7 +114,7 @@ func (w *win32Window) SetIMESurroundingText(text gpucontext.IMESurroundingText) 
 		return
 	}
 	w.imeMu.Lock()
-	if w.ime.enabled {
+	if !w.imeDestroyed && w.ime.enabled && !imeContentIsSensitive(w.imePurpose, w.imeHints) {
 		w.imeSurrounding = text
 	}
 	w.imeMu.Unlock()
@@ -88,6 +122,10 @@ func (w *win32Window) SetIMESurroundingText(text gpucontext.IMESurroundingText) 
 
 func (w *win32Window) CancelIME() {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	canceled := w.ime.cancel()
 	w.imeMu.Unlock()
 	if !canceled {
@@ -156,6 +194,10 @@ func (w *win32Window) applyStoredIMECursorArea() {
 // handleIMEStart is called from wndProc on WM_IME_STARTCOMPOSITION.
 func (w *win32Window) handleIMEStart() {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	started := w.ime.start()
 	w.imeMu.Unlock()
 	if started {
@@ -168,6 +210,10 @@ func (w *win32Window) handleIMEStart() {
 // legacy end callback receives one complete committed string.
 func (w *win32Window) handleIMEComposition(flags uintptr) {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	started := w.ime.ensureActive()
 	enabled := w.ime.enabled
 	w.imeMu.Unlock()
@@ -225,6 +271,10 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 
 func (w *win32Window) handleIMEEnd() {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	committed, ok := w.ime.end()
 	if ok && committed == "" {
 		// Legacy IMM32 providers may deliver the result as WM_CHAR after END
@@ -248,6 +298,10 @@ func (w *win32Window) handleIMEEnd() {
 
 func (w *win32Window) consumeIMECharResult(codeUnit uint16) bool {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return false
+	}
 	consumed := w.ime.consumeCharResultUnit(codeUnit)
 	w.imeMu.Unlock()
 	if !consumed {
@@ -261,6 +315,10 @@ func (w *win32Window) consumeIMECharResult(codeUnit uint16) bool {
 
 func (w *win32Window) consumeIMECharResultUnits(units []uint16) bool {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return false
+	}
 	consumed := w.ime.consumeCharResultUnits(units)
 	w.imeMu.Unlock()
 	if !consumed {
@@ -272,15 +330,29 @@ func (w *win32Window) consumeIMECharResultUnits(units []uint16) bool {
 
 func (w *win32Window) finishIMECharResult() {
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	committed, ok := w.ime.finishCharResult()
 	w.imeMu.Unlock()
-	if ok {
-		w.queueIME(Event{
-			WindowID:     w.id,
-			Type:         EventIMECompositionEnd,
-			IMECommitted: committed,
-		})
+	if !ok {
+		return
 	}
+	if committed == "" {
+		// WM_IME_ENDCOMPOSITION with no GCS_RESULTSTR and no post-END WM_CHAR
+		// is the native cancellation path (Escape/focus loss), not an empty
+		// commit.  Empty commits have no insertion semantics and would violate
+		// the v2 cancellation contract by making consumers commit nothing while
+		// leaving the preedit lifecycle un-canceled.
+		w.queueIME(Event{WindowID: w.id, Type: EventIMECanceled})
+		return
+	}
+	w.queueIME(Event{
+		WindowID:     w.id,
+		Type:         EventIMECompositionEnd,
+		IMECommitted: committed,
+	})
 }
 
 func (w *win32Window) hasNextIMECharMessage() bool {

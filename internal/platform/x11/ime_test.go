@@ -153,3 +153,62 @@ func TestNativeKeyEventCarriesXKeyEventFields(t *testing.T) {
 		t.Fatalf("native event same_screen = %d, want 1", got)
 	}
 }
+
+func TestXIMFocusLossDisablesAndDropsContext(t *testing.T) {
+	var events []PlatformEvent
+	ime := &x11IME{
+		ic:          1,
+		enabled:     true,
+		focused:     true,
+		composing:   true,
+		surrounding: gpucontext.IMESurroundingText{Text: "秘密", Cursor: len("秘密"), Anchor: len("秘密")},
+		queueFn: func(event PlatformEvent) {
+			events = append(events, event)
+		},
+	}
+
+	ime.setFocus(false)
+	if ime.enabled || ime.composing || ime.surrounding.IsValid() {
+		t.Fatalf("focus loss retained IME state: enabled=%v composing=%v surrounding=%+v", ime.enabled, ime.composing, ime.surrounding)
+	}
+	if len(events) != 2 || events[0].Type != EventTypeIMECanceled || events[1].Type != EventTypeIMEDisabled {
+		t.Fatalf("focus-loss events = %+v, want canceled then disabled", events)
+	}
+}
+
+func TestXIMSensitiveContentDisablesAndDropsContext(t *testing.T) {
+	var events []PlatformEvent
+	ime := &x11IME{
+		ic:          1,
+		enabled:     true,
+		focused:     true,
+		composing:   true,
+		surrounding: gpucontext.IMESurroundingText{Text: "秘密", Cursor: len("秘密"), Anchor: len("秘密")},
+		queueFn: func(event PlatformEvent) {
+			events = append(events, event)
+		},
+	}
+
+	ime.setContentType(gpucontext.ContentPurposeNormal, gpucontext.ContentHintSensitiveData)
+	if ime.enabled || ime.composing || ime.surrounding.IsValid() {
+		t.Fatalf("sensitive content retained IME state: enabled=%v composing=%v surrounding=%+v", ime.enabled, ime.composing, ime.surrounding)
+	}
+	if len(events) != 2 || events[0].Type != EventTypeIMECanceled || events[1].Type != EventTypeIMEDisabled {
+		t.Fatalf("sensitive-content events = %+v, want canceled then disabled", events)
+	}
+}
+
+func TestXIMTeardownRejectsLateControllerCalls(t *testing.T) {
+	var events []PlatformEvent
+	ime := &x11IME{
+		ic:      1,
+		enabled: true,
+		queueFn: func(event PlatformEvent) { events = append(events, event) },
+	}
+	ime.close()
+	ime.setEnabled(false)
+	ime.setFocus(false)
+	if len(events) != 0 {
+		t.Fatalf("late teardown calls queued events: %+v", events)
+	}
+}

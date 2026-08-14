@@ -110,7 +110,12 @@ type x11IME struct {
 	callbackID uintptr
 	ic         uintptr
 
-	mu               sync.Mutex
+	mu sync.Mutex
+	// nativeMu serializes XIM/XIC calls with close and controller setters.
+	// Xlib objects are owned by the event-thread connection and must not be
+	// destroyed while a worker goroutine is still using the XIC.
+	nativeMu         sync.Mutex
+	closed           bool
 	enabled          bool
 	focused          bool
 	composing        bool
@@ -125,6 +130,12 @@ type x11IME struct {
 	purpose          gpucontext.ContentPurpose
 	hints            gpucontext.ContentHint
 	surrounding      gpucontext.IMESurroundingText
+}
+
+func x11IMEContentIsSensitive(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) bool {
+	return purpose == gpucontext.ContentPurposePassword ||
+		hints.Has(gpucontext.ContentHintHiddenText) ||
+		hints.Has(gpucontext.ContentHintSensitiveData)
 }
 
 var (
@@ -664,11 +675,14 @@ func (i *x11IME) close() {
 	i.mu.Lock()
 	ic := i.ic
 	i.ic = 0
+	i.closed = true
 	i.enabled = false
 	i.composing = false
 	i.preedit = ""
 	i.preeditDone = false
 	i.mu.Unlock()
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
 	unregisterXIM(i)
 	if i.xlib != nil {
 		i.xlib.destroyIC(ic)
@@ -678,7 +692,19 @@ func (i *x11IME) close() {
 
 func (i *x11IME) setFocus(focused bool) {
 	i.mu.Lock()
+	if i.closed {
+		i.mu.Unlock()
+		return
+	}
 	i.focused = focused
+	wasEnabled := i.enabled
+	if !focused {
+		// Focus loss is a native IME disable boundary.  Do not retain context
+		// or allow a stale XIC to consume key text after the focus event; the UI
+		// must explicitly enable IME again when focus returns.
+		i.enabled = false
+		i.surrounding = gpucontext.IMESurroundingText{}
+	}
 	enabled := i.enabled
 	ic := i.ic
 	area, areaSet := i.cursorArea, i.cursorAreaSet
@@ -691,15 +717,23 @@ func (i *x11IME) setFocus(focused bool) {
 		i.preeditDone = false
 	}
 	i.mu.Unlock()
-	if ic != 0 {
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
+	i.mu.Lock()
+	closed := i.closed || i.ic == 0 || i.ic != ic
+	i.mu.Unlock()
+	if !closed && ic != 0 {
 		i.xlib.setFocus(ic, focused && enabled)
 		if focused && enabled && areaSet && preeditSupported && cursorSupported {
 			i.xlib.setSpot(ic, area, scale)
 		}
 	}
-	if canceled {
+	if !closed && canceled {
 		i.xlib.reset(ic)
 		i.queue(gpucontextEventCanceled)
+	}
+	if !closed && !focused && wasEnabled {
+		i.queue(gpucontextEventDisabled)
 	}
 }
 
@@ -710,6 +744,10 @@ const (
 
 func (i *x11IME) setEnabled(enabled bool) {
 	i.mu.Lock()
+	if i.closed {
+		i.mu.Unlock()
+		return
+	}
 	wasEnabled := i.enabled
 	i.enabled = enabled
 	ic := i.ic
@@ -724,21 +762,26 @@ func (i *x11IME) setEnabled(enabled bool) {
 	area, areaSet := i.cursorArea, i.cursorAreaSet
 	preeditSupported, cursorSupported := i.preeditSupported, i.cursorSupported
 	i.mu.Unlock()
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
+	i.mu.Lock()
+	closed := i.closed || i.ic == 0 || i.ic != ic
+	i.mu.Unlock()
 
-	if ic != 0 {
+	if !closed && ic != 0 {
 		i.xlib.setFocus(ic, enabled && focused)
 	}
-	if enabled && areaSet && preeditSupported && cursorSupported {
+	if !closed && enabled && areaSet && preeditSupported && cursorSupported {
 		i.mu.Lock()
 		scale := i.scale
 		i.mu.Unlock()
 		i.xlib.setSpot(ic, area, scale)
 	}
-	if canceled {
+	if !closed && canceled {
 		i.xlib.reset(ic)
 		i.queue(gpucontextEventCanceled)
 	}
-	if !enabled && wasEnabled {
+	if !closed && !enabled && wasEnabled {
 		i.queue(gpucontextEventDisabled)
 	}
 }
@@ -750,11 +793,20 @@ func (i *x11IME) setCursorArea(area gpucontext.IMECursorArea) {
 		return
 	}
 	i.mu.Lock()
+	if i.closed {
+		i.mu.Unlock()
+		return
+	}
 	i.cursorArea, i.cursorAreaSet = area, true
 	enabled, focused, ic := i.enabled, i.focused, i.ic
 	preeditSupported, cursorSupported := i.preeditSupported, i.cursorSupported
 	i.mu.Unlock()
-	if enabled && focused && preeditSupported && cursorSupported {
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
+	i.mu.Lock()
+	closed := i.closed || i.ic == 0 || i.ic != ic
+	i.mu.Unlock()
+	if !closed && enabled && focused && preeditSupported && cursorSupported {
 		i.mu.Lock()
 		scale := i.scale
 		i.mu.Unlock()
@@ -771,6 +823,10 @@ func (i *x11IME) setLegacyPosition(x, y int) {
 		return
 	}
 	i.mu.Lock()
+	if i.closed {
+		i.mu.Unlock()
+		return
+	}
 	scale := i.scale
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
@@ -780,15 +836,28 @@ func (i *x11IME) setLegacyPosition(x, y int) {
 	enabled, focused, ic := i.enabled, i.focused, i.ic
 	preeditSupported, cursorSupported := i.preeditSupported, i.cursorSupported
 	i.mu.Unlock()
-	if enabled && focused && preeditSupported && cursorSupported {
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
+	i.mu.Lock()
+	closed := i.closed || i.ic == 0 || i.ic != ic
+	i.mu.Unlock()
+	if !closed && enabled && focused && preeditSupported && cursorSupported {
 		i.xlib.setSpot(ic, area, scale)
 	}
 }
 
 func (i *x11IME) setContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
 	i.mu.Lock()
+	if i.closed {
+		i.mu.Unlock()
+		return
+	}
 	i.purpose, i.hints = purpose, hints
+	enabled := i.enabled
 	i.mu.Unlock()
+	if enabled && x11IMEContentIsSensitive(purpose, hints) {
+		i.setEnabled(false)
+	}
 }
 
 func (i *x11IME) setSurroundingText(text gpucontext.IMESurroundingText) {
@@ -796,7 +865,7 @@ func (i *x11IME) setSurroundingText(text gpucontext.IMESurroundingText) {
 		return
 	}
 	i.mu.Lock()
-	if i.enabled {
+	if !i.closed && i.enabled && !x11IMEContentIsSensitive(i.purpose, i.hints) {
 		i.surrounding = text
 	}
 	i.mu.Unlock()
@@ -804,7 +873,7 @@ func (i *x11IME) setSurroundingText(text gpucontext.IMESurroundingText) {
 
 func (i *x11IME) cancel() {
 	i.mu.Lock()
-	if !i.composing {
+	if i.closed || !i.composing {
 		i.mu.Unlock()
 		return
 	}
@@ -813,6 +882,14 @@ func (i *x11IME) cancel() {
 	i.preeditDone = false
 	ic := i.ic
 	i.mu.Unlock()
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
+	i.mu.Lock()
+	closed := i.closed || i.ic == 0 || i.ic != ic
+	i.mu.Unlock()
+	if closed {
+		return
+	}
 	i.xlib.reset(ic)
 	i.queue(gpucontextEventCanceled)
 }
@@ -822,15 +899,28 @@ func (i *x11IME) handleKey(keyEvent *KeyEvent, pressed bool) bool {
 		return false
 	}
 	i.mu.Lock()
-	enabled, ic := i.enabled, i.ic
-	i.mu.Unlock()
-	if !enabled || ic == 0 {
+	if i.closed {
+		i.mu.Unlock()
 		return false
 	}
-	raw := nativeKeyEventType(keyEvent, i.xlib.display, pressed)
+	enabled, ic := i.enabled, i.ic
+	xlib := i.xlib
+	i.mu.Unlock()
+	if !enabled || ic == 0 || xlib == nil {
+		return false
+	}
+	raw := nativeKeyEventType(keyEvent, xlib.display, pressed)
 	// XFilterEvent updates the XIC's compose state and may synchronously invoke
 	// preedit callbacks. Its boolean result is intentionally not used: a
 	// no-preedit XIC still returns ordinary committed UTF-8 text below.
+	i.nativeMu.Lock()
+	defer i.nativeMu.Unlock()
+	i.mu.Lock()
+	if i.closed || !i.enabled || i.ic == 0 || i.ic != ic {
+		i.mu.Unlock()
+		return false
+	}
+	i.mu.Unlock()
 	i.xlib.filterEvent(ic, &raw, i.window)
 	if !pressed {
 		// XIM's back-end protocol forwards both KeyPress and KeyRelease events;
@@ -871,7 +961,7 @@ func (i *x11IME) handleKey(keyEvent *KeyEvent, pressed bool) bool {
 func (i *x11IME) preeditStart() int32 {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if !i.enabled || !i.focused {
+	if i.closed || !i.enabled || !i.focused {
 		return -1
 	}
 	if !i.composing {
@@ -885,7 +975,7 @@ func (i *x11IME) preeditStart() int32 {
 
 func (i *x11IME) preeditDoneCallback() {
 	i.mu.Lock()
-	if i.enabled && i.focused && i.composing {
+	if !i.closed && i.enabled && i.focused && i.composing {
 		i.preeditDone = true
 	}
 	i.mu.Unlock()
@@ -901,7 +991,7 @@ func (i *x11IME) preeditDraw(callData uintptr) {
 	draw := (*ximPreeditDrawData)(unsafe.Pointer(callData))
 	text := ximTextString(draw.Text)
 	i.mu.Lock()
-	if !i.enabled || !i.focused {
+	if i.closed || !i.enabled || !i.focused {
 		i.mu.Unlock()
 		return
 	}

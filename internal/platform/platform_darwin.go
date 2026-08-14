@@ -18,15 +18,16 @@ import (
 
 // darwinWindow holds all per-window state for a macOS window.
 type darwinWindow struct {
-	window      *darwin.Window
-	surface     *darwin.Surface
-	config      Config
-	id          WindowID
-	shouldClose bool
-	events      *eventqueue.Queue[Event]
-	eventMu     sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
-	imeMu       sync.Mutex // guards AppKit NSTextInputClient state
-	ime         macIMEState
+	window       *darwin.Window
+	surface      *darwin.Surface
+	config       Config
+	id           WindowID
+	shouldClose  bool
+	events       *eventqueue.Queue[Event]
+	eventMu      sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
+	imeMu        sync.Mutex // guards AppKit NSTextInputClient state
+	imeDestroyed bool       // native view/window has been torn down
+	ime          macIMEState
 
 	// Mouse state tracking
 	pointerX      float64
@@ -328,6 +329,10 @@ func (p *darwinPlatform) Destroy() {
 
 	// Clean up native handlers for all windows before destroying them.
 	for _, w := range p.windows {
+		w.imeMu.Lock()
+		w.imeDestroyed = true
+		w.ime.setEnabled(false)
+		w.imeMu.Unlock()
 		if w.window != nil {
 			cv := w.window.ContentView()
 			if !cv.IsNil() {

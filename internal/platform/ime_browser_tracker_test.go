@@ -42,6 +42,19 @@ func TestBrowserIMETrackerPreEndCommitAndCancel(t *testing.T) {
 	}
 }
 
+func TestBrowserIMETrackerPreEndCommitDoesNotArmStaleEcho(t *testing.T) {
+	var tracker browserIMETracker
+	tracker.setEnabled(true)
+	tracker.start()
+	tracker.input("insertText", "同じ")
+	if committed, canceled, ok := tracker.end(""); !ok || canceled || committed != "同じ" {
+		t.Fatalf("pre-end commit = (%q, canceled=%v, ok=%v)", committed, canceled, ok)
+	}
+	if text, consumed := tracker.input("insertText", "同じ"); text != "同じ" || consumed {
+		t.Fatalf("same ordinary input after pre-end commit = (%q, %v), want unconsumed", text, consumed)
+	}
+}
+
 func TestBrowserIMETrackerDisableCancelsAndDropsState(t *testing.T) {
 	var tracker browserIMETracker
 	tracker.setEnabled(true)

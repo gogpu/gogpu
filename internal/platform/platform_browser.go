@@ -169,8 +169,13 @@ func (p *browserPlatform) ShowSaveFileDialog(_ FileDialogOptions) (string, error
 	return "", fmt.Errorf("file dialog: not yet implemented in browser")
 }
 
-// Destroy is a no-op on browser.
-func (p *browserPlatform) Destroy() {}
+// Destroy removes the hidden IME input and releases DOM callbacks.
+func (p *browserPlatform) Destroy() {
+	if p != nil && p.window != nil {
+		p.window.Destroy()
+		p.window = nil
+	}
+}
 
 // enqueueEvent adds an event to the platform event queue.
 func (p *browserPlatform) enqueueEvent(ev Event) {
@@ -185,6 +190,7 @@ type browserWindow struct {
 	id          WindowID
 	canvas      js.Value
 	platform    *browserPlatform
+	destroyed   bool
 	shouldClose bool
 	lastScale   float64 // DPI scale change detection (ADR-059)
 
@@ -228,6 +234,9 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 	})
 
 	w.addEventListener(w.canvas, "keydown", func(_ js.Value, args []js.Value) any {
+		if w.destroyed {
+			return nil
+		}
 		ev := args[0]
 		// When IME is enabled, the hidden input owns text editing and its
 		// beforeinput/input events provide the text payload. The canvas may
@@ -255,6 +264,9 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 	})
 
 	w.addEventListener(w.canvas, "keyup", func(_ js.Value, args []js.Value) any {
+		if w.destroyed {
+			return nil
+		}
 		ev := args[0]
 		ev.Call("preventDefault")
 		key, mods := translateKeyEvent(ev)
@@ -441,6 +453,9 @@ func (w *browserWindow) registerIMEInput(p *browserPlatform) {
 }
 
 func (w *browserWindow) setBrowserFocus(focused bool) {
+	if w.destroyed {
+		return
+	}
 	if w.focused == focused {
 		return
 	}
@@ -449,6 +464,9 @@ func (w *browserWindow) setBrowserFocus(focused bool) {
 }
 
 func (w *browserWindow) handleCanvasBlur() {
+	if w.destroyed {
+		return
+	}
 	if w.suppressBlur || w.activeElementIsIMEInput() {
 		return
 	}
@@ -459,6 +477,9 @@ func (w *browserWindow) handleCanvasBlur() {
 }
 
 func (w *browserWindow) handleIMEInputBlur() {
+	if w.destroyed {
+		return
+	}
 	if w.suppressBlur {
 		w.suppressBlur = false
 		return
@@ -503,16 +524,25 @@ func (w *browserWindow) enqueueText(text string) {
 }
 
 func (w *browserWindow) handleIMEKeyDown(ev js.Value, p *browserPlatform) {
+	if w.destroyed {
+		return
+	}
 	key, mods := translateKeyEvent(ev)
 	p.enqueueEvent(Event{WindowID: w.id, Type: EventKeyDown, Key: key, Mods: mods})
 }
 
 func (w *browserWindow) handleIMEKeyUp(ev js.Value, p *browserPlatform) {
+	if w.destroyed {
+		return
+	}
 	key, mods := translateKeyEvent(ev)
 	p.enqueueEvent(Event{WindowID: w.id, Type: EventKeyUp, Key: key, Mods: mods})
 }
 
 func (w *browserWindow) handleIMECompositionStart() {
+	if w.destroyed {
+		return
+	}
 	if !w.imeEnabled || !w.imeTracker.start() {
 		return
 	}
@@ -520,7 +550,7 @@ func (w *browserWindow) handleIMECompositionStart() {
 }
 
 func (w *browserWindow) handleIMECompositionUpdate(data string) {
-	if !w.imeEnabled {
+	if w.destroyed || !w.imeEnabled {
 		return
 	}
 	if w.imeTracker.ensureActive() {
@@ -538,7 +568,7 @@ func (w *browserWindow) handleIMECompositionUpdate(data string) {
 }
 
 func (w *browserWindow) handleIMECompositionEnd(data string) {
-	if !w.imeEnabled {
+	if w.destroyed || !w.imeEnabled {
 		return
 	}
 	committed, canceled, ok := w.imeTracker.end(data)
@@ -557,7 +587,7 @@ func (w *browserWindow) handleIMECompositionEnd(data string) {
 }
 
 func (w *browserWindow) handleIMEBeforeInput(ev js.Value) {
-	if !w.imeEnabled {
+	if w.destroyed || !w.imeEnabled {
 		return
 	}
 	inputType := jsStringProperty(ev, "inputType")
@@ -574,7 +604,7 @@ func (w *browserWindow) handleIMEBeforeInput(ev js.Value) {
 }
 
 func (w *browserWindow) handleIMEInput(ev js.Value) {
-	if !w.imeEnabled {
+	if w.destroyed || !w.imeEnabled {
 		return
 	}
 	inputType := jsStringProperty(ev, "inputType")
@@ -594,6 +624,9 @@ func (w *browserWindow) IMECapabilities() gpucontext.IMECapabilities {
 }
 
 func (w *browserWindow) SetIMEEnabled(enabled bool) {
+	if w.destroyed {
+		return
+	}
 	if enabled {
 		if w.imeEnabled {
 			w.applyIMEInputArea()
@@ -634,7 +667,7 @@ func (w *browserWindow) disableIME() {
 }
 
 func (w *browserWindow) SetIMECursorArea(area gpucontext.IMECursorArea) {
-	if !validBrowserIMEArea(area) {
+	if w.destroyed || !validBrowserIMEArea(area) {
 		return
 	}
 	w.imeArea = area
@@ -645,6 +678,9 @@ func (w *browserWindow) SetIMECursorArea(area gpucontext.IMECursorArea) {
 }
 
 func (w *browserWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
+	if w.destroyed {
+		return
+	}
 	w.imePurpose, w.imeHints = purpose, hints
 	w.imeSensitive = purpose == gpucontext.ContentPurposePassword ||
 		hints.Has(gpucontext.ContentHintHiddenText) || hints.Has(gpucontext.ContentHintSensitiveData)
@@ -660,7 +696,7 @@ func (w *browserWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hin
 }
 
 func (w *browserWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
-	if !text.IsValid() || !w.imeEnabled || w.imeSensitive {
+	if w.destroyed || !text.IsValid() || !w.imeEnabled || w.imeSensitive {
 		return
 	}
 	w.imeSurrounding = text
@@ -669,6 +705,9 @@ func (w *browserWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText
 }
 
 func (w *browserWindow) CancelIME() {
+	if w.destroyed {
+		return
+	}
 	if !w.imeTracker.cancel() {
 		return
 	}
@@ -992,6 +1031,14 @@ func (w *browserWindow) StartDrag(paths []string, done func(DragResult)) {
 
 // Destroy releases JS callbacks.
 func (w *browserWindow) Destroy() {
+	if w == nil || w.destroyed {
+		return
+	}
+	w.destroyed = true
+	w.imeEnabled = false
+	w.imeTracker.setEnabled(false)
+	w.imeSurrounding = gpucontext.IMESurroundingText{}
+	w.imeSurroundingSet = false
 	if !w.imeInput.IsNull() && !w.imeInput.IsUndefined() {
 		parent := w.imeInput.Get("parentNode")
 		if !parent.IsNull() && !parent.IsUndefined() {

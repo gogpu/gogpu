@@ -92,15 +92,24 @@ func (t *browserIMETracker) end(data string) (committed string, canceled, ok boo
 	if !t.active {
 		return "", false, false
 	}
+	preEnd := t.preEndInput
 	committed = data
 	if committed == "" {
-		committed = t.preEndInput
+		committed = preEnd
 	}
 	t.active = false
 	t.preEndInput = ""
 	if committed == "" {
 		t.suppressInput = ""
 		return "", true, true
+	}
+	// Some engines deliver the final insertText before compositionend and do
+	// not emit a second input echo afterward. Only arm echo suppression when
+	// the commit was not already consumed on that pre-end path; otherwise a
+	// later ordinary insertion of the same text would be swallowed.
+	if preEnd != "" && preEnd == committed {
+		t.suppressInput = ""
+		return committed, false, true
 	}
 	t.suppressInput = committed
 	return committed, false, true

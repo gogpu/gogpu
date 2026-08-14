@@ -89,6 +89,7 @@ type waylandWindow struct {
 	// event-dispatch thread; this mutex also protects controller calls made by
 	// widgets from another goroutine.
 	imeMu             sync.Mutex
+	imeDestroyed      bool
 	imeEnabled        bool
 	imeFocused        bool
 	imeComposing      bool
@@ -1054,6 +1055,7 @@ func (w *waylandPlatformWindow) Destroy() {
 			}
 		}
 		p.secondaryMu.Unlock()
+		w.secondary.state.destroyWaylandIMEState()
 		w.secondary.libwl.Close()
 		if w.secondary.goDisp != nil {
 			_ = w.secondary.goDisp.Close()
@@ -1985,6 +1987,10 @@ func (p *waylandPlatform) setupInputCallbacks() {
 		},
 		OnTextInputEnter: func() {
 			w.imeMu.Lock()
+			if w.imeDestroyed {
+				w.imeMu.Unlock()
+				return
+			}
 			w.imeFocused = true
 			// text-input-v3 invalidates all state after enter. Replaying from
 			// PollEvents keeps FFI out of the protocol callback itself.
@@ -1993,6 +1999,10 @@ func (p *waylandPlatform) setupInputCallbacks() {
 		},
 		OnTextInputLeave: func() {
 			w.imeMu.Lock()
+			if w.imeDestroyed {
+				w.imeMu.Unlock()
+				return
+			}
 			wasEnabled := w.imeEnabled
 			canceled := w.imeComposing
 			w.imeFocused = false
@@ -3303,6 +3313,9 @@ func (p *waylandPlatform) Destroy() {
 	}
 
 	// Close C libwayland connection (owns all Wayland objects)
+	if p.primary != nil {
+		p.primary.destroyWaylandIMEState()
+	}
 	if p.libwl != nil {
 		p.libwl.Close()
 		p.libwl = nil

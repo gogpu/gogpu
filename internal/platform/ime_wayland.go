@@ -45,6 +45,26 @@ func (w *waylandPlatformWindow) imeWindow() *waylandWindow {
 	return w.platform.primary
 }
 
+// destroyWaylandIMEState makes controller callbacks harmless after the native
+// wl_display/text-input objects have been torn down. The platform destroys
+// native handles before callers necessarily release their controller, so this
+// state transition must not issue protocol requests or retain context.
+func (w *waylandWindow) destroyWaylandIMEState() {
+	if w == nil {
+		return
+	}
+	w.imeMu.Lock()
+	w.imeDestroyed = true
+	w.imeEnabled = false
+	w.imeFocused = false
+	w.imeComposing = false
+	w.imeReplay = false
+	w.imeNeedsDisable = false
+	w.imeSurrounding = gpucontext.IMESurroundingText{}
+	w.imeSurroundingSet = false
+	w.imeMu.Unlock()
+}
+
 // SetIMEPosition preserves the legacy point-only API by translating it to a
 // zero-size logical-DIP cursor rectangle.
 func (w *waylandPlatformWindow) SetIMEPosition(x, y int) {
@@ -54,11 +74,15 @@ func (w *waylandPlatformWindow) SetIMEPosition(x, y int) {
 func (w *waylandPlatformWindow) SetIMEEnabled(enabled bool) {
 	wp := w.imeWindow()
 	h := w.libwayland()
-	if wp == nil || h == nil || !h.HasTextInput() {
+	if wp == nil {
 		return
 	}
 
 	wp.imeMu.Lock()
+	if wp.imeDestroyed || (enabled && (h == nil || !h.HasTextInput())) {
+		wp.imeMu.Unlock()
+		return
+	}
 	wasEnabled := wp.imeEnabled
 	canceled := wp.imeComposing && !enabled
 	if enabled {
@@ -74,7 +98,9 @@ func (w *waylandPlatformWindow) SetIMEEnabled(enabled bool) {
 	}
 	wp.imeMu.Unlock()
 
-	h.SetTextInputEnabled(enabled)
+	if h != nil && h.HasTextInput() {
+		h.SetTextInputEnabled(enabled)
+	}
 	if enabled {
 		wp.replayWaylandIMEState(h)
 	}
@@ -92,6 +118,10 @@ func (w *waylandPlatformWindow) SetIMECursorArea(area gpucontext.IMECursorArea) 
 		return
 	}
 	wp.imeMu.Lock()
+	if wp.imeDestroyed {
+		wp.imeMu.Unlock()
+		return
+	}
 	wp.imeArea = area
 	wp.imeAreaSet = true
 	enabled := wp.imeEnabled
@@ -109,11 +139,23 @@ func (w *waylandPlatformWindow) SetIMEContentType(purpose gpucontext.ContentPurp
 		return
 	}
 	wp.imeMu.Lock()
+	if wp.imeDestroyed {
+		wp.imeMu.Unlock()
+		return
+	}
 	wp.imePurpose = purpose
 	wp.imeHints = hints
 	enabled := wp.imeEnabled
 	wp.imeMu.Unlock()
 	if enabled {
+		// The v3 protocol's surrounding-text request is the data path through
+		// which an input method can retain context.  End the session before a
+		// sensitive field can leave that context enabled; SetIMEEnabled also
+		// clears the protocol transaction and the Go-side copy.
+		if imeContentIsSensitive(purpose, hints) {
+			w.SetIMEEnabled(false)
+			return
+		}
 		if h := w.libwayland(); h != nil {
 			h.SetTextInputContentType(purpose, hints)
 		}
@@ -129,7 +171,11 @@ func (w *waylandPlatformWindow) SetIMESurroundingText(text gpucontext.IMESurroun
 		return
 	}
 	wp.imeMu.Lock()
-	if !wp.imeEnabled {
+	if wp.imeDestroyed || !wp.imeEnabled {
+		wp.imeMu.Unlock()
+		return
+	}
+	if imeContentIsSensitive(wp.imePurpose, wp.imeHints) {
 		wp.imeMu.Unlock()
 		return
 	}
@@ -144,11 +190,11 @@ func (w *waylandPlatformWindow) SetIMESurroundingText(text gpucontext.IMESurroun
 func (w *waylandPlatformWindow) CancelIME() {
 	wp := w.imeWindow()
 	h := w.libwayland()
-	if wp == nil || h == nil || !h.HasTextInput() {
+	if wp == nil {
 		return
 	}
 	wp.imeMu.Lock()
-	if !wp.imeEnabled {
+	if wp.imeDestroyed || !wp.imeEnabled || h == nil || !h.HasTextInput() {
 		wp.imeMu.Unlock()
 		return
 	}
@@ -191,7 +237,7 @@ func (w *waylandWindow) imeShouldFilterText() bool {
 		return false
 	}
 	w.imeMu.Lock()
-	enabled := w.imeEnabled
+	enabled := w.imeEnabled && !w.imeDestroyed
 	w.imeMu.Unlock()
 	return enabled
 }
@@ -203,6 +249,10 @@ func (w *waylandWindow) replayWaylandIME(h *wayland.LibwaylandHandle) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	needsDisable := w.imeNeedsDisable
 	w.imeNeedsDisable = false
 	replay := w.imeReplay && w.imeEnabled
@@ -221,6 +271,10 @@ func (w *waylandWindow) replayWaylandIMEState(h *wayland.LibwaylandHandle) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	enabled := w.imeEnabled
 	area, areaSet := w.imeArea, w.imeAreaSet
 	purpose, hints := w.imePurpose, w.imeHints
@@ -244,7 +298,7 @@ func (w *waylandWindow) handleWaylandTextInputDone(update wayland.TextInputUpdat
 		return
 	}
 	w.imeMu.Lock()
-	if !w.imeEnabled {
+	if w.imeDestroyed || !w.imeEnabled {
 		w.imeMu.Unlock()
 		return
 	}

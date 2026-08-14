@@ -35,6 +35,10 @@ func (w *darwinWindow) SetIMEEnabled(enabled bool) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	wasEnabled := w.ime.enabled
 	canceled := w.ime.setEnabled(enabled)
 	w.imeMu.Unlock()
@@ -55,6 +59,10 @@ func (w *darwinWindow) SetIMECursorArea(area gpucontext.IMECursorArea) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	w.ime.area = area
 	w.imeMu.Unlock()
 }
@@ -64,9 +72,21 @@ func (w *darwinWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hint
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	w.ime.purpose = purpose
 	w.ime.hints = hints
+	enabled := w.ime.enabled
 	w.imeMu.Unlock()
+	// AppKit can query the surrounding text through
+	// attributedSubstringForProposedRange:. Do not leave a native marked range
+	// or surrounding context alive when a password/hidden/sensitive field is
+	// selected; the next explicit enable starts a fresh session.
+	if enabled && imeContentIsSensitive(purpose, hints) {
+		w.SetIMEEnabled(false)
+	}
 }
 
 func (w *darwinWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
@@ -74,7 +94,7 @@ func (w *darwinWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText)
 		return
 	}
 	w.imeMu.Lock()
-	if w.ime.enabled {
+	if !w.imeDestroyed && w.ime.enabled && !imeContentIsSensitive(w.ime.purpose, w.ime.hints) {
 		w.ime.surrounding = text
 	}
 	w.imeMu.Unlock()
@@ -85,6 +105,10 @@ func (w *darwinWindow) CancelIME() {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	canceled := w.ime.unmark()
 	w.imeMu.Unlock()
 	if !canceled {
@@ -113,6 +137,10 @@ func (w *darwinWindow) flushNativeIMEReset(view darwin.ID) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	reset := w.ime.nativeNeedsUnmark
 	w.ime.nativeNeedsUnmark = false
 	w.imeMu.Unlock()
@@ -126,6 +154,10 @@ func (w *darwinWindow) applyMacIMEArea(view darwin.ID) {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	area := w.ime.area
 	w.imeMu.Unlock()
 	darwin.SetTextInputCursorArea(view, area.X, area.Y)
@@ -138,6 +170,10 @@ func (w *darwinWindow) handleMacSetMarkedText(text darwin.ID, selectedLocation, 
 	}
 	value := darwin.ObjectString(text)
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	started, composition := w.ime.setMarked(value, selectedLocation, selectedLength)
 	w.imeMu.Unlock()
 	w.applyMacIMEAreaForWindow()
@@ -167,6 +203,10 @@ func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) {
 	}
 	value := darwin.ObjectString(text)
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	if !w.ime.enabled {
 		w.imeMu.Unlock()
 		return
@@ -208,6 +248,10 @@ func (w *darwinWindow) handleMacUnmarkText() {
 		return
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
 	if !w.ime.enabled {
 		w.imeMu.Unlock()
 		return
@@ -227,10 +271,15 @@ func (w *darwinWindow) handleMacAttributedSubstring(location, length, actualRang
 		return darwin.NewAutoreleasedAttributedString("")
 	}
 	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return darwin.NewAutoreleasedAttributedString("")
+	}
 	enabled := w.ime.enabled
+	sensitive := imeContentIsSensitive(w.ime.purpose, w.ime.hints)
 	surrounding := w.ime.surrounding
 	w.imeMu.Unlock()
-	if !enabled || !surrounding.IsValid() {
+	if !enabled || sensitive || !surrounding.IsValid() {
 		return darwin.NewAutoreleasedAttributedString("")
 	}
 	start, end, hidden, ok := macUTF16RangeToUTF8(surrounding.Text, location, length)

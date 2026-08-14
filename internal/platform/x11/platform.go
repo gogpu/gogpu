@@ -1089,22 +1089,26 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		p.handleLeaveNotify(w, e)
 
 	case *FocusInEvent:
-		// Re-grab pointer if cursor mode requires it
-		p.handleFocusIn(w)
-
 		// Emit focus event only for meaningful focus changes.
 		// Filter out NotifyPointer (5) and NotifyPointerRoot (6) which are noise,
 		// and only accept NotifyNormal mode (0) to avoid spurious events from grabs.
-		if e.Detail != 5 && e.Detail != 6 && e.Mode == 0 {
+		meaningful := e.Detail != 5 && e.Detail != 6 && e.Mode == 0
+		// Re-grab pointer for every focus notification, but restore XIC focus
+		// only for a real focus change; pointer-grab notifications must not
+		// reopen or disable IME state.
+		p.handleFocusIn(w, meaningful)
+		if meaningful {
 			return PlatformEvent{Type: EventTypeFocus, Focused: true}
 		}
 
 	case *FocusOutEvent:
-		// Release pointer grab on focus loss
-		p.handleFocusOut(w)
-
 		// Emit focus event with same filtering as FocusIn.
-		if e.Detail != 5 && e.Detail != 6 && e.Mode == 0 {
+		meaningful := e.Detail != 5 && e.Detail != 6 && e.Mode == 0
+		// Release pointer grab for every focus notification, but disable XIM
+		// only for a real focus change; NotifyPointer/NotifyPointerRoot are
+		// transient grab bookkeeping.
+		p.handleFocusOut(w, meaningful)
+		if meaningful {
 			return PlatformEvent{Type: EventTypeFocus, Focused: false}
 		}
 
@@ -2779,7 +2783,7 @@ func (p *Platform) GetCursorMode() int {
 }
 
 // handleFocusIn re-applies cursor grab when window regains focus.
-func (p *Platform) handleFocusIn(w *x11Window) {
+func (p *Platform) handleFocusIn(w *x11Window, meaningful bool) {
 	w.eventMu.Lock()
 	mode := w.cursorMode
 	// Reset cursorMode temporarily so SetCursorMode doesn't early-return
@@ -2791,13 +2795,13 @@ func (p *Platform) handleFocusIn(w *x11Window) {
 	if mode != 0 {
 		p.SetCursorMode(mode)
 	}
-	if w.ime != nil {
+	if meaningful && w.ime != nil {
 		w.ime.setFocus(true)
 	}
 }
 
 // handleFocusOut releases cursor grab when window loses focus.
-func (p *Platform) handleFocusOut(w *x11Window) {
+func (p *Platform) handleFocusOut(w *x11Window, meaningful bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -2805,7 +2809,7 @@ func (p *Platform) handleFocusOut(w *x11Window) {
 		_ = p.conn.UngrabPointer(0)
 		w.cursorGrabbed = false
 	}
-	if w.ime != nil {
+	if meaningful && w.ime != nil {
 		w.ime.setFocus(false)
 	}
 }

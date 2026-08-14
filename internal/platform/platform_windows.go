@@ -588,6 +588,7 @@ type win32Window struct {
 	// calls from widgets, so imeMu protects the latter without extending native
 	// context lifetimes across goroutines.
 	imeMu          sync.Mutex
+	imeDestroyed   bool
 	ime            imeTracker
 	imeArea        gpucontext.IMECursorArea
 	imeAreaSet     bool
@@ -1222,6 +1223,7 @@ func (w *win32Window) StartDrag(paths []string, done func(DragResult)) {
 }
 
 func (w *win32Window) Destroy() {
+	w.destroyIMEState()
 	if w.platform != nil {
 		w.platform.windowMu.Lock()
 		delete(w.platform.windows, w.hwnd)
@@ -1271,8 +1273,9 @@ func (p *windowsPlatform) PollEvents() Event {
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
-	// If an IME ended without a post-END WM_CHAR result, publish the pending
-	// empty commit now rather than leaving the lifecycle open indefinitely.
+	// If an IME ended without a post-END WM_CHAR result, terminate the pending
+	// lifecycle now rather than leaving it open indefinitely. The Windows
+	// adapter maps an empty post-END result to cancellation.
 	p.flushPendingIMECharResults()
 
 	return p.dequeueEvent()
@@ -1375,15 +1378,21 @@ func (w *win32Window) setModalFrameCallback(fn func()) {
 // Same pattern as win32Window.Destroy and GLFW's RemovePropW-before-DestroyWindow.
 func (p *windowsPlatform) Destroy() {
 	p.windowMu.Lock()
-	toDestroy := make([]windows.HWND, 0, len(p.windows))
-	for hwnd := range p.windows {
-		toDestroy = append(toDestroy, hwnd)
+	toDestroy := make([]*win32Window, 0, len(p.windows))
+	for hwnd, w := range p.windows {
+		toDestroy = append(toDestroy, w)
 		delete(p.windows, hwnd)
 	}
 	p.windowMu.Unlock()
 
-	for _, hwnd := range toDestroy {
-		procDestroyWindow.Call(uintptr(hwnd))
+	for _, w := range toDestroy {
+		if w == nil {
+			continue
+		}
+		w.destroyIMEState()
+		if w.hwnd != 0 {
+			procDestroyWindow.Call(uintptr(w.hwnd))
+		}
 	}
 	p.hMenu = 0
 	p.primary = nil
