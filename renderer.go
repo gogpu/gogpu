@@ -1463,8 +1463,6 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 
 // initTexturedQuadPipeline creates the GPU resources for textured quad rendering.
 // This is called lazily on the first DrawTexture call.
-//
-//nolint:funlen // pipeline init is inherently sequential setup code
 func (r *Renderer) initTexturedQuadPipeline() error {
 	if r.texQuadPipelineInited {
 		return nil
