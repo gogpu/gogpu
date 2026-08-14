@@ -4,7 +4,9 @@ package platform
 
 import (
 	"fmt"
+	"math"
 	"syscall/js"
+	"unicode/utf8"
 
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gpucontext"
@@ -58,8 +60,9 @@ func (p *browserPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 
 	w := &browserWindow{
-		id:     NewWindowID(),
-		canvas: canvas,
+		id:       NewWindowID(),
+		canvas:   canvas,
+		platform: p,
 	}
 	w.registerEventListeners(p)
 
@@ -181,8 +184,25 @@ func (p *browserPlatform) enqueueEvent(ev Event) {
 type browserWindow struct {
 	id          WindowID
 	canvas      js.Value
+	platform    *browserPlatform
 	shouldClose bool
 	lastScale   float64 // DPI scale change detection (ADR-059)
+
+	// Browser IME input is delivered through a focusable, visually hidden
+	// textarea. It must remain in the DOM (display:none breaks composition),
+	// while all text is routed through the platform event queue.
+	imeInput          js.Value
+	imeTracker        browserIMETracker
+	imeArea           gpucontext.IMECursorArea
+	imeAreaSet        bool
+	imePurpose        gpucontext.ContentPurpose
+	imeHints          gpucontext.ContentHint
+	imeSensitive      bool
+	imeSurrounding    gpucontext.IMESurroundingText
+	imeSurroundingSet bool
+	imeEnabled        bool
+	focused           bool
+	suppressBlur      bool
 
 	// JS callbacks stored for cleanup.
 	jsCallbacks []js.Func
@@ -193,10 +213,29 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 	// Keyboard events — listen on document since canvas doesn't receive
 	// key events without tabindex.
 	w.canvas.Call("setAttribute", "tabindex", "0")
+	w.registerIMEInput(p)
+
+	// A canvas can lose focus when the hidden IME input takes focus. The
+	// hidden-input handlers below coalesce that transition into one window
+	// focus state instead of exposing a false blur to consumers.
+	w.addEventListener(w.canvas, "focus", func(_ js.Value, _ []js.Value) any {
+		w.setBrowserFocus(true)
+		return nil
+	})
+	w.addEventListener(w.canvas, "blur", func(_ js.Value, _ []js.Value) any {
+		w.handleCanvasBlur()
+		return nil
+	})
 
 	w.addEventListener(w.canvas, "keydown", func(_ js.Value, args []js.Value) any {
 		ev := args[0]
-		ev.Call("preventDefault")
+		// When IME is enabled, the hidden input owns text editing and its
+		// beforeinput/input events provide the text payload. The canvas may
+		// still receive a key event in browsers that do not move focus
+		// synchronously, so do not synthesize a second EventChar here.
+		if !w.imeEnabled {
+			ev.Call("preventDefault")
+		}
 		key, mods := translateKeyEvent(ev)
 		p.enqueueEvent(Event{
 			WindowID: w.id,
@@ -204,14 +243,13 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 			Key:      key,
 			Mods:     mods,
 		})
-		// Also generate EventChar for printable characters.
-		if keyStr := ev.Get("key").String(); len(keyStr) == 1 {
-			r := []rune(keyStr)
-			p.enqueueEvent(Event{
-				WindowID: w.id,
-				Type:     EventChar,
-				Char:     r[0],
-			})
+		// Also generate EventChar for printable characters when the native
+		// input method is disabled. IME-enabled text is delivered by the
+		// hidden input's input event, avoiding keydown/text double-dispatch.
+		if !w.imeEnabled {
+			if keyText := ev.Get("key").String(); len([]rune(keyText)) == 1 {
+				w.enqueueText(keyText)
+			}
 		}
 		return nil
 	})
@@ -300,6 +338,7 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 
 	// Resize: watch window resize and update canvas dimensions.
 	w.addEventListener(js.Global(), "resize", func(_ js.Value, _ []js.Value) any {
+		w.applyIMEInputArea()
 		logW, logH := w.LogicalSize()
 		physW, physH := w.PhysicalSize()
 		p.enqueueEvent(Event{
@@ -312,12 +351,470 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 		})
 		return nil
 	})
+	w.addEventListener(js.Global(), "scroll", func(_ js.Value, _ []js.Value) any {
+		w.applyIMEInputArea()
+		return nil
+	})
 
 	// Context menu suppression (right-click).
 	w.addEventListener(w.canvas, "contextmenu", func(_ js.Value, args []js.Value) any {
 		args[0].Call("preventDefault")
 		return nil
 	})
+}
+
+// registerIMEInput creates the hidden DOM control used by browser IMEs. A
+// canvas is not a text-editing target, and CompositionEvent is only delivered
+// reliably to an input/textarea that owns focus. The control remains attached
+// and focusable while its pixels are transparent and it is positioned at the
+// latest candidate rectangle.
+func (w *browserWindow) registerIMEInput(p *browserPlatform) {
+	doc := js.Global().Get("document")
+	input := doc.Call("createElement", "textarea")
+	input.Set("rows", 1)
+	input.Set("cols", 1)
+	input.Set("wrap", "off")
+	input.Set("tabIndex", -1)
+	input.Call("setAttribute", "aria-hidden", "true")
+	input.Set("autocomplete", "off")
+	input.Set("autocorrect", "off")
+	input.Set("spellcheck", false)
+	style := input.Get("style")
+	style.Set("position", "fixed")
+	style.Set("left", "0px")
+	style.Set("top", "0px")
+	style.Set("width", "1px")
+	style.Set("height", "1px")
+	style.Set("padding", "0")
+	style.Set("margin", "0")
+	style.Set("border", "0")
+	style.Set("outline", "none")
+	style.Set("background", "transparent")
+	style.Set("color", "transparent")
+	style.Set("caretColor", "transparent")
+	style.Set("opacity", "0")
+	style.Set("pointerEvents", "none")
+	// Keep the control in the hit-test/render tree. Some mobile browsers do
+	// not open an IME for off-screen or negative-z-index controls; opacity keeps
+	// it invisible while the rect remains available for candidate placement.
+	style.Set("zIndex", "2147483647")
+	doc.Get("body").Call("appendChild", input)
+	w.imeInput = input
+	w.imeTracker.setEnabled(false)
+
+	w.addEventListener(input, "focus", func(_ js.Value, _ []js.Value) any {
+		w.setBrowserFocus(true)
+		return nil
+	})
+	w.addEventListener(input, "blur", func(_ js.Value, _ []js.Value) any {
+		w.handleIMEInputBlur()
+		return nil
+	})
+	w.addEventListener(input, "compositionstart", func(_ js.Value, _ []js.Value) any {
+		w.handleIMECompositionStart()
+		return nil
+	})
+	w.addEventListener(input, "compositionupdate", func(_ js.Value, args []js.Value) any {
+		w.handleIMECompositionUpdate(jsStringProperty(args[0], "data"))
+		return nil
+	})
+	w.addEventListener(input, "compositionend", func(_ js.Value, args []js.Value) any {
+		w.handleIMECompositionEnd(jsStringProperty(args[0], "data"))
+		return nil
+	})
+	w.addEventListener(input, "beforeinput", func(_ js.Value, args []js.Value) any {
+		w.handleIMEBeforeInput(args[0])
+		return nil
+	})
+	w.addEventListener(input, "input", func(_ js.Value, args []js.Value) any {
+		w.handleIMEInput(args[0])
+		return nil
+	})
+	w.addEventListener(input, "keydown", func(_ js.Value, args []js.Value) any {
+		w.handleIMEKeyDown(args[0], p)
+		return nil
+	})
+	w.addEventListener(input, "keyup", func(_ js.Value, args []js.Value) any {
+		w.handleIMEKeyUp(args[0], p)
+		return nil
+	})
+}
+
+func (w *browserWindow) setBrowserFocus(focused bool) {
+	if w.focused == focused {
+		return
+	}
+	w.focused = focused
+	w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventFocus, Focused: focused})
+}
+
+func (w *browserWindow) handleCanvasBlur() {
+	if w.suppressBlur || w.activeElementIsIMEInput() {
+		return
+	}
+	if w.imeEnabled {
+		w.SetIMEEnabled(false)
+	}
+	w.setBrowserFocus(false)
+}
+
+func (w *browserWindow) handleIMEInputBlur() {
+	if w.suppressBlur {
+		w.suppressBlur = false
+		return
+	}
+	if !w.imeEnabled {
+		return
+	}
+	// Focus moved outside both the canvas and hidden input. Match native
+	// backends: cancel preedit, drop surrounding text, then report disabled.
+	w.SetIMEEnabled(false)
+	if !w.activeElementIsCanvas() {
+		w.setBrowserFocus(false)
+	}
+}
+
+func (w *browserWindow) activeElementIsIMEInput() bool {
+	if w.imeInput.IsNull() || w.imeInput.IsUndefined() {
+		return false
+	}
+	active := js.Global().Get("document").Get("activeElement")
+	return active.Equal(w.imeInput)
+}
+
+func (w *browserWindow) activeElementIsCanvas() bool {
+	if w.canvas.IsNull() || w.canvas.IsUndefined() {
+		return false
+	}
+	active := js.Global().Get("document").Get("activeElement")
+	return active.Equal(w.canvas)
+}
+
+func (w *browserWindow) enqueueText(text string) {
+	if text == "" {
+		return
+	}
+	for _, r := range text {
+		if r < 32 || r == 127 {
+			continue
+		}
+		w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventChar, Char: r})
+	}
+}
+
+func (w *browserWindow) handleIMEKeyDown(ev js.Value, p *browserPlatform) {
+	key, mods := translateKeyEvent(ev)
+	p.enqueueEvent(Event{WindowID: w.id, Type: EventKeyDown, Key: key, Mods: mods})
+}
+
+func (w *browserWindow) handleIMEKeyUp(ev js.Value, p *browserPlatform) {
+	key, mods := translateKeyEvent(ev)
+	p.enqueueEvent(Event{WindowID: w.id, Type: EventKeyUp, Key: key, Mods: mods})
+}
+
+func (w *browserWindow) handleIMECompositionStart() {
+	if !w.imeEnabled || !w.imeTracker.start() {
+		return
+	}
+	w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventIMECompositionStart})
+}
+
+func (w *browserWindow) handleIMECompositionUpdate(data string) {
+	if !w.imeEnabled {
+		return
+	}
+	if w.imeTracker.ensureActive() {
+		w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventIMECompositionStart})
+	}
+	composition := browserIMEComposition(data)
+	if !composition.IsValid() {
+		return
+	}
+	w.platform.enqueueEvent(Event{
+		WindowID:       w.id,
+		Type:           EventIMECompositionUpdate,
+		IMEComposition: composition,
+	})
+}
+
+func (w *browserWindow) handleIMECompositionEnd(data string) {
+	if !w.imeEnabled {
+		return
+	}
+	committed, canceled, ok := w.imeTracker.end(data)
+	if !ok {
+		return
+	}
+	if canceled {
+		w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventIMECanceled})
+		return
+	}
+	w.platform.enqueueEvent(Event{
+		WindowID:     w.id,
+		Type:         EventIMECompositionEnd,
+		IMECommitted: committed,
+	})
+}
+
+func (w *browserWindow) handleIMEBeforeInput(ev js.Value) {
+	if !w.imeEnabled {
+		return
+	}
+	inputType := jsStringProperty(ev, "inputType")
+	deletion, ok := w.browserDeleteSurrounding(ev, inputType)
+	if !ok {
+		return
+	}
+	ev.Call("preventDefault")
+	w.platform.enqueueEvent(Event{
+		WindowID:  w.id,
+		Type:      EventIMEDeleteSurrounding,
+		IMEDelete: deletion,
+	})
+}
+
+func (w *browserWindow) handleIMEInput(ev js.Value) {
+	if !w.imeEnabled {
+		return
+	}
+	inputType := jsStringProperty(ev, "inputType")
+	data := jsStringProperty(ev, "data")
+	text, _ := w.imeTracker.input(inputType, data)
+	w.enqueueText(text)
+}
+
+// SetIMEPosition implements the legacy controller in terms of the richer
+// logical-DIP cursor area.
+func (w *browserWindow) SetIMEPosition(x, y int) {
+	w.SetIMECursorArea(gpucontext.IMECursorArea{X: float64(x), Y: float64(y)})
+}
+
+func (w *browserWindow) IMECapabilities() gpucontext.IMECapabilities {
+	return DefaultIMECapabilities()
+}
+
+func (w *browserWindow) SetIMEEnabled(enabled bool) {
+	if enabled {
+		if w.imeEnabled {
+			w.applyIMEInputArea()
+			w.focusIMEInput()
+			return
+		}
+		w.imeEnabled = true
+		w.imeTracker.setEnabled(true)
+		w.applyIMEInputAttributes()
+		w.applyIMEInputValue()
+		w.applyIMEInputArea()
+		w.focusIMEInput()
+		return
+	}
+	w.disableIME()
+}
+
+func (w *browserWindow) disableIME() {
+	wasEnabled := w.imeEnabled
+	canceled := w.imeTracker.cancel()
+	w.imeTracker.setEnabled(false)
+	w.imeEnabled = false
+	// Do not retain sensitive surrounding text in a DOM control after IME is
+	// disabled. App keeps an explicit copy for replay on the next enable.
+	w.imeSurrounding = gpucontext.IMESurroundingText{}
+	w.imeSurroundingSet = false
+	w.clearIMEInput()
+	if w.activeElementIsIMEInput() {
+		w.suppressBlur = true
+		w.imeInput.Call("blur")
+	}
+	if canceled {
+		w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventIMECanceled})
+	}
+	if wasEnabled {
+		w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventIMEDisabled})
+	}
+}
+
+func (w *browserWindow) SetIMECursorArea(area gpucontext.IMECursorArea) {
+	if !validBrowserIMEArea(area) {
+		return
+	}
+	w.imeArea = area
+	w.imeAreaSet = true
+	if w.imeEnabled {
+		w.applyIMEInputArea()
+	}
+}
+
+func (w *browserWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
+	w.imePurpose, w.imeHints = purpose, hints
+	w.imeSensitive = purpose == gpucontext.ContentPurposePassword ||
+		hints.Has(gpucontext.ContentHintHiddenText) || hints.Has(gpucontext.ContentHintSensitiveData)
+	if w.imeSensitive && w.imeEnabled {
+		// Password/sensitive fields must not leave a focused DOM editor or
+		// an active preedit that could be observed by browser suggestions.
+		w.SetIMEEnabled(false)
+	}
+	w.applyIMEInputAttributes()
+	if w.imeSensitive {
+		w.clearIMEInput()
+	}
+}
+
+func (w *browserWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
+	if !text.IsValid() || !w.imeEnabled || w.imeSensitive {
+		return
+	}
+	w.imeSurrounding = text
+	w.imeSurroundingSet = true
+	w.applyIMEInputValue()
+}
+
+func (w *browserWindow) CancelIME() {
+	if !w.imeTracker.cancel() {
+		return
+	}
+	w.platform.enqueueEvent(Event{WindowID: w.id, Type: EventIMECanceled})
+	w.applyIMEInputValue()
+	if w.imeEnabled {
+		w.focusIMEInput()
+	}
+}
+
+func (w *browserWindow) focusIMEInput() {
+	if w.imeInput.IsNull() || w.imeInput.IsUndefined() {
+		return
+	}
+	w.imeInput.Call("focus")
+}
+
+func (w *browserWindow) clearIMEInput() {
+	if w.imeInput.IsNull() || w.imeInput.IsUndefined() {
+		return
+	}
+	w.imeInput.Set("value", "")
+	w.imeInput.Call("setSelectionRange", 0, 0)
+}
+
+func (w *browserWindow) applyIMEInputValue() {
+	if w.imeInput.IsNull() || w.imeInput.IsUndefined() {
+		return
+	}
+	if !w.imeEnabled || w.imeSensitive || !w.imeSurroundingSet {
+		w.clearIMEInput()
+		return
+	}
+	text := w.imeSurrounding.Text
+	w.imeInput.Set("value", text)
+	start := utf8OffsetToUTF16(text, w.imeSurrounding.Cursor)
+	end := utf8OffsetToUTF16(text, w.imeSurrounding.Anchor)
+	w.imeInput.Call("setSelectionRange", start, end)
+}
+
+func (w *browserWindow) applyIMEInputAttributes() {
+	if w.imeInput.IsNull() || w.imeInput.IsUndefined() {
+		return
+	}
+	inputMode := browserInputMode(w.imePurpose)
+	w.imeInput.Set("inputMode", inputMode)
+	w.imeInput.Set("autocapitalize", browserAutoCapitalize(w.imeHints))
+	spellcheck := !w.imeSensitive && !w.imeHints.Has(gpucontext.ContentHintLowercase)
+	w.imeInput.Set("spellcheck", spellcheck)
+	if w.imeSensitive {
+		w.imeInput.Set("autocomplete", "new-password")
+		w.imeInput.Set("autocorrect", "off")
+	} else {
+		w.imeInput.Set("autocomplete", "off")
+		w.imeInput.Set("autocorrect", "on")
+	}
+}
+
+func (w *browserWindow) applyIMEInputArea() {
+	if !w.imeAreaSet || w.imeInput.IsNull() || w.imeInput.IsUndefined() {
+		return
+	}
+	area := w.imeArea
+	canvasRect := w.canvas.Call("getBoundingClientRect")
+	left := canvasRect.Get("left").Float() + area.X
+	top := canvasRect.Get("top").Float() + area.Y
+	style := w.imeInput.Get("style")
+	style.Set("left", cssPixels(left))
+	style.Set("top", cssPixels(top))
+	style.Set("width", cssPixels(math.Max(area.Width, 1)))
+	style.Set("height", cssPixels(math.Max(area.Height, 1)))
+}
+
+func cssPixels(value float64) string {
+	return fmt.Sprintf("%.3fpx", value)
+}
+
+func jsStringProperty(value js.Value, property string) string {
+	propertyValue := value.Get(property)
+	if propertyValue.IsUndefined() || propertyValue.IsNull() {
+		return ""
+	}
+	return propertyValue.String()
+}
+
+func (w *browserWindow) browserDeleteSurrounding(ev js.Value, inputType string) (gpucontext.IMEDeleteSurroundingEvent, bool) {
+	text := ""
+	if !w.imeSensitive && w.imeSurroundingSet {
+		text = w.imeSurrounding.Text
+	} else if !w.imeInput.IsNull() && !w.imeInput.IsUndefined() {
+		text = w.imeInput.Get("value").String()
+	}
+	if !utf8.ValidString(text) {
+		return gpucontext.IMEDeleteSurroundingEvent{}, false
+	}
+	start16, end16, ok := browserSelection(ev, text, w.imeSurrounding)
+	if !ok {
+		return gpucontext.IMEDeleteSurroundingEvent{}, false
+	}
+	start := utf16OffsetToUTF8(text, start16)
+	end := utf16OffsetToUTF8(text, end16)
+	if start > end {
+		start, end = end, start
+	}
+	if start < 0 || end < start || end > len(text) {
+		return gpucontext.IMEDeleteSurroundingEvent{}, false
+	}
+	if start != end {
+		// A selected range is represented as an atomic deletion before the
+		// DOM's selection anchor. Consumers apply it as one edit.
+		deletion := gpucontext.IMEDeleteSurroundingEvent{Before: end - start}
+		return deletion, deletion.IsValid()
+	}
+
+	var before, after int
+	switch inputType {
+	case "deleteContentBackward":
+		before = previousRuneBytes(text, start)
+	case "deleteWordBackward":
+		before = start - previousWordStart(text, start)
+	case "deleteContentForward":
+		after = nextRuneBytes(text, start)
+	case "deleteWordForward":
+		after = nextWordEnd(text, start) - start
+	default:
+		return gpucontext.IMEDeleteSurroundingEvent{}, false
+	}
+	deletion := gpucontext.IMEDeleteSurroundingEvent{Before: before, After: after}
+	if !deletion.IsValid() || before == 0 && after == 0 {
+		return gpucontext.IMEDeleteSurroundingEvent{}, false
+	}
+	return deletion, true
+}
+
+func browserSelection(ev js.Value, text string, surrounding gpucontext.IMESurroundingText) (start, end int, ok bool) {
+	target := ev.Get("target")
+	if !target.IsUndefined() && !target.IsNull() {
+		startValue, endValue := target.Get("selectionStart"), target.Get("selectionEnd")
+		if !startValue.IsUndefined() && !startValue.IsNull() && !endValue.IsUndefined() && !endValue.IsNull() {
+			return startValue.Int(), endValue.Int(), true
+		}
+	}
+	if surrounding.IsValid() {
+		return utf8OffsetToUTF16(text, surrounding.Cursor), utf8OffsetToUTF16(text, surrounding.Anchor), true
+	}
+	return 0, 0, false
 }
 
 // addEventListener registers a JS event listener and tracks the callback for cleanup.
@@ -495,11 +992,22 @@ func (w *browserWindow) StartDrag(paths []string, done func(DragResult)) {
 
 // Destroy releases JS callbacks.
 func (w *browserWindow) Destroy() {
+	if !w.imeInput.IsNull() && !w.imeInput.IsUndefined() {
+		parent := w.imeInput.Get("parentNode")
+		if !parent.IsNull() && !parent.IsUndefined() {
+			parent.Call("removeChild", w.imeInput)
+		}
+		w.imeInput = js.Null()
+	}
 	for _, cb := range w.jsCallbacks {
 		cb.Release()
 	}
 	w.jsCallbacks = nil
 }
+
+var _ PlatformWindow = (*browserWindow)(nil)
+var _ gpucontext.IMEControllerV2 = (*browserWindow)(nil)
+var _ gpucontext.IMECapabilityProviderV2 = (*browserWindow)(nil)
 
 // --------------------------------------------------------------------------
 // Key and pointer event translation helpers
