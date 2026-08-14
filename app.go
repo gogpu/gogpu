@@ -1425,16 +1425,52 @@ func (a *App) ClipboardWrite(text string) error {
 }
 
 // FileDialogOptions configures a native file open or save dialog.
-type FileDialogOptions = platform.FileDialogOptions
+//
+// The application package owns this public type. The platform package uses
+// its own internal representation and receives a converted copy at the
+// platform boundary.
+type FileDialogOptions struct {
+	Title            string
+	Filters          []FileTypeFilter
+	Directory        bool   // pick a directory instead of a file
+	Multiple         bool   // allow multi-selection (open only)
+	InitialDirectory string // starting directory (optional)
+	DefaultFilename  string // suggested filename for save dialog (optional)
+}
 
 // FileTypeFilter restricts the visible files in a dialog by extension.
-type FileTypeFilter = platform.FileTypeFilter
+type FileTypeFilter struct {
+	Name       string   // e.g. "Images"
+	Extensions []string // e.g. ["*.png", "*.jpg"] or ["png", "jpg"]
+}
+
+// platformFileDialogOptions converts the public dialog contract to the
+// platform package's private boundary type. Slices are copied so a platform
+// implementation cannot mutate caller-owned dialog options.
+func platformFileDialogOptions(opts FileDialogOptions) platform.FileDialogOptions {
+	converted := platform.FileDialogOptions{
+		Title:            opts.Title,
+		Directory:        opts.Directory,
+		Multiple:         opts.Multiple,
+		InitialDirectory: opts.InitialDirectory,
+		DefaultFilename:  opts.DefaultFilename,
+	}
+	if len(opts.Filters) == 0 {
+		return converted
+	}
+	converted.Filters = make([]platform.FileTypeFilter, len(opts.Filters))
+	for i, filter := range opts.Filters {
+		converted.Filters[i].Name = filter.Name
+		converted.Filters[i].Extensions = append([]string(nil), filter.Extensions...)
+	}
+	return converted
+}
 
 // ShowOpenFileDialog opens a native file picker dialog on the primary window.
 // Returns nil, nil if the user cancels without making a selection.
 func (a *App) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
 	if a.manager != nil {
-		return a.manager.ShowOpenFileDialog(opts)
+		return a.manager.ShowOpenFileDialog(platformFileDialogOptions(opts))
 	}
 	return nil, nil
 }
@@ -1443,7 +1479,7 @@ func (a *App) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
 // Returns "", nil if the user cancels.
 func (a *App) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
 	if a.manager != nil {
-		return a.manager.ShowSaveFileDialog(opts)
+		return a.manager.ShowSaveFileDialog(platformFileDialogOptions(opts))
 	}
 	return "", nil
 }
@@ -1771,14 +1807,15 @@ func (a *App) Config() Config {
 	return a.config
 }
 
-// DeviceProvider returns a provider for GPU resources.
-// This enables dependency injection of GPU capabilities into external
-// libraries without circular dependencies.
+// DeviceProvider returns the legacy gogpu GPU resource provider.
+//
+// Deprecated: use GPUContextProvider instead. It returns the shared
+// gpucontext.DeviceProvider contract used by gg, ui, and other consumers.
 //
 // Example:
 //
 //	app := gogpu.NewApp(gogpu.Config{Title: "My App"})
-//	provider := app.DeviceProvider()
+//	provider := app.GPUContextProvider()
 //
 //	// Access GPU resources
 //	device := provider.Device()

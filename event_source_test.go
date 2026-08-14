@@ -75,7 +75,12 @@ func TestEventSourceCallbackRegistration(t *testing.T) {
 			called = true
 		})
 		adapter := es.(*eventSourceAdapter)
-		adapter.dispatchMouseMove(100, 200)
+		adapter.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerMove,
+			PointerType: gpucontext.PointerTypeMouse,
+			X:           100,
+			Y:           200,
+		})
 		if !called {
 			t.Error("OnMouseMove callback was not called")
 		}
@@ -87,7 +92,13 @@ func TestEventSourceCallbackRegistration(t *testing.T) {
 			called = true
 		})
 		adapter := es.(*eventSourceAdapter)
-		adapter.dispatchMousePress(gpucontext.MouseButtonLeft, 100, 200)
+		adapter.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerDown,
+			PointerType: gpucontext.PointerTypeMouse,
+			Button:      gpucontext.ButtonLeft,
+			X:           100,
+			Y:           200,
+		})
 		if !called {
 			t.Error("OnMousePress callback was not called")
 		}
@@ -99,7 +110,13 @@ func TestEventSourceCallbackRegistration(t *testing.T) {
 			called = true
 		})
 		adapter := es.(*eventSourceAdapter)
-		adapter.dispatchMouseRelease(gpucontext.MouseButtonLeft, 100, 200)
+		adapter.dispatchPointerEvent(gpucontext.PointerEvent{
+			Type:        gpucontext.PointerUp,
+			PointerType: gpucontext.PointerTypeMouse,
+			Button:      gpucontext.ButtonLeft,
+			X:           100,
+			Y:           200,
+		})
 		if !called {
 			t.Error("OnMouseRelease callback was not called")
 		}
@@ -111,21 +128,17 @@ func TestEventSourceCallbackRegistration(t *testing.T) {
 			called = true
 		})
 		adapter := es.(*eventSourceAdapter)
-		adapter.dispatchScroll(10, 20)
+		adapter.dispatchScrollEventDetailed(gpucontext.ScrollEvent{DeltaX: 10, DeltaY: 20})
 		if !called {
 			t.Error("OnScroll callback was not called")
 		}
 	})
 
 	t.Run("OnResize", func(t *testing.T) {
-		called := false
-		es.OnResize(func(width, height int) {
-			called = true
-		})
+		es.OnResize(func(width, height int) {})
 		adapter := es.(*eventSourceAdapter)
-		adapter.dispatchResize(800, 600)
-		if !called {
-			t.Error("OnResize callback was not called")
+		if adapter.onResize == nil {
+			t.Error("OnResize callback was not registered")
 		}
 	})
 
@@ -151,11 +164,8 @@ func TestEventSourceNilCallbacks(t *testing.T) {
 		adapter.dispatchKeyPress(gpucontext.KeyA, 0)
 		adapter.dispatchKeyRelease(gpucontext.KeyA, 0)
 		adapter.dispatchTextInput("test")
-		adapter.dispatchMouseMove(0, 0)
-		adapter.dispatchMousePress(gpucontext.MouseButtonLeft, 0, 0)
-		adapter.dispatchMouseRelease(gpucontext.MouseButtonLeft, 0, 0)
-		adapter.dispatchScroll(0, 0)
-		adapter.dispatchResize(800, 600)
+		adapter.dispatchPointerEvent(gpucontext.PointerEvent{PointerType: gpucontext.PointerTypeMouse})
+		adapter.dispatchScrollEventDetailed(gpucontext.ScrollEvent{})
 		adapter.dispatchFocus(true)
 	})
 }

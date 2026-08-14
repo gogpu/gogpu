@@ -49,7 +49,6 @@ func TestDarwinAppRunSmoke(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo).
 		WithContinuousRender(true)
 
 	frames := 0
@@ -78,7 +77,6 @@ func TestDarwinAppRunNoDraw(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo).
 		WithContinuousRender(true)
 
 	frames := 0
@@ -104,7 +102,6 @@ func TestDarwinAppRunPanicOnUpdate(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo).
 		WithContinuousRender(true)
 
 	runAppOnce(t, cfg,
@@ -124,7 +121,6 @@ func TestDarwinAppRunPanicOnDrawNoTriangle(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo).
 		WithContinuousRender(true)
 
 	runAppOnce(t, cfg,
@@ -146,7 +142,6 @@ func TestDarwinAppRunPanicPath(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
 		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo).
 		WithContinuousRender(true)
 
 	const iterations = 20
@@ -173,8 +168,7 @@ func TestDarwinAppRunPanicPath(t *testing.T) {
 func TestDarwinAppQuitUnblocksIdle(t *testing.T) {
 	cfg := gogpu.DefaultConfig().
 		WithTitle("gogpu").
-		WithSize(640, 480).
-		WithBackend(gogpu.BackendGo)
+		WithSize(640, 480)
 	// ContinuousRender left false: after the first frame the loop idles.
 
 	done := make(chan struct{})

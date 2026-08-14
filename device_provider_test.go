@@ -6,14 +6,14 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-// TestDeviceProviderInterface verifies the DeviceProvider interface contract.
-func TestDeviceProviderInterface(t *testing.T) {
+// TestLegacyDeviceProviderInterface verifies the deprecated compatibility contract.
+func TestLegacyDeviceProviderInterface(t *testing.T) {
 	// Verify interface methods exist with HAL types
 	var _ DeviceProvider = (*rendererDeviceProvider)(nil)
 }
 
-// TestDeviceProviderNilBeforeRun verifies DeviceProvider returns nil before Run().
-func TestDeviceProviderNilBeforeRun(t *testing.T) {
+// TestLegacyDeviceProviderNilBeforeRun verifies the deprecated method remains nil before Run().
+func TestLegacyDeviceProviderNilBeforeRun(t *testing.T) {
 	app := NewApp(DefaultConfig())
 
 	provider := app.DeviceProvider()
@@ -22,7 +22,7 @@ func TestDeviceProviderNilBeforeRun(t *testing.T) {
 	}
 }
 
-// TestRendererDeviceProviderImplementation verifies rendererDeviceProvider implements DeviceProvider.
+// TestRendererDeviceProviderImplementation verifies the legacy adapter remains source-compatible.
 func TestRendererDeviceProviderImplementation(t *testing.T) {
 	// Compile-time check that rendererDeviceProvider implements DeviceProvider
 	var _ DeviceProvider = (*rendererDeviceProvider)(nil)
@@ -77,8 +77,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestConfigBuilder(t *testing.T) {
 	config := DefaultConfig().
 		WithTitle("Test Window").
-		WithSize(1024, 768).
-		WithBackend(BackendGo)
+		WithSize(1024, 768)
 
 	if config.Title != "Test Window" {
 		t.Errorf("Title = %q, want %q", config.Title, "Test Window")
@@ -88,8 +87,5 @@ func TestConfigBuilder(t *testing.T) {
 	}
 	if config.Height != 768 {
 		t.Errorf("Height = %d, want %d", config.Height, 768)
-	}
-	if config.Backend != BackendGo {
-		t.Errorf("Backend = %v, want %v", config.Backend, BackendGo)
 	}
 }

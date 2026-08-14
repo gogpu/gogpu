@@ -212,35 +212,18 @@ tex, err := renderer.LoadTextureWithOptions("tile.png", opts)
 
 ---
 
-## DeviceProvider Interface
+## GPU Resource Integration (gpucontext)
 
-GoGPU exposes GPU resources through the `DeviceProvider` interface for integration with external libraries:
-
-```go
-type DeviceProvider interface {
-    Device() hal.Device              // HAL GPU device (type-safe Go interface)
-    Queue() hal.Queue                // HAL command queue
-    SurfaceFormat() gputypes.TextureFormat
-}
-
-// Usage
-provider := app.DeviceProvider()
-device := provider.Device()   // hal.Device — 30+ methods with error returns
-queue := provider.Queue()     // hal.Queue — Submit, WriteBuffer, ReadBuffer
-```
-
-### Cross-Package Integration (gpucontext)
-
-For integration with external libraries like [gogpu/gg](https://github.com/gogpu/gg), use the standard [gpucontext](https://github.com/gogpu/gpucontext) interfaces:
+For integration with external libraries like [gogpu/gg](https://github.com/gogpu/gg), use the shared [gpucontext](https://github.com/gogpu/gpucontext) interfaces:
 
 ```go
 import "github.com/gogpu/gpucontext"
 
-// Get gpucontext.DeviceProvider for external libraries
+// Get gpucontext.DeviceProvider for external libraries.
 provider := app.GPUContextProvider()
-device := provider.Device()   // gpucontext.Device interface
-queue := provider.Queue()     // gpucontext.Queue interface
-format := provider.SurfaceFormat() // gpucontext.TextureFormat
+device := provider.Device()   // opaque gpucontext.Device handle
+queue := provider.Queue()     // opaque gpucontext.Queue handle
+format := provider.SurfaceFormat()
 
 // Get gpucontext.EventSource for UI frameworks
 events := app.EventSource()
@@ -254,17 +237,19 @@ events.OnMousePress(func(button gpucontext.MouseButton, x, y float64) {
 
 This enables enterprise-grade dependency injection between packages without circular imports.
 
-### DeviceProvider (GPU Access)
-
-For GPU compute and custom rendering, access the wgpu device directly:
+To use the concrete wgpu API for compute shaders or custom pipelines, convert
+the opaque handle at the integration boundary:
 
 ```go
-provider := app.DeviceProvider()
-device := provider.Device()   // *wgpu.Device — full WebGPU API
-queue := device.Queue()       // *wgpu.Queue — command submission
+import "github.com/gogpu/wgpu"
+
+provider := app.GPUContextProvider()
+device := wgpu.DeviceFromHandle(provider.Device())
+queue := device.Queue()
 ```
 
-Used for compute shaders, custom render pipelines, and by [gogpu/gg](https://github.com/gogpu/gg) GPU accelerator.
+The shared provider is also what [gogpu/gg](https://github.com/gogpu/gg) uses
+for its GPU accelerator.
 
 ### SurfaceView (Zero-Copy Rendering)
 
@@ -509,7 +494,7 @@ if err := app.Run(); err != nil {
 Full compute shader support via wgpu public API:
 
 ```go
-device := app.DeviceProvider().Device()
+device := wgpu.DeviceFromHandle(app.GPUContextProvider().Device())
 
 // WGSL compute shader
 shader, _ := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{

@@ -195,7 +195,7 @@ Enterprise API audit: unexport internals, remove dead code, fix documentation.
 - [ ] Remove dead `gogpu.DeviceProvider` interface (replaced by `gpucontext.DeviceProvider`)
 - [ ] Replace type aliases `FileDialogOptions`/`FileTypeFilter` with real types
 - [ ] Rewrite `doc.go` (says "macOS: Planned" — fully supported since v0.21.0)
-- [ ] Deprecate `Config.Backend` + `WithBackend()` (obsolete per ADR-038 build tags)
+- [x] Deprecate `Config.Backend` + `WithBackend()` (retained as ignored compatibility shims; obsolete per ADR-038 build tags)
 - [ ] `App.SetTitle()` — platform layer ready, expose in public API
 
 ### v0.43.x — Wayland Cursor Fallback (ADR-043)

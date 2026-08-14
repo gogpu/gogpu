@@ -46,7 +46,7 @@ func (a *gpuContextAdapter) SurfaceFormat() gputypes.TextureFormat {
 	if a.renderer == nil {
 		return gputypes.TextureFormatUndefined
 	}
-	return mapTextureFormat(a.renderer.primary.format)
+	return allowedSurfaceFormat(a.renderer.primary.format)
 }
 
 // Adapter returns the GPU adapter as gpucontext.Adapter opaque handle.
@@ -197,8 +197,9 @@ var _ gpucontext.WindowProvider = (*gpuContextAdapter)(nil)
 // Ensure gpuContextAdapter implements gpucontext.PlatformProvider.
 var _ gpucontext.PlatformProvider = (*gpuContextAdapter)(nil)
 
-// mapTextureFormat converts gogpu TextureFormat to gputypes TextureFormat.
-func mapTextureFormat(format gputypes.TextureFormat) gputypes.TextureFormat {
+// allowedSurfaceFormat returns the surface formats supported by the shared
+// gpucontext contract. Unsupported formats are reported as undefined.
+func allowedSurfaceFormat(format gputypes.TextureFormat) gputypes.TextureFormat {
 	switch format {
 	case gputypes.TextureFormatRGBA8Unorm:
 		return gputypes.TextureFormatRGBA8Unorm
