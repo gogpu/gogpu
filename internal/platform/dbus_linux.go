@@ -2,8 +2,9 @@
 
 // Minimal hand-written D-Bus session bus client.
 //
-// Covers exactly the wire shapes needed by org.freedesktop.portal.FileChooser
-// (ADR-036) and reusable for future D-Bus portals (ADR-040).
+// Covers the wire shapes needed by org.freedesktop.portal.FileChooser and
+// org.freedesktop.portal.Print (ADR-036/040), with Unix FD passing for portal
+// document submission and no external D-Bus dependency.
 //
 // Wire format summary:
 //
@@ -17,6 +18,7 @@
 package platform
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -27,8 +29,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // errPortalUnavailable is returned by portalOpenFile/portalSaveFile when the
@@ -57,6 +62,10 @@ const (
 	dbusFieldDest        byte = 6
 	dbusFieldSender      byte = 7
 	dbusFieldSignature   byte = 8
+	// dbusFieldUnixFds announces the number of file descriptors attached to a
+	// message through SCM_RIGHTS.  The body refers to those descriptors by a
+	// zero-based index using the D-Bus `h` type.
+	dbusFieldUnixFds byte = 9
 )
 
 // dbusSerial is a process-global counter used to generate unique portal request tokens.
@@ -73,31 +82,70 @@ type dbusMsg struct {
 	ErrorName string // ERROR_NAME header field (non-empty only for dbusMsgError)
 	Sender    string
 	Sig       string // body signature
+	UnixFDs   uint32 // UNIX_FDS header field (number of attached descriptors)
 	Body      []byte
 }
 
 // dbusConn is a D-Bus session bus connection that has completed SASL auth and
 // the Hello handshake.  Close rw when done.
 type dbusConn struct {
-	rw     net.Conn
-	serial uint32
-	name   string // unique bus name assigned by Hello (e.g. ":1.42")
+	rw      net.Conn
+	serial  uint32
+	name    string     // unique bus name assigned by Hello (e.g. ":1.42")
+	writeMu sync.Mutex // serializes complete D-Bus writes and serial allocation
 }
 
 // dbusConnect opens the session bus socket, performs SASL EXTERNAL authentication,
 // and sends the mandatory Hello method call to obtain our unique bus name.
 func dbusConnect() (*dbusConn, error) {
+	return dbusConnectContext(context.Background())
+}
+
+// dbusConnectContext is dbusConnect with a cancellation-aware Unix dial.  The
+// authentication/Hello exchange is still bounded by the same short deadline
+// used by dbusConnect, so a portal that is present but unresponsive cannot
+// hold StartPrint indefinitely.
+func dbusConnectContext(ctx context.Context) (*dbusConn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	addr := os.Getenv("DBUS_SESSION_BUS_ADDRESS")
 	if addr == "" {
 		return nil, fmt.Errorf("dbus: DBUS_SESSION_BUS_ADDRESS not set")
 	}
 
-	raw, err := dbusDialAddr(addr)
+	raw, err := dbusDialAddrContext(ctx, addr)
 	if err != nil {
 		return nil, fmt.Errorf("dbus: dial: %w", err)
 	}
 
 	c := &dbusConn{rw: raw}
+	if err := ctx.Err(); err != nil {
+		raw.Close()
+		return nil, err
+	}
+	// Authentication and Hello are synchronous wire exchanges.  Close the
+	// socket from a short-lived watcher when the caller cancels so either phase
+	// returns promptly instead of waiting for its five-second deadline.
+	stopCancel := make(chan struct{})
+	if done := ctx.Done(); done != nil {
+		go func() {
+			select {
+			case <-done:
+				_ = raw.Close()
+			case <-stopCancel:
+			}
+		}()
+	}
+	defer close(stopCancel)
+	// auth() has no context parameter because it is also used by the existing
+	// file chooser path.  A bounded socket deadline keeps this setup phase
+	// cancellable in practice while the dial itself observes ctx directly.
+	setupDeadline := time.Now().Add(5 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(setupDeadline) {
+		setupDeadline = ctxDeadline
+	}
+	raw.SetDeadline(setupDeadline)
 	if err := c.auth(); err != nil {
 		raw.Close()
 		return nil, fmt.Errorf("dbus: auth: %w", err)
@@ -105,7 +153,11 @@ func dbusConnect() (*dbusConn, error) {
 
 	// Bound the Hello round-trip; clear the deadline so that the caller
 	// (portal dialog) can set its own longer deadline via waitResponse.
-	c.rw.SetDeadline(time.Now().Add(5 * time.Second))
+	deadline := time.Now().Add(5 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	c.rw.SetDeadline(deadline)
 	name, err := c.hello()
 	c.rw.SetDeadline(time.Time{})
 	if err != nil {
@@ -125,6 +177,17 @@ func dbusConnect() (*dbusConn, error) {
 // unix:abstract=... (Linux abstract namespace, '\x00' prefix).
 // Multiple addresses separated by ';' are tried in order.
 func dbusDialAddr(addr string) (net.Conn, error) {
+	return dbusDialAddrContext(context.Background(), addr)
+}
+
+// dbusDialAddrContext is the context-aware counterpart to dbusDialAddr.  A
+// D-Bus session address may contain several transports; each Unix transport
+// is attempted in order until one succeeds.
+func dbusDialAddrContext(ctx context.Context, addr string) (net.Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dialer := &net.Dialer{}
 	for _, transport := range strings.Split(addr, ";") {
 		if !strings.HasPrefix(transport, "unix:") {
 			continue
@@ -132,16 +195,18 @@ func dbusDialAddr(addr string) (net.Conn, error) {
 		params := dbusParseParams(transport[len("unix:"):])
 
 		if path, ok := params["path"]; ok {
-			if conn, err := net.Dial("unix", path); err == nil {
+			if conn, err := dialer.DialContext(ctx, "unix", path); err == nil {
 				return conn, nil
 			}
 		}
 		if abstract, ok := params["abstract"]; ok {
-			uaddr := &net.UnixAddr{Net: "unix", Name: "\x00" + abstract}
-			if conn, err := net.DialUnix("unix", nil, uaddr); err == nil {
+			if conn, err := dialer.DialContext(ctx, "unix", "\x00"+abstract); err == nil {
 				return conn, nil
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return nil, fmt.Errorf("dbus: unreachable bus address %q", addr)
 }
@@ -211,10 +276,98 @@ func (c *dbusConn) hello() (string, error) {
 // sendCall encodes a D-Bus METHOD_CALL message, writes it to the connection, and
 // returns the serial number used (needed to match the eventual METHOD_RETURN).
 func (c *dbusConn) sendCall(dest, path, iface, member, sig string, body []byte) (uint32, error) {
+	return c.sendCallWithFDs(dest, path, iface, member, sig, body, nil)
+}
+
+// sendCallContext makes the setup-phase method call interruptible.  A portal
+// connection is not handed to a PrintJob until PreparePrint has been written,
+// so there is no cancellation watcher that can close a blocked write yet.  On
+// context cancellation, closing the socket unblocks the writer and prevents a
+// request that cannot be tracked from outliving its temporary document.
+func (c *dbusConn) sendCallContext(ctx context.Context, dest, path, iface, member, sig string, body []byte) (uint32, error) {
+	if ctx == nil {
+		return c.sendCall(dest, path, iface, member, sig, body)
+	}
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	type result struct {
+		serial uint32
+		err    error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		serial, err := c.sendCall(dest, path, iface, member, sig, body)
+		resultCh <- result{serial: serial, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		return result.serial, result.err
+	case <-ctx.Done():
+		_ = c.rw.Close()
+		return 0, ctx.Err()
+	}
+}
+
+// sendCallWithFDs is sendCall with optional Unix file descriptors attached via
+// SCM_RIGHTS.  D-Bus represents each descriptor in the body as an `h` value
+// containing its zero-based index and announces the count in the UNIX_FDS
+// header field.  The portal Print API uses this to receive the document.
+func (c *dbusConn) sendCallWithFDs(dest, path, iface, member, sig string, body []byte, fds []int) (uint32, error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	c.serial++
-	raw := dbusEncodeMsg(dbusMsgCall, c.serial, dest, path, iface, member, sig, body)
-	_, err := c.rw.Write(raw)
+	raw := dbusEncodeMsgWithFDs(dbusMsgCall, c.serial, dest, path, iface, member, sig, body, uint32(len(fds)))
+	var err error
+	if len(fds) == 0 {
+		var n int
+		n, err = c.rw.Write(raw)
+		if err == nil && n != len(raw) {
+			err = io.ErrShortWrite
+		}
+	} else {
+		conn, ok := c.rw.(*net.UnixConn)
+		if !ok {
+			return c.serial, fmt.Errorf("dbus: UnixFDs require UnixConn, got %T", c.rw)
+		}
+		n, _, writeErr := conn.WriteMsgUnix(raw, unix.UnixRights(fds...), nil)
+		err = writeErr
+		if err == nil && n != len(raw) {
+			err = io.ErrShortWrite
+		}
+	}
 	return c.serial, err
+}
+
+// closeRequest asks the portal to end a user interaction.  Cancellation also
+// closes the session socket, which is the fallback when a concurrent write is
+// in progress; TryLock keeps the cancellation path from waiting behind a
+// blocked D-Bus write that the socket close is about to interrupt.
+func (c *dbusConn) closeRequest(handlePath string) {
+	if c == nil || c.rw == nil || handlePath == "" || !c.writeMu.TryLock() {
+		return
+	}
+	defer c.writeMu.Unlock()
+	c.serial++
+	raw := dbusEncodeMsg(
+		dbusMsgCall,
+		c.serial,
+		"org.freedesktop.portal.Desktop",
+		handlePath,
+		"org.freedesktop.portal.Request",
+		"Close",
+		"",
+		nil,
+	)
+	// Never let cancellation wait indefinitely for a portal socket reader.  A
+	// subsequent connection close still aborts the request when this best-effort
+	// Close call cannot be delivered.
+	_ = c.rw.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+	_, _ = c.rw.Write(raw)
+	_ = c.rw.SetWriteDeadline(time.Time{})
 }
 
 // waitResponse reads incoming messages and waits in two stages:
@@ -227,6 +380,19 @@ func (c *dbusConn) sendCall(dest, path, iface, member, sig string, body []byte) 
 // Returns nil, nil if the portal reports that the user canceled (response code 1).
 // A 5-minute deadline guards against a hung or crashed portal daemon.
 func (c *dbusConn) waitResponse(callSerial uint32, handlePath string) ([]string, error) {
+	body, err := c.waitResponseBody(callSerial, handlePath)
+	if err != nil {
+		return nil, err
+	}
+	return decodePortalResponse(body)
+}
+
+// waitResponseBody waits for an xdg-desktop-portal Request.Response signal and
+// returns its raw ua{sv} body.  Keeping response decoding separate lets the
+// Print portal consume its token while the existing FileChooser path continues
+// to decode URI results.  Signals may arrive before the method return, so the
+// first matching signal is buffered until the return is observed.
+func (c *dbusConn) waitResponseBody(callSerial uint32, handlePath string) ([]byte, error) {
 	c.rw.SetDeadline(time.Now().Add(5 * time.Minute))
 	var early *dbusMsg // Response signal buffered before METHOD_RETURN
 	gotReturn := false
@@ -244,7 +410,7 @@ func (c *dbusConn) waitResponse(callSerial uint32, handlePath string) ([]string,
 				if msg.Type == dbusMsgReturn {
 					gotReturn = true
 					if early != nil {
-						return decodePortalResponse(early.Body)
+						return early.Body, nil
 					}
 				}
 			} else if msg.Type == dbusMsgSignal &&
@@ -258,7 +424,7 @@ func (c *dbusConn) waitResponse(callSerial uint32, handlePath string) ([]string,
 		if msg.Type == dbusMsgSignal &&
 			msg.Path == handlePath &&
 			msg.Member == "Response" {
-			return decodePortalResponse(msg.Body)
+			return msg.Body, nil
 		}
 	}
 }
@@ -360,8 +526,11 @@ func dbusParseHdrFields(hdrData []byte, msg *dbusMsg) {
 			if err != nil {
 				break
 			}
-			if code == dbusFieldReplySerial {
+			switch code {
+			case dbusFieldReplySerial:
 				msg.ReplyTo = v
+			case dbusFieldUnixFds:
+				msg.UnixFDs = v
 			}
 		case "g":
 			g, err := d.readSig()
@@ -452,6 +621,11 @@ func (b *msgBuf) variantStr(v string) { b.sig("s"); b.str(v) }
 // variantBool encodes a D-Bus variant v(b): signature "b" followed by the bool value.
 func (b *msgBuf) variantBool(v bool) { b.sig("b"); b.bool32(v) }
 
+// variantU32 encodes a D-Bus variant v(u): signature "u" followed by the
+// unsigned 32-bit value.  The Print portal returns its prepared settings token
+// in this form and accepts it on the subsequent Print call.
+func (b *msgBuf) variantU32(v uint32) { b.sig("u"); b.u32(v) }
+
 // variantByteArray encodes a D-Bus variant v(ay): signature "ay" followed by the byte slice.
 func (b *msgBuf) variantByteArray(v []byte) {
 	b.sig("ay")
@@ -507,6 +681,14 @@ func dbusAssembleMsg(msgType, flags byte, serial uint32, hdrBytes, body []byte) 
 // The fixed 16-byte header, variable header fields, 8-byte-boundary padding,
 // and body are concatenated into a single slice ready to write to the socket.
 func dbusEncodeMsg(msgType byte, serial uint32, dest, path, iface, member, bodySig string, body []byte) []byte {
+	return dbusEncodeMsgWithFDs(msgType, serial, dest, path, iface, member, bodySig, body, 0)
+}
+
+// dbusEncodeMsgWithFDs is dbusEncodeMsg with an optional UNIX_FDS header field.
+// The descriptors themselves are attached by sendCallWithFDs; this function
+// only emits the D-Bus metadata required for the receiver to interpret `h`
+// values in the body.
+func dbusEncodeMsgWithFDs(msgType byte, serial uint32, dest, path, iface, member, bodySig string, body []byte, unixFDCount uint32) []byte {
 	hdr := newMsgBuf(16) // header fields start at absolute offset 16
 	dbusWriteHdrField(hdr, dbusFieldPath, "o", func() { hdr.str(path) })
 	if iface != "" {
@@ -516,6 +698,9 @@ func dbusEncodeMsg(msgType byte, serial uint32, dest, path, iface, member, bodyS
 	dbusWriteHdrField(hdr, dbusFieldDest, "s", func() { hdr.str(dest) })
 	if bodySig != "" {
 		dbusWriteHdrField(hdr, dbusFieldSignature, "g", func() { hdr.sig(bodySig) })
+	}
+	if unixFDCount > 0 {
+		dbusWriteHdrField(hdr, dbusFieldUnixFds, "u", func() { hdr.u32(unixFDCount) })
 	}
 	return dbusAssembleMsg(msgType, 0, serial, hdr.data, body)
 }
