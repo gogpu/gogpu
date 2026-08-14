@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **macOS: `SetMenu` separators lost between Role items** (#456) — top-level separators were routed to the menu bar (invisible). They now go to the App Menu submenu, matching GLFW `cocoa_init.m`.
+- **macOS: About ⓘ icon missing on Role+Action** (#456) — custom `Action` no longer swaps the item to `handleMenuItem:`. Role+Action keeps the system selector (`orderFrontStandardAboutPanel:` etc.) and overrides via `setTarget:` on the app delegate (Electron/Qt pattern), so AppKit still draws role chrome.
+- **macOS: `SetMenu` appended to App Menu instead of replacing** (#456) — `applyMenu` now clears the App Menu submenu before applying caller items (`Menu.setApplicationMenu()` replace semantics).
+- **macOS: only one separator visible in App Menu** (#456) — `+[NSMenuItem separatorItem]` is a shared singleton; adding it repeatedly moved the same instance. Each separator is now `copy`'d before insert (AppKit requirement).
+- **macOS: `RoleServices` was a no-op** (#456) — now creates the Services submenu and registers it with `setServicesMenu:` (GLFW pattern). Default `createAppMenu` also attaches the Services item that was previously missing.
+
 ## [0.53.0] - 2026-08-13
 
 ### Added

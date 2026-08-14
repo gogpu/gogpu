@@ -166,6 +166,80 @@ func TestAddSeparatorItem(t *testing.T) {
 	})
 }
 
+// TestAddSeparatorItem_MultipleCopies verifies that each AddSeparatorItem
+// inserts a distinct separator. +[NSMenuItem separatorItem] is a singleton;
+// without copy, a second add would move/replace the first (#456 follow-up).
+func TestAddSeparatorItem_MultipleCopies(t *testing.T) {
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			t.Fatal("NewMainMenu() returned nil")
+		}
+
+		before := menu.GetInt64(platformdarwin.RegisterSelector("numberOfItems"))
+		platformdarwin.AddSeparatorItem(menu)
+		platformdarwin.AddSeparatorItem(menu)
+		platformdarwin.AddSeparatorItem(menu)
+		after := menu.GetInt64(platformdarwin.RegisterSelector("numberOfItems"))
+
+		if got, want := after-before, int64(3); got != want {
+			t.Fatalf("added %d separators, want %d (singleton separatorItem not copied?)", got, want)
+		}
+	})
+}
+
+// TestAddMenuItemWithRole_Services creates the Services submenu and registers
+// it with NSApp (GLFW setServicesMenu: pattern).
+//
+// Assertions run on the test goroutine — t.Fatal inside runOnMainThread would
+// Goexit the main-thread runner and deadlock subsequent tests.
+func TestAddMenuItemWithRole_Services(t *testing.T) {
+	var (
+		itemNil     bool
+		submenuNil  bool
+		appMenuNil  bool
+		servicesNil bool
+	)
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			appMenuNil = true
+			return
+		}
+
+		item := platformdarwin.AddMenuItemWithRole(menu, "Services", "services")
+		itemNil = item.IsNil()
+		if itemNil {
+			return
+		}
+
+		submenu := item.Send(platformdarwin.RegisterSelector("submenu"))
+		submenuNil = submenu.IsNil()
+
+		nsApp := platformdarwin.GetClass("NSApplication").Send(platformdarwin.RegisterSelector("sharedApplication"))
+		if nsApp.IsNil() {
+			servicesNil = true
+			return
+		}
+		// AppKit may retain a different object identity than the submenu
+		// pointer we passed; only require that servicesMenu is registered.
+		servicesNil = nsApp.Send(platformdarwin.RegisterSelector("servicesMenu")).IsNil()
+	})
+
+	if appMenuNil {
+		t.Fatal("NewMainMenu() returned nil")
+	}
+	if itemNil {
+		t.Fatal("AddMenuItemWithRole(services) returned nil")
+	}
+	if submenuNil {
+		t.Fatal("Services item has no submenu")
+	}
+	if servicesNil {
+		t.Fatal("NSApp.servicesMenu is nil after RoleServices")
+	}
+}
+
 // TestAddMenuItemWithCallback verifies that AddMenuItemWithCallback
 // creates a menu item and adds it to the menu.
 func TestAddMenuItemWithCallback(t *testing.T) {
@@ -183,6 +257,56 @@ func TestAddMenuItemWithCallback(t *testing.T) {
 		// The delegate is invoked only when the user selects the item,
 		// so we don't call it here. Just ensure no panic.
 		_ = called
+	})
+}
+
+// TestAddMenuItemWithRoleAndCallback_PreservesAboutSelector verifies that
+// Role+Action About items keep orderFrontStandardAboutPanel: so AppKit can
+// still render the system ⓘ icon (#456).
+func TestAddMenuItemWithRoleAndCallback_PreservesAboutSelector(t *testing.T) {
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			t.Fatal("NewMainMenu() returned nil")
+		}
+
+		item := platformdarwin.AddMenuItemWithRoleAndCallback(menu, "About Foo", "about", func() {})
+		if item.IsNil() {
+			t.Fatal("AddMenuItemWithRoleAndCallback returned nil")
+		}
+
+		want := platformdarwin.RegisterSelector("orderFrontStandardAboutPanel:")
+		got := platformdarwin.SEL(item.Send(platformdarwin.RegisterSelector("action")).Ptr())
+		if got != want {
+			t.Fatalf("About Role+Action action = %v, want orderFrontStandardAboutPanel: (%v)", got, want)
+		}
+
+		target := item.Send(platformdarwin.RegisterSelector("target"))
+		if target.IsNil() {
+			t.Fatal("About Role+Action target is nil; setTarget: required for custom Action")
+		}
+	})
+}
+
+// TestAddMenuItemWithRole_AboutSelector verifies role-only About items use
+// the system selector (baseline for the Role+Action icon fix).
+func TestAddMenuItemWithRole_AboutSelector(t *testing.T) {
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			t.Fatal("NewMainMenu() returned nil")
+		}
+
+		item := platformdarwin.AddMenuItemWithRole(menu, "About Foo", "about")
+		if item.IsNil() {
+			t.Fatal("AddMenuItemWithRole returned nil")
+		}
+
+		want := platformdarwin.RegisterSelector("orderFrontStandardAboutPanel:")
+		got := platformdarwin.SEL(item.Send(platformdarwin.RegisterSelector("action")).Ptr())
+		if got != want {
+			t.Fatalf("About role action = %v, want orderFrontStandardAboutPanel: (%v)", got, want)
+		}
 	})
 }
 

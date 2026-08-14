@@ -1627,9 +1627,14 @@ func (p *darwinPlatform) SetApplicationMenu(items []MenuItem) {
 // Go callback through the application delegate (handleMenuItem:).
 //
 // macOS menu bar only renders items that have submenus. Leaf items with an
-// App Menu role (About, Quit, Preferences, etc.) are routed to the App Menu
-// submenu automatically. Leaf items without a role or submenu are logged and
-// skipped — they would be invisible on macOS.
+// App Menu role (About, Quit, Preferences, etc.) and top-level separators are
+// routed to the App Menu submenu automatically (GLFW/Electron pattern).
+// Leaf items without a role or submenu are logged and skipped — they would be
+// invisible on macOS.
+//
+// SetMenu uses Electron-style replace semantics: the App Menu submenu is
+// cleared before applying caller items, so Role items are not appended after
+// the default About/Hide/Quit entries.
 //
 // Must only be called after NSApplication has been initialized.
 func (p *darwinPlatform) applyMenu(items []MenuItem) {
@@ -1651,21 +1656,47 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 	}
 
 	appMenu := p.getAppMenu()
+	if !appMenu.IsNil() {
+		// Replace, don't append — matches Electron Menu.setApplicationMenu().
+		appMenu.Send(darwin.RegisterSelector("removeAllItems"))
+	}
 
 	for _, item := range items {
-		if item.Separator || len(item.Submenu) > 0 {
+		switch macOSMenuDestination(item) {
+		case menuDestMenuBar:
 			p.addPlatformItem(mainMenu, item)
-			continue
-		}
-		if item.Role != MenuRoleNone {
+		case menuDestAppMenu:
 			if !appMenu.IsNil() {
 				p.addPlatformItem(appMenu, item)
 			}
-			continue
+		default:
+			slog.Warn("gogpu: macOS menu bar requires submenus — leaf item skipped",
+				"title", item.Title)
 		}
-		slog.Warn("gogpu: macOS menu bar requires submenus — leaf item skipped",
-			"title", item.Title)
 	}
+}
+
+// menuDestination classifies where a top-level SetMenu item is installed on macOS.
+type menuDestination int
+
+const (
+	menuDestSkip menuDestination = iota
+	menuDestAppMenu
+	menuDestMenuBar
+)
+
+// macOSMenuDestination returns where a top-level menu item should be installed.
+//
+// Separators go to the App Menu: on the menu bar they are invisible, and GLFW
+// cocoa_init.m adds separators directly to appMenu between Role items.
+func macOSMenuDestination(item MenuItem) menuDestination {
+	if len(item.Submenu) > 0 {
+		return menuDestMenuBar
+	}
+	if item.Separator || item.Role != MenuRoleNone {
+		return menuDestAppMenu
+	}
+	return menuDestSkip
 }
 
 func (p *darwinPlatform) addPlatformItem(parentMenu darwin.ID, item MenuItem) {
@@ -1675,11 +1706,17 @@ func (p *darwinPlatform) addPlatformItem(parentMenu darwin.ID, item MenuItem) {
 	}
 
 	if item.Role != MenuRoleNone {
+		roleStr := roleToString(item.Role)
 		if item.Action != nil {
+			// Keep the system role selector so AppKit still draws role icons
+			// (e.g. ⓘ for About). Custom Action is wired via setTarget:.
+			if roleStr != "" {
+				darwin.AddMenuItemWithRoleAndCallback(parentMenu, item.Title, roleStr, item.Action)
+				return
+			}
 			darwin.AddMenuItemWithCallback(parentMenu, item.Title, item.Action, roleKeyEquivalent(item.Role))
 			return
 		}
-		roleStr := roleToString(item.Role)
 		if roleStr != "" {
 			darwin.AddMenuItemWithRole(parentMenu, item.Title, roleStr)
 			return
