@@ -13,7 +13,8 @@ import (
 
 type countingSubmitQueue struct {
 	noop.Queue
-	submits int
+	submits        int
+	writeBufferErr error
 }
 
 type commandEncoderFailDevice struct{ noop.Device }
@@ -27,6 +28,13 @@ func (d *commandEncoderFailDevice) CreateCommandEncoder(
 func (q *countingSubmitQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
 	q.submits++
 	return uint64(q.submits), nil
+}
+
+func (q *countingSubmitQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	if q.writeBufferErr != nil {
+		return q.writeBufferErr
+	}
+	return q.Queue.WriteBuffer(buffer, offset, data)
 }
 
 // recordingCommandEncoderDevice counts frame encoder creation and records the
@@ -429,6 +437,41 @@ func TestContextCommandEncoderReturnsNilWhenCreationFails(t *testing.T) {
 	ctx, _, _ := newSharedEncoderTestContextWithDevice(t, &commandEncoderFailDevice{})
 	if got := ctx.CommandEncoder(); got != nil {
 		t.Fatalf("CommandEncoder() = %v after creation failure, want nil", got)
+	}
+}
+
+func TestContextCommandEncoderReturnsNilWhenTexturedQuadPassEndFails(t *testing.T) {
+	ctx, target, queue := newSharedEncoderTestContext(t)
+	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	target.format = gputypes.TextureFormatBGRA8Unorm
+	target.width = 1
+	target.height = 1
+
+	tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	t.Cleanup(tex.Destroy)
+
+	queue.writeBufferErr = errors.New("injected uniform write failure")
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("DrawTextureEx: %v", err)
+	}
+	if target.texturedQuadPass == nil {
+		t.Fatal("DrawTextureEx did not leave an active textured-quad pass")
+	}
+
+	if got := ctx.CommandEncoder(); got != nil {
+		t.Fatal("CommandEncoder returned an encoder after textured-quad pass failure")
+	}
+	if target.texturedQuadPass != nil {
+		t.Fatal("failed textured-quad pass was retained")
+	}
+	if target.frameEncoder != nil {
+		t.Fatal("failed shared encoder was retained")
+	}
+	if queue.submits != 0 {
+		t.Fatalf("failed shared encoder submissions = %d, want 0", queue.submits)
 	}
 }
 
