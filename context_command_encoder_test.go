@@ -157,6 +157,20 @@ func TestContextCommandEncoderReusesAndSubmitsFrameEncoderOnce(t *testing.T) {
 	}
 }
 
+func TestBeginFrameReleasesPreviousTexturedQuadUniformArena(t *testing.T) {
+	ws := &RenderTarget{
+		texQuadUniformChunks: []texQuadUniformChunk{{nextSlot: 7}},
+	}
+	r := &Renderer{primary: ws}
+
+	if r.BeginFrame() {
+		t.Fatal("BeginFrame succeeded for an unconfigured surface")
+	}
+	if got := len(ws.texQuadUniformChunks); got != 0 {
+		t.Fatalf("textured-quad uniform chunks after new frame = %d, want 0", got)
+	}
+}
+
 func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
 	halDevice := &recordingCommandEncoderDevice{}
 	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)

@@ -579,6 +579,12 @@ func (ws *RenderTarget) CanRender() bool {
 //   - ErrSurfaceOutdated → reconfigure (swapchain stale after resize/DPI change)
 //   - ErrSurfaceLost → mark SurfaceLost (caller must recreate)
 func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) bool {
+	// The app frame loop normally releases these in prepareLazyAcquire, but the
+	// exported Renderer.BeginFrame/EndFrame pair reaches beginFrame directly.
+	// Start every acquired frame with a fresh uniform arena so manual callers do
+	// not retain one chunk per frame indefinitely.
+	ws.releaseTexQuadUniformChunks()
+
 	if !ws.CanRender() {
 		return false
 	}
@@ -1666,27 +1672,15 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		return err
 	}
 
-	// Upload uniform data — screen dimensions come from per-window state
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(ws.width)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
-	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
-	if err := r.device.Queue().WriteBuffer(uniform.buffer, uint64(uniform.offset), r.texQuadUniformData); err != nil {
-		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
-	}
-
 	// Determine LoadOp: consume pending clear if available, otherwise preserve content.
 	// Default clear = transparent black (WebGPU spec, Rust wgpu Color::default).
 	// Opaque black (A:1) would destroy alpha for compositing (ggcanvas, DrawTexture).
 	loadOp := gputypes.LoadOpClear
 	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 0}
+	consumePendingClear := false
 	if ws.hasPendingClear {
 		clearValue = ws.pendingClearColor
-		ws.hasPendingClear = false
+		consumePendingClear = true
 	} else if ws.frameCleared {
 		loadOp = gputypes.LoadOpLoad
 	}
@@ -1705,6 +1699,33 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to begin render pass: %w", err)
 	}
+	if consumePendingClear {
+		ws.hasPendingClear = false
+	}
+
+	// Upload uniform data only after the render pass has been accepted. Queue
+	// writes may be deferred in a staging encoder; keeping them after the begin
+	// check avoids leaving a write targeting an unreferenced frame buffer when a
+	// released attachment rejects the pass.
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[12:16], math.Float32bits(opts.Height))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[16:20], math.Float32bits(float32(ws.width)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
+	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
+	if err := r.device.Queue().WriteBuffer(uniform.buffer, uint64(uniform.offset), r.texQuadUniformData); err != nil {
+		// The pass has no useful draw without its parameters. Close and discard
+		// the shared encoder so the clear/pass cannot reach the surface, while
+		// preserving the frame's previous resources for the next frame boundary.
+		_ = renderPass.End()
+		if consumePendingClear {
+			ws.hasPendingClear = true
+		}
+		ws.discardFrameEncoder()
+		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
+	}
 
 	// Set pipeline and bind groups
 	renderPass.SetPipeline(r.texQuadPipeline)
@@ -1716,6 +1737,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 
 	// End render pass
 	if err := renderPass.End(); err != nil {
+		ws.discardFrameEncoder()
 		return fmt.Errorf("gogpu: failed to end render pass: %w", err)
 	}
 
