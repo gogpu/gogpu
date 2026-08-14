@@ -2015,7 +2015,7 @@ func (p *Platform) handleKeyEventForEvent(w *x11Window, keyEvent *KeyEvent, pres
 	// XIM owns text translation while enabled. Do this before rejecting an
 	// unmapped key so composition control keys (which have no gogpu.Key) still
 	// reach the native input method.
-	if pressed && w.ime != nil && w.ime.handleKey(keyEvent) {
+	if w.ime != nil && w.ime.handleKey(keyEvent, pressed) {
 		return
 	}
 	if key == gpucontext.KeyUnknown {

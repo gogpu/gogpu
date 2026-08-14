@@ -37,6 +37,7 @@ const (
 	xLookupKeySym     = 3
 	xLookupBoth       = 4
 	xKeyPressEvent    = 2
+	xKeyReleaseEvent  = 3
 	xNativeEventBytes = 192 // largest XEvent ABI; 32-bit callers use its prefix.
 )
 
@@ -583,6 +584,10 @@ func (x *x11XIM) setSpot(ic uintptr, area gpucontext.IMECursorArea, scale float6
 }
 
 func nativeKeyEvent(keyEvent *KeyEvent, display uintptr) [xNativeEventBytes]byte {
+	return nativeKeyEventType(keyEvent, display, true)
+}
+
+func nativeKeyEventType(keyEvent *KeyEvent, display uintptr, pressed bool) [xNativeEventBytes]byte {
 	var raw [xNativeEventBytes]byte
 	put32 := func(offset int, value uint32) {
 		binary.NativeEndian.PutUint32(raw[offset:offset+4], value)
@@ -590,7 +595,11 @@ func nativeKeyEvent(keyEvent *KeyEvent, display uintptr) [xNativeEventBytes]byte
 	put64 := func(offset int, value uint64) {
 		binary.NativeEndian.PutUint64(raw[offset:offset+8], value)
 	}
-	put32(0, xKeyPressEvent)
+	eventType := uint32(xKeyReleaseEvent)
+	if pressed {
+		eventType = xKeyPressEvent
+	}
+	put32(0, eventType)
 	if strconv.IntSize == 32 {
 		put32(4, uint32(keyEvent.Sequence))
 		put32(8, 0) // send_event = False
@@ -808,7 +817,7 @@ func (i *x11IME) cancel() {
 	i.queue(gpucontextEventCanceled)
 }
 
-func (i *x11IME) handleKey(keyEvent *KeyEvent) bool {
+func (i *x11IME) handleKey(keyEvent *KeyEvent, pressed bool) bool {
 	if i == nil || keyEvent == nil {
 		return false
 	}
@@ -818,11 +827,16 @@ func (i *x11IME) handleKey(keyEvent *KeyEvent) bool {
 	if !enabled || ic == 0 {
 		return false
 	}
-	raw := nativeKeyEvent(keyEvent, i.xlib.display)
+	raw := nativeKeyEventType(keyEvent, i.xlib.display, pressed)
 	// XFilterEvent updates the XIC's compose state and may synchronously invoke
 	// preedit callbacks. Its boolean result is intentionally not used: a
 	// no-preedit XIC still returns ordinary committed UTF-8 text below.
 	i.xlib.filterEvent(ic, &raw, i.window)
+	if !pressed {
+		// XIM's back-end protocol forwards both KeyPress and KeyRelease events;
+		// only KeyPress carries lookup text into the application.
+		return true
+	}
 	text := i.xlib.lookupString(ic, &raw)
 	i.mu.Lock()
 	composing, preeditDone := i.composing, i.preeditDone

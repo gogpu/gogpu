@@ -93,6 +93,13 @@ func TestXIMLookupStatusConstantsMatchXlib(t *testing.T) {
 	}
 }
 
+func TestNativeKeyEventReleaseType(t *testing.T) {
+	raw := nativeKeyEventType(&KeyEvent{}, 0, false)
+	if got := binary.NativeEndian.Uint32(raw[0:4]); got != xKeyReleaseEvent {
+		t.Fatalf("native release event type = %d, want %d", got, xKeyReleaseEvent)
+	}
+}
+
 func TestNativeKeyEventCarriesXKeyEventFields(t *testing.T) {
 	event := &KeyEvent{
 		Sequence:   7,
