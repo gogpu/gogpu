@@ -85,6 +85,22 @@ type waylandWindow struct {
 	// Keyboard focus tracking
 	keyboardFocused bool
 
+	// Wayland text-input-v3 state. IME callbacks are delivered on the main
+	// event-dispatch thread; this mutex also protects controller calls made by
+	// widgets from another goroutine.
+	imeMu             sync.Mutex
+	imeEnabled        bool
+	imeFocused        bool
+	imeComposing      bool
+	imeReplay         bool
+	imeNeedsDisable   bool
+	imeArea           gpucontext.IMECursorArea
+	imeAreaSet        bool
+	imePurpose        gpucontext.ContentPurpose
+	imeHints          gpucontext.ContentHint
+	imeSurrounding    gpucontext.IMESurroundingText
+	imeSurroundingSet bool
+
 	// XKB keyboard layout support (libxkbcommon.so.0 via goffi).
 	// Non-nil when libxkbcommon is available; nil falls back to evdevKeycodeToRune.
 	xkb xkbKeyHandler
@@ -1161,6 +1177,11 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		viewporterName = viewporterGlobal.Name
 		viewporterVersion = viewporterGlobal.Version
 	}
+	var textInputName, textInputVersion uint32
+	if textInputGlobal := registry.GetGlobalByInterface(wayland.InterfaceZwpTextInputManagerV3); textInputGlobal != nil {
+		textInputName = textInputGlobal.Name
+		textInputVersion = textInputGlobal.Version
+	}
 
 	// Step 2: Open C libwayland connection — this is the SINGLE connection
 	// that owns everything: surface, xdg-shell, input, Vulkan.
@@ -1250,6 +1271,15 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	if seatGlobal != nil {
 		if err := libwl.SetupInput(seatGlobal.Name, seatGlobal.Version); err != nil {
 			logger().Warn("input setup failed", "err", err)
+		}
+	}
+	// zwp_text_input_manager_v3 is optional. Bind it only after the seat is
+	// available because get_text_input requires that seat object.
+	if textInputName != 0 {
+		if err := libwl.SetupTextInput(textInputName, textInputVersion); err != nil {
+			logger().Warn("text-input-v3 setup failed (IME unavailable)", "err", err)
+		} else if libwl.HasTextInput() {
+			logger().Debug("text-input-v3 protocol bound")
 		}
 	}
 
@@ -1876,7 +1906,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			// and filtering out Alt blocks AltGr combos (e.g., AltGr+, -> <<).
 			// Control characters (r < 32) are filtered instead (GLFW pattern).
 			if pressed {
-				if r := w.keycodeToRune(key); r >= 32 {
+				if r := w.keycodeToRune(key); r >= 32 && !w.imeShouldFilterText() {
 					w.queueEvent(Event{Type: EventChar, Char: r})
 				}
 			}
@@ -1904,6 +1934,36 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.repeatRate = rate
 			w.repeatDelay = delay
 			w.repeatMu.Unlock()
+		},
+		OnTextInputEnter: func() {
+			w.imeMu.Lock()
+			w.imeFocused = true
+			// text-input-v3 invalidates all state after enter. Replaying from
+			// PollEvents keeps FFI out of the protocol callback itself.
+			w.imeReplay = w.imeEnabled
+			w.imeMu.Unlock()
+		},
+		OnTextInputLeave: func() {
+			w.imeMu.Lock()
+			wasEnabled := w.imeEnabled
+			canceled := w.imeComposing
+			w.imeFocused = false
+			w.imeEnabled = false
+			w.imeComposing = false
+			w.imeReplay = false
+			w.imeNeedsDisable = wasEnabled
+			w.imeSurrounding = gpucontext.IMESurroundingText{}
+			w.imeSurroundingSet = false
+			w.imeMu.Unlock()
+			if canceled {
+				w.queueEvent(Event{Type: EventIMECanceled})
+			}
+			if wasEnabled {
+				w.queueEvent(Event{Type: EventIMEDisabled})
+			}
+		},
+		OnTextInputDone: func(update wayland.TextInputUpdate) {
+			w.handleWaylandTextInputDone(update)
 		},
 
 		// Touch events
@@ -2325,7 +2385,7 @@ func (w *waylandWindow) processRepeatTimer() {
 	// Generate repeat events on main thread — xkb access is safe here.
 	for range repeats {
 		w.dispatchKeyEvent(gpuKey, mods, true)
-		if r := w.keycodeToRune(evdevKey); r >= 32 {
+		if r := w.keycodeToRune(evdevKey); r >= 32 && !w.imeShouldFilterText() {
 			w.queueEvent(Event{Type: EventChar, Char: r})
 		}
 	}
@@ -3029,6 +3089,11 @@ func (p *waylandPlatform) PollEvents() Event {
 				logger().Error("CSD dispatch error", "error", err)
 			}
 		}
+
+		// Enter invalidates text-input-v3 state. Replay the app's explicit
+		// enable/content/cursor state outside the protocol callback and before
+		// the next event-loop turn.
+		w.replayWaylandIME(p.libwl)
 
 		// FRAME-001: Consume frame callback ready state. The done event
 		// already unblocked WaitEvents (data on display fd). The frame

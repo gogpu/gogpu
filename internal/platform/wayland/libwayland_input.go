@@ -37,6 +37,13 @@ type InputCallbacks struct {
 	OnKeyboardModifiers func(serial, modsDepressed, modsLatched, modsLocked, group uint32)
 	OnKeyboardRepeat    func(rate, delay int32)
 
+	// Optional zwp_text_input_v3 lifecycle. The protocol emits preedit,
+	// commit, and delete requests before one done event; the backend aggregates
+	// those messages and invokes OnTextInputDone exactly once per transaction.
+	OnTextInputEnter func()
+	OnTextInputLeave func()
+	OnTextInputDone  func(update TextInputUpdate)
+
 	// Touch events
 	OnTouchDown   func(serial, timeMs uint32, id int32, x, y float64)
 	OnTouchUp     func(serial, timeMs uint32, id int32)

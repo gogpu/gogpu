@@ -45,6 +45,9 @@ const (
 	// which D-Bus service/path exposes their dbusmenu. Required for global
 	// menus on KDE Plasma Wayland (D-Bus RegisterWindow alone is insufficient).
 	InterfaceOrgKdeKwinAppmenuManager = "org_kde_kwin_appmenu_manager"
+
+	// Optional text-input protocol used by native Wayland input methods.
+	InterfaceZwpTextInputManagerV3 = "zwp_text_input_manager_v3"
 )
 
 // Global represents a Wayland global interface advertised by the compositor.

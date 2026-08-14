@@ -166,6 +166,17 @@ type LibwaylandHandle struct {
 	inputTouch     uintptr         // wl_touch* for main surface
 	inputCallbacks *InputCallbacks // Go callbacks for input events
 
+	// Optional zwp_text_input_v3 objects. The protocol is deliberately kept
+	// separate from wl_keyboard: compositors may advertise it independently,
+	// and all requests/events are ignored when it is unavailable.
+	textInputManager   uintptr
+	textInput          uintptr
+	textInputSupported bool
+	textInputEnabled   bool
+	textInputEntered   bool
+	textInputPending   textInputPending
+	textInputMu        sync.Mutex
+
 	// Pointer constraints (zwp_pointer_constraints_v1 + zwp_relative_pointer_v1)
 	pointerConstraintsMgr uintptr // zwp_pointer_constraints_v1* manager proxy
 	relativePointerMgr    uintptr // zwp_relative_pointer_manager_v1* proxy
@@ -396,6 +407,9 @@ func (h *LibwaylandHandle) Close() {
 
 	// Destroy clipboard objects (before cursor shape, pointer constraints, and input)
 	h.DestroyClipboard()
+
+	// Destroy optional text-input objects before destroying the seat they use.
+	h.DestroyTextInput()
 
 	// Destroy KDE appmenu object (before input cleanup)
 	h.DestroyKDEAppmenu()

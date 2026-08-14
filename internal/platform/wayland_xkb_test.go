@@ -168,6 +168,20 @@ func TestWaylandXKBNoCharOnNonPrintable(t *testing.T) {
 	}
 }
 
+// TestWaylandXKBIMEFiltersDirectChars verifies that text-input-v3 commits do
+// not arrive twice through the ordinary wl_keyboard character path.
+func TestWaylandXKBIMEFiltersDirectChars(t *testing.T) {
+	w := &waylandWindow{startTime: time.Now(), events: eventqueue.New[Event](eventqueue.DefaultCapacity)}
+	w.xkb = &mockXKBHandle{ready: true, result: "a"}
+	w.keyboardFocused = true
+	w.imeEnabled = true
+
+	events := dispatchKeyWithXKB(w, 30, 0, true)
+	if len(events) != 1 || events[0].Type != EventKeyDown {
+		t.Fatalf("IME-enabled key produced duplicate text events: %+v", events)
+	}
+}
+
 // TestWaylandXKBGroupSwitch verifies that UpdateMask is called with the group parameter.
 func TestWaylandXKBGroupSwitch(t *testing.T) {
 	w := &waylandWindow{startTime: time.Now(), events: eventqueue.New[Event](eventqueue.DefaultCapacity)}
@@ -337,7 +351,7 @@ func dispatchKeyWithXKB(w *waylandWindow, keycode uint32, mods gpucontext.Modifi
 	// xkbcommon handles AltGr (Level3) correctly.
 	// Control characters (r < 32) are filtered (GLFW pattern).
 	if pressed {
-		if r := w.keycodeToRune(keycode); r >= 32 {
+		if r := w.keycodeToRune(keycode); r >= 32 && !w.imeShouldFilterText() {
 			w.queueEvent(Event{Type: EventChar, Char: r})
 		}
 	}
