@@ -21,6 +21,10 @@ var menuSels struct {
 	addItemWithTitleActionKey    SEL
 	setWindowsMenu               SEL
 	setTarget                    SEL
+	copy                         SEL
+	numberOfItems                SEL
+	itemAtIndex                  SEL
+	submenu                      SEL
 	orderFrontStandardAboutPanel SEL
 	orderFrontPreferencesPanel   SEL
 	performClose                 SEL
@@ -46,6 +50,10 @@ func initMenuSelectors() {
 	menuSels.addItemWithTitleActionKey = RegisterSelector("addItemWithTitle:action:keyEquivalent:")
 	menuSels.setWindowsMenu = RegisterSelector("setWindowsMenu:")
 	menuSels.setTarget = RegisterSelector("setTarget:")
+	menuSels.copy = RegisterSelector("copy")
+	menuSels.numberOfItems = RegisterSelector("numberOfItems")
+	menuSels.itemAtIndex = RegisterSelector("itemAtIndex:")
+	menuSels.submenu = RegisterSelector("submenu")
 	menuSels.orderFrontStandardAboutPanel = RegisterSelector("orderFrontStandardAboutPanel:")
 	menuSels.orderFrontPreferencesPanel = RegisterSelector("orderFrontPreferencesPanel:")
 	menuSels.performClose = RegisterSelector("performClose:")
@@ -170,11 +178,12 @@ func (a *Application) updateMenuBar(appName string) {
 // more than once moves it (or no-ops) — only the last insertion remains.
 // AppKit expects callers to copy the singleton for each separator in a menu.
 func newSeparatorItem(nsMenuItemClass Class) ID {
+	initMenuSelectors()
 	sep := ID(nsMenuItemClass).Send(menuSels.separatorItem)
 	if sep.IsNil() {
 		return 0
 	}
-	copied := sep.Send(RegisterSelector("copy"))
+	copied := sep.Send(menuSels.copy)
 	if copied.IsNil() {
 		return 0
 	}
@@ -432,6 +441,37 @@ func getMenuItemAction(item ID) func() {
 		return nil
 	}
 	return val.(func())
+}
+
+func deleteMenuItemAction(item ID) {
+	menuActionMap.Delete(uintptr(item))
+}
+
+// ClearMenuActions drops Go callbacks stored for every item in menu,
+// including nested submenus. Call before NSMenu.removeAllItems so
+// menuActionMap does not retain stale pointers after AppKit deallocates
+// the items (SetMenu replace can reuse those addresses).
+func ClearMenuActions(menu ID) {
+	if menu.IsNil() {
+		return
+	}
+	initMenuSelectors()
+	clearMenuActionsRecursive(menu)
+}
+
+func clearMenuActionsRecursive(menu ID) {
+	count := menu.GetInt64(menuSels.numberOfItems)
+	for i := int64(0); i < count; i++ {
+		item := menu.SendInt(menuSels.itemAtIndex, i)
+		if item.IsNil() {
+			continue
+		}
+		deleteMenuItemAction(item)
+		submenu := item.Send(menuSels.submenu)
+		if !submenu.IsNil() {
+			clearMenuActionsRecursive(submenu)
+		}
+	}
 }
 
 // NewMainMenu creates an empty NSMenu, sets it as the main menu of NSApp,

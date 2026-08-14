@@ -18,6 +18,7 @@ func TestMenuSelectorRegistration(t *testing.T) {
 			"setSubmenu:",
 			"setMainMenu:",
 			"separatorItem",
+			"copy",
 			"setKeyEquivalentModifierMask:",
 			"initWithTitle:action:keyEquivalent:",
 			"setWindowsMenu:",
@@ -308,6 +309,70 @@ func TestAddMenuItemWithRole_AboutSelector(t *testing.T) {
 			t.Fatalf("About role action = %v, want orderFrontStandardAboutPanel: (%v)", got, want)
 		}
 	})
+}
+
+// TestClearMenuActions_RemovesCallbacks verifies that ClearMenuActions
+// drops menuActionMap entries, including items nested in submenus (#457).
+func TestClearMenuActions_RemovesCallbacks(t *testing.T) {
+	var (
+		menuNil     bool
+		itemNil     bool
+		nestedNil   bool
+		boundBefore bool
+		boundNested bool
+		boundAfter  bool
+		nestedAfter bool
+	)
+	runOnMainThread(t, func() {
+		menu := platformdarwin.NewMainMenu()
+		if menu.IsNil() {
+			menuNil = true
+			return
+		}
+
+		item := platformdarwin.AddMenuItemWithCallback(menu, "Top", func() {}, "")
+		itemNil = item.IsNil()
+
+		submenu := platformdarwin.NewMenuWithTitle("Sub")
+		nested := platformdarwin.AddMenuItemWithCallback(submenu, "Nested", func() {}, "")
+		nestedNil = nested.IsNil()
+		if !submenu.IsNil() {
+			subItem := platformdarwin.NewMenuItemWithSubmenu("Sub", submenu)
+			if !subItem.IsNil() {
+				menu.SendPtr(platformdarwin.RegisterSelector("addItem:"), subItem.Ptr())
+			}
+		}
+
+		boundBefore = platformdarwin.MenuItemActionForTest(item) != nil
+		boundNested = platformdarwin.MenuItemActionForTest(nested) != nil
+
+		platformdarwin.ClearMenuActions(menu)
+
+		boundAfter = platformdarwin.MenuItemActionForTest(item) != nil
+		nestedAfter = platformdarwin.MenuItemActionForTest(nested) != nil
+	})
+
+	if menuNil {
+		t.Fatal("NewMainMenu() returned nil")
+	}
+	if itemNil {
+		t.Fatal("AddMenuItemWithCallback returned nil")
+	}
+	if nestedNil {
+		t.Fatal("nested AddMenuItemWithCallback returned nil")
+	}
+	if !boundBefore {
+		t.Fatal("top-level item had no stored action before clear")
+	}
+	if !boundNested {
+		t.Fatal("nested item had no stored action before clear")
+	}
+	if boundAfter {
+		t.Fatal("top-level action still stored after ClearMenuActions")
+	}
+	if nestedAfter {
+		t.Fatal("nested action still stored after ClearMenuActions")
+	}
 }
 
 // TestMenuItemActionAssociation verifies that setMenuItemAction and

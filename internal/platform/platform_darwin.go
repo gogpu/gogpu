@@ -1649,6 +1649,11 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 
 	appMenuItem := mainMenu.SendInt(darwin.RegisterSelector("itemAtIndex:"), 0)
 
+	// Drop Go callbacks before AppKit deallocates the items. Recurses into
+	// App Menu / Window / custom submenus so replace SetMenu cannot leave
+	// stale menuActionMap entries keyed by reused pointers.
+	darwin.ClearMenuActions(mainMenu)
+
 	mainMenu.Send(darwin.RegisterSelector("removeAllItems"))
 
 	if !appMenuItem.IsNil() {
@@ -1658,6 +1663,7 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 	appMenu := p.getAppMenu()
 	if !appMenu.IsNil() {
 		// Replace, don't append — matches Electron Menu.setApplicationMenu().
+		darwin.ClearMenuActions(appMenu)
 		appMenu.Send(darwin.RegisterSelector("removeAllItems"))
 	}
 

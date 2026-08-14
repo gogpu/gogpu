@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **macOS: `SetMenu` appended to App Menu instead of replacing** (#456) — `applyMenu` now clears the App Menu submenu before applying caller items (`Menu.setApplicationMenu()` replace semantics).
 - **macOS: only one separator visible in App Menu** (#456) — `+[NSMenuItem separatorItem]` is a shared singleton; adding it repeatedly moved the same instance. Each separator is now `copy`'d before insert (AppKit requirement).
 - **macOS: `RoleServices` was a no-op** (#456) — now creates the Services submenu and registers it with `setServicesMenu:` (GLFW pattern). Default `createAppMenu` also attaches the Services item that was previously missing.
+- **macOS: stale `SetMenu` callbacks after replace** (#457) — `menuActionMap` entries are cleared (including nested submenus) before `removeAllItems`, so reused NSMenuItem pointers cannot fire old Go callbacks.
 
 ## [0.53.0] - 2026-08-13
 
