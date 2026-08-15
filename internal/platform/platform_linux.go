@@ -793,7 +793,11 @@ func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
 	wp.eventMu.Lock()
 	scaleChanged := wp.lastScale != 0 && wp.lastScale != scale
 	if scaleChanged {
-		lw, lh := w.LogicalSize()
+		// Read size under the same lock. Do NOT call LogicalSize() here:
+		// LogicalSize also acquires eventMu, and sync.Mutex is not reentrant —
+		// that self-deadlocks the render thread on multi-display fractional
+		// scale transitions (issue #448; confirmed via goroutine dump).
+		lw, lh := wp.width, wp.height
 		wp.events.Push(Event{
 			WindowID:    wp.winID,
 			Type:        EventScaleChanged,
