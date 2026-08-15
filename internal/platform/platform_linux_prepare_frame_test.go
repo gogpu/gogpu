@@ -31,14 +31,6 @@ func newWaylandPrepareFrameFixture(width, height int, outputScale, lastScale flo
 // newWaylandSecondaryPrepareFrameFixture mirrors the primary fixture on the
 // secondary-window path (own state, shared scale source on the platform).
 func newWaylandSecondaryPrepareFrameFixture(width, height int, outputScale, lastScale float64) (*waylandPlatformWindow, *waylandWindow) {
-	state := waylandWindow{
-		width:     width,
-		height:    height,
-		lastScale: lastScale,
-		winID:     2,
-		events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
-		startTime: time.Now(),
-	}
 	plat := &waylandPlatform{
 		primary: &waylandWindow{
 			events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
@@ -46,10 +38,19 @@ func newWaylandSecondaryPrepareFrameFixture(width, height int, outputScale, last
 		},
 		outputScale: outputScale,
 	}
+	sec := &secondaryWaylandConn{winID: 2}
+	// Initialize fields in place — waylandWindow embeds sync.Mutex and must
+	// not be copied (govet copylocks).
+	sec.state.width = width
+	sec.state.height = height
+	sec.state.lastScale = lastScale
+	sec.state.winID = 2
+	sec.state.events = eventqueue.New[Event](eventqueue.DefaultCapacity)
+	sec.state.startTime = time.Now()
 	w := &waylandPlatformWindow{
 		platform:  plat,
 		id:        2,
-		secondary: &secondaryWaylandConn{winID: 2, state: state},
+		secondary: sec,
 	}
 	return w, &w.secondary.state
 }
