@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **macOS: `RoleServices` was a no-op** (#456) — now creates the Services submenu and registers it with `setServicesMenu:` (GLFW pattern). Default `createAppMenu` also attaches the Services item that was previously missing.
 - **macOS: stale `SetMenu` callbacks after replace** (#457) — `menuActionMap` entries are cleared (including nested submenus) before `removeAllItems`, so reused NSMenuItem pointers cannot fire old Go callbacks.
 
+### Changed
+
+- **deps:** wgpu v0.31.4 → v0.31.6
+  - Atomic copy usage tracking for all 4 copy commands (#312, @besmpl)
+  - `MappedRange.BytesMut()` and `MappedRange.Flush()` cross-backend API parity (#318, @tarmo888)
+  - Cross-platform lint exclusions fix (golangci-lint#3833)
+
 ## [0.53.0] - 2026-08-13
 
 ### Added
