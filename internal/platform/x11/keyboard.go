@@ -364,8 +364,6 @@ func KeysymToString(sym Keysym) string {
 }
 
 // KeysymName returns a human-readable name for a keysym.
-//
-//nolint:goconst // display names intentionally match constant names
 func KeysymName(sym Keysym) string {
 	switch sym {
 	case KeysymBackSpace:
