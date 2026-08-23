@@ -287,6 +287,59 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 	return r, nil
 }
 
+// NewHeadlessRenderer creates a renderer that does not require a native window
+// or display. The zero-argument form uses the deterministic Pure-Go software
+// backend, which is suitable for golden tests and CI. An optional graphics API
+// can be supplied when a headless render must exercise another backend.
+//
+// The returned renderer owns a GPU device and must be released with Destroy
+// followed by ReleaseInstance when it is no longer needed. RenderToImage is
+// the headless frame boundary; it is not safe to call concurrently on one
+// renderer.
+func NewHeadlessRenderer(graphicsAPI ...types.GraphicsAPI) (*Renderer, error) {
+	return newHeadlessRendererWithRuntime(graphicsAPI, defaultHeadlessRuntime)
+}
+
+type headlessRuntime struct {
+	initInstance      func(*Renderer, types.GraphicsAPI) error
+	initAdapterDevice func(*Renderer) error
+}
+
+var defaultHeadlessRuntime = headlessRuntime{
+	initInstance: func(r *Renderer, api types.GraphicsAPI) error {
+		return r.initInstance(api)
+	},
+	initAdapterDevice: func(r *Renderer) error {
+		return r.initAdapterDevice(nil)
+	},
+}
+
+func newHeadlessRendererWithRuntime(graphicsAPI []types.GraphicsAPI, runtime headlessRuntime) (*Renderer, error) {
+	api := types.GraphicsAPISoftware
+	if len(graphicsAPI) > 1 {
+		return nil, errors.New("gogpu: NewHeadlessRenderer accepts at most one graphics API")
+	}
+	if len(graphicsAPI) == 1 {
+		api = graphicsAPI[0]
+	}
+
+	r := &Renderer{
+		powerPreference: gputypes.PowerPreferenceHighPerformance,
+	}
+	r.primary = &RenderTarget{renderer: r}
+
+	if err := runtime.initInstance(r, api); err != nil {
+		r.ReleaseInstance()
+		return nil, err
+	}
+	if err := runtime.initAdapterDevice(r); err != nil {
+		r.Destroy()
+		r.ReleaseInstance()
+		return nil, err
+	}
+	return r, nil
+}
+
 // initInstance creates the wgpu Instance for the requested graphics API.
 // For Auto mode, the mask includes multiple backends (e.g., DX12|Vulkan|GLES on Windows)
 // so wgpu can enumerate all available adapters and pick the best GPU.
@@ -1674,15 +1727,15 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 // without re-creation.
 //
 // Not safe for concurrent use with the same renderer instance.
-//
-// TODO: expose server-side / headless image generation via App or Context so
-// callers outside this package can use it without reaching into Renderer.
 func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image.RGBA, error) {
 	if r.device == nil {
 		return nil, errors.New("gogpu: RenderToImage: device not initialized")
 	}
 	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf("gogpu: RenderToImage: invalid size %dx%d", width, height)
+	}
+	if draw == nil {
+		return nil, errors.New("gogpu: RenderToImage: draw callback is nil")
 	}
 
 	// Use the renderer's surface format so existing pipelines (triangle, texquad)
@@ -1721,13 +1774,12 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 		frameStarted: true,
 	}
 	r.primary = synthetic
+	defer func() { r.primary = prevPrimary }()
 
 	ctx := newContext(r, 1.0)
 	draw(ctx)
 	// Flush Context.Clear() calls that were deferred as a pending clear.
 	synthetic.flushClear(r.device, r)
-
-	r.primary = prevPrimary
 
 	return r.renderToImageReadback(offscreen, texFmt, width, height)
 }
@@ -1870,8 +1922,11 @@ func (r *Renderer) Destroy() {
 		_ = r.device.WaitIdle()
 	}
 
-	// Wait for all tracked submissions and free their command buffers.
-	r.tracker.waitAll(r.device)
+	// Wait for all tracked submissions and free their command buffers. A
+	// partially initialized headless renderer may not have a device yet.
+	if r.device != nil {
+		r.tracker.waitAll(r.device)
+	}
 
 	// Destroy primary window surface (per-window resources first).
 	if r.primary != nil {

@@ -110,6 +110,30 @@ jobs:
         flags: unittests
         name: codecov-gogpu
 
+  # Deterministic headless rendering against committed software fixtures.
+  # Keep this separate from the broad matrix so a missing fixture or an
+  # accidental skip cannot make the visual contract appear green.
+  golden-tests:
+    name: Golden Image Tests
+    runs-on: ubuntu-latest
+    env:
+      GOGPU_GRAPHICS_API: software
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run golden tests
+      run: go test -count=1 -run '^TestGolden' ./...
+
   # Linting
   lint:
     name: Lint
