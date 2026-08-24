@@ -802,11 +802,11 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Star History
 
-<a href="https://star-history.com/#gogpu/gogpu&Date">
+<a href="https://starhistory.io">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=gogpu/gogpu&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=gogpu/gogpu&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=gogpu/gogpu&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.starhistory.io/png?repos=gogpu/gogpu&style=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.starhistory.io/png?repos=gogpu/gogpu&style=professional" />
+   <img alt="Star History Chart" src="https://api.starhistory.io/png?repos=gogpu/gogpu" width="800" />
  </picture>
 </a>
 
