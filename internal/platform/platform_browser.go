@@ -16,6 +16,7 @@ import (
 type browserPlatform struct {
 	events *eventqueue.Queue[Event]
 	window *browserWindow
+	wakeUp func()
 }
 
 func newPlatformManager() PlatformManager {
@@ -82,11 +83,22 @@ func (p *browserPlatform) WaitEvents() {
 	// Browser event loop is non-blocking. The Go main loop must cooperate
 	// with requestAnimationFrame. Blocking here would freeze the page.
 	// Instead, we return immediately — the caller should use the
-	// requestAnimationFrame-based run loop (see app_browser.go).
+	// requestAnimationFrame-based run loop (see app_run_browser.go).
 }
 
-// WakeUp is a no-op on browser (single-threaded JS environment).
-func (p *browserPlatform) WakeUp() {}
+// WakeUp schedules a browser event-loop turn when the application has
+// installed a hook. Repeated calls are coalesced by the RAF scheduler.
+func (p *browserPlatform) WakeUp() {
+	if p.wakeUp != nil {
+		p.wakeUp()
+	}
+}
+
+// SetWakeUpHook connects platform events and application invalidation to the
+// browser's requestAnimationFrame scheduler.
+func (p *browserPlatform) SetWakeUpHook(wakeUp func()) {
+	p.wakeUp = wakeUp
+}
 
 // ClipboardRead reads text from the system clipboard via the Clipboard API.
 // Note: requires user gesture and Permissions API for async clipboard.
@@ -172,6 +184,7 @@ func (p *browserPlatform) Destroy() {}
 // enqueueEvent adds an event to the platform event queue.
 func (p *browserPlatform) enqueueEvent(ev Event) {
 	p.events.Push(ev)
+	p.WakeUp()
 }
 
 // --------------------------------------------------------------------------
@@ -184,8 +197,14 @@ type browserWindow struct {
 	shouldClose bool
 	lastScale   float64 // DPI scale change detection (ADR-059)
 
-	// JS callbacks stored for cleanup.
-	jsCallbacks []js.Func
+	// JS event listeners stored for removal and callback release during cleanup.
+	jsListeners []browserEventListener
+}
+
+type browserEventListener struct {
+	target js.Value
+	event  string
+	fn     js.Func
 }
 
 // registerEventListeners sets up DOM event listeners on the canvas.
@@ -323,7 +342,11 @@ func (w *browserWindow) registerEventListeners(p *browserPlatform) {
 // addEventListener registers a JS event listener and tracks the callback for cleanup.
 func (w *browserWindow) addEventListener(target js.Value, event string, fn func(js.Value, []js.Value) any) {
 	cb := js.FuncOf(fn)
-	w.jsCallbacks = append(w.jsCallbacks, cb)
+	w.jsListeners = append(w.jsListeners, browserEventListener{
+		target: target,
+		event:  event,
+		fn:     cb,
+	})
 	target.Call("addEventListener", event, cb)
 }
 
@@ -495,10 +518,11 @@ func (w *browserWindow) StartDrag(paths []string, done func(DragResult)) {
 
 // Destroy releases JS callbacks.
 func (w *browserWindow) Destroy() {
-	for _, cb := range w.jsCallbacks {
-		cb.Release()
+	for _, listener := range w.jsListeners {
+		listener.target.Call("removeEventListener", listener.event, listener.fn)
+		listener.fn.Release()
 	}
-	w.jsCallbacks = nil
+	w.jsListeners = nil
 }
 
 // --------------------------------------------------------------------------

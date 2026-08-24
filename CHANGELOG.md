@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **macOS: Window menu lost after `SetMenu`** (#463, #464) — `applyMenu` preserved only the App Menu item, so Minimize/Zoom/Close (Cmd+W)/Full Screen disappeared from the menu bar. The system Window menu is now detached, retained, and re-inserted after user items (GLFW/Qt6/Electron pattern).
+- **Browser/WASM rendering was not presented without an application sleep** (#467, #469) — the browser app loop now schedules frames through `requestAnimationFrame`, coalesces redraw and DOM-event wakeups, pauses while the document is hidden, resets frame timing on resume, and removes JavaScript callbacks during shutdown.
 - **macOS: `SetMenu` separators lost between Role items** (#456) — top-level separators were routed to the menu bar (invisible). They now go to the App Menu submenu, matching GLFW `cocoa_init.m`.
 - **macOS: About ⓘ icon missing on Role+Action** (#456) — custom `Action` no longer swaps the item to `handleMenuItem:`. Role+Action keeps the system selector (`orderFrontStandardAboutPanel:` etc.) and overrides via `setTarget:` on the app delegate (Electron/Qt pattern), so AppKit still draws role chrome.
 - **macOS: `SetMenu` appended to App Menu instead of replacing** (#456) — `applyMenu` now clears the App Menu submenu before applying caller items (`Menu.setApplicationMenu()` replace semantics).

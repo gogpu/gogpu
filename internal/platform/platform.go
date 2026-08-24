@@ -195,6 +195,14 @@ type PlatformManager interface {
 	Destroy()
 }
 
+// WakeUpHookSetter is implemented by event-loop-driven platforms that need
+// the application to provide the mechanism used to schedule a loop turn.
+// Browser/WASM uses this to translate WakeUp calls into a coalesced
+// requestAnimationFrame callback.
+type WakeUpHookSetter interface {
+	SetWakeUpHook(func())
+}
+
 // PlatformWindow represents a single OS window.
 // Multiple PlatformWindows can exist per PlatformManager.
 type PlatformWindow interface {

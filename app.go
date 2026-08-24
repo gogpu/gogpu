@@ -397,9 +397,7 @@ func (a *App) Run() error {
 	//   2. ANIMATING: StartAnimation() — loop active, onUpdate every tick,
 	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
 	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
-	for a.running.Load() && (a.platWindow == nil || !a.platWindow.ShouldClose()) {
-		a.runFrame()
-	}
+	a.runMainLoop()
 
 	a.lifecycle = AppIdle
 	return nil
