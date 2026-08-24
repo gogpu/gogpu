@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -12,7 +13,8 @@ import (
 
 type countingSubmitQueue struct {
 	noop.Queue
-	submits int
+	submits        int
+	writeBufferErr error
 }
 
 type commandEncoderFailDevice struct{ noop.Device }
@@ -28,13 +30,71 @@ func (q *countingSubmitQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
 	return uint64(q.submits), nil
 }
 
-func newSharedEncoderTestContext(t *testing.T) (*Context, *RenderTarget, *countingSubmitQueue) {
+func (q *countingSubmitQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	if q.writeBufferErr != nil {
+		return q.writeBufferErr
+	}
+	return q.Queue.WriteBuffer(buffer, offset, data)
+}
+
+// recordingCommandEncoderDevice counts frame encoder creation and records the
+// load operation for each render pass. It wraps the noop backend so the test
+// can prove both the submission boundary and clear/load ordering without a
+// real display or GPU.
+type recordingCommandEncoderDevice struct {
+	noop.Device
+	encoders []*recordingCommandEncoder
+}
+
+type recordingCommandEncoder struct {
+	*noop.CommandEncoder
+	loadOps        []gputypes.LoadOp
+	uniformOffsets [][]uint32
+}
+
+type recordingRenderPassEncoder struct {
+	hal.RenderPassEncoder
+	owner *recordingCommandEncoder
+}
+
+func (d *recordingCommandEncoderDevice) CreateCommandEncoder(
+	_ *hal.CommandEncoderDescriptor,
+) (hal.CommandEncoder, error) {
+	encoder := &recordingCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
+	d.encoders = append(d.encoders, encoder)
+	return encoder, nil
+}
+
+func (e *recordingCommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	if len(desc.ColorAttachments) > 0 {
+		e.loadOps = append(e.loadOps, desc.ColorAttachments[0].LoadOp)
+	}
+	return &recordingRenderPassEncoder{
+		RenderPassEncoder: e.CommandEncoder.BeginRenderPass(desc),
+		owner:             e,
+	}
+}
+
+func (p *recordingRenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
+	if index == 0 {
+		p.owner.uniformOffsets = append(p.owner.uniformOffsets, append([]uint32(nil), offsets...))
+	}
+	p.RenderPassEncoder.SetBindGroup(index, group, offsets)
+}
+
+type testContextHelper interface {
+	Helper()
+	Cleanup(func())
+	Fatalf(string, ...any)
+}
+
+func newSharedEncoderTestContext(t testContextHelper) (*Context, *RenderTarget, *countingSubmitQueue) {
 	t.Helper()
 	return newSharedEncoderTestContextWithDevice(t, &noop.Device{})
 }
 
 func newSharedEncoderTestContextWithDevice(
-	t *testing.T,
+	t testContextHelper,
 	halDevice hal.Device,
 ) (*Context, *RenderTarget, *countingSubmitQueue) {
 	t.Helper()
@@ -77,7 +137,7 @@ func newSharedEncoderTestContextWithDevice(
 			target.currentView.Release()
 		}
 		texture.Release()
-		device.Release()
+		renderer.Destroy()
 	})
 	return newContext(renderer, 1), target, queue
 }
@@ -102,6 +162,222 @@ func TestContextCommandEncoderReusesAndSubmitsFrameEncoderOnce(t *testing.T) {
 	}
 	if target.frameEncoder != nil {
 		t.Fatal("frame encoder retained after submission")
+	}
+}
+
+func TestBeginFrameReleasesPreviousTexturedQuadUniformArena(t *testing.T) {
+	ws := &RenderTarget{
+		texQuadUniformChunks: []texQuadUniformChunk{{nextSlot: 7}},
+	}
+	r := &Renderer{primary: ws}
+
+	if r.BeginFrame() {
+		t.Fatal("BeginFrame succeeded for an unconfigured surface")
+	}
+	if got := len(ws.texQuadUniformChunks); got != 0 {
+		t.Fatalf("textured-quad uniform chunks after new frame = %d, want 0", got)
+	}
+}
+
+func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
+	halDevice := &recordingCommandEncoderDevice{}
+	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	target.format = gputypes.TextureFormatBGRA8Unorm
+	target.width = 1
+	target.height = 1
+
+	tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	t.Cleanup(tex.Destroy)
+
+	// The first quad consumes the pending clear. Every subsequent quad must
+	// load the prior result while remaining in the same frame submission.
+	target.clear(0.1, 0.2, 0.3, 1)
+	for i := 0; i < 3; i++ {
+		if err := ctx.DrawTextureEx(tex, DrawTextureOptions{
+			X:      float32(i),
+			Y:      0,
+			Width:  1,
+			Height: 1,
+			Alpha:  1,
+		}); err != nil {
+			t.Fatalf("DrawTextureEx(%d): %v", i, err)
+		}
+	}
+
+	if got := len(halDevice.encoders); got != 1 {
+		t.Fatalf("frame command encoders created = %d, want 1", got)
+	}
+	if queue.submits != 0 {
+		t.Fatalf("submissions before EndFrame = %d, want 0", queue.submits)
+	}
+
+	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{gputypes.LoadOpClear}; !equalLoadOps(got, want) {
+		t.Fatalf("render-pass load ops = %v, want %v", got, want)
+	}
+	if got, want := halDevice.encoders[0].uniformOffsets, [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
+		t.Fatalf("uniform dynamic offsets = %v, want %v", got, want)
+	}
+
+	target.submitFrameEncoder(target.renderer)
+	if queue.submits != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	}
+}
+
+func TestTexturedQuadPassPreservesExternalAndClearBoundaries(t *testing.T) {
+	halDevice := &recordingCommandEncoderDevice{}
+	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	target.format = gputypes.TextureFormatBGRA8Unorm
+	target.width = 1
+	target.height = 1
+
+	tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	t.Cleanup(tex.Destroy)
+
+	target.clear(0.1, 0.2, 0.3, 1)
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("first DrawTextureEx: %v", err)
+	}
+
+	// Lending the frame encoder to an external renderer must close the current
+	// quad pass, then the next quad resumes with LoadOpLoad in call order.
+	encoder := ctx.CommandEncoder()
+	if encoder == nil {
+		t.Fatal("CommandEncoder returned nil")
+	}
+	externalPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:    target.renderView(),
+			LoadOp:  gputypes.LoadOpLoad,
+			StoreOp: gputypes.StoreOpStore,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("external BeginRenderPass: %v", err)
+	}
+	if err := externalPass.End(); err != nil {
+		t.Fatalf("external End: %v", err)
+	}
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{X: 1, Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("second DrawTextureEx: %v", err)
+	}
+
+	// An explicit clear is another pass boundary. It must not be folded into
+	// the already-open pass or reorder the clear relative to the next draw.
+	target.clear(0.4, 0.5, 0.6, 1)
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{X: 2, Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("third DrawTextureEx: %v", err)
+	}
+
+	if got := len(halDevice.encoders); got != 1 {
+		t.Fatalf("frame command encoders created = %d, want 1", got)
+	}
+	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{
+		gputypes.LoadOpClear,
+		gputypes.LoadOpLoad,
+		gputypes.LoadOpLoad,
+		gputypes.LoadOpClear,
+	}; !equalLoadOps(got, want) {
+		t.Fatalf("render-pass load ops = %v, want %v", got, want)
+	}
+	if got, want := halDevice.encoders[0].uniformOffsets, [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
+		t.Fatalf("uniform dynamic offsets = %v, want %v", got, want)
+	}
+	if queue.submits != 0 {
+		t.Fatalf("submissions before EndFrame = %d, want 0", queue.submits)
+	}
+	target.submitFrameEncoder(target.renderer)
+	if queue.submits != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	}
+}
+
+func equalLoadOps(got, want []gputypes.LoadOp) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalOffsets(got, want [][]uint32) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if len(got[i]) != len(want[i]) {
+			return false
+		}
+		for j := range got[i] {
+			if got[i][j] != want[i][j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func BenchmarkDrawTexturedQuadsSharedFrameEncoder(b *testing.B) {
+	for _, draws := range []int{1, 20, 100} {
+		b.Run(fmt.Sprintf("draws=%d", draws), func(b *testing.B) {
+			halDevice := &recordingCommandEncoderDevice{}
+			ctx, target, queue := newSharedEncoderTestContextWithDevice(b, halDevice)
+			target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+			target.format = gputypes.TextureFormatBGRA8Unorm
+			target.width = 1
+			target.height = 1
+
+			tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+			if err != nil {
+				b.Fatalf("NewTextureFromRGBA: %v", err)
+			}
+			b.Cleanup(tex.Destroy)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				target.frameCleared = false
+				for j := 0; j < draws; j++ {
+					if err := ctx.DrawTextureEx(tex, DrawTextureOptions{
+						X:      float32(j),
+						Width:  1,
+						Height: 1,
+						Alpha:  1,
+					}); err != nil {
+						b.Fatalf("DrawTextureEx(%d): %v", j, err)
+					}
+				}
+				if got := len(halDevice.encoders[i].loadOps); got != 1 {
+					b.Fatalf("render passes for %d draws = %d, want 1", draws, got)
+				}
+				target.submitFrameEncoder(target.renderer)
+				target.renderer.pollSubmissions()
+				target.releaseTexQuadUniformChunks()
+			}
+			b.StopTimer()
+
+			if got := len(halDevice.encoders); got != b.N {
+				b.Fatalf("frame command encoders created = %d, want %d", got, b.N)
+			}
+			if got := queue.submits; got != b.N {
+				b.Fatalf("frame submissions = %d, want %d", got, b.N)
+			}
+			b.ReportMetric(float64(draws), "draws/frame")
+			b.ReportMetric(1, "passes/frame")
+			b.ReportMetric(1, "encoders/frame")
+			b.ReportMetric(1, "submits/frame")
+		})
 	}
 }
 
@@ -161,6 +437,41 @@ func TestContextCommandEncoderReturnsNilWhenCreationFails(t *testing.T) {
 	ctx, _, _ := newSharedEncoderTestContextWithDevice(t, &commandEncoderFailDevice{})
 	if got := ctx.CommandEncoder(); got != nil {
 		t.Fatalf("CommandEncoder() = %v after creation failure, want nil", got)
+	}
+}
+
+func TestContextCommandEncoderReturnsNilWhenTexturedQuadPassEndFails(t *testing.T) {
+	ctx, target, queue := newSharedEncoderTestContext(t)
+	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	target.format = gputypes.TextureFormatBGRA8Unorm
+	target.width = 1
+	target.height = 1
+
+	tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	t.Cleanup(tex.Destroy)
+
+	queue.writeBufferErr = errors.New("injected uniform write failure")
+	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{Width: 1, Height: 1, Alpha: 1}); err != nil {
+		t.Fatalf("DrawTextureEx: %v", err)
+	}
+	if target.texturedQuadPass == nil {
+		t.Fatal("DrawTextureEx did not leave an active textured-quad pass")
+	}
+
+	if got := ctx.CommandEncoder(); got != nil {
+		t.Fatal("CommandEncoder returned an encoder after textured-quad pass failure")
+	}
+	if target.texturedQuadPass != nil {
+		t.Fatal("failed textured-quad pass was retained")
+	}
+	if target.frameEncoder != nil {
+		t.Fatal("failed shared encoder was retained")
+	}
+	if queue.submits != 0 {
+		t.Fatalf("failed shared encoder submissions = %d, want 0", queue.submits)
 	}
 }
 
