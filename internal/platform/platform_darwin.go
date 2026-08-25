@@ -1737,6 +1737,7 @@ func (p *darwinPlatform) restoreWindowsMenu(mainMenu, windowMenuItem darwin.ID) 
 		return
 	}
 
+	created := false
 	if windowMenuItem.IsNil() {
 		windowMenu := p.getWindowMenu()
 		if windowMenu.IsNil() {
@@ -1746,9 +1747,14 @@ func (p *darwinPlatform) restoreWindowsMenu(mainMenu, windowMenuItem darwin.ID) 
 		if windowMenuItem.IsNil() {
 			return
 		}
+		created = true
 	}
 
 	mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), windowMenuItem.Ptr())
+	if created {
+		// Balance alloc from NewMenuItemWithSubmenu; addItem: retains the item.
+		windowMenuItem.Send(darwin.Selectors().Release())
+	}
 	if submenu := windowMenuItem.Send(darwin.RegisterSelector("submenu")); !submenu.IsNil() {
 		nsApp.SendPtr(darwin.RegisterSelector("setWindowsMenu:"), submenu.Ptr())
 	}
@@ -1812,9 +1818,14 @@ func (p *darwinPlatform) addPlatformItem(parentMenu darwin.ID, item MenuItem) {
 		}
 
 		menuItem := darwin.NewMenuItemWithSubmenu(item.Title, submenu)
-		if !menuItem.IsNil() {
-			parentMenu.SendPtr(darwin.RegisterSelector("addItem:"), menuItem.Ptr())
+		if menuItem.IsNil() {
+			submenu.Send(darwin.Selectors().Release())
+			return
 		}
+		parentMenu.SendPtr(darwin.RegisterSelector("addItem:"), menuItem.Ptr())
+		// Balance allocs: addItem:/setSubmenu: retain item and submenu.
+		menuItem.Send(darwin.Selectors().Release())
+		submenu.Send(darwin.Selectors().Release())
 		return
 	}
 
