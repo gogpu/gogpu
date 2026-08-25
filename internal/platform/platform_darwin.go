@@ -1636,6 +1636,10 @@ func (p *darwinPlatform) SetApplicationMenu(items []MenuItem) {
 // cleared before applying caller items, so Role items are not appended after
 // the default About/Hide/Quit entries.
 //
+// The system Window menu (Minimize, Zoom, Close/Cmd+W, Full Screen, Bring All
+// to Front) is preserved across replace — same as GLFW, Qt6, Flutter, and
+// Electron. Without it, Cmd+W and the Window menu bar entry disappear (#463, #464).
+//
 // Must only be called after NSApplication has been initialized.
 func (p *darwinPlatform) applyMenu(items []MenuItem) {
 	nsApp := p.app.NSApp()
@@ -1648,10 +1652,19 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 	}
 
 	appMenuItem := mainMenu.SendInt(darwin.RegisterSelector("itemAtIndex:"), 0)
+	windowMenuItem := p.findWindowsMenuItem(mainMenu)
+
+	// Detach + retain Window menu before ClearMenuActions/removeAllItems so
+	// system items (Close/Cmd+W) and AddToSystemMenu(Window) Go callbacks
+	// survive SetMenu replace (#463, #464).
+	if !windowMenuItem.IsNil() {
+		windowMenuItem.Send(darwin.Selectors().Retain())
+		mainMenu.SendPtr(darwin.RegisterSelector("removeItem:"), windowMenuItem.Ptr())
+	}
 
 	// Drop Go callbacks before AppKit deallocates the items. Recurses into
-	// App Menu / Window / custom submenus so replace SetMenu cannot leave
-	// stale menuActionMap entries keyed by reused pointers.
+	// App Menu / custom submenus so replace SetMenu cannot leave stale
+	// menuActionMap entries keyed by reused pointers.
 	darwin.ClearMenuActions(mainMenu)
 
 	mainMenu.Send(darwin.RegisterSelector("removeAllItems"))
@@ -1679,6 +1692,65 @@ func (p *darwinPlatform) applyMenu(items []MenuItem) {
 			slog.Warn("gogpu: macOS menu bar requires submenus — leaf item skipped",
 				"title", item.Title)
 		}
+	}
+
+	// Re-insert Window menu after user items (GLFW/Qt/Electron pattern).
+	p.restoreWindowsMenu(mainMenu, windowMenuItem)
+	if !windowMenuItem.IsNil() {
+		windowMenuItem.Send(darwin.Selectors().Release())
+	}
+}
+
+// findWindowsMenuItem returns the main-menu NSMenuItem whose submenu is
+// NSApp.windowsMenu, or 0 if the Window menu is not currently in the bar.
+func (p *darwinPlatform) findWindowsMenuItem(mainMenu darwin.ID) darwin.ID {
+	windowMenu := p.getWindowMenu()
+	if windowMenu.IsNil() || mainMenu.IsNil() {
+		return 0
+	}
+
+	count := mainMenu.GetInt64(darwin.RegisterSelector("numberOfItems"))
+	for i := int64(0); i < count; i++ {
+		item := mainMenu.SendInt(darwin.RegisterSelector("itemAtIndex:"), i)
+		if item.IsNil() {
+			continue
+		}
+		submenu := item.Send(darwin.RegisterSelector("submenu"))
+		if !submenu.IsNil() && submenu.Ptr() == windowMenu.Ptr() {
+			return item
+		}
+	}
+	return 0
+}
+
+// restoreWindowsMenu puts the system Window menu back on the menu bar after
+// SetMenu replace. If the previous NSMenuItem was captured, it is re-added;
+// otherwise a new item is wrapped around NSApp.windowsMenu (still retained by
+// the application after a prior strip).
+func (p *darwinPlatform) restoreWindowsMenu(mainMenu, windowMenuItem darwin.ID) {
+	if mainMenu.IsNil() || p.app == nil {
+		return
+	}
+
+	nsApp := p.app.NSApp()
+	if nsApp.IsNil() {
+		return
+	}
+
+	if windowMenuItem.IsNil() {
+		windowMenu := p.getWindowMenu()
+		if windowMenu.IsNil() {
+			return
+		}
+		windowMenuItem = darwin.NewMenuItemWithSubmenu("Window", windowMenu)
+		if windowMenuItem.IsNil() {
+			return
+		}
+	}
+
+	mainMenu.SendPtr(darwin.RegisterSelector("addItem:"), windowMenuItem.Ptr())
+	if submenu := windowMenuItem.Send(darwin.RegisterSelector("submenu")); !submenu.IsNil() {
+		nsApp.SendPtr(darwin.RegisterSelector("setWindowsMenu:"), submenu.Ptr())
 	}
 }
 
@@ -1843,6 +1915,9 @@ func (p *darwinPlatform) getSystemMenu(menu SystemMenu) darwin.ID {
 // getAppMenu returns the NSMenu of the Apple menu (the first submenu of the main menu).
 // This is the menu that contains About, Preferences, Services, Quit, etc.
 func (p *darwinPlatform) getAppMenu() darwin.ID {
+	if p.app == nil {
+		return 0
+	}
 	nsApp := p.app.NSApp()
 	if nsApp.IsNil() {
 		return 0
@@ -1863,6 +1938,9 @@ func (p *darwinPlatform) getAppMenu() darwin.ID {
 // NSApplication automatically manages the Window menu when setWindowsMenu: is called,
 // which createMenuBar already does during Init().
 func (p *darwinPlatform) getWindowMenu() darwin.ID {
+	if p.app == nil {
+		return 0
+	}
 	nsApp := p.app.NSApp()
 	if nsApp.IsNil() {
 		return 0

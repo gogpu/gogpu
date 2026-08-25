@@ -70,3 +70,11 @@ func TestMacOSMenuDestination_Issue456Reproduction(t *testing.T) {
 		}
 	}
 }
+
+func TestFindWindowsMenuItem_NilSafe(t *testing.T) {
+	p := &darwinPlatform{}
+	if got := p.findWindowsMenuItem(0); !got.IsNil() {
+		t.Fatalf("findWindowsMenuItem(uninit) = %v, want nil", got)
+	}
+	p.restoreWindowsMenu(0, 0) // must not panic
+}
