@@ -69,6 +69,14 @@ func (a *gpuContextAdapter) AdapterInfo() gpucontext.AdapterInfo {
 	}
 }
 
+// Features returns the set of optional features supported by the device.
+func (a *gpuContextAdapter) Features() gputypes.Features {
+	if a.renderer == nil || a.renderer.device == nil {
+		return 0
+	}
+	return a.renderer.device.Features()
+}
+
 func mapAdapterType(dt gputypes.DeviceType) gpucontext.AdapterType {
 	switch dt {
 	case gputypes.DeviceTypeDiscreteGPU:

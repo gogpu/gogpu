@@ -82,8 +82,19 @@ func (d *mockFenceDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDe
 	return nil, fmt.Errorf("mock: render bundles not supported")
 }
 func (d *mockFenceDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
-func (d *mockFenceDevice) WaitIdle() error                        { return nil }
-func (d *mockFenceDevice) Destroy()                               {}
+func (d *mockFenceDevice) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	return nil, fmt.Errorf("mock: ray tracing not supported")
+}
+func (d *mockFenceDevice) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
+func (d *mockFenceDevice) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return hal.AccelerationStructureBuildSizes{}
+}
+func (d *mockFenceDevice) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
+	return 0
+}
+func (d *mockFenceDevice) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
+func (d *mockFenceDevice) WaitIdle() error                               { return nil }
+func (d *mockFenceDevice) Destroy()                                      {}
 
 // Verify the mockFenceDevice satisfies the hal.Device interface at compile time.
 var _ hal.Device = (*mockFenceDevice)(nil)
