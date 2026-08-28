@@ -74,7 +74,7 @@ func (a *gpuContextAdapter) Features() gputypes.Features {
 	if a.renderer == nil || a.renderer.device == nil {
 		return 0
 	}
-	return gputypes.Features(a.renderer.device.Features())
+	return a.renderer.device.Features()
 }
 
 func mapAdapterType(dt gputypes.DeviceType) gpucontext.AdapterType {
