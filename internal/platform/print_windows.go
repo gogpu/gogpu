@@ -264,7 +264,7 @@ func (p *windowsPlatform) printParent(id WindowID) (uintptr, error) {
 	defer p.windowMu.RUnlock()
 	if id == 0 {
 		if p.primary == nil || p.primary.hwnd == 0 {
-			return 0, nil
+			return 0, ErrPrintUnavailable
 		}
 		return uintptr(p.primary.hwnd), nil
 	}
@@ -499,7 +499,7 @@ func spoolWindowsDocument(ctx context.Context, request PrintRequest, hdc uintptr
 
 func printLastError() error {
 	err := windows.GetLastError()
-	if err == nil || err == syscall.Errno(0) {
+	if err == nil || errors.Is(err, syscall.Errno(0)) {
 		return syscall.EIO
 	}
 	return err
