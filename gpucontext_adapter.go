@@ -77,6 +77,14 @@ func (a *gpuContextAdapter) Features() gputypes.Features {
 	return a.renderer.device.Features()
 }
 
+// DownlevelCapabilities returns backend capability flags for the adapter.
+func (a *gpuContextAdapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	if a.renderer == nil || a.renderer.adapter == nil {
+		return gputypes.DownlevelCapabilities{}
+	}
+	return a.renderer.adapter.DownlevelCapabilities()
+}
+
 func mapAdapterType(dt gputypes.DeviceType) gpucontext.AdapterType {
 	switch dt {
 	case gputypes.DeviceTypeDiscreteGPU:
