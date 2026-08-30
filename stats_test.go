@@ -89,7 +89,7 @@ func TestUpdateRegionStrideValidation(t *testing.T) {
 	}
 }
 
-// TestUpdateRegionStrideZeroCopyBand verifies the geckty/ggcanvas use case:
+// TestUpdateRegionStrideZeroCopyBand verifies the ggcanvas-style use case:
 // upload a dirty horizontal band from a full-frame RGBA buffer without extractRegion.
 func TestUpdateRegionStrideZeroCopyBand(t *testing.T) {
 	EnableStats()

@@ -433,7 +433,7 @@ func (t *Texture) UpdateData(data []byte) error {
 // When bytesPerRow > 0, data must be at least bytesPerRow*(h-1)+w*bytesPerPixel
 // bytes (the last row need not be padded). bytesPerRow must be >= w*bytesPerPixel.
 //
-// Related: #484 (geckty dirty-band uploads without extractRegion memcpy).
+// Related: #484 (dirty-band uploads without extractRegion memcpy).
 func (t *Texture) UpdateRegion(x, y, w, h, bytesPerRow int, data []byte) error {
 	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed

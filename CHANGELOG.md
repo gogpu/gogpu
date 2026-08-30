@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Strided `Texture.UpdateRegion`** (#484) — `bytesPerRow` parameter (pre-v1.0 signature change). `0` = tightly packed rows (`w * bytesPerPixel`), matching WebGPU `ImageDataLayout.bytesPerRow`. Enables zero-copy dirty-band uploads from a full-frame RGBA buffer (geckty/ggcanvas) without `extractRegion` memcpy. wgpu already handles 256-byte row-pitch alignment via `alignTextureDataInto`.
+- **Strided `Texture.UpdateRegion`** (#484) — `bytesPerRow` parameter (pre-v1.0 signature change). `0` = tightly packed rows (`w * bytesPerPixel`), matching WebGPU `ImageDataLayout.bytesPerRow`. Enables zero-copy dirty-band uploads from a full-frame RGBA buffer (ggcanvas and similar) without `extractRegion` memcpy. wgpu already handles 256-byte row-pitch alignment via `alignTextureDataInto`.
 - **GPUStats — two-level observability** (#484) — Rust wgpu + Flutter pattern:
   - `Renderer.GetCounters()` — cumulative texture count, allocated bytes, upload totals (device owner)
   - `Context.FrameStats()` — per-frame `UploadBytes`, `UploadRegions`, `PresentSkipped`, `FrameDuration` (frame owner)

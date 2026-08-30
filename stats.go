@@ -118,7 +118,7 @@ func (r *Renderer) GetFrameStats() FrameStats {
 
 // FrameStats returns the in-progress frame's upload/present metrics.
 // Safe to call during OnDraw after texture uploads to assert upload budgets
-// (e.g. geckty CI: dirty rows → UploadBytes < 10% of full frame).
+// (e.g. CI: dirty rows → UploadBytes < 10% of full frame).
 func (c *Context) FrameStats() FrameStats {
 	if c == nil || c.renderer == nil || !statsEnabled.Load() {
 		return FrameStats{}
