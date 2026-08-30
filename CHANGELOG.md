@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.53.2] - 2026-08-30
+
+### Added
+
+- **`DownlevelCapabilities()` on `GPUContextProvider`** (ADR-071) — exposes 27 backend capability flags for graceful degradation. Consumers check `DownlevelFlagsComputeShaders` without importing wgpu. Skia Graphite pattern: one check, one gate, one fallback.
+
+### Fixed
+
+- **lint:** errorlint + nilnil in `print_windows.go`
+
+### Changed
+
+- **deps:** wgpu v0.32.1 → v0.33.0 (DownlevelCapabilities across all 7 backends, RequireDownlevelFlags validation)
+- **deps:** gpucontext v0.29.0 → v0.30.0 (DownlevelCapabilities interface method)
+- **deps:** gputypes v0.6.0 → v0.7.0 (DownlevelFlags 27 constants, DownlevelCapabilities struct, ShaderModel)
+
 ## [0.53.1] - 2026-08-28
 
 ### Fixed
