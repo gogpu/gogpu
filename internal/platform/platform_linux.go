@@ -85,6 +85,23 @@ type waylandWindow struct {
 	// Keyboard focus tracking
 	keyboardFocused bool
 
+	// Wayland text-input-v3 state. IME callbacks are delivered on the main
+	// event-dispatch thread; this mutex also protects controller calls made by
+	// widgets from another goroutine.
+	imeMu             sync.Mutex
+	imeDestroyed      bool
+	imeEnabled        bool
+	imeFocused        bool
+	imeComposing      bool
+	imeReplay         bool
+	imeNeedsDisable   bool
+	imeArea           gpucontext.IMECursorArea
+	imeAreaSet        bool
+	imePurpose        gpucontext.ContentPurpose
+	imeHints          gpucontext.ContentHint
+	imeSurrounding    gpucontext.IMESurroundingText
+	imeSurroundingSet bool
+
 	// XKB keyboard layout support (libxkbcommon.so.0 via goffi).
 	// Non-nil when libxkbcommon is available; nil falls back to evdevKeycodeToRune.
 	xkb xkbKeyHandler
@@ -292,6 +309,8 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 // primary window as much as any secondary one — were silently never
 // invoked on Linux. Resize is unaffected either way: classifyEvent treats
 // WindowID==0 or ==primaryWindow.platformID as equally "primary".
+//
+//nolint:gocritic // PlatformEvent is copied into the platform-neutral Event.
 func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID WindowID) Event {
 	switch event.Type {
 	case x11.EventTypeClose:
@@ -323,6 +342,18 @@ func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID Wi
 		return Event{Type: EventKeyUp, Key: event.Key, Mods: event.Mods, WindowID: windowID}
 	case x11.EventTypeChar:
 		return Event{Type: EventChar, Char: event.Char, WindowID: windowID}
+	case x11.EventTypeIMECompositionStart:
+		return Event{Type: EventIMECompositionStart, WindowID: windowID}
+	case x11.EventTypeIMECompositionUpdate:
+		return Event{Type: EventIMECompositionUpdate, IMEComposition: event.IMEComposition, WindowID: windowID}
+	case x11.EventTypeIMECompositionEnd:
+		return Event{Type: EventIMECompositionEnd, IMECommitted: event.IMECommitted, WindowID: windowID}
+	case x11.EventTypeIMECanceled:
+		return Event{Type: EventIMECanceled, WindowID: windowID}
+	case x11.EventTypeIMEDisabled:
+		return Event{Type: EventIMEDisabled, WindowID: windowID}
+	case x11.EventTypeIMEDeleteSurrounding:
+		return Event{Type: EventIMEDeleteSurrounding, IMEDelete: event.IMEDelete, WindowID: windowID}
 	case x11.EventTypePointerDown:
 		return Event{Type: EventPointerDown, Pointer: event.Pointer, WindowID: windowID}
 	case x11.EventTypePointerUp:
@@ -507,6 +538,9 @@ type x11PlatformWindow struct {
 	lastScale float64           // DPI scale change detection (ADR-059)
 }
 
+var _ gpucontext.IMEControllerV2 = (*x11PlatformWindow)(nil)
+var _ gpucontext.IMECapabilityProviderV2 = (*x11PlatformWindow)(nil)
+
 // inner returns the *x11.Platform connection backing this window: the
 // secondary's own independent connection if this is a secondary window,
 // otherwise the shared primary connection. Every method below goes through
@@ -522,6 +556,37 @@ func (w *x11PlatformWindow) inner() *x11.Platform {
 
 func (w *x11PlatformWindow) ID() WindowID                  { return w.id }
 func (w *x11PlatformWindow) GetHandle() (uintptr, uintptr) { return w.inner().GetHandle() }
+
+// IME methods are optional gpucontext v2 capabilities. They deliberately do
+// not become part of PlatformWindow so existing third-party implementations
+// remain source-compatible.
+func (w *x11PlatformWindow) IMECapabilities() gpucontext.IMECapabilities {
+	return w.inner().IMECapabilities()
+}
+
+func (w *x11PlatformWindow) SetIMEPosition(x, y int) {
+	w.inner().SetIMEPosition(x, y)
+}
+
+func (w *x11PlatformWindow) SetIMEEnabled(enabled bool) {
+	w.inner().SetIMEEnabled(enabled)
+}
+
+func (w *x11PlatformWindow) SetIMECursorArea(area gpucontext.IMECursorArea) {
+	w.inner().SetIMECursorArea(area)
+}
+
+func (w *x11PlatformWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucontext.ContentHint) {
+	w.inner().SetIMEContentType(purpose, hints)
+}
+
+func (w *x11PlatformWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
+	w.inner().SetIMESurroundingText(text)
+}
+
+func (w *x11PlatformWindow) CancelIME() {
+	w.inner().CancelIME()
+}
 
 // LogicalSize returns the window size in logical units (DIP/platform points).
 // On HiDPI, divides physical pixels by the scale factor.
@@ -994,6 +1059,7 @@ func (w *waylandPlatformWindow) Destroy() {
 			}
 		}
 		p.secondaryMu.Unlock()
+		w.secondary.state.destroyWaylandIMEState()
 		w.secondary.libwl.Close()
 		if w.secondary.goDisp != nil {
 			_ = w.secondary.goDisp.Close()
@@ -1165,6 +1231,11 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		viewporterName = viewporterGlobal.Name
 		viewporterVersion = viewporterGlobal.Version
 	}
+	var textInputName, textInputVersion uint32
+	if textInputGlobal := registry.GetGlobalByInterface(wayland.InterfaceZwpTextInputManagerV3); textInputGlobal != nil {
+		textInputName = textInputGlobal.Name
+		textInputVersion = textInputGlobal.Version
+	}
 
 	// Step 2: Open C libwayland connection — this is the SINGLE connection
 	// that owns everything: surface, xdg-shell, input, Vulkan.
@@ -1254,6 +1325,15 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	if seatGlobal != nil {
 		if err := libwl.SetupInput(seatGlobal.Name, seatGlobal.Version); err != nil {
 			logger().Warn("input setup failed", "err", err)
+		}
+	}
+	// zwp_text_input_manager_v3 is optional. Bind it only after the seat is
+	// available because get_text_input requires that seat object.
+	if textInputName != 0 {
+		if err := libwl.SetupTextInput(textInputName, textInputVersion); err != nil {
+			logger().Warn("text-input-v3 setup failed (IME unavailable)", "err", err)
+		} else if libwl.HasTextInput() {
+			logger().Debug("text-input-v3 protocol bound")
 		}
 	}
 
@@ -1880,7 +1960,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			// and filtering out Alt blocks AltGr combos (e.g., AltGr+, -> <<).
 			// Control characters (r < 32) are filtered instead (GLFW pattern).
 			if pressed {
-				if r := w.keycodeToRune(key); r >= 32 {
+				if r := w.keycodeToRune(key); r >= 32 && !w.imeShouldFilterText() {
 					w.queueEvent(Event{Type: EventChar, Char: r})
 				}
 			}
@@ -1908,6 +1988,44 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			w.repeatRate = rate
 			w.repeatDelay = delay
 			w.repeatMu.Unlock()
+		},
+		OnTextInputEnter: func() {
+			w.imeMu.Lock()
+			if w.imeDestroyed {
+				w.imeMu.Unlock()
+				return
+			}
+			w.imeFocused = true
+			// text-input-v3 invalidates all state after enter. Replaying from
+			// PollEvents keeps FFI out of the protocol callback itself.
+			w.imeReplay = w.imeEnabled
+			w.imeMu.Unlock()
+		},
+		OnTextInputLeave: func() {
+			w.imeMu.Lock()
+			if w.imeDestroyed {
+				w.imeMu.Unlock()
+				return
+			}
+			wasEnabled := w.imeEnabled
+			canceled := w.imeComposing
+			w.imeFocused = false
+			w.imeEnabled = false
+			w.imeComposing = false
+			w.imeReplay = false
+			w.imeNeedsDisable = wasEnabled
+			w.imeSurrounding = gpucontext.IMESurroundingText{}
+			w.imeSurroundingSet = false
+			w.imeMu.Unlock()
+			if canceled {
+				w.queueEvent(Event{Type: EventIMECanceled})
+			}
+			if wasEnabled {
+				w.queueEvent(Event{Type: EventIMEDisabled})
+			}
+		},
+		OnTextInputDone: func(update wayland.TextInputUpdate) {
+			w.handleWaylandTextInputDone(update)
 		},
 
 		// Touch events
@@ -2211,6 +2329,8 @@ func (w *waylandWindow) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Mod
 // stamping it with this window's WindowID (see the winID field doc comment)
 // so App's dispatch* methods route it to the right window's callbacks
 // instead of only ever the primary window's.
+//
+//nolint:gocritic // Event is copied into the ring buffer to transfer ownership.
 func (w *waylandWindow) queueEvent(event Event) {
 	event.WindowID = w.winID
 	w.events.Push(event)
@@ -2329,7 +2449,7 @@ func (w *waylandWindow) processRepeatTimer() {
 	// Generate repeat events on main thread — xkb access is safe here.
 	for range repeats {
 		w.dispatchKeyEvent(gpuKey, mods, true)
-		if r := w.keycodeToRune(evdevKey); r >= 32 {
+		if r := w.keycodeToRune(evdevKey); r >= 32 && !w.imeShouldFilterText() {
 			w.queueEvent(Event{Type: EventChar, Char: r})
 		}
 	}
@@ -3034,6 +3154,11 @@ func (p *waylandPlatform) PollEvents() Event {
 			}
 		}
 
+		// Enter invalidates text-input-v3 state. Replay the app's explicit
+		// enable/content/cursor state outside the protocol callback and before
+		// the next event-loop turn.
+		w.replayWaylandIME(p.libwl)
+
 		// FRAME-001: Consume frame callback ready state. The done event
 		// already unblocked WaitEvents (data on display fd). The frame
 		// callback acts as a GATE (via frameCallbackReady() in app.go:485),
@@ -3192,6 +3317,9 @@ func (p *waylandPlatform) Destroy() {
 	}
 
 	// Close C libwayland connection (owns all Wayland objects)
+	if p.primary != nil {
+		p.primary.destroyWaylandIMEState()
+	}
 	if p.libwl != nil {
 		p.libwl.Close()
 		p.libwl = nil

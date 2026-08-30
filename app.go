@@ -3,6 +3,7 @@ package gogpu
 import (
 	"io"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -81,6 +82,22 @@ type App struct {
 
 	// Event source for gpucontext integration
 	eventSource *eventSourceAdapter
+
+	// IME controller state is kept on App so widgets may configure IME before
+	// Run creates the native window. The configured values are replayed onto
+	// the platform controller during initPlatform.
+	imeMu             sync.Mutex
+	imeEnabled        bool
+	imeConfigured     bool
+	imeCursorArea     gpucontext.IMECursorArea
+	imeAreaSet        bool
+	imePosition       struct{ x, y int }
+	imePositionSet    bool
+	imePurpose        gpucontext.ContentPurpose
+	imeHints          gpucontext.ContentHint
+	imeContentSet     bool
+	imeSurrounding    gpucontext.IMESurroundingText
+	imeSurroundingSet bool
 
 	// Input state for Ebiten-style polling (KeyJustPressed, etc.)
 	inputState *input.State
@@ -584,6 +601,7 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 
 	// Store the primary platform window for per-window operations.
 	a.platWindow = platWindow
+	a.applyIMEControllerState(platWindow)
 
 	if a.hitTestCallback != nil {
 		a.applyHitTestCallback()
@@ -860,6 +878,18 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 	case platform.EventChar:
 		a.dispatchCharEvent(event)
 		a.inputEvents = append(a.inputEvents, gpucontext.CharEvent{Char: event.Char})
+	case platform.EventIMECompositionStart:
+		a.dispatchIMECompositionStart(event)
+	case platform.EventIMECompositionUpdate:
+		a.dispatchIMECompositionUpdate(event.IMEComposition)
+	case platform.EventIMECompositionEnd:
+		a.dispatchIMECompositionEnd(event.IMECommitted)
+	case platform.EventIMECanceled:
+		a.dispatchIMECanceled()
+	case platform.EventIMEDisabled:
+		a.dispatchIMEDisabled()
+	case platform.EventIMEDeleteSurrounding:
+		a.dispatchIMEDeleteSurrounding(event.IMEDelete)
 	case platform.EventPointerDown, platform.EventPointerUp, platform.EventPointerMove,
 		platform.EventPointerEnter, platform.EventPointerLeave:
 		a.dispatchPointerEvent(event)
@@ -932,6 +962,42 @@ func (a *App) dispatchCharEvent(event *platform.Event) {
 	}
 	if a.eventSource != nil {
 		a.eventSource.dispatchTextInput(string(event.Char))
+	}
+}
+
+func (a *App) dispatchIMECompositionStart(_ *platform.Event) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECompositionStart()
+	}
+}
+
+func (a *App) dispatchIMECompositionUpdate(composition gpucontext.IMEComposition) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECompositionUpdate(composition)
+	}
+}
+
+func (a *App) dispatchIMECompositionEnd(committed string) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECompositionEnd(committed)
+	}
+}
+
+func (a *App) dispatchIMECanceled() {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECanceled()
+	}
+}
+
+func (a *App) dispatchIMEDisabled() {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMEDisabled()
+	}
+}
+
+func (a *App) dispatchIMEDeleteSurrounding(event gpucontext.IMEDeleteSurroundingEvent) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMEDeleteSurrounding(event)
 	}
 }
 

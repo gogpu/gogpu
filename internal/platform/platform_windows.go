@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
@@ -236,6 +237,20 @@ const (
 	waActive      = 1      // WA_ACTIVE
 	waClickActive = 2      // WA_CLICKACTIVE
 
+	// IMM32 composition messages and lParam flags.
+	wmIMEStartComposition = 0x010D
+	wmIMEEndComposition   = 0x010E
+	wmIMEComposition      = 0x010F
+	wmIMEChar             = 0x0286
+	gcsCompStr            = 0x0008
+	gcsCompAttr           = 0x0010
+	gcsResultStr          = 0x0800
+	gcsCursorPos          = 0x0080
+	immCFSCandidatePos    = 0x0040
+	immCFSExclude         = 0x0080
+	immNicompositionstr   = 0x0015
+	immCpsCancel          = 0x0004
+
 	// WaitEvents / WakeUp constants
 	wmWakeUp       = 0x0401     // WM_USER + 1 (custom wakeup message)
 	qsAllinput     = 0x04FF     // QS_ALLINPUT
@@ -261,25 +276,39 @@ type msgStruct struct {
 }
 
 var (
-	user32                 = windows.NewLazyDLL("user32.dll")
-	kernel32               = windows.NewLazyDLL("kernel32.dll")
-	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
-	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
-	procShowWindow         = user32.NewProc("ShowWindow")
-	procUpdateWindow       = user32.NewProc("UpdateWindow")
-	procPeekMessageW       = user32.NewProc("PeekMessageW")
-	procTranslateMessage   = user32.NewProc("TranslateMessage")
-	procDispatchMessageW   = user32.NewProc("DispatchMessageW")
-	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
-	procPostQuitMessage    = user32.NewProc("PostQuitMessage")
-	procLoadCursorW        = user32.NewProc("LoadCursorW")
-	procSetCursor          = user32.NewProc("SetCursor")
-	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
-	procDestroyWindow      = user32.NewProc("DestroyWindow")
-	procGetClientRect      = user32.NewProc("GetClientRect")
-	procClientToScreen     = user32.NewProc("ClientToScreen")
-	procTrackMouseEvent    = user32.NewProc("TrackMouseEvent")
-	procGetMessageTime     = user32.NewProc("GetMessageTime")
+	user32               = windows.NewLazyDLL("user32.dll")
+	kernel32             = windows.NewLazyDLL("kernel32.dll")
+	procRegisterClassExW = user32.NewProc("RegisterClassExW")
+	procCreateWindowExW  = user32.NewProc("CreateWindowExW")
+	procShowWindow       = user32.NewProc("ShowWindow")
+	procUpdateWindow     = user32.NewProc("UpdateWindow")
+	procPeekMessageW     = user32.NewProc("PeekMessageW")
+	procTranslateMessage = user32.NewProc("TranslateMessage")
+	procDispatchMessageW = user32.NewProc("DispatchMessageW")
+	procDefWindowProcW   = user32.NewProc("DefWindowProcW")
+	procPostQuitMessage  = user32.NewProc("PostQuitMessage")
+	procLoadCursorW      = user32.NewProc("LoadCursorW")
+	procSetCursor        = user32.NewProc("SetCursor")
+	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
+	procDestroyWindow    = user32.NewProc("DestroyWindow")
+	procGetClientRect    = user32.NewProc("GetClientRect")
+	procClientToScreen   = user32.NewProc("ClientToScreen")
+	procTrackMouseEvent  = user32.NewProc("TrackMouseEvent")
+	procGetMessageTime   = user32.NewProc("GetMessageTime")
+)
+
+var (
+	// IMM32 (Input Method Manager) composition APIs.
+	imm32                        = windows.NewLazyDLL("imm32.dll")
+	procImmGetContext            = imm32.NewProc("ImmGetContext")
+	procImmReleaseContext        = imm32.NewProc("ImmReleaseContext")
+	procImmGetCompositionStringW = imm32.NewProc("ImmGetCompositionStringW")
+	procImmSetCandidateWindow    = imm32.NewProc("ImmSetCandidateWindow")
+	procImmSetOpenStatus         = imm32.NewProc("ImmSetOpenStatus")
+	procImmNotifyIME             = imm32.NewProc("ImmNotifyIME")
+)
+
+var (
 	procSetTimer           = user32.NewProc("SetTimer")
 	procKillTimer          = user32.NewProc("KillTimer")
 	procGetWindowLongPtrW  = user32.NewProc("GetWindowLongPtrW")
@@ -494,6 +523,15 @@ type win32Size struct {
 	cx, cy int32
 }
 
+// candidateForm mirrors the Win32 CANDIDATEFORM structure used by
+// ImmSetCandidateWindow. Coordinates are screen pixels.
+type candidateForm struct {
+	dwIndex      uint32
+	dwStyle      uint32
+	ptCurrentPos point
+	rcArea       rect
+}
+
 // win32Window holds all per-window state for a single Win32 window.
 // Implements both per-window methods on windowsPlatform (legacy Platform)
 // and the PlatformWindow interface (multi-window PlatformManager).
@@ -545,6 +583,18 @@ type win32Window struct {
 	minHeight int
 	maxWidth  int
 	maxHeight int
+
+	// IMM32 state. All accesses happen on the message thread except controller
+	// calls from widgets, so imeMu protects the latter without extending native
+	// context lifetimes across goroutines.
+	imeMu          sync.Mutex
+	imeDestroyed   bool
+	ime            imeTracker
+	imeArea        gpucontext.IMECursorArea
+	imeAreaSet     bool
+	imePurpose     gpucontext.ContentPurpose
+	imeHints       gpucontext.ContentHint
+	imeSurrounding gpucontext.IMESurroundingText
 }
 
 // windowsPlatform implements Platform for Windows.
@@ -1173,6 +1223,7 @@ func (w *win32Window) StartDrag(paths []string, done func(DragResult)) {
 }
 
 func (w *win32Window) Destroy() {
+	w.destroyIMEState()
 	if w.platform != nil {
 		w.platform.windowMu.Lock()
 		delete(w.platform.windows, w.hwnd)
@@ -1222,8 +1273,25 @@ func (p *windowsPlatform) PollEvents() Event {
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
+	// If an IME ended without a post-END WM_CHAR result, terminate the pending
+	// lifecycle now rather than leaving it open indefinitely. The Windows
+	// adapter maps an empty post-END result to cancellation.
+	p.flushPendingIMECharResults()
 
 	return p.dequeueEvent()
+}
+
+func (p *windowsPlatform) flushPendingIMECharResults() {
+	p.windowMu.RLock()
+	for _, w := range p.windows {
+		w.imeMu.Lock()
+		pending := w.ime.hasPendingCharResult()
+		w.imeMu.Unlock()
+		if pending {
+			w.finishIMECharResult()
+		}
+	}
+	p.windowMu.RUnlock()
 }
 
 func (p *windowsPlatform) ShouldClose() bool {
@@ -1310,15 +1378,21 @@ func (w *win32Window) setModalFrameCallback(fn func()) {
 // Same pattern as win32Window.Destroy and GLFW's RemovePropW-before-DestroyWindow.
 func (p *windowsPlatform) Destroy() {
 	p.windowMu.Lock()
-	toDestroy := make([]windows.HWND, 0, len(p.windows))
-	for hwnd := range p.windows {
-		toDestroy = append(toDestroy, hwnd)
+	toDestroy := make([]*win32Window, 0, len(p.windows))
+	for hwnd, w := range p.windows {
+		toDestroy = append(toDestroy, w)
 		delete(p.windows, hwnd)
 	}
 	p.windowMu.Unlock()
 
-	for _, hwnd := range toDestroy {
-		procDestroyWindow.Call(uintptr(hwnd))
+	for _, w := range toDestroy {
+		if w == nil {
+			continue
+		}
+		w.destroyIMEState()
+		if w.hwnd != 0 {
+			procDestroyWindow.Call(uintptr(w.hwnd))
+		}
 	}
 	p.hMenu = 0
 	p.primary = nil
@@ -2713,6 +2787,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmKillFocus:
 		p.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: false})
+		// Losing focus cancels any preedit and disables native IME before the
+		// next focus target can receive composition messages.
+		w.SetIMEEnabled(false)
 		return 0
 
 	case wmActivate:
@@ -2790,6 +2867,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 		// Update cached client size after DPI-driven resize.
 		w.updateSize()
+		w.applyStoredIMECursorArea()
 
 		// Emit ScaleChanged BEFORE Resize (cause before effect, ADR-059).
 		logW, logH := w.LogicalSize()
@@ -2947,6 +3025,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		}
 
 	case wmKeydown, wmSysKeydown:
+		w.beforeIMEKeyDown()
 		// Convert to Key using scancode-based translation (GLFW/Ebiten pattern)
 		// This correctly handles Left/Right modifiers and AltGr
 		key := translateKey(wParam, lParam)
@@ -2989,12 +3068,30 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		// For WM_SYSKEYUP: suppress menu activation
 		return 0
 
-	case wmChar, wmSysChar:
+	case wmIMEStartComposition:
+		w.handleIMEStart()
+		return 0
+
+	case wmIMEComposition:
+		w.handleIMEComposition(lParam)
+		return 0
+
+	case wmIMEEndComposition:
+		w.handleIMEEnd()
+		return 0
+
+	case wmChar, wmSysChar, wmIMEChar:
 		// WM_CHAR/WM_SYSCHAR are generated by TranslateMessage().
 		// wParam is a UTF-16 code unit -- supplementary characters (emoji, CJK)
 		// arrive as two consecutive messages: high surrogate then low surrogate.
 		// Pattern: GLFW 3.4 win32_window.c + Ebiten textinput_windows.go
 		codeUnit := uint16(wParam)
+		if w.consumeIMECharResult(codeUnit) {
+			return 0
+		}
+		if w.consumeIMECharUnit(codeUnit) {
+			return 0
+		}
 		if codeUnit >= 0xD800 && codeUnit <= 0xDBFF {
 			// High surrogate -- store and wait for low surrogate
 			w.highSurrogate = codeUnit
@@ -3022,6 +3119,22 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			return 1 // "Yes, we support WM_UNICHAR"
 		}
 		char := rune(wParam)
+		if char >= 0 && char <= 0x10FFFF {
+			resultUnits := utf16.Encode([]rune{char})
+			if w.consumeIMECharResultUnits(resultUnits) {
+				return 0
+			}
+			suppressed := true
+			for _, unit := range resultUnits {
+				if !w.consumeIMECharUnit(unit) {
+					suppressed = false
+					break
+				}
+			}
+			if suppressed {
+				return 0
+			}
+		}
 		if char >= 32 && char != 127 {
 			p.queueEvent(Event{WindowID: w.id, Type: EventChar, Char: char})
 		}
