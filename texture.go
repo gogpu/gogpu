@@ -25,6 +25,7 @@ type textureCleanupHandle struct {
 	view     *wgpu.TextureView
 	sampler  *wgpu.Sampler
 	renderer *Renderer
+	bytes    int64 // allocated texel bytes for stats free on GC path
 }
 
 // Texture update errors.
@@ -40,6 +41,10 @@ var (
 
 	// ErrInvalidRegion is returned when region parameters are invalid (negative or zero).
 	ErrInvalidRegion = errors.New("gogpu: invalid region parameters")
+
+	// ErrInvalidStride is returned when bytesPerRow is positive but smaller than
+	// the tightly packed row size (w * bytesPerPixel).
+	ErrInvalidStride = errors.New("gogpu: invalid bytesPerRow stride")
 )
 
 // Texture represents a GPU texture resource with its associated view and sampler.
@@ -157,6 +162,13 @@ func (t *Texture) Destroy() {
 	if t.texture != nil {
 		t.texture.Release()
 		t.texture = nil
+	}
+
+	if bpp := t.BytesPerPixel(); bpp > 0 && t.width > 0 && t.height > 0 {
+		t.renderer.recordTextureFree(int64(t.width * t.height * bpp))
+		// Prevent double-counting on a second Destroy call.
+		t.width = 0
+		t.height = 0
 	}
 }
 
@@ -338,6 +350,9 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		renderer:      r,
 	}
 
+	r.recordTextureAlloc(int64(width * height * 4))
+	r.recordUpload(int64(len(data)), 1)
+
 	// Safety net: if the texture is garbage collected without Destroy(),
 	// enqueue deferred destruction on the render thread.
 	handle := textureCleanupHandle{
@@ -345,6 +360,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		view:     view,
 		sampler:  sampler,
 		renderer: r,
+		bytes:    int64(width * height * 4),
 	}
 	tex.cleanup = runtime.AddCleanup(tex, func(h textureCleanupHandle) {
 		h.renderer.EnqueueDeferredDestroy(func() {
@@ -357,6 +373,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 			if h.texture != nil {
 				h.texture.Release()
 			}
+			h.renderer.recordTextureFree(h.bytes)
 		})
 	}, handle)
 
@@ -402,11 +419,22 @@ func (t *Texture) UpdateData(data []byte) error {
 		return fmt.Errorf("gogpu: failed to upload texture data: %w", err)
 	}
 
+	t.renderer.recordUpload(int64(expectedSize), 1)
 	return nil
 }
 
 // UpdateRegion uploads pixel data to a rectangular region of the texture.
-func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
+//
+// bytesPerRow is the stride in bytes between consecutive rows in data
+// (WebGPU ImageDataLayout.bytesPerRow). Pass 0 for tightly packed rows
+// (w * bytesPerPixel) — this preserves the pre-stride dense-upload behavior.
+//
+// When bytesPerRow is 0, data must be exactly w*h*bytesPerPixel bytes.
+// When bytesPerRow > 0, data must be at least bytesPerRow*(h-1)+w*bytesPerPixel
+// bytes (the last row need not be padded). bytesPerRow must be >= w*bytesPerPixel.
+//
+// Related: #484 (geckty dirty-band uploads without extractRegion memcpy).
+func (t *Texture) UpdateRegion(x, y, w, h, bytesPerRow int, data []byte) error {
 	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed
 	}
@@ -426,12 +454,24 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 		return fmt.Errorf("%w: unsupported texture format", ErrInvalidDataSize)
 	}
 
-	expectedSize := w * h * bpp
-	if len(data) != expectedSize {
-		return fmt.Errorf("%w: expected %d bytes (%dx%dx%d), got %d",
-			ErrInvalidDataSize, expectedSize, w, h, bpp, len(data))
+	packedRow := w * bpp
+	stride := bytesPerRow
+	if stride == 0 {
+		stride = packedRow
+	}
+	if stride < packedRow {
+		return fmt.Errorf("%w: bytesPerRow=%d < packed row=%d (w=%d * bpp=%d)",
+			ErrInvalidStride, bytesPerRow, packedRow, w, bpp)
 	}
 
+	// WebGPU writeTexture size: bytesPerRow*(height-1) + bytesPerCopy for last row.
+	expectedSize := stride*(h-1) + packedRow
+	if len(data) < expectedSize {
+		return fmt.Errorf("%w: expected at least %d bytes (stride=%d, %dx%dx%d), got %d",
+			ErrInvalidDataSize, expectedSize, stride, w, h, bpp, len(data))
+	}
+
+	uploadBytes := packedRow * h // logical texel bytes transferred (not stride padding)
 	if err := t.renderer.device.Queue().WriteTexture(
 		&wgpu.ImageCopyTexture{
 			Texture:  t.texture,
@@ -446,8 +486,8 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 		data,
 		&wgpu.ImageDataLayout{
 			Offset:       0,
-			BytesPerRow:  uint32(w * bpp), //nolint:gosec // G115: w validated positive above
-			RowsPerImage: uint32(h),       //nolint:gosec // G115: h validated positive above
+			BytesPerRow:  uint32(stride), //nolint:gosec // G115: stride validated positive above
+			RowsPerImage: uint32(h),      //nolint:gosec // G115: h validated positive above
 		},
 		&wgpu.Extent3D{
 			Width:              uint32(w), //nolint:gosec // G115: w validated positive above
@@ -458,5 +498,6 @@ func (t *Texture) UpdateRegion(x, y, w, h int, data []byte) error {
 		return fmt.Errorf("gogpu: failed to upload texture region: %w", err)
 	}
 
+	t.renderer.recordUpload(int64(uploadBytes), 1)
 	return nil
 }

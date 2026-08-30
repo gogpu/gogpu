@@ -1137,6 +1137,7 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 			if ws.acquireFailed {
 				a.RequestRedraw()
 			}
+			a.renderer.endFrameStats(true) // idle: no acquire → present skipped (#484 FrameStats)
 			ws.resetLazyState()
 			a.renderer.currentSurface = nil
 			continue

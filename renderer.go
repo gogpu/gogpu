@@ -247,6 +247,14 @@ type Renderer struct {
 	// single-window path. It is set only when a secondary platform window
 	// actually prepares compositor frame gating.
 	secondaryFrameGatePending atomic.Bool
+
+	// GPU stats (GOGPU_STATS=1 / EnableStats). Zero-cost when disabled —
+	// record paths return after a single atomic load (Rust wgpu counters pattern).
+	statsTextures      atomic.Int64
+	statsTextureBytes  atomic.Int64
+	statsUploadBytes   atomic.Int64
+	statsUploadRegions atomic.Int64
+	frameStats         frameStatsState
 }
 
 // newRenderer creates and initializes a new renderer.
@@ -586,6 +594,7 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 // Backward compatibility wrapper — multi-window code uses beginFrameForSurface.
 func (r *Renderer) BeginFrame() bool {
 	r.DrainDeferredDestroys()
+	r.beginFrameStats()
 	return r.beginFrameForSurface(r.primary)
 }
 
@@ -685,6 +694,7 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 // Backward compatibility wrapper — multi-window code uses endFrameForSurface.
 func (r *Renderer) EndFrame() {
 	if !r.primary.frameStarted {
+		r.endFrameStats(true)
 		r.pollSubmissions()
 		return
 	}
@@ -705,6 +715,13 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 		ws.pixelPresented = false
 		ws.hasPendingClear = false
 		ws.releaseFrame()
+		r.endFrameStats(false)
+		return false
+	}
+
+	// No swapchain frame was started (idle / lazy acquire never triggered).
+	if !ws.frameStarted {
+		r.endFrameStats(true)
 		return false
 	}
 
@@ -736,6 +753,7 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	reconfigured, presented := ws.present()
 	finishPresentationSync(ws, syncAttempt, presented)
 	ws.releaseFrame()
+	r.endFrameStats(!presented)
 	return reconfigured
 }
 
@@ -902,6 +920,9 @@ func (ws *RenderTarget) prepareLazyAcquire() {
 		ws.pendingBlitBindGroup = nil
 	}
 	ws.compositeState.Release()
+	if ws.renderer != nil {
+		ws.renderer.beginFrameStats()
+	}
 }
 
 // ensureFrameStarted calls beginFrame on first draw call (lazy acquire pattern).

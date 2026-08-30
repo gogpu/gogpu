@@ -418,7 +418,7 @@ func TestUpdateRegionDestroyedTexture(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.tex.UpdateRegion(0, 0, 5, 5, make([]byte, 100))
+			err := tt.tex.UpdateRegion(0, 0, 5, 5, 0, make([]byte, 100))
 			if !errors.Is(err, ErrTextureUpdateDestroyed) {
 				t.Errorf("UpdateRegion() error = %v, want ErrTextureUpdateDestroyed", err)
 			}
@@ -454,7 +454,7 @@ func TestUpdateRegionInvalidParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tex.UpdateRegion(tt.x, tt.y, tt.w, tt.h, make([]byte, 100))
+			err := tex.UpdateRegion(tt.x, tt.y, tt.w, tt.h, 0, make([]byte, 100))
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("UpdateRegion() error = %v, want %v", err, tt.wantErr)
 			}
@@ -472,6 +472,7 @@ func TestTextureUpdateErrors(t *testing.T) {
 		{ErrInvalidDataSize, "gogpu: invalid data size"},
 		{ErrRegionOutOfBounds, "gogpu: region out of bounds"},
 		{ErrInvalidRegion, "gogpu: invalid region parameters"},
+		{ErrInvalidStride, "gogpu: invalid bytesPerRow stride"},
 	}
 
 	for _, tt := range tests {

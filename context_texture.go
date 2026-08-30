@@ -168,10 +168,11 @@ var ErrInvalidTextureType = errors.New("gogpu: texture must be *Texture")
 
 // Compile-time interface compliance checks.
 var (
-	_ gpucontext.TextureDrawer  = (*contextTextureDrawer)(nil)
-	_ gpucontext.TextureCreator = (*rendererTextureCreator)(nil)
-	_ gpucontext.Texture        = (*Texture)(nil)
-	_ gpucontext.TextureUpdater = (*Texture)(nil)
+	_ gpucontext.TextureDrawer        = (*contextTextureDrawer)(nil)
+	_ gpucontext.TextureCreator       = (*rendererTextureCreator)(nil)
+	_ gpucontext.Texture              = (*Texture)(nil)
+	_ gpucontext.TextureUpdater       = (*Texture)(nil)
+	_ gpucontext.TextureRegionUpdater = (*Texture)(nil)
 )
 
 // contextTextureDrawer adapts Context to gpucontext.TextureDrawer interface.
