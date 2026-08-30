@@ -25,9 +25,10 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.50.0
+## Current State: v0.54.0
 
 ✅ **Production-ready** with full feature set:
+- **Strided texture uploads + GPUStats** (#484) — `Texture.UpdateRegion(region, data, layout)` for zero-copy dirty bands; `Renderer.GetCounters()` + `Context.FrameStats()` behind `GOGPU_STATS=1`
 - **Outgoing drag source** (#427, ADR-061) — `Window.StartDrag(DragData, callback)` on all 5 platforms (Windows COM DoDragDrop, macOS NSDraggingSource, X11 XDND v5, Wayland wl_data_source, Browser stub). Enterprise references: Qt6, SDL3, winit
 - **Per-pixel alpha transparency** (#361, @shaolei) — `Config.WithTransparent(bool)` for overlay/tray popup windows. Windows DwmBlurBehind, macOS isOpaque+clearColor, X11 ARGB visual
 - **Window control API** (#361, @shaolei) — `Window.Show()`, `Hide()`, `SetPosition()`, `SetSize()` on all desktop platforms
@@ -93,6 +94,8 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.54.0** | 2026-08-30 | **Strided UpdateRegion + GPUStats** (#484). deps gpucontext v0.31.2. |
+| **v0.53.2** | 2026-08-30 | DownlevelCapabilities (ADR-071). deps wgpu v0.33.0, gpucontext v0.30.0. |
 | **v0.50.0** | 2026-08-06 | **Outgoing drag source** (#427, ADR-061) — `StartDrag` all 5 platforms. Per-pixel alpha (#361, @shaolei). Input ordering fix (#425, @FDUTCH). deps wgpu v0.30.36. |
 | **v0.49.2** | 2026-08-05 | Input JustPressed/Delta ordering fix (#425, @FDUTCH). 38 enterprise input tests. |
 | **v0.49.1** | 2026-08-04 | macOS menu Role+Action fix (#423, @jbunds). |
@@ -278,13 +281,13 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.29.2 | GPU application framework, windowing, multi-window, damage-aware present |
-| **gogpu/wgpu** | v0.26.4 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/gogpu** | v0.54.0 | GPU application framework, windowing, multi-window, damage-aware present |
+| **gogpu/wgpu** | v0.33.0 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
 | **gogpu/naga** | v0.17.6 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
 | **gogpu/gg** | v0.41.2 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
 | **gogpu/ui** | v0.1.13 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
-| **gogpu/gpucontext** | v0.14.0 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
-| **gogpu/gputypes** | v0.5.0 | WebGPU type definitions (zero value = spec default) |
+| **gogpu/gpucontext** | v0.31.1 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
+| **gogpu/gputypes** | v0.7.0 | WebGPU type definitions (zero value = spec default) |
 | **gogpu/compose** | design | Multi-process composition library |
 | **gogpu/g3d** | v0.1.0 | 3D rendering (scene graph, PBR Blinn-Phong, forward renderer, 5 backends) |
 | **gogpu/gg-pdf** | v0.1.0 | PDF export |

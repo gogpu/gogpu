@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.0] - 2026-08-30
+
+### Added
+
+- **Strided `Texture.UpdateRegion`** (#484) — `image.Rectangle` + `gpucontext.ImageDataLayout` (WebGPU / Go stdlib idiom). Zero-value layout = offset 0, tightly packed rows, region height. Enables zero-copy dirty-band uploads from a full-frame RGBA buffer without `extractRegion` memcpy. wgpu handles 256-byte row-pitch alignment via `alignTextureDataInto`.
+- **GPUStats — two-level observability** (#484) — Rust wgpu + Flutter pattern:
+  - `Renderer.GetCounters()` — cumulative texture count, allocated bytes, upload totals (device owner)
+  - `Context.FrameStats()` — per-frame `UploadBytes`, `UploadRegions`, `PresentSkipped`, `FrameDuration` (frame owner)
+  - Feature-gated: `GOGPU_STATS=1` or `EnableStats()` / `DisableStats()`. Zero-cost when off (single atomic load).
+
+### Changed
+
+- **deps:** gpucontext v0.30.0 → v0.31.2 (`TextureRegionUpdater.UpdateRegion` struct API)
+
 ## [0.53.2] - 2026-08-30
 
 ### Added

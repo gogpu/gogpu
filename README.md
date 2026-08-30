@@ -161,6 +161,7 @@ All settings can be overridden via environment variables (no code changes needed
 | `GOGPU_POWER_PREFERENCE` | `low`, `high` | none | GPU power/performance trade-off |
 | `GOGPU_RENDER_MODE` | `auto`, `cpu`, `gpu` | auto | 2D rendering path (ADR-020) |
 | `GOGPU_DEBUG_DAMAGE` | `1` | off | Show damage region overlay (ADR-021) |
+| `GOGPU_STATS` | `1` | off | Enable GPU upload/resource stats (#484) |
 
 ```bash
 # Examples:

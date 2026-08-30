@@ -190,6 +190,7 @@ All Config options can be overridden via environment variables:
 | `GOGPU_POWER_PREFERENCE` | `low`, `high` | none | GPU selection |
 | `GOGPU_RENDER_MODE` | `auto`, `cpu`, `gpu` | auto | 2D render path (ADR-020) |
 | `GOGPU_DEBUG_DAMAGE` | `1` | off | Damage region overlay (ADR-021) |
+| `GOGPU_STATS` | `1` | off | GPU upload/resource counters (#484) |
 | `GOGPU_SUBPIXEL_LAYOUT` | `rgb`, `bgr`, `vrgb`, `vbgr`, `none` | auto-detect | LCD subpixel override (ADR-047) |
 | `GOGPU_WAYLAND_FRAME_CALLBACK` | `0` | enabled | Disable Wayland frame callback gating (ADR-049) |
 
