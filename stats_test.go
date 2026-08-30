@@ -10,10 +10,6 @@ import (
 	_ "github.com/gogpu/wgpu/hal/software"
 )
 
-func regionRect(x, w, h int) image.Rectangle {
-	return image.Rect(x, 0, x+w, h)
-}
-
 // TestUpdateRegionStrideValidation covers layout validation with a live headless renderer.
 func TestUpdateRegionStrideValidation(t *testing.T) {
 	EnableStats()
@@ -45,59 +41,59 @@ func TestUpdateRegionStrideValidation(t *testing.T) {
 	}{
 		{
 			name:    "tight packed zero layout",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{},
 			dataLen: 4 * 2 * 4,
 		},
 		{
 			name:    "explicit packed stride",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{BytesPerRow: 16},
 			dataLen: 4 * 2 * 4,
 		},
 		{
 			name:    "strided full-frame buffer band",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{BytesPerRow: 32},
 			dataLen: 48, // stride*(h-1)+packedRow = 32*1+16
 		},
 		{
 			name:    "stride too small",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{BytesPerRow: 8},
 			dataLen: 100,
 			wantErr: ErrInvalidStride,
 		},
 		{
 			name:    "data too short for stride",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{BytesPerRow: 32},
 			dataLen: 40,
 			wantErr: ErrInvalidDataSize,
 		},
 		{
 			name:    "region out of bounds",
-			region:  regionRect(6, 4, 1),
+			region:  image.Rect(6, 0, 10, 1),
 			layout:  gpucontext.ImageDataLayout{},
 			dataLen: 16,
 			wantErr: ErrRegionOutOfBounds,
 		},
 		{
 			name:    "invalid region zero height",
-			region:  regionRect(0, 4, 0),
+			region:  image.Rect(0, 0, 4, 0),
 			layout:  gpucontext.ImageDataLayout{},
 			dataLen: 16,
 			wantErr: ErrInvalidRegion,
 		},
 		{
 			name:    "layout offset within buffer",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{BytesPerRow: 16, Offset: 8},
 			dataLen: 8 + 4*2*4,
 		},
 		{
 			name:    "layout offset past buffer",
-			region:  regionRect(0, 4, 2),
+			region:  image.Rect(0, 0, 4, 2),
 			layout:  gpucontext.ImageDataLayout{Offset: 100},
 			dataLen: 32,
 			wantErr: ErrInvalidDataSize,
