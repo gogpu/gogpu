@@ -281,13 +281,13 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.29.2 | GPU application framework, windowing, multi-window, damage-aware present |
-| **gogpu/wgpu** | v0.26.4 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/gogpu** | v0.54.0 | GPU application framework, windowing, multi-window, damage-aware present |
+| **gogpu/wgpu** | v0.33.0 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
 | **gogpu/naga** | v0.17.6 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
 | **gogpu/gg** | v0.41.2 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
 | **gogpu/ui** | v0.1.13 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
-| **gogpu/gpucontext** | v0.14.0 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
-| **gogpu/gputypes** | v0.5.0 | WebGPU type definitions (zero value = spec default) |
+| **gogpu/gpucontext** | v0.31.0 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
+| **gogpu/gputypes** | v0.7.0 | WebGPU type definitions (zero value = spec default) |
 | **gogpu/compose** | design | Multi-process composition library |
 | **gogpu/g3d** | v0.1.0 | 3D rendering (scene graph, PBR Blinn-Phong, forward renderer, 5 backends) |
 | **gogpu/gg-pdf** | v0.1.0 | PDF export |
