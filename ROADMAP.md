@@ -94,7 +94,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| **v0.54.0** | 2026-08-30 | **Strided UpdateRegion + GPUStats** (#484). deps gpucontext v0.31.1. |
+| **v0.54.0** | 2026-08-30 | **Strided UpdateRegion + GPUStats** (#484). deps gpucontext v0.31.2. |
 | **v0.53.2** | 2026-08-30 | DownlevelCapabilities (ADR-071). deps wgpu v0.33.0, gpucontext v0.30.0. |
 | **v0.50.0** | 2026-08-06 | **Outgoing drag source** (#427, ADR-061) — `StartDrag` all 5 platforms. Per-pixel alpha (#361, @shaolei). Input ordering fix (#425, @FDUTCH). deps wgpu v0.30.36. |
 | **v0.49.2** | 2026-08-05 | Input JustPressed/Delta ordering fix (#425, @FDUTCH). 38 enterprise input tests. |

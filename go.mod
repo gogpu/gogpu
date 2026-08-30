@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-webgpu/goffi v0.6.3
-	github.com/gogpu/gpucontext v0.31.1-0.20260830183443-01709c12389b
+	github.com/gogpu/gpucontext v0.31.2
 	github.com/gogpu/gputypes v0.7.0
 	github.com/gogpu/wgpu v0.33.0
 	golang.org/x/sys v0.47.0

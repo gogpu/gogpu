@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **deps:** gpucontext v0.30.0 → v0.31.1 (`TextureRegionUpdater.UpdateRegion` struct API)
+- **deps:** gpucontext v0.30.0 → v0.31.2 (`TextureRegionUpdater.UpdateRegion` struct API)
 
 ## [0.53.2] - 2026-08-30
 
