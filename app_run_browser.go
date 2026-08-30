@@ -16,6 +16,7 @@ import (
 type browserFrameLoop struct {
 	app *App
 
+	jsDocument         js.Value
 	rafCallback        js.Func
 	visibilityCallback js.Func
 
@@ -28,8 +29,9 @@ type browserFrameLoop struct {
 
 func newBrowserFrameLoop(app *App) *browserFrameLoop {
 	loop := &browserFrameLoop{
-		app:  app,
-		done: make(chan struct{}),
+		app:        app,
+		jsDocument: js.Global().Get("document"),
+		done:       make(chan struct{}),
 	}
 	loop.rafCallback = js.FuncOf(loop.onAnimationFrame)
 	loop.visibilityCallback = js.FuncOf(loop.onVisibilityChange)
@@ -44,13 +46,12 @@ func (a *App) runMainLoop() {
 		setter.SetWakeUpHook(loop.schedule)
 	}
 
-	doc := js.Global().Get("document")
-	doc.Call("addEventListener", "visibilitychange", loop.visibilityCallback)
+	loop.jsDocument.Call("addEventListener", "visibilitychange", loop.visibilityCallback)
 	loop.schedule()
 	<-loop.done
 
 	loop.stop()
-	doc.Call("removeEventListener", "visibilitychange", loop.visibilityCallback)
+	loop.jsDocument.Call("removeEventListener", "visibilitychange", loop.visibilityCallback)
 	if setter, ok := a.manager.(platform.WakeUpHookSetter); ok {
 		setter.SetWakeUpHook(nil)
 	}
@@ -62,11 +63,11 @@ func (l *browserFrameLoop) schedule() {
 	if l.stopped.Load() {
 		return
 	}
-	if !l.app.running.Load() {
+	if l.shouldExit() {
 		l.finish()
 		return
 	}
-	if documentHidden() {
+	if l.documentHidden() {
 		return
 	}
 	if !l.rafPending.CompareAndSwap(false, true) {
@@ -80,16 +81,16 @@ func (l *browserFrameLoop) onAnimationFrame(_ js.Value, _ []js.Value) any {
 	if l.stopped.Load() {
 		return nil
 	}
-	if !l.app.running.Load() || (l.app.platWindow != nil && l.app.platWindow.ShouldClose()) {
+	if l.shouldExit() {
 		l.finish()
 		return nil
 	}
-	if documentHidden() {
+	if l.documentHidden() {
 		return nil
 	}
 
 	l.app.runFrame()
-	if !l.app.running.Load() || (l.app.platWindow != nil && l.app.platWindow.ShouldClose()) {
+	if l.shouldExit() {
 		l.finish()
 		return nil
 	}
@@ -104,7 +105,7 @@ func (l *browserFrameLoop) onVisibilityChange(_ js.Value, _ []js.Value) any {
 	if l.stopped.Load() {
 		return nil
 	}
-	if documentHidden() {
+	if l.documentHidden() {
 		l.cancelPendingFrame()
 		return nil
 	}
@@ -131,7 +132,11 @@ func (l *browserFrameLoop) cancelPendingFrame() {
 	}
 }
 
-func documentHidden() bool {
-	hidden := js.Global().Get("document").Get("hidden")
+func (l *browserFrameLoop) shouldExit() bool {
+	return !l.app.running.Load() || (l.app.platWindow != nil && l.app.platWindow.ShouldClose())
+}
+
+func (l *browserFrameLoop) documentHidden() bool {
+	hidden := l.jsDocument.Get("hidden")
 	return !hidden.IsUndefined() && !hidden.IsNull() && hidden.Bool()
 }

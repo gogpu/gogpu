@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"sync/atomic"
 	"syscall/js"
 
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
@@ -16,7 +17,7 @@ import (
 type browserPlatform struct {
 	events *eventqueue.Queue[Event]
 	window *browserWindow
-	wakeUp func()
+	wakeUp atomic.Pointer[func()]
 }
 
 func newPlatformManager() PlatformManager {
@@ -59,8 +60,9 @@ func (p *browserPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 
 	w := &browserWindow{
-		id:     NewWindowID(),
-		canvas: canvas,
+		id:       NewWindowID(),
+		canvas:   canvas,
+		platform: p,
 	}
 	w.registerEventListeners(p)
 
@@ -89,15 +91,19 @@ func (p *browserPlatform) WaitEvents() {
 // WakeUp schedules a browser event-loop turn when the application has
 // installed a hook. Repeated calls are coalesced by the RAF scheduler.
 func (p *browserPlatform) WakeUp() {
-	if p.wakeUp != nil {
-		p.wakeUp()
+	if wakeUp := p.wakeUp.Load(); wakeUp != nil {
+		(*wakeUp)()
 	}
 }
 
 // SetWakeUpHook connects platform events and application invalidation to the
 // browser's requestAnimationFrame scheduler.
 func (p *browserPlatform) SetWakeUpHook(wakeUp func()) {
-	p.wakeUp = wakeUp
+	if wakeUp == nil {
+		p.wakeUp.Store(nil)
+		return
+	}
+	p.wakeUp.Store(&wakeUp)
 }
 
 // ClipboardRead reads text from the system clipboard via the Clipboard API.
@@ -194,6 +200,7 @@ func (p *browserPlatform) enqueueEvent(ev Event) {
 type browserWindow struct {
 	id          WindowID
 	canvas      js.Value
+	platform    *browserPlatform
 	shouldClose bool
 	lastScale   float64 // DPI scale change detection (ADR-059)
 
@@ -473,8 +480,12 @@ func (w *browserWindow) Maximize() {}
 // IsMaximized returns false — not applicable for browser canvas.
 func (w *browserWindow) IsMaximized() bool { return false }
 
-// Close marks the window as should-close. On browser, the user closes tabs directly.
-func (w *browserWindow) Close() { w.shouldClose = true }
+// Close marks the window as should-close and wakes a demand-driven loop so it
+// can observe the close request. On browser, the user closes tabs directly.
+func (w *browserWindow) Close() {
+	w.shouldClose = true
+	w.platform.WakeUp()
+}
 
 // Show is a no-op on browser -- the canvas is always visible.
 func (w *browserWindow) Show() {}
