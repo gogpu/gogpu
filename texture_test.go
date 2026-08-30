@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 )
 
@@ -418,7 +419,7 @@ func TestUpdateRegionDestroyedTexture(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.tex.UpdateRegion(0, 0, 5, 5, 0, make([]byte, 100))
+			err := tt.tex.UpdateRegion(image.Rect(0, 0, 5, 5), make([]byte, 100), gpucontext.ImageDataLayout{})
 			if !errors.Is(err, ErrTextureUpdateDestroyed) {
 				t.Errorf("UpdateRegion() error = %v, want ErrTextureUpdateDestroyed", err)
 			}
@@ -440,21 +441,20 @@ func TestUpdateRegionInvalidParams(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		x, y    int
-		w, h    int
+		region  image.Rectangle
 		wantErr error
 	}{
-		{"negative x", -1, 0, 5, 5, ErrTextureUpdateDestroyed},
-		{"negative y", 0, -1, 5, 5, ErrTextureUpdateDestroyed},
-		{"zero width", 0, 0, 0, 5, ErrTextureUpdateDestroyed},
-		{"zero height", 0, 0, 5, 0, ErrTextureUpdateDestroyed},
-		{"negative width", 0, 0, -5, 5, ErrTextureUpdateDestroyed},
-		{"negative height", 0, 0, 5, -5, ErrTextureUpdateDestroyed},
+		{"negative x", image.Rect(-1, 0, 4, 5), ErrTextureUpdateDestroyed},
+		{"negative y", image.Rect(0, -1, 5, 4), ErrTextureUpdateDestroyed},
+		{"zero width", image.Rect(0, 0, 0, 5), ErrTextureUpdateDestroyed},
+		{"zero height", image.Rect(0, 0, 5, 0), ErrTextureUpdateDestroyed},
+		{"negative width", image.Rect(0, 0, -5, 5), ErrTextureUpdateDestroyed},
+		{"negative height", image.Rect(0, 0, 5, -5), ErrTextureUpdateDestroyed},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tex.UpdateRegion(tt.x, tt.y, tt.w, tt.h, 0, make([]byte, 100))
+			err := tex.UpdateRegion(tt.region, make([]byte, 100), gpucontext.ImageDataLayout{})
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("UpdateRegion() error = %v, want %v", err, tt.wantErr)
 			}

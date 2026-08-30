@@ -425,28 +425,28 @@ func (t *Texture) UpdateData(data []byte) error {
 
 // UpdateRegion uploads pixel data to a rectangular region of the texture.
 //
-// bytesPerRow is the stride in bytes between consecutive rows in data
-// (WebGPU ImageDataLayout.bytesPerRow). Pass 0 for tightly packed rows
-// (w * bytesPerPixel) — this preserves the pre-stride dense-upload behavior.
-//
-// When bytesPerRow is 0, data must be exactly w*h*bytesPerPixel bytes.
-// When bytesPerRow > 0, data must be at least bytesPerRow*(h-1)+w*bytesPerPixel
-// bytes (the last row need not be padded). bytesPerRow must be >= w*bytesPerPixel.
+// region uses stdlib image.Rectangle coordinates (Min = top-left,
+// Max = exclusive bottom-right). layout describes source buffer stride,
+// offset, and rows-per-image (WebGPU GPUTexelCopyBufferLayout semantics).
+// Zero-value layout = offset 0, tightly packed rows, region height.
 //
 // Related: #484 (dirty-band uploads without extractRegion memcpy).
-func (t *Texture) UpdateRegion(x, y, w, h, bytesPerRow int, data []byte) error {
+func (t *Texture) UpdateRegion(region image.Rectangle, data []byte, layout gpucontext.ImageDataLayout) error {
 	if t.renderer == nil || t.renderer.device == nil || t.texture == nil {
 		return ErrTextureUpdateDestroyed
 	}
 
+	x, y := region.Min.X, region.Min.Y
+	w, h := region.Dx(), region.Dy()
+
 	if x < 0 || y < 0 || w <= 0 || h <= 0 {
-		return fmt.Errorf("%w: x=%d, y=%d, w=%d, h=%d (x,y must be non-negative; w,h must be positive)",
-			ErrInvalidRegion, x, y, w, h)
+		return fmt.Errorf("%w: region %v (min must be non-negative; size must be positive)",
+			ErrInvalidRegion, region)
 	}
 
 	if x+w > t.width || y+h > t.height {
-		return fmt.Errorf("%w: region (%d,%d)+(%d,%d) exceeds texture size (%d,%d)",
-			ErrRegionOutOfBounds, x, y, w, h, t.width, t.height)
+		return fmt.Errorf("%w: region %v exceeds texture size (%d,%d)",
+			ErrRegionOutOfBounds, region, t.width, t.height)
 	}
 
 	bpp := t.BytesPerPixel()
@@ -454,21 +454,38 @@ func (t *Texture) UpdateRegion(x, y, w, h, bytesPerRow int, data []byte) error {
 		return fmt.Errorf("%w: unsupported texture format", ErrInvalidDataSize)
 	}
 
+	if layout.Offset < 0 {
+		return fmt.Errorf("%w: negative layout offset %d", ErrInvalidDataSize, layout.Offset)
+	}
+	if layout.Offset > len(data) {
+		return fmt.Errorf("%w: layout offset %d exceeds data length %d",
+			ErrInvalidDataSize, layout.Offset, len(data))
+	}
+
 	packedRow := w * bpp
-	stride := bytesPerRow
+	stride := layout.BytesPerRow
 	if stride == 0 {
 		stride = packedRow
 	}
 	if stride < packedRow {
 		return fmt.Errorf("%w: bytesPerRow=%d < packed row=%d (w=%d * bpp=%d)",
-			ErrInvalidStride, bytesPerRow, packedRow, w, bpp)
+			ErrInvalidStride, layout.BytesPerRow, packedRow, w, bpp)
+	}
+
+	rowsPerImage := layout.RowsPerImage
+	if rowsPerImage == 0 {
+		rowsPerImage = h
+	}
+	if rowsPerImage < h {
+		return fmt.Errorf("%w: rowsPerImage=%d < region height %d",
+			ErrInvalidDataSize, layout.RowsPerImage, h)
 	}
 
 	// WebGPU writeTexture size: bytesPerRow*(height-1) + bytesPerCopy for last row.
 	expectedSize := stride*(h-1) + packedRow
-	if len(data) < expectedSize {
-		return fmt.Errorf("%w: expected at least %d bytes (stride=%d, %dx%dx%d), got %d",
-			ErrInvalidDataSize, expectedSize, stride, w, h, bpp, len(data))
+	if len(data) < layout.Offset+expectedSize {
+		return fmt.Errorf("%w: expected at least %d bytes (offset=%d, stride=%d, %dx%dx%d), got %d",
+			ErrInvalidDataSize, layout.Offset+expectedSize, layout.Offset, stride, w, h, bpp, len(data))
 	}
 
 	uploadBytes := packedRow * h // logical texel bytes transferred (not stride padding)
@@ -485,9 +502,9 @@ func (t *Texture) UpdateRegion(x, y, w, h, bytesPerRow int, data []byte) error {
 		},
 		data,
 		&wgpu.ImageDataLayout{
-			Offset:       0,
-			BytesPerRow:  uint32(stride), //nolint:gosec // G115: stride validated positive above
-			RowsPerImage: uint32(h),      //nolint:gosec // G115: h validated positive above
+			Offset:       uint64(layout.Offset),
+			BytesPerRow:  uint32(stride),       //nolint:gosec // G115: stride validated positive above
+			RowsPerImage: uint32(rowsPerImage), //nolint:gosec // G115: rowsPerImage validated positive above
 		},
 		&wgpu.Extent3D{
 			Width:              uint32(w), //nolint:gosec // G115: w validated positive above

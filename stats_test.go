@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"errors"
+	"image"
 	"testing"
 
 	"github.com/gogpu/gpucontext"
@@ -9,9 +10,11 @@ import (
 	_ "github.com/gogpu/wgpu/hal/software"
 )
 
-// TestUpdateRegionStrideValidation covers bytesPerRow validation without a live GPU
-// after the destroyed check is bypassed via a non-nil texture handle stub is not
-// available — these use a live headless renderer.
+func regionRect(x, w, h int) image.Rectangle {
+	return image.Rect(x, 0, x+w, h)
+}
+
+// TestUpdateRegionStrideValidation covers layout validation with a live headless renderer.
 func TestUpdateRegionStrideValidation(t *testing.T) {
 	EnableStats()
 	t.Cleanup(DisableStats)
@@ -34,48 +37,77 @@ func TestUpdateRegionStrideValidation(t *testing.T) {
 	t.Cleanup(tex.Destroy)
 
 	tests := []struct {
-		name        string
-		x, y, w, h  int
-		bytesPerRow int
-		dataLen     int
-		wantErr     error
+		name    string
+		region  image.Rectangle
+		layout  gpucontext.ImageDataLayout
+		dataLen int
+		wantErr error
 	}{
 		{
-			name: "tight packed zero stride",
-			w:    4, h: 2, bytesPerRow: 0, dataLen: 4 * 2 * 4,
+			name:    "tight packed zero layout",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{},
+			dataLen: 4 * 2 * 4,
 		},
 		{
-			name: "explicit packed stride",
-			w:    4, h: 2, bytesPerRow: 16, dataLen: 4 * 2 * 4,
+			name:    "explicit packed stride",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{BytesPerRow: 16},
+			dataLen: 4 * 2 * 4,
 		},
 		{
-			name: "strided full-frame buffer band",
-			// Region 4x2 from an 8-wide RGBA buffer: stride = 8*4 = 32.
-			// Need stride*(h-1)+packedRow = 32*1+16 = 48 bytes minimum.
-			w: 4, h: 2, bytesPerRow: 32, dataLen: 48,
+			name:    "strided full-frame buffer band",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{BytesPerRow: 32},
+			dataLen: 48, // stride*(h-1)+packedRow = 32*1+16
 		},
 		{
-			name: "stride too small",
-			w:    4, h: 2, bytesPerRow: 8, dataLen: 100, wantErr: ErrInvalidStride,
+			name:    "stride too small",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{BytesPerRow: 8},
+			dataLen: 100,
+			wantErr: ErrInvalidStride,
 		},
 		{
-			name: "data too short for stride",
-			w:    4, h: 2, bytesPerRow: 32, dataLen: 40, wantErr: ErrInvalidDataSize,
+			name:    "data too short for stride",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{BytesPerRow: 32},
+			dataLen: 40,
+			wantErr: ErrInvalidDataSize,
 		},
 		{
-			name: "region out of bounds",
-			x:    6, w: 4, h: 1, bytesPerRow: 0, dataLen: 16, wantErr: ErrRegionOutOfBounds,
+			name:    "region out of bounds",
+			region:  regionRect(6, 4, 1),
+			layout:  gpucontext.ImageDataLayout{},
+			dataLen: 16,
+			wantErr: ErrRegionOutOfBounds,
 		},
 		{
-			name: "invalid region zero height",
-			w:    4, h: 0, bytesPerRow: 0, dataLen: 16, wantErr: ErrInvalidRegion,
+			name:    "invalid region zero height",
+			region:  regionRect(0, 4, 0),
+			layout:  gpucontext.ImageDataLayout{},
+			dataLen: 16,
+			wantErr: ErrInvalidRegion,
+		},
+		{
+			name:    "layout offset within buffer",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{BytesPerRow: 16, Offset: 8},
+			dataLen: 8 + 4*2*4,
+		},
+		{
+			name:    "layout offset past buffer",
+			region:  regionRect(0, 4, 2),
+			layout:  gpucontext.ImageDataLayout{Offset: 100},
+			dataLen: 32,
+			wantErr: ErrInvalidDataSize,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := make([]byte, tt.dataLen)
-			err := tex.UpdateRegion(tt.x, tt.y, tt.w, tt.h, tt.bytesPerRow, data)
+			err := tex.UpdateRegion(tt.region, data, tt.layout)
 			if tt.wantErr == nil {
 				if err != nil {
 					t.Fatalf("UpdateRegion: %v", err)
@@ -109,7 +141,6 @@ func TestUpdateRegionStrideZeroCopyBand(t *testing.T) {
 		bpp    = 4
 	)
 	frame := make([]byte, fw*fh*bpp)
-	// Paint dirty rows 5..7 with a recognizable pattern.
 	for y := 5; y < 8; y++ {
 		for x := 0; x < fw; x++ {
 			i := (y*fw + x) * bpp
@@ -126,11 +157,13 @@ func TestUpdateRegionStrideZeroCopyBand(t *testing.T) {
 	}
 	defer tex.Destroy()
 
-	r.beginFrameStats() // isolate band upload from create upload
+	r.beginFrameStats()
 	dirtyY, dirtyH := 5, 3
-	bandOffset := dirtyY * fw * bpp
-	band := frame[bandOffset:] // zero-copy slice into full frame
-	if err := tex.UpdateRegion(0, dirtyY, fw, dirtyH, fw*bpp, band); err != nil {
+	stride := fw * bpp
+	band := frame[dirtyY*stride:] // zero-copy slice into full frame
+	region := image.Rect(0, dirtyY, fw, dirtyY+dirtyH)
+	layout := gpucontext.ImageDataLayout{BytesPerRow: stride}
+	if err := tex.UpdateRegion(region, band, layout); err != nil {
 		t.Fatalf("strided UpdateRegion: %v", err)
 	}
 
@@ -143,7 +176,6 @@ func TestUpdateRegionStrideZeroCopyBand(t *testing.T) {
 	if fs.UploadRegions != 1 {
 		t.Fatalf("FrameStats.UploadRegions = %d, want 1", fs.UploadRegions)
 	}
-	// Acceptance from #484: dirty rows ≪ full frame.
 	if fs.UploadBytes*10 >= fullBytes {
 		t.Fatalf("upload %d bytes is not < 10%% of full frame %d", fs.UploadBytes, fullBytes)
 	}
@@ -222,7 +254,7 @@ func TestFrameStatsPresentSkippedOnIdleEndFrame(t *testing.T) {
 	r := &Renderer{primary: &RenderTarget{}}
 	r.primary.renderer = r
 	r.beginFrameStats()
-	r.EndFrame() // frameStarted=false → present skipped
+	r.EndFrame()
 
 	last := r.GetFrameStats()
 	if !last.PresentSkipped {
@@ -231,13 +263,12 @@ func TestFrameStatsPresentSkippedOnIdleEndFrame(t *testing.T) {
 }
 
 func TestUpdateRegionValidationOrderDestroyedFirst(t *testing.T) {
-	// Destroyed check must precede region/stride validation (existing contract).
 	tex := &Texture{
 		width:  10,
 		height: 10,
 		format: gputypes.TextureFormatRGBA8Unorm,
 	}
-	err := tex.UpdateRegion(0, 0, 5, 5, 1, nil) // stride too small would be ErrInvalidStride if live
+	err := tex.UpdateRegion(image.Rect(0, 0, 5, 5), nil, gpucontext.ImageDataLayout{BytesPerRow: 1})
 	if !errors.Is(err, ErrTextureUpdateDestroyed) {
 		t.Fatalf("error = %v, want ErrTextureUpdateDestroyed", err)
 	}

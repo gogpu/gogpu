@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Strided `Texture.UpdateRegion`** (#484) — `bytesPerRow` parameter (pre-v1.0 signature change). `0` = tightly packed rows (`w * bytesPerPixel`), matching WebGPU `ImageDataLayout.bytesPerRow`. Enables zero-copy dirty-band uploads from a full-frame RGBA buffer (ggcanvas and similar) without `extractRegion` memcpy. wgpu already handles 256-byte row-pitch alignment via `alignTextureDataInto`.
+- **Strided `Texture.UpdateRegion`** (#484) — `image.Rectangle` + `gpucontext.ImageDataLayout` (WebGPU / Go stdlib idiom). Zero-value layout = offset 0, tightly packed rows, region height. Enables zero-copy dirty-band uploads from a full-frame RGBA buffer without `extractRegion` memcpy. wgpu handles 256-byte row-pitch alignment via `alignTextureDataInto`.
 - **GPUStats — two-level observability** (#484) — Rust wgpu + Flutter pattern:
   - `Renderer.GetCounters()` — cumulative texture count, allocated bytes, upload totals (device owner)
   - `Context.FrameStats()` — per-frame `UploadBytes`, `UploadRegions`, `PresentSkipped`, `FrameDuration` (frame owner)
@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **deps:** gpucontext v0.30.0 → v0.31.0 (`TextureRegionUpdater.UpdateRegion` gains `bytesPerRow`)
+- **deps:** gpucontext v0.30.0 → v0.31.1 (`TextureRegionUpdater.UpdateRegion` struct API)
 
 ## [0.53.2] - 2026-08-30
 
