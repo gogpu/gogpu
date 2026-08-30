@@ -685,6 +685,10 @@ func addServicesMenuItem(menu ID, title string) ID {
 		return 0
 	}
 	menu.SendPtr(menuSels.addItem, item.Ptr())
+	// Balance alloc from NewMenuItemWithSubmenu; menu retain owns the item.
+	item.Send(Selectors().Release())
+	// Balance alloc of servicesMenu; setServicesMenu: + setSubmenu: retain it.
+	servicesMenu.Send(Selectors().Release())
 	return item
 }
 
@@ -745,6 +749,11 @@ func NewMenuWithTitle(title string) ID {
 }
 
 // NewMenuItemWithSubmenu creates an NSMenuItem with a title and an attached submenu.
+//
+// Ownership follows Cocoa alloc/init (+1). Callers that transfer the item into
+// an NSMenu via addItem: must Send(Selectors().Release()) once after addItem:
+// so the menu's retain is the sole owner (avoids retain=alloc+addItem leak).
+// setSubmenu: retains submenu; the caller still owns any +1 they held on submenu.
 func NewMenuItemWithSubmenu(title string, submenu ID) ID {
 	if err := initRuntime(); err != nil {
 		return 0

@@ -340,6 +340,8 @@ func TestClearMenuActions_RemovesCallbacks(t *testing.T) {
 			subItem := platformdarwin.NewMenuItemWithSubmenu("Sub", submenu)
 			if !subItem.IsNil() {
 				menu.SendPtr(platformdarwin.RegisterSelector("addItem:"), subItem.Ptr())
+				subItem.Send(platformdarwin.Selectors().Release())
+				submenu.Send(platformdarwin.Selectors().Release())
 			}
 		}
 
