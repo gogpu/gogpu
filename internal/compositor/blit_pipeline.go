@@ -357,7 +357,7 @@ func (bp *BlitPipeline) BlitToSwapchain(
 	renderPass.SetPipeline(bp.pipeline)
 	renderPass.SetBindGroup(0, bp.uniformBindGrp, nil)
 	renderPass.SetBindGroup(1, texBindGrp, nil)
-	renderPass.Draw(6, 1, 0, 0) // 6 vertices (2 triangles) for full-screen quad
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1}) // 2 triangles for full-screen quad
 
 	if err := renderPass.End(); err != nil {
 		slog.Error("compositor: blit EndRenderPass failed", "err", err)
@@ -426,13 +426,13 @@ func (bp *BlitPipeline) EncodeSurfaceCompositePass(
 	if err != nil {
 		return fmt.Errorf("compositor: begin surface composite pass: %w", err)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
-	rp.SetScissorRect(0, 0, w, h)
+	rp.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: float32(w), Height: float32(h), MinDepth: 0, MaxDepth: 1})
+	rp.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: w, Height: h})
 
 	rp.SetPipeline(bp.compositePipeline)
 	rp.SetBindGroup(0, bp.uniformBindGrp, nil)
 	rp.SetBindGroup(1, texBindGrp, nil)
-	rp.Draw(6, 1, 0, 0) // 6 vertices (2 triangles) for full-screen quad
+	rp.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1}) // 2 triangles for full-screen quad
 
 	if endErr := rp.End(); endErr != nil {
 		return fmt.Errorf("compositor: end surface composite pass: %w", endErr)

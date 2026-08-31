@@ -77,9 +77,9 @@ func ApplyOverlayScissorWithDamage(rp *wgpu.RenderPassEncoder, rect *[4]uint32, 
 	if damage.Empty() {
 		// No damage constraint — use group scissor or full surface.
 		if rect != nil {
-			rp.SetScissorRect(rect[0], rect[1], rect[2], rect[3])
+			rp.SetScissorRect(gputypes.ScissorRect{X: rect[0], Y: rect[1], Width: rect[2], Height: rect[3]})
 		} else {
-			rp.SetScissorRect(0, 0, w, h)
+			rp.SetScissorRect(gputypes.ScissorRect{X: 0, Y: 0, Width: w, Height: h})
 		}
 		return true
 	}
@@ -87,7 +87,7 @@ func ApplyOverlayScissorWithDamage(rp *wgpu.RenderPassEncoder, rect *[4]uint32, 
 	if !valid {
 		return false
 	}
-	rp.SetScissorRect(dx, dy, dw, dh)
+	rp.SetScissorRect(gputypes.ScissorRect{X: dx, Y: dy, Width: dw, Height: dh})
 	return true
 }
 
@@ -100,7 +100,7 @@ func RecordBaseBlitDraws(rp *wgpu.RenderPassEncoder, base BlitDrawRecorder, hasD
 		for _, dr := range rects {
 			dx, dy, dw, dh, valid := ComputeDamageScissor(nil, w, h, dr)
 			if valid {
-				rp.SetScissorRect(dx, dy, dw, dh)
+				rp.SetScissorRect(gputypes.ScissorRect{X: dx, Y: dy, Width: dw, Height: dh})
 				base.RecordBlitDraws(rp)
 			}
 		}
@@ -152,7 +152,7 @@ func EncodeBlitPass(
 	if err != nil {
 		return fmt.Errorf("begin compositor blit pass: %w", err)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: float32(w), Height: float32(h), MinDepth: 0, MaxDepth: 1})
 
 	// Base layer: per-rect scissor when damage rects exist (ADR-028).
 	RecordBaseBlitDraws(rp, baseRecorder, hasDamage, damageRects, w, h)
