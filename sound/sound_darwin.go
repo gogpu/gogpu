@@ -12,22 +12,24 @@ import (
 	"github.com/go-webgpu/goffi/types"
 )
 
+const darwinSoundTink = "Tink"
+
 // darwinSoundName maps SystemSound to macOS system sound file names.
 // These files are located in /System/Library/Sounds/.
 func darwinSoundName(s SystemSound) string {
 	switch s {
 	case Click:
-		return "Tink"
+		return darwinSoundTink
 	case Invoke:
 		return "Pop"
 	case Focus:
-		return "Tink"
+		return darwinSoundTink
 	case MoveNext:
-		return "Tink"
+		return darwinSoundTink
 	case MovePrev:
-		return "Tink"
+		return darwinSoundTink
 	case GoBack:
-		return "Tink"
+		return darwinSoundTink
 	case Show:
 		return "Blow"
 	case Hide:

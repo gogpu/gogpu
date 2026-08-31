@@ -36,7 +36,7 @@ var _ PrintManager = (*darwinPlatform)(nil)
 // objects are returned as acceptance errors. The modal operation itself is
 // queued asynchronously, allowing the caller to receive a PrintJob before the
 // panel is dismissed.
-func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (PrintJob, error) {
+func (p *darwinPlatform) StartPrint(ctx context.Context, request PrintRequest) (PrintJob, error) { //nolint:gocognit // print dialog orchestration is inherently sequential
 	if ctx == nil {
 		return nil, context.Canceled
 	}

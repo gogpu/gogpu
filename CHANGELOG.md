@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.54.0] - 2026-08-30
+## [0.54.0] - 2026-08-31
 
 ### Added
 
@@ -17,7 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **deps:** gpucontext v0.30.0 → v0.31.2 (`TextureRegionUpdater.UpdateRegion` struct API)
+- **Struct params migration** (ADR-072) — `SetViewport`, `SetScissorRect`, `Draw` use `gputypes.Viewport`, `gputypes.ScissorRect`, `gputypes.DrawArgs` structs instead of positional parameters
+- **deps:** wgpu v0.33.0 → v0.34.2 (struct params, type alias removal, pipeline disk cache), gpucontext v0.30.0 → v0.31.3, gputypes v0.7.0 → v0.8.0
+
+### Fixed
+
+- **lint:** darwin goconst (`services` string, `Tink` sound name) and gocognit (print dialog)
 
 ## [0.53.2] - 2026-08-30
 

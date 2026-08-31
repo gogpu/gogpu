@@ -8,6 +8,8 @@ import (
 	"github.com/go-webgpu/goffi/ffi"
 )
 
+const roleServices = "services"
+
 // Menu-related selectors (initialized lazily).
 var menuSels struct {
 	initWithTitle                SEL
@@ -565,7 +567,7 @@ func (a *Application) GetMenuSelector(role string) SEL {
 		return menuSels.orderFrontStandardAboutPanel
 	case "preferences":
 		return menuSels.orderFrontPreferencesPanel
-	case "services":
+	case roleServices:
 		return 0 // Services menu is handled specially
 	case "hide":
 		return menuSels.hide
@@ -607,7 +609,7 @@ func AddMenuItemWithRole(menu ID, title string, role string) ID {
 	case "preferences":
 		action = menuSels.orderFrontPreferencesPanel
 		keyEquiv = ","
-	case "services":
+	case roleServices:
 		// GLFW/Electron: empty submenu registered via setServicesMenu:.
 		return addServicesMenuItem(menu, title)
 	case "hide":
@@ -709,7 +711,7 @@ func AddMenuItemWithRoleAndCallback(menu ID, title string, role string, action f
 	}
 
 	// Services is a system-populated submenu — custom Action is ignored.
-	if role == "services" {
+	if role == roleServices {
 		return addServicesMenuItem(menu, title)
 	}
 
