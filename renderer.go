@@ -1418,7 +1418,7 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	}
 
 	renderPass.SetPipeline(r.trianglePipeline)
-	renderPass.Draw(3, 1, 0, 0) // 3 vertices, 1 instance
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 
 	if err := renderPass.End(); err != nil {
 		return fmt.Errorf("gogpu: failed to end render pass: %w", err)
@@ -1713,7 +1713,7 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	renderPass.SetBindGroup(1, texBindGroup, nil)
 
 	// Draw 6 vertices (2 triangles for quad)
-	renderPass.Draw(6, 1, 0, 0)
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 
 	// End render pass
 	if err := renderPass.End(); err != nil {

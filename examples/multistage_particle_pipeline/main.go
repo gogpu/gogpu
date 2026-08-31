@@ -159,7 +159,7 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 	defer interCS.Release()
 
 	interBGL, err := dev.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: uniformSize}},
 			{Binding: 2, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
 			{Binding: 3, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage}},
@@ -190,7 +190,7 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 	defer bouncerCS.Release()
 
 	bouncerBGL, err := dev.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: uniformSize}},
 			{Binding: 1, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
 			{Binding: 2, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
@@ -221,7 +221,7 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 	defer rs.Release()
 
 	s.rendBGL, err = dev.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Visibility: wgpu.ShaderStageVertex | wgpu.ShaderStageFragment, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: uniformSize}},
 		},
 	})
@@ -238,7 +238,7 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 		Layout: s.rendPL,
 		Vertex: wgpu.VertexState{
 			Module: rs, EntryPoint: "vs_main",
-			Buffers: []wgpu.VertexBufferLayout{{
+			Buffers: []gputypes.VertexBufferLayout{{
 				ArrayStride: particleBytes,
 				StepMode:    gputypes.VertexStepModeInstance,
 				Attributes: []gputypes.VertexAttribute{
@@ -340,7 +340,7 @@ func (s *sim) frame(sv *wgpu.TextureView) error {
 	rp.SetPipeline(s.rendPipe)
 	rp.SetBindGroup(0, rendBG, nil)
 	rp.SetVertexBuffer(0, s.bufB, 0)
-	rp.Draw(4, numParticles, 0, 0) // 4 vertices to draw a square
+	rp.Draw(gputypes.DrawArgs{VertexCount: 4, InstanceCount: numParticles})
 	rp.End()
 
 	cmds, err := enc.Finish()

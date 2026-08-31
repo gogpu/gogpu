@@ -208,7 +208,7 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 	defer cs.Release()
 
 	bgl, err := dev.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage}},
 			{Binding: 1, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
 			{Binding: 2, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: 8}},
@@ -264,7 +264,7 @@ func newSim(dev *wgpu.Device, format gputypes.TextureFormat) (*sim, error) {
 		Layout: rpl,
 		Vertex: wgpu.VertexState{
 			Module: rs, EntryPoint: "vs_main",
-			Buffers: []wgpu.VertexBufferLayout{{
+			Buffers: []gputypes.VertexBufferLayout{{
 				ArrayStride: particleBytes,
 				StepMode:    gputypes.VertexStepModeInstance,
 				Attributes: []gputypes.VertexAttribute{
@@ -337,7 +337,7 @@ func (s *sim) frame(sv *wgpu.TextureView) error {
 	}
 	rp.SetPipeline(s.rendPipe)
 	rp.SetVertexBuffer(0, outputBuf, 0)
-	rp.Draw(4, numParticles, 0, 0)
+	rp.Draw(gputypes.DrawArgs{VertexCount: 4, InstanceCount: numParticles})
 	rp.End()
 	cmds2, err := enc2.Finish()
 	if err != nil {

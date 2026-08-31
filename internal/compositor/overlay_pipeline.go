@@ -262,7 +262,7 @@ func (p *OverlayPipeline) RenderInstances(
 	renderPass.SetPipeline(p.pipeline)
 	renderPass.SetBindGroup(0, p.uniformBindGrp, nil)
 	renderPass.SetVertexBuffer(0, p.instanceBuf, 0)
-	renderPass.Draw(6, instanceCount, 0, 0)
+	renderPass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: instanceCount})
 
 	if err := renderPass.End(); err != nil {
 		slog.Error("compositor: overlay End render pass failed", "err", err)
