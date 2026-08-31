@@ -439,14 +439,14 @@ func TestApp_SetCustomMenu_UpdatesExistingEntry(t *testing.T) {
 }
 
 // =============================================================================
-// DeviceProvider
+// GPUContextProvider
 // =============================================================================
 
-func TestApp_DeviceProvider_WithRenderer(t *testing.T) {
+func TestApp_GPUContextProvider_WithRenderer(t *testing.T) {
 	app := &App{renderer: &Renderer{}}
-	provider := app.DeviceProvider()
+	provider := app.GPUContextProvider()
 	if provider == nil {
-		t.Error("DeviceProvider should be non-nil once the renderer is set")
+		t.Error("GPUContextProvider should be non-nil once the renderer is set")
 	}
 }
 

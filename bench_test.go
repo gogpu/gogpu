@@ -23,7 +23,7 @@ func BenchmarkDefaultConfig(b *testing.B) {
 }
 
 // BenchmarkConfigBuilderChain measures the fluent builder pattern cost.
-// Typical usage: DefaultConfig().WithTitle(...).WithSize(...).WithBackend(...)
+// Typical usage: DefaultConfig().WithTitle(...).WithSize(...).WithGraphicsAPI(...)
 func BenchmarkConfigBuilderChain(b *testing.B) {
 	b.ReportAllocs()
 	var result Config
@@ -31,7 +31,6 @@ func BenchmarkConfigBuilderChain(b *testing.B) {
 		result = DefaultConfig().
 			WithTitle("Benchmark App").
 			WithSize(1920, 1080).
-			WithBackend(BackendNative).
 			WithGraphicsAPI(GraphicsAPIVulkan).
 			WithContinuousRender(true)
 	}
