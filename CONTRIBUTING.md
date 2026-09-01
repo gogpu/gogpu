@@ -8,7 +8,6 @@ Thank you for your interest in contributing to GoGPU!
 
 - **Go 1.25+** (required for iterators, generics, and modern features)
 - **golangci-lint** for code quality checks
-- **wgpu-native** (optional, for Rust backend testing)
 
 ---
 
@@ -41,12 +40,13 @@ cd gogpu
 git remote add upstream https://github.com/gogpu/gogpu
 ```
 
-### 2. Create Feature Branch
+### 2. Sync with upstream
 
 ```bash
+git fetch upstream main
+git checkout main
+git pull upstream main
 git checkout -b feat/your-feature
-# or
-git checkout -b fix/issue-number-description
 ```
 
 ### 3. Make Changes
@@ -58,16 +58,24 @@ git checkout -b fix/issue-number-description
 ### 4. Validate Before Commit
 
 ```bash
-# Format code
-go fmt ./...
+# Format ALL files (including platform-specific)
+gofmt -w .
 
-# Run pre-release checks
-bash scripts/pre-release-check.sh
+# Build
+go build ./...
+
+# Run tests
+go test ./...
+
+# Lint (CI uses latest golangci-lint — keep yours updated)
+golangci-lint run --timeout=5m
+
+# Cross-platform lint (if touching platform-specific files)
+GOOS=linux GOARCH=amd64 golangci-lint run --timeout=5m
+GOOS=darwin GOARCH=arm64 golangci-lint run --timeout=5m
 ```
 
 ### 5. Create Pull Request
-
-**All contributions must go through Pull Requests:**
 
 ```bash
 git add .
@@ -75,7 +83,7 @@ git commit -m "feat(component): description"
 git push origin feat/your-feature
 ```
 
-Then open a PR on GitHub: `https://github.com/gogpu/gogpu/compare`
+Then open a PR on GitHub.
 
 ---
 
@@ -84,18 +92,22 @@ Then open a PR on GitHub: `https://github.com/gogpu/gogpu/compare`
 ### PR Requirements
 
 - [ ] All tests pass (`go test ./...`)
-- [ ] Linter passes (`golangci-lint run`)
-- [ ] Code is formatted (`go fmt ./...`)
+- [ ] Linter passes (`golangci-lint run --timeout=5m`)
+- [ ] Code is formatted (`gofmt -l .` returns nothing)
 - [ ] Documentation updated (if applicable)
 - [ ] CHANGELOG.md updated (for features/fixes)
 
 ### PR Title Format
 
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
 ```
-feat(gpu): add Metal backend support
-fix(platform): resolve macOS window sizing issue
-docs: update ROADMAP for v0.7.0
-test(backend): add smoke tests for native backend
+feat(platform): add Wayland fractional scaling
+fix(compositor): prevent stale damage rect on resize
+docs: update ROADMAP for v0.54.0
+test(golden): add headless triangle snapshot
+refactor(sound): extract platform sound constants
+chore: update wgpu v0.34.0 → v0.34.2
 ```
 
 ### PR Description Template
@@ -104,16 +116,27 @@ test(backend): add smoke tests for native backend
 ## Summary
 Brief description of changes.
 
-## Changes
-- Change 1
-- Change 2
-
-## Testing
-How was this tested?
+## Test plan
+- [x] `go test ./...`
+- [x] `golangci-lint run`
+- [ ] Visual verification on [backends]
 
 ## Related Issues
 Closes #123
 ```
+
+### Merge Strategy
+
+We use two merge modes depending on commit quality:
+
+| Situation | Merge type | Command |
+|-----------|-----------|---------|
+| PR with iteration commits (review fixes, deps bumps, gofmt) | **Squash** | `gh pr merge N --squash --subject "type(scope): description"` |
+| PR with multiple meaningful, self-contained commits | **Regular merge** | `gh pr merge N --merge` |
+
+**Rule of thumb:** if each commit is independently valuable in `git log` → regular merge. If intermediate commits are "fix lint" / "address review" → squash into one clean commit.
+
+Commit message **always** in conventional commits format, regardless of merge type.
 
 ---
 
@@ -124,6 +147,7 @@ Closes #123
 - Use `gofmt` for formatting (tabs, not spaces)
 - Follow [Effective Go](https://go.dev/doc/effective_go)
 - Use pointer receivers for structs with mutexes
+- `ID`, `URL`, `HTTP` are uppercase in names
 
 ### Naming
 
@@ -137,13 +161,22 @@ Closes #123
 ### Error Handling
 
 ```go
-// Always check errors
+// Always propagate errors with context
 if err != nil {
     return fmt.Errorf("operation failed: %w", err)
 }
 
-// Or explicitly ignore
-_ = file.Close()
+// Never silently discard errors
+// ❌ _ = surface.Commit()
+// ✅ if err := surface.Commit(); err != nil { ... }
+```
+
+### JSON Tags
+
+```go
+// Always camelCase for JSON tags
+UserID string `json:"userId"`
+CreatedAt time.Time `json:"createdAt"`
 ```
 
 ---
@@ -154,10 +187,6 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 type(scope): description
-
-[optional body]
-
-[optional footer]
 ```
 
 ### Types
@@ -171,18 +200,19 @@ type(scope): description
 | `refactor` | Code refactoring |
 | `perf` | Performance |
 | `ci` | CI/CD changes |
-| `chore` | Maintenance |
+| `chore` | Maintenance (deps, tooling) |
 
 ### Scopes
 
 | Scope | Description |
 |-------|-------------|
-| `gpu` | GPU backend |
-| `platform` | Platform code (Win32, Cocoa, X11, Wayland) |
-| `backend` | Native/Rust backend |
+| `platform` | Platform code (Win32, Cocoa, X11, Wayland, Browser) |
+| `compositor` | Surface compositor, damage tracking, blit pipeline |
+| `gpu` | GPU backend, renderer |
 | `gmath` | Math library |
-| `window` | Window management |
 | `input` | Input handling |
+| `sound` | System sounds |
+| `golden` | Golden image test harness |
 | `examples` | Example code |
 | `deps` | Dependencies |
 
@@ -192,25 +222,51 @@ type(scope): description
 
 ```
 gogpu/
-├── gpu/                    # GPU abstraction layer
-│   ├── types/              # BackendType, GraphicsAPI enums
-│   └── backend/
-│       └── native/         # HAL backend creation (Vulkan/Metal/DX12/GLES/Software)
-├── internal/platform/      # Platform-specific windowing
-│   ├── platform_windows.go # Win32
-│   ├── platform_darwin.go  # macOS Cocoa
-│   ├── platform_linux.go   # X11 + Wayland
-│   ├── platform_browser.go # Browser/WASM
-│   ├── darwin/             # Objective-C runtime via goffi
-│   ├── wayland/            # libwayland-client FFI, CSD, xdg-shell, input
-│   └── x11/               # Pure Go X11 wire protocol
-├── gmath/                  # Vec2, Vec3, Vec4, Mat4, Color
-├── window/                 # Window configuration
-├── input/                  # Keyboard and mouse input
-├── sound/                  # Platform system sounds
-├── examples/               # Example applications
-└── scripts/                # Build/release scripts
+├── gpu/                       # GPU abstraction layer
+│   ├── types/                 # BackendType, GraphicsAPI enums
+│   └── backend/native/        # HAL backend creation
+├── internal/
+│   ├── platform/              # Platform-specific windowing
+│   │   ├── platform_windows.go
+│   │   ├── platform_darwin.go
+│   │   ├── platform_linux.go
+│   │   ├── platform_browser.go
+│   │   ├── darwin/            # Objective-C runtime via goffi
+│   │   ├── wayland/           # libwayland FFI, CSD, xdg-shell
+│   │   ├── x11/              # Pure Go X11 wire protocol
+│   │   └── eventqueue/       # Thread-safe event queue
+│   ├── compositor/            # Surface compositor, blit pipeline, damage overlay
+│   └── thread/                # Cross-goroutine panic propagation
+├── gmath/                     # Vec2, Vec3, Vec4, Mat4, Color
+├── golden/                    # Deterministic headless golden image harness
+├── input/                     # Keyboard and mouse input
+├── sound/                     # Platform system sounds (Win32, macOS, Linux, Browser)
+├── window/                    # Window configuration
+├── examples/                  # Example applications
+├── docs/                      # Public documentation
+│   └── ARCHITECTURE.md        # Architecture overview
+├── CHANGELOG.md
+├── ROADMAP.md
+└── CONTRIBUTING.md
 ```
+
+---
+
+## Ecosystem
+
+GoGPU is a multi-repo ecosystem. Changes may span repositories:
+
+| Repository | Purpose | Version |
+|------------|---------|---------|
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | App framework, windowing | v0.54.0 |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.34.2 |
+| [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics | v0.52.5 |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.19.0 |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | v0.1.54 |
+| [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces | v0.31.3 |
+| [gogpu/gputypes](https://github.com/gogpu/gputypes) | WebGPU type definitions | v0.8.0 |
+
+For cross-repo changes: start with the lowest dependency (gputypes → gpucontext → wgpu → gogpu/gg → ui).
 
 ---
 
@@ -219,10 +275,10 @@ gogpu/
 | Platform | Windowing | GPU Backends | Status |
 |----------|-----------|-------------|--------|
 | Windows | Win32 | Vulkan, DX12, GLES, Software | Production |
-| Linux X11 | X11 (Pure Go wire protocol) | Vulkan, GLES, Software | Production |
-| Linux Wayland | Wayland (libwayland FFI) | Vulkan, GLES, Software | Production |
+| Linux X11 | Pure Go X11 wire protocol | Vulkan, GLES, Software | Production |
+| Linux Wayland | libwayland FFI, xdg-shell v6 | Vulkan, GLES, Software | Production |
 | macOS | Cocoa (goffi ObjC runtime) | Metal, Software | Production |
-| Browser | WASM (syscall/js) | WebGPU | Production |
+| Browser | WASM (syscall/js, requestAnimationFrame) | WebGPU | Production |
 
 ---
 
@@ -246,21 +302,42 @@ go test -v ./internal/platform/...
 go test -race ./...
 ```
 
-### Pre-Release Validation
+### Golden Image Tests
 
 ```bash
-bash scripts/pre-release-check.sh
+go test -v ./golden/...
 ```
+
+### Backend Smoke Test (visual)
+
+```bash
+GOGPU_GRAPHICS_API=vulkan   go run examples/triangle/main.go
+GOGPU_GRAPHICS_API=dx12     go run examples/triangle/main.go
+GOGPU_GRAPHICS_API=gles     go run examples/triangle/main.go
+GOGPU_GRAPHICS_API=software go run examples/triangle/main.go
+```
+
+---
+
+## AI-Assisted Contributions (Smart Coding)
+
+We welcome AI-assisted contributions. GoGPU itself is built with AI assistance (Claude Code + multi-agent architecture). However, all code — whether human-written or AI-assisted — must meet the same enterprise quality standard:
+
+- **Understand what the code does.** Don't submit code you can't explain. AI-generated code must be reviewed and understood by the submitter.
+- **Validate against enterprise references.** Architectural decisions should reference how Skia, Qt6, SDL3, Rust wgpu, or other enterprise libraries solve the same problem.
+- **No stubs presented as complete.** Every feature claimed in CHANGELOG must have working implementation, not just types/interfaces.
+- **Research before implementation.** For GPU/HAL/sync changes: study the reference implementation first, then implement.
+
+Smart Coding = AI accelerates the work, human ensures the quality. Vibe coding (ship without understanding) is not accepted.
 
 ---
 
 ## Areas Where We Need Help
 
-- **Platform Testing** — Test on Linux Wayland (GNOME, KDE, sway), macOS, Windows DX12/GLES
-- **GLES Testing** — Different GPU vendors (AMD, NVIDIA, Intel) and driver versions
+- **Platform Testing** — Linux Wayland (GNOME, KDE, sway, Hyprland), macOS (Intel + Apple Silicon), Windows DX12/GLES
+- **Android** — arm64 Vulkan WSI (see wgpu#268)
+- **Browser/WASM** — WebGPU testing across browsers
 - **Documentation** — Examples, tutorials, API docs
-- **Cursor Fallback** — `wl_pointer.set_cursor` with libwayland-cursor for compositors without `wp_cursor_shape_v1` (ADR-043)
-- **CSD Geometry** — Maximize/fullscreen decoration handling (#300)
 - **Performance** — Profiling, benchmarks, optimization
 
 ---
