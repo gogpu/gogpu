@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.54.1] - 2026-09-08
+
 ### Fixed
 
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **CONTRIBUTING.md** — merge strategy (squash vs regular merge), project structure, AI-assisted contributions (Smart Coding) policy, ecosystem versions, platform support
+- **deps:** wgpu v0.34.2 → v0.34.5 (Vulkan depth-only render passes, RenderBundle API, Validation Phase C, GLES Linux AdapterContext)
 
 ## [0.54.0] - 2026-08-31
 

@@ -258,8 +258,8 @@ GoGPU is a multi-repo ecosystem. Changes may span repositories:
 
 | Repository | Purpose | Version |
 |------------|---------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | App framework, windowing | v0.54.0 |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.34.2 |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | App framework, windowing | v0.54.1 |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.34.5 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics | v0.52.5 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.19.0 |
 | [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | v0.1.54 |
