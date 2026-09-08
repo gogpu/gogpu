@@ -5,12 +5,12 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// DeviceProvider provides access to GPU resources for external libraries.
+// DeviceProvider is the legacy gogpu-specific GPU resource provider.
 // This interface enables dependency injection of GPU capabilities without
 // creating circular dependencies between packages.
 //
-// For cross-package integration (e.g., with gg), prefer using
-// gpucontext.DeviceProvider via App.GPUContextProvider().
+// Deprecated: use gpucontext.DeviceProvider via App.GPUContextProvider() for
+// cross-package integration (for example, with gg).
 type DeviceProvider interface {
 	// Device returns the wgpu GPU device.
 	Device() *wgpu.Device

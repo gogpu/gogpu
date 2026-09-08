@@ -177,7 +177,7 @@ func (r *renderer) init(app *gogpu.App) {
 	if err != nil {
 		panic(err)
 	}
-	r.gpu.device = app.DeviceProvider().Device()
+	r.gpu.device = wgpu.DeviceFromHandle(app.GPUContextProvider().Device())
 
 	paletteColors,
 		paletteBuf,
