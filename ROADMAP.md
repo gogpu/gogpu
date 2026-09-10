@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.54.0
+## Current State: v0.54.1
 
 ✅ **Production-ready** with full feature set:
 - **Strided texture uploads + GPUStats** (#484) — `Texture.UpdateRegion(region, data, layout)` for zero-copy dirty bands; `Renderer.GetCounters()` + `Context.FrameStats()` behind `GOGPU_STATS=1`

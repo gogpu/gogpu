@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **CONTRIBUTING.md** — merge strategy (squash vs regular merge), project structure, AI-assisted contributions (Smart Coding) policy, ecosystem versions, platform support
 
+## [0.54.1] - 2026-09-10
+
+### Changed
+
+- **deps:** goffi v0.6.3 → v0.6.4 ([goffi v0.6.4](https://github.com/go-webgpu/goffi/releases/tag/v0.6.4) — `-tags goffi_static` linking profile)
+
 ## [0.54.0] - 2026-08-31
 
 ### Added
