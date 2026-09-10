@@ -92,6 +92,22 @@ type Config struct {
 	// PowerPreferenceNone (default) lets the driver decide.
 	PowerPreference gputypes.PowerPreference
 
+	// RequiredFeatures are the optional GPU features the device is created
+	// with. It is a request rather than a wish: a device is created with the
+	// features asked for here and no others, and an adapter that cannot supply
+	// one fails the request by name instead of handing back a device that
+	// quietly cannot do the thing.
+	//
+	// Naming them is the app's job because only the app knows which it needs,
+	// and the cost of the alternative is real - enabling every feature an
+	// adapter advertises can move a device onto different power and scheduling
+	// behaviour for capabilities nothing in the frame ever uses.
+	//
+	// The zero value asks for none, which is what an app drawing through
+	// gogpu's own Context needs. An app reaching for the raw device through
+	// DeviceProvider is the one that has to say.
+	RequiredFeatures gputypes.Features
+
 	// RenderMode controls 2D rendering path selection (ADR-020).
 	// RenderModeAuto (default): CPU rasterizer on software adapter, GPU on real hardware.
 	// Can be overridden via GOGPU_RENDER_MODE=auto|cpu|gpu environment variable.
@@ -304,6 +320,14 @@ func (c Config) WithFrameless(frameless bool) Config {
 //     if wgpu selects DX12, per-pixel alpha may not composite (see docs).
 func (c Config) WithTransparent(transparent bool) Config {
 	c.Transparent = transparent
+	return c
+}
+
+// WithRequiredFeatures sets the optional GPU features the device is created
+// with. See Config.RequiredFeatures; the features are requested as a set, so
+// call it once with everything the app needs rather than once per feature.
+func (c Config) WithRequiredFeatures(features gputypes.Features) Config {
+	c.RequiredFeatures = features
 	return c
 }
 
