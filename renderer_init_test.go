@@ -296,3 +296,21 @@ func TestInitAdapterDevice_StructFieldSet(t *testing.T) {
 	}
 	// If this compiles, the field is wired correctly.
 }
+
+// TestFeatureNames checks that a failed device request names the features,
+// not their mask: an app reads from it which request to drop.
+func TestFeatureNames(t *testing.T) {
+	for _, c := range []struct {
+		set  gputypes.Features
+		want string
+	}{
+		{0, "none"},
+		{gputypes.Features(gputypes.FeatureIndirectFirstInstance), "IndirectFirstInstance"},
+		{gputypes.Features(gputypes.FeatureIndirectFirstInstance | gputypes.FeatureShaderF16), "IndirectFirstInstance, ShaderF16"},
+		{gputypes.Features(gputypes.FeatureDepthClipControl) | 1<<63, "DepthClipControl, 0x8000000000000000"},
+	} {
+		if got := featureNames(c.set); got != c.want {
+			t.Errorf("featureNames(%#x) = %q, want %q", uint64(c.set), got, c.want)
+		}
+	}
+}

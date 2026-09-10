@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -316,6 +317,9 @@ type Renderer struct {
 	// PowerPreference for adapter selection
 	powerPreference gputypes.PowerPreference
 
+	// requiredFeatures are the optional device features Config asked for.
+	requiredFeatures gputypes.Features
+
 	// Primary RenderTarget — backward compatibility for single-window API.
 	// TODO(lifecycle-phase3): remove once all callers use per-window surfaces.
 	primary *RenderTarget
@@ -339,9 +343,10 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool) (*Renderer, error) {
+func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool, requiredFeatures gputypes.Features) (*Renderer, error) {
 	r := &Renderer{
-		powerPreference: powerPref,
+		powerPreference:  powerPref,
+		requiredFeatures: requiredFeatures,
 	}
 	r.primary = &RenderTarget{
 		renderer:    r,
@@ -470,11 +475,43 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
 	r.pixelPresent = info.DeviceType == gputypes.DeviceTypeCPU
 
-	r.device, err = r.adapter.RequestDevice(nil)
+	// Create the device with the features the app asked for. Passing nil here
+	// creates a device with no optional features at all, which silently costs
+	// any consumer reaching for one through DeviceProvider - a non-zero
+	// firstInstance on a direct draw, say, which wgpu gates on
+	// IndirectFirstInstance.
+	r.device, err = r.adapter.RequestDevice(&wgpu.DeviceDescriptor{
+		Label:            "gogpu",
+		RequiredFeatures: r.requiredFeatures,
+	})
 	if err != nil {
-		return fmt.Errorf("%w: request device: %w", ErrNoGPU, err)
+		supported := r.adapter.Features()
+		return fmt.Errorf("%w: request device with features %s (adapter lacks %s; supports %s): %w", ErrNoGPU,
+			featureNames(r.requiredFeatures), featureNames(r.requiredFeatures&^supported), featureNames(supported), err)
 	}
 	return nil
+}
+
+// featureNames names the features of set, as "IndirectFirstInstance,
+// ShaderF16", or "none" when it is empty. A bit gputypes has no name for is
+// written in hexadecimal.
+func featureNames(set gputypes.Features) string {
+	if set.IsEmpty() {
+		return "none"
+	}
+	var names []string
+	for bit := 0; bit < 64; bit++ {
+		feature := gputypes.Feature(1) << bit
+		if !set.Contains(feature) {
+			continue
+		}
+		if name := feature.String(); name != "Unknown" {
+			names = append(names, name)
+		} else {
+			names = append(names, fmt.Sprintf("%#x", uint64(feature)))
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // createSurface creates the wgpu Surface from the window handles.
