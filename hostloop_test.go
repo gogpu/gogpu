@@ -91,7 +91,7 @@ func mockedRunPlatform(t *testing.T, window platform.PlatformWindow) {
 	oldManager := newPlatformManagerFn
 	newPlatformManagerFn = func() platform.PlatformManager { return manager }
 	oldRenderer := newRendererFn
-	newRendererFn = func(platformWindow platform.PlatformWindow, _ types.GraphicsAPI, _ bool, _ gputypes.PowerPreference, _ bool) (*Renderer, error) {
+	newRendererFn = func(platformWindow platform.PlatformWindow, _ types.GraphicsAPI, _ bool, _ gputypes.PowerPreference, _ bool, _ gputypes.Features) (*Renderer, error) {
 		renderer := &Renderer{}
 		width, height := platformWindow.PhysicalSize()
 		renderer.primary = &RenderTarget{
