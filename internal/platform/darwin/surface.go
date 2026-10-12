@@ -382,6 +382,18 @@ func (s *Surface) Layer() *MetalLayer {
 	return s.layer
 }
 
+// SetContentsScale updates only the layer's contentsScale, leaving the
+// drawable size and layer frame alone. The render thread calls it from
+// PrepareFrame when the window's backing scale changed (moved to another
+// display), just before it reconfigures the drawable to the new physical
+// size, so the two stay in step. Nil-safe, also after Destroy.
+func (s *Surface) SetContentsScale(scale float64) {
+	if s == nil || s.layer == nil || scale <= 0 {
+		return
+	}
+	s.layer.SetContentsScale(scale)
+}
+
 // LayerPtr returns the CAMetalLayer pointer for Vulkan/Metal surface creation.
 func (s *Surface) LayerPtr() uintptr {
 	if s == nil || s.layer == nil {

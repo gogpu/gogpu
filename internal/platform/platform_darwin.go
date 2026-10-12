@@ -209,6 +209,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		platform:  p,
 		id:        id,
 		window:    w.window,
+		surface:   w.surface,
 		frameless: config.Frameless,
 	}
 
@@ -336,6 +337,7 @@ type darwinPlatformWindow struct {
 	platform        *darwinPlatform
 	id              WindowID
 	window          *darwin.Window
+	surface         *darwin.Surface // nil when Metal surface creation failed
 	lastScale       float64
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -454,8 +456,17 @@ func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
 	scale := dw.window.BackingScaleFactor()
 	physW, physH := dw.window.FramebufferSize()
 
-	scaleChanged := dw.lastScale != 0 && dw.lastScale != scale
-	dw.lastScale = scale
+	scaleChanged, syncScale := scaleTransition(dw.lastScale, scale)
+	if syncScale {
+		// The caller (RenderTarget.beginFrame) reconfigures the drawable to
+		// the new physical size right after this returns; contentsScale must
+		// follow, or the drawable is presented at the old scale: 1x->2x
+		// magnified and cropped, 2x->1x in the top-left quarter. Setting it
+		// here, on the render thread that owns the drawable (RETINA-002),
+		// keeps the two in step.
+		dw.surface.SetContentsScale(scale)
+		dw.lastScale = scale
+	}
 
 	return PrepareFrameResult{
 		ScaleChanged:   scaleChanged,
@@ -661,41 +672,7 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 		default:
 		}
 
-		oldWidth, oldHeight := w.config.Width, w.config.Height
-		oldPhysW, oldPhysH := w.physW, w.physH
-
-		w.window.UpdateSize()
-		newWidth, newHeight := w.window.Size()
-		newPhysW, newPhysH := w.window.FramebufferSize()
-
-		if newWidth != oldWidth || newHeight != oldHeight || newPhysW != oldPhysW || newPhysH != oldPhysH {
-			w.config.Width = newWidth
-			w.config.Height = newHeight
-			w.physW = newPhysW
-			w.physH = newPhysH
-
-			// Detect scale change — emit ScaleChanged before Resize (ADR-059).
-			newScale := w.window.BackingScaleFactor()
-			if w.lastScale != 0 && w.lastScale != newScale {
-				w.events.Push(Event{
-					WindowID:    w.id,
-					Type:        EventScaleChanged,
-					ScaleFactor: newScale,
-					Width:       newWidth,
-					Height:      newHeight,
-				})
-			}
-			w.lastScale = newScale
-
-			w.events.Push(Event{
-				WindowID:       w.id,
-				Type:           EventResize,
-				Width:          newWidth,
-				Height:         newHeight,
-				PhysicalWidth:  newPhysW,
-				PhysicalHeight: newPhysH,
-			})
-		}
+		w.checkSizeChange()
 	}
 
 	// Check for focus change — macOS uses key window status.
@@ -1047,7 +1024,7 @@ func (w *darwinWindow) queueEvent(event Event) {
 	w.events.Push(event)
 }
 
-// checkResize checks for logical or physical size changes and queues EventResize.
+// checkResize checks for size and scale changes (see checkSizeChange).
 // RETINA-002: Does NOT call w.surface.Resize(). Surface reconfiguration
 // is handled by the render thread via RequestResize to avoid race conditions.
 // Must be called with w.eventMu held.
@@ -1061,6 +1038,14 @@ func (w *darwinWindow) checkResize() {
 		return
 	}
 
+	w.checkSizeChange()
+}
+
+// checkSizeChange queues EventResize when the logical or physical size
+// changed, preceded by EventScaleChanged when the backing scale changed too
+// (ADR-059). Shared by pollEvents and checkResize so the two event-loop
+// paths cannot drift apart. Must be called with w.eventMu held.
+func (w *darwinWindow) checkSizeChange() {
 	oldWidth, oldHeight := w.config.Width, w.config.Height
 	oldPhysW, oldPhysH := w.physW, w.physH
 
@@ -1068,21 +1053,34 @@ func (w *darwinWindow) checkResize() {
 	newWidth, newHeight := w.window.Size()
 	newPhysW, newPhysH := w.window.FramebufferSize()
 
-	if newWidth != oldWidth || newHeight != oldHeight || newPhysW != oldPhysW || newPhysH != oldPhysH {
-		w.config.Width = newWidth
-		w.config.Height = newHeight
-		w.physW = newPhysW
-		w.physH = newPhysH
+	if newWidth == oldWidth && newHeight == oldHeight && newPhysW == oldPhysW && newPhysH == oldPhysH {
+		return
+	}
+	w.config.Width = newWidth
+	w.config.Height = newHeight
+	w.physW = newPhysW
+	w.physH = newPhysH
 
+	newScale := w.window.BackingScaleFactor()
+	if changed, _ := scaleTransition(w.lastScale, newScale); changed {
 		w.queueEvent(Event{
-			WindowID:       w.id,
-			Type:           EventResize,
-			Width:          newWidth,
-			Height:         newHeight,
-			PhysicalWidth:  newPhysW,
-			PhysicalHeight: newPhysH,
+			WindowID:    w.id,
+			Type:        EventScaleChanged,
+			ScaleFactor: newScale,
+			Width:       newWidth,
+			Height:      newHeight,
 		})
 	}
+	w.lastScale = newScale
+
+	w.queueEvent(Event{
+		WindowID:       w.id,
+		Type:           EventResize,
+		Width:          newWidth,
+		Height:         newHeight,
+		PhysicalWidth:  newPhysW,
+		PhysicalHeight: newPhysH,
+	})
 }
 
 // eventTimestamp returns the event timestamp as duration since start.

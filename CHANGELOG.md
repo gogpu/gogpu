@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **macOS: wrong scale after moving a window between displays** — `CAMetalLayer.contentsScale` was set only when the surface was created and shown, while the render thread reconfigured the drawable to the new physical size. A window moved from a 1× to a 2× display was drawn magnified and cropped; from 2× to 1× it filled only the top-left quarter. `PrepareFrame` now updates `contentsScale` on the render thread when the backing scale changes, right before the drawable is reconfigured. The `WaitEvents` path (`checkResize`) now also emits `EventScaleChanged`, sharing its size/scale detection with `pollEvents`.
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
 
 ### Changed

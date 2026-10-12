@@ -1028,3 +1028,57 @@ func TestDarwinApplicationInitDestroyLoop(t *testing.T) {
 		}
 	})
 }
+
+// TestDarwinSurfaceSetContentsScale covers the display-change path: the
+// window moved to a display with another backing scale, and PrepareFrame
+// updates contentsScale without touching the drawable.
+func TestDarwinSurfaceSetContentsScale(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("struct argument/return tests require arm64")
+	}
+	rt := loadObjcRuntime(t)
+
+	runOnMainThread(t, func() {
+		app := platformdarwin.GetApplication()
+		if err := app.Init(); err != nil {
+			t.Fatalf("Application.Init failed: %v", err)
+		}
+		defer app.Destroy()
+
+		w, err := platformdarwin.NewWindow(platformdarwin.WindowConfig{Title: "gogpu", Width: 320, Height: 240})
+		w = must(t, "NewWindow", w, err)
+		defer w.Destroy()
+		s, err := platformdarwin.NewSurface(w, false)
+		s = must(t, "NewSurface", s, err)
+		defer s.Destroy()
+
+		s.Configure(platformdarwin.DefaultSurfaceConfig())
+		layer := s.Layer()
+		layer.SetDrawableSize(640, 480)
+		drawW, drawH := layer.DrawableSize()
+		contentsScale := func() float64 {
+			return objcCallRet[float64](t, rt, s.LayerPtr(), rt.sel(t, "contentsScale"))
+		}
+
+		for _, scale := range []float64{2, 1, 2} {
+			s.SetContentsScale(scale)
+			if got := contentsScale(); math.Abs(got-scale) > 1e-9 {
+				t.Fatalf("contentsScale = %v after SetContentsScale(%v)", got, scale)
+			}
+		}
+
+		// Invalid scales are ignored.
+		s.SetContentsScale(0)
+		if got := contentsScale(); math.Abs(got-2) > 1e-9 {
+			t.Fatalf("contentsScale = %v after SetContentsScale(0), want 2 kept", got)
+		}
+
+		// The drawable is untouched (RETINA-002).
+		if gotW, gotH := layer.DrawableSize(); gotW != drawW || gotH != drawH {
+			t.Fatalf("drawableSize = %vx%v, want %vx%v untouched", gotW, gotH, drawW, drawH)
+		}
+
+		var nilSurface *platformdarwin.Surface
+		nilSurface.SetContentsScale(2) // must not panic
+	})
+}
