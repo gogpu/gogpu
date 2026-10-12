@@ -54,6 +54,9 @@ type Event struct {
 	// Character input (EventChar)
 	Char rune
 
+	// Optional native keyboard snapshot, delivered in the same event queue.
+	NativeKey *NativeKeyEvent
+
 	// Pointer (EventPointer*)
 	Pointer gpucontext.PointerEvent
 
@@ -92,6 +95,7 @@ const (
 	EventDragDrop     // Files dropped on window
 	EventDragLeave    // Files left window area
 	EventScaleChanged // DPI scale factor changed (ADR-059)
+	EventNativeKey
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.

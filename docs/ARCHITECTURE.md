@@ -539,6 +539,23 @@ Platform Layer          EventSource              User Code
 - `GestureEventSource` — Vello-style gestures (pinch, rotate, pan)
 - `EventSource` — Keyboard, IME, focus events
 
+### Optional native keyboard stream
+
+`App.OnNativeKey` provides physical key presses/releases and committed Unicode
+characters for terminal and text-input adapters. It returns `true` on Windows
+10 1607 and later; other platforms continue using the existing `EventSource`.
+Register the callback before `Run`, and subscribe to only one keyboard stream.
+
+The Windows source snapshots VK, scan code, side-specific modifiers and repeat
+count before `TranslateMessage`. `TextExpected` lets an adapter defer a printable
+press or dead key until its `NativeTextCommit`. The source associates each UTF-16
+commit with the corresponding press, including batched messages, dead-key
+composition and supplementary characters. `TextInput` marks confirmed modified
+or composed text that must bypass shortcuts, while physical metadata remains
+available for forwarding. Ordinary Alt accelerators remain unmarked. Native
+callbacks share the existing event queue and retain focus/pointer ordering;
+legacy callbacks and the `gpucontext.EventSource` interface are unchanged.
+
 ### Polling-based (Game Loops)
 
 For game loops that check input state each frame:
