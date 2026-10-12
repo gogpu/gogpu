@@ -132,6 +132,7 @@ func TestApp_RunFrame_ContinuousWithUpdateAndInput(t *testing.T) {
 		app.RequestRedraw()
 	}
 
+	app.running.Store(true)
 	app.runFrame()
 
 	if !updateCalled {

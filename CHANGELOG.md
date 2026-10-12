@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Continuous rendering CPU usage** — wait for events or a background deadline when presentation is blocked or fails, preserve queued input until an update, and use Vulkan swapchain pacing without an extra compositor gate. VSync-off rendering remains uncapped; explicit presentation synchronization is preserved.
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
 
 ### Changed

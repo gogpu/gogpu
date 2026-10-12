@@ -155,7 +155,7 @@ func TestPresentationSyncUsesOneShotPlatformPath(t *testing.T) {
 
 func TestPresentationSyncUsesNormalFramePolicyWithoutRequest(t *testing.T) {
 	window := &countingPresentationWindow{prepareOK: true}
-	target := &RenderTarget{platWindow: window}
+	target := &RenderTarget{platWindow: window, vsync: true}
 
 	attempt := syncFrameForPresent(target)
 
@@ -227,7 +227,7 @@ func TestPresentationSyncPresentationFailureCancelsAndRestoresRequest(t *testing
 
 func TestNormalPresentationFailureCancelsPreparedFramePolicy(t *testing.T) {
 	window := &countingPresentationWindow{prepareOK: true}
-	target := &RenderTarget{platWindow: window}
+	target := &RenderTarget{platWindow: window, vsync: true}
 
 	attempt := syncFrameForPresent(target)
 	finishPresentationSync(target, attempt, false)
@@ -348,7 +348,7 @@ func TestPresentationSyncMarksSecondaryFrameGate(t *testing.T) {
 	window := &countingPresentationWindow{prepareOK: true}
 	renderer := &Renderer{}
 	primary := &RenderTarget{renderer: renderer}
-	secondary := &RenderTarget{renderer: renderer, platWindow: window}
+	secondary := &RenderTarget{renderer: renderer, platWindow: window, vsync: true}
 	renderer.primary = primary
 
 	syncFrameForPresent(secondary)
@@ -360,7 +360,7 @@ func TestPresentationSyncMarksSecondaryFrameGate(t *testing.T) {
 
 func BenchmarkPresentationSyncSteadyState(b *testing.B) {
 	window := &steadyStatePresentationWindow{}
-	target := &RenderTarget{platWindow: window}
+	target := &RenderTarget{platWindow: window, vsync: true}
 	b.ReportAllocs()
 
 	for b.Loop() {

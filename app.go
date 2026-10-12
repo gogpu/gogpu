@@ -70,6 +70,7 @@ type App struct {
 	lifecycle              AppLifecycle // ADR-026 universal lifecycle state
 	quitOnLastWindowClosed bool         // default true — exit when last window closes
 	lastFrame              time.Time
+	retryFrameAt           time.Time
 
 	// Event-driven rendering
 	invalidator   *Invalidator
@@ -88,7 +89,8 @@ type App struct {
 	// Input event queue for SDL-style PollInputEvent (ADR-058).
 	// Lazy-initialized on first PollInputEvent call. Events are collected
 	// during classifyEvent dispatch and drained each frame.
-	inputEvents []gpucontext.InputEvent
+	inputEvents         []gpucontext.InputEvent
+	inputEventsConsumed bool
 
 	// Resource tracker for automatic GPU resource cleanup on shutdown.
 	tracker *resourceTracker
@@ -479,11 +481,14 @@ func (a *App) startRunLoop() {
 // events when idle, processes platform events, ticks onUpdate, and draws
 // a frame when the three-mode state detection (ADR-023) calls for one.
 func (a *App) runFrame() {
-	continuousRender := a.config.ContinuousRender
+	if a.config.ContinuousRender {
+		a.runContinuousFrame()
+		return
+	}
 	animating := a.animations.IsAnimating()
 	invalidated := a.invalidator.Consume()
 
-	if !continuousRender && !animating && !invalidated {
+	if !animating && !invalidated {
 		// IDLE: block on OS events (0% CPU, <1ms response)
 		a.manager.WaitEvents()
 	}
@@ -498,6 +503,82 @@ func (a *App) runFrame() {
 		invalidated = true
 	}
 
+	a.updateFrame()
+
+	// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
+	if a.invalidator.Consume() {
+		invalidated = true
+	}
+
+	// Demand-driven mode draws only when invalidated, including during animation.
+	// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
+	if invalidated && a.frameCallbackReady() {
+		a.renderFrameMultiThread()
+	}
+}
+
+// backgroundFrameInterval bounds updates and retries when no frame can be
+// presented. Successful frames have no timer or artificial FPS limit.
+const backgroundFrameInterval = 50 * time.Millisecond
+
+func (a *App) runContinuousFrame() {
+	a.processEventsMultiThread()
+	if !a.running.Load() || (a.platWindow != nil && a.platWindow.ShouldClose()) {
+		return
+	}
+
+	ready := a.canRender()
+	if !ready {
+		deadline := a.lastFrame.Add(backgroundFrameInterval)
+		a.waitForEventsUntil(deadline)
+		a.processEventsMultiThread()
+		if !a.running.Load() || (a.platWindow != nil && a.platWindow.ShouldClose()) {
+			return
+		}
+		ready = a.canRender()
+		if !ready && !time.Now().Before(deadline) {
+			a.updateFrame()
+		}
+	}
+	if !ready {
+		return
+	}
+
+	a.invalidator.Consume()
+	a.updateFrame()
+	if !a.running.Load() {
+		return
+	}
+	if !a.renderFrameMultiThread() {
+		a.retryFrameAt = time.Now().Add(backgroundFrameInterval)
+		a.waitForEventsUntil(a.retryFrameAt)
+	}
+}
+
+func (a *App) canRender() bool {
+	return !time.Now().Before(a.retryFrameAt) && a.frameCallbackReady()
+}
+
+// waitForEventsUntil uses the same blocking event wait on every native
+// platform. Join an expired timer before returning so it cannot access the
+// platform after shutdown. Input can wake the wait without triggering an update.
+func (a *App) waitForEventsUntil(deadline time.Time) {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return
+	}
+	done := make(chan struct{})
+	timer := time.AfterFunc(remaining, func() {
+		a.manager.WakeUp()
+		close(done)
+	})
+	a.manager.WaitEvents()
+	if !timer.Stop() {
+		<-done
+	}
+}
+
+func (a *App) updateFrame() {
 	// Calculate delta time
 	now := time.Now()
 	deltaTime := now.Sub(a.lastFrame).Seconds()
@@ -526,17 +607,9 @@ func (a *App) runFrame() {
 		a.inputState.Update()
 	}
 
-	// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
-	if a.invalidator.Consume() {
-		invalidated = true
-	}
-
-	// OnDraw: CONTINUOUS = every VSync (games), otherwise only when dirty.
-	// ANIMATING mode: onUpdate runs every tick, OnDraw only on RequestRedraw.
-	// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
-	if (continuousRender || invalidated) && a.frameCallbackReady() {
-		a.renderFrameMultiThread()
-	}
+	// The next event pump clears this frame's input. Keep it available to
+	// OnDraw too, and preserve new events across wakes without an update.
+	a.inputEventsConsumed = true
 }
 
 // newPlatformManagerFn creates a platform manager; replaced in tests to inject mocks.
@@ -738,8 +811,10 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 // This matches the winit/Flutter/Qt pattern: platform layer delivers events,
 // handlers decide whether to invalidate, render loop never guesses.
 func (a *App) processEventsMultiThread() {
-	// Reset public input event queue (ADR-058). Reuse backing array.
-	a.inputEvents = a.inputEvents[:0]
+	if a.inputEventsConsumed {
+		a.inputEvents = a.inputEvents[:0]
+		a.inputEventsConsumed = false
+	}
 
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
@@ -1021,7 +1096,7 @@ func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow) {
 // When multiple windows are open, each window with an onDraw callback gets
 // its own beginFrame/draw/endFrame cycle. GPU submission polling happens once
 // after all windows are presented.
-func (a *App) renderFrameMultiThread() {
+func (a *App) renderFrameMultiThread() bool {
 	// Collect visible windows with their main-thread state.
 	a.windowManager.mu.RLock()
 	frames := make([]windowFrame, 0, len(a.windowManager.order))
@@ -1055,20 +1130,23 @@ func (a *App) renderFrameMultiThread() {
 	a.windowManager.mu.RUnlock()
 
 	if len(frames) == 0 {
-		return
+		return false
 	}
 
-	// Execute GPU operations on render thread.
+	// The call joins the render thread before reading its presentation result.
+	var presented bool
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		runInFramePool(func() {
-			a.renderFrameGPU(frames)
+			presented = a.renderFrameGPU(frames)
 		})
 	})
+	return presented
 }
 
 // renderFrameGPU performs GPU work for all visible windows.
 // Must run on the render thread inside runInFramePool on macOS.
-func (a *App) renderFrameGPU(frames []windowFrame) {
+func (a *App) renderFrameGPU(frames []windowFrame) bool {
+	var presented bool
 	// Apply pending resize for the primary window (if still alive).
 	// Applied during live resize too (Rio pattern): the surface tracks the
 	// window every tick; resize() skips no-op reconfigures, and the Metal
@@ -1131,7 +1209,7 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// swapchain and run endFrame to blit the preserved composition texture
 		// with updated overlays. This enables self-sustaining overlay animation
 		// even when the application's OnDraw callback draws nothing.
-		if !ws.frameStarted && !ws.tryOverlayOnlyFrame() {
+		if !ws.frameStarted && !ws.pixelPresented && !ws.tryOverlayOnlyFrame() {
 			if ws.acquireFailed {
 				a.RequestRedraw()
 			}
@@ -1141,17 +1219,8 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 			continue
 		}
 
-		// On outdated, present() reconfigured the surface; re-render once at the
-		// live scale (a DPI change is an outdated trigger, so frame.scale may be
-		// stale). One retry only — looping can livelock a live resize; if still
-		// outdated, request another frame since nothing else reschedules on-demand.
-		if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
-			ws.prepareLazyAcquire()
-			frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
-			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
-				a.RequestRedraw()
-			}
-		}
+		didPresent := a.presentWindowFrame(frame)
+		presented = presented || didPresent
 
 		// Self-sustaining debug overlay loop (ADR-066, Chromium pattern):
 		// when any overlay returns true from Draw, request another frame so
@@ -1166,6 +1235,30 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 
 	// Poll submissions once after all windows are presented.
 	a.renderer.pollSubmissions()
+	return presented
+}
+
+// presentWindowFrame retries an outdated surface once at the current scale.
+// Report actual presentation, including recovery, to the shared pacing loop.
+func (a *App) presentWindowFrame(frame windowFrame) bool {
+	ws := frame.window.surface
+	if !ws.frameStarted && !ws.pixelPresented {
+		return false
+	}
+	retry, presented := a.renderer.endFrameForSurface(ws)
+	if !retry {
+		return presented
+	}
+	ws.prepareLazyAcquire()
+	frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
+	if !ws.frameStarted && !ws.pixelPresented {
+		return presented
+	}
+	retry, retryPresented := a.renderer.endFrameForSurface(ws)
+	if retry {
+		a.RequestRedraw()
+	}
+	return presented || retryPresented
 }
 
 func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
@@ -1199,25 +1292,7 @@ func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
 // is NOT called during modal drag. This prevents content re-centering artifacts.
 // The onResize callback fires after WM_EXITSIZEMOVE via normal event processing.
 func (a *App) modalFrameTick() {
-	// Delta time
-	now := time.Now()
-	deltaTime := now.Sub(a.lastFrame).Seconds()
-	a.lastFrame = now
-
-	// Clamp deltaTime after long idle (same as main loop).
-	if deltaTime > 0.066 {
-		deltaTime = 0.066
-	}
-
-	// Update input state
-	if a.inputState != nil {
-		a.inputState.Update()
-	}
-
-	// User logic callback
-	if a.onUpdate != nil {
-		a.onUpdate(deltaTime)
-	}
+	a.updateFrame()
 
 	// Propagate PHYSICAL window size to render thread for swapchain resize.
 	// During modal loop, processEventsMultiThread doesn't run, so

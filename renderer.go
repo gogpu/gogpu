@@ -200,6 +200,7 @@ type Renderer struct {
 
 	// Backend metadata
 	backendName string
+	backend     gputypes.Backend
 
 	// Submission tracker for non-blocking resource recycling.
 	tracker submissionTracker
@@ -385,6 +386,7 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
 	}
 	info := r.adapter.Info()
+	r.backend = info.Backend
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
 
@@ -707,8 +709,8 @@ func (r *Renderer) EndFrame() {
 // endFrameForSurface flushes, presents, and releases frame resources for a
 // specific RenderTarget. Used by the multi-window frame loop. Unlike EndFrame,
 // it does NOT poll submissions -- the caller polls once after all windows.
-// Returns true if present() reconfigured an outdated surface (see present).
-func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
+// Reports whether the surface was reconfigured and whether a frame was presented.
+func (r *Renderer) endFrameForSurface(ws *RenderTarget) (reconfigured, presented bool) {
 	// PresentPixels already presented — skip normal present path (ADR-052).
 	if ws.pixelPresented {
 		ws.discardFrameEncoder()
@@ -716,13 +718,13 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 		ws.hasPendingClear = false
 		ws.releaseFrame()
 		r.endFrameStats(false)
-		return false
+		return false, true
 	}
 
 	// No swapchain frame was started (idle / lazy acquire never triggered).
 	if !ws.frameStarted {
 		r.endFrameStats(true)
-		return false
+		return false, false
 	}
 
 	// ADR-067: when composition texture is active, content renderers already
@@ -750,11 +752,11 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
 	syncAttempt := syncFrameForPresent(ws)
-	reconfigured, presented := ws.present()
+	reconfigured, presented = ws.present()
 	finishPresentationSync(ws, syncAttempt, presented)
 	ws.releaseFrame()
 	r.endFrameStats(!presented)
-	return reconfigured
+	return reconfigured, presented
 }
 
 type presentationSyncAttempt struct {
@@ -771,6 +773,13 @@ func syncFrameForPresent(ws *RenderTarget) presentationSyncAttempt {
 	}
 	force := ws.presentationSyncRequested
 	if syncer, ok := ws.platWindow.(platform.PresentationSyncer); ok {
+		// Vulkan already paces acquisition through the swapchain. An extra
+		// compositor gate delays the next frame's work unnecessarily. With
+		// VSync off no backend should add a normal compositor frame limit.
+		// Explicit one-shot requests still synchronize UI surface updates.
+		if !force && (!ws.vsync || (ws.renderer != nil && ws.renderer.backend == gputypes.BackendVulkan)) {
+			return presentationSyncAttempt{}
+		}
 		prepared := syncer.PrepareFrameSync(force)
 		if prepared {
 			markSecondaryFrameGatePending(ws)
