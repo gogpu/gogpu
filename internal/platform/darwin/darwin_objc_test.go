@@ -1068,9 +1068,11 @@ func TestDarwinSurfaceSetContentsScale(t *testing.T) {
 		}
 
 		// Invalid scales are ignored.
-		s.SetContentsScale(0)
-		if got := contentsScale(); math.Abs(got-2) > 1e-9 {
-			t.Fatalf("contentsScale = %v after SetContentsScale(0), want 2 kept", got)
+		for _, bad := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+			s.SetContentsScale(bad)
+			if got := contentsScale(); math.Abs(got-2) > 1e-9 {
+				t.Fatalf("contentsScale = %v after SetContentsScale(%v), want 2 kept", got, bad)
+			}
 		}
 
 		// The drawable is untouched (RETINA-002).

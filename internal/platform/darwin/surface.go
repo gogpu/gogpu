@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"errors"
+	"math"
 )
 
 // Errors returned by Surface operations.
@@ -386,12 +387,25 @@ func (s *Surface) Layer() *MetalLayer {
 // drawable size and layer frame alone. The render thread calls it from
 // PrepareFrame when the window's backing scale changed (moved to another
 // display), just before it reconfigures the drawable to the new physical
-// size, so the two stay in step. Nil-safe, also after Destroy.
+// size, so the two stay in step. Nil-safe, also after Destroy; scales that
+// fail ValidScale are ignored.
+//
+// Threading: PrepareFrame runs only inside RunOnRenderThreadVoid, which
+// blocks the calling main thread until it returns, so it never overlaps the
+// main thread's Show/UpdateSize. Teardown destroys the GPU surface on the
+// render thread (Renderer.Destroy, or RenderTarget.destroy on window close)
+// before the platform window and this Surface are destroyed.
 func (s *Surface) SetContentsScale(scale float64) {
-	if s == nil || s.layer == nil || scale <= 0 {
+	if s == nil || s.layer == nil || !ValidScale(scale) {
 		return
 	}
 	s.layer.SetContentsScale(scale)
+}
+
+// ValidScale reports whether s is usable as a backing scale factor:
+// positive and finite. NaN fails the comparison and is rejected too.
+func ValidScale(s float64) bool {
+	return s > 0 && !math.IsInf(s, 1)
 }
 
 // LayerPtr returns the CAMetalLayer pointer for Vulkan/Metal surface creation.
