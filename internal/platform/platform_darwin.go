@@ -26,6 +26,10 @@ type darwinWindow struct {
 	events      *eventqueue.Queue[Event]
 	eventMu     sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
 
+	// metrics overrides readMetrics in tests (the platform package cannot
+	// create an NSWindow); nil in production.
+	metrics func() (windowMetrics, bool)
+
 	// Mouse state tracking
 	pointerX      float64
 	pointerY      float64
@@ -209,6 +213,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		platform:  p,
 		id:        id,
 		window:    w.window,
+		surface:   w.surface,
 		frameless: config.Frameless,
 	}
 
@@ -281,6 +286,11 @@ func (p *darwinPlatform) WaitEvents() {
 	}
 
 	// Check for resize after all events have been processed.
+	// Only the key window is checked here; other windows are covered by the
+	// PollEvents drain that follows every WaitEvents (App.runFrame →
+	// processEventsMultiThread), since pollEvents runs checkResize for each
+	// window. A non-key window moved to another display wakes this loop via
+	// its own windowDidChangeScreen: delegate (WakeEventLoop).
 	keyWin.eventMu.Lock()
 	keyWin.checkResize()
 	keyWin.eventMu.Unlock()
@@ -336,10 +346,17 @@ type darwinPlatformWindow struct {
 	platform        *darwinPlatform
 	id              WindowID
 	window          *darwin.Window
+	surface         layerScaler // the window's *darwin.Surface; nil-safe either way
 	lastScale       float64
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 	callbackMu      sync.RWMutex
+}
+
+// layerScaler is the part of *darwin.Surface that PrepareFrame uses; an
+// interface so tests can observe the contentsScale sync.
+type layerScaler interface {
+	SetContentsScale(scale float64)
 }
 
 func (dw *darwinPlatformWindow) ID() WindowID { return dw.id }
@@ -453,9 +470,27 @@ func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
 
 	scale := dw.window.BackingScaleFactor()
 	physW, physH := dw.window.FramebufferSize()
+	return dw.prepareFrame(scale, physW, physH)
+}
 
-	scaleChanged := dw.lastScale != 0 && dw.lastScale != scale
-	dw.lastScale = scale
+// prepareFrame is PrepareFrame after the window reads: it syncs the layer's
+// contentsScale when the backing scale changed and builds the result.
+func (dw *darwinPlatformWindow) prepareFrame(scale float64, physW, physH int) PrepareFrameResult {
+	scaleChanged, syncScale := scaleTransition(dw.lastScale, scale)
+	if syncScale {
+		// The caller (RenderTarget.beginFrame) reconfigures the drawable to
+		// the new physical size right after this returns; contentsScale must
+		// follow, or the drawable is presented at the old scale: 1x->2x
+		// magnified and cropped, 2x->1x in the top-left quarter. Setting it
+		// here, on the render thread that owns the drawable (RETINA-002),
+		// keeps the two in step. PrepareFrame runs inside
+		// RunOnRenderThreadVoid, so the main thread is blocked meanwhile; see
+		// darwin.Surface.SetContentsScale for the full threading contract.
+		if dw.surface != nil {
+			dw.surface.SetContentsScale(scale)
+		}
+		dw.lastScale = scale
+	}
 
 	return PrepareFrameResult{
 		ScaleChanged:   scaleChanged,
@@ -645,58 +680,18 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 		w.events.Push(Event{WindowID: w.id, Type: EventClose})
 	}
 
-	// Check for resize — queue if logical OR physical size changed.
-	// RETINA-002: Do NOT call w.surface.Resize() here. PollEvents runs on the
-	// main thread while the render thread operates on wgpu surface. Surface
-	// reconfiguration is handled by the render thread via RequestResize.
-	//
-	// Physical-size tracking (physW/physH) catches Retina↔1× transitions
-	// where logical dims are unchanged but the framebuffer resolution changes.
-	if w.window != nil && !w.window.InLiveResize() {
-		// Drain the screen-change signal from windowDidChangeScreen:.
-		// The signal already woke WaitEvents; draining resets the channel
-		// for the next display transition.
+	// Drain the screen-change signal from windowDidChangeScreen:. The
+	// signal already woke WaitEvents; draining resets the channel for the
+	// next display transition.
+	if w.window != nil {
 		select {
 		case <-w.window.ScreenChangedCh():
 		default:
 		}
-
-		oldWidth, oldHeight := w.config.Width, w.config.Height
-		oldPhysW, oldPhysH := w.physW, w.physH
-
-		w.window.UpdateSize()
-		newWidth, newHeight := w.window.Size()
-		newPhysW, newPhysH := w.window.FramebufferSize()
-
-		if newWidth != oldWidth || newHeight != oldHeight || newPhysW != oldPhysW || newPhysH != oldPhysH {
-			w.config.Width = newWidth
-			w.config.Height = newHeight
-			w.physW = newPhysW
-			w.physH = newPhysH
-
-			// Detect scale change — emit ScaleChanged before Resize (ADR-059).
-			newScale := w.window.BackingScaleFactor()
-			if w.lastScale != 0 && w.lastScale != newScale {
-				w.events.Push(Event{
-					WindowID:    w.id,
-					Type:        EventScaleChanged,
-					ScaleFactor: newScale,
-					Width:       newWidth,
-					Height:      newHeight,
-				})
-			}
-			w.lastScale = newScale
-
-			w.events.Push(Event{
-				WindowID:       w.id,
-				Type:           EventResize,
-				Width:          newWidth,
-				Height:         newHeight,
-				PhysicalWidth:  newPhysW,
-				PhysicalHeight: newPhysH,
-			})
-		}
 	}
+
+	// Check for size and scale changes (skipped during live resize).
+	w.checkResize()
 
 	// Check for focus change — macOS uses key window status.
 	// NSWindow.isKeyWindow is true when the window has keyboard focus.
@@ -1047,42 +1042,73 @@ func (w *darwinWindow) queueEvent(event Event) {
 	w.events.Push(event)
 }
 
-// checkResize checks for logical or physical size changes and queues EventResize.
+// checkResize checks for size and scale changes and queues the events for
+// them (see applyMetrics). Shared by pollEvents and WaitEvents so the two
+// event-loop paths cannot drift apart.
 // RETINA-002: Does NOT call w.surface.Resize(). Surface reconfiguration
 // is handled by the render thread via RequestResize to avoid race conditions.
 // Must be called with w.eventMu held.
 func (w *darwinWindow) checkResize() {
-	if w.window == nil {
-		return
+	read := w.metrics
+	if read == nil {
+		read = w.readMetrics
 	}
-	// During live resize, defer GPU surface reconfiguration until the user
-	// releases the mouse (windowDidEndLiveResize → WakeEventLoop → here).
-	if w.window.InLiveResize() {
-		return
+	if m, ok := read(); ok {
+		w.applyMetrics(m)
 	}
+}
 
-	oldWidth, oldHeight := w.config.Width, w.config.Height
-	oldPhysW, oldPhysH := w.physW, w.physH
-
+// readMetrics reads the window's current size and backing scale. It reports
+// false when there is no window, and during live resize: GPU surface
+// reconfiguration is deferred until the user releases the mouse
+// (windowDidEndLiveResize → WakeEventLoop → checkResize).
+func (w *darwinWindow) readMetrics() (windowMetrics, bool) {
+	if w.window == nil || w.window.InLiveResize() {
+		return windowMetrics{}, false
+	}
 	w.window.UpdateSize()
-	newWidth, newHeight := w.window.Size()
-	newPhysW, newPhysH := w.window.FramebufferSize()
+	m := windowMetrics{Scale: w.window.BackingScaleFactor()}
+	m.Width, m.Height = w.window.Size()
+	m.PhysW, m.PhysH = w.window.FramebufferSize()
+	return m, true
+}
 
-	if newWidth != oldWidth || newHeight != oldHeight || newPhysW != oldPhysW || newPhysH != oldPhysH {
-		w.config.Width = newWidth
-		w.config.Height = newHeight
-		w.physW = newPhysW
-		w.physH = newPhysH
-
-		w.queueEvent(Event{
-			WindowID:       w.id,
-			Type:           EventResize,
-			Width:          newWidth,
-			Height:         newHeight,
-			PhysicalWidth:  newPhysW,
-			PhysicalHeight: newPhysH,
-		})
+// applyMetrics queues EventScaleChanged when the backing scale changed and
+// EventResize when the logical or physical size changed, in that order
+// (ADR-059). The two are detected independently: a scale change with an
+// unchanged size still emits EventScaleChanged. Must be called with
+// w.eventMu held.
+func (w *darwinWindow) applyMetrics(cur windowMetrics) {
+	if changed, syncScale := scaleTransition(w.lastScale, cur.Scale); syncScale {
+		if changed {
+			w.queueEvent(Event{
+				WindowID:    w.id,
+				Type:        EventScaleChanged,
+				ScaleFactor: cur.Scale,
+				Width:       cur.Width,
+				Height:      cur.Height,
+			})
+		}
+		w.lastScale = cur.Scale
 	}
+
+	if cur.Width == w.config.Width && cur.Height == w.config.Height &&
+		cur.PhysW == w.physW && cur.PhysH == w.physH {
+		return
+	}
+	w.config.Width = cur.Width
+	w.config.Height = cur.Height
+	w.physW = cur.PhysW
+	w.physH = cur.PhysH
+
+	w.queueEvent(Event{
+		WindowID:       w.id,
+		Type:           EventResize,
+		Width:          cur.Width,
+		Height:         cur.Height,
+		PhysicalWidth:  cur.PhysW,
+		PhysicalHeight: cur.PhysH,
+	})
 }
 
 // eventTimestamp returns the event timestamp as duration since start.
