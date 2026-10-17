@@ -62,6 +62,9 @@ type App struct {
 	onSuspended        func()                             // app backgrounded (ADR-026)
 	onMemoryWarning    func()                             // free caches or be killed (ADR-026)
 	onFileDrop         func(paths []string, x, y float64) // OS file drag-and-drop
+	onDragEnter        func(paths []string, x, y float64) // OS file drag entered the window
+	onDragMove         func(x, y float64)                 // OS file drag moved over the window
+	onDragLeave        func()                             // OS file drag left without dropping
 	hitTestCallback    gpucontext.HitTestCallback
 
 	// State
@@ -232,6 +235,39 @@ func (a *App) OnAnyWindowClosed(fn func(WindowID)) *App {
 // (NSDraggingDestination), X11 (XDND v5), and Wayland (wl_data_device).
 func (a *App) OnDragDrop(fn func(paths []string, x, y float64)) *App {
 	a.onFileDrop = fn
+	return a
+}
+
+// OnDragEnter sets the callback for an OS file drag entering the window,
+// before anything is dropped. Together with OnDragMove and OnDragLeave it lets
+// an application show where a drop would land — a highlighted folder, a
+// forbidden zone — while the user is still dragging. x and y are in the same
+// units as OnDragDrop's. paths may be empty: Wayland only hands the paths
+// over on the drop itself.
+//
+// Supported where the platform reports the drag in progress: macOS
+// (draggingEntered:), X11 (XdndEnter/XdndPosition) and Wayland
+// (wl_data_device.enter). Windows uses WM_DROPFILES, which reports only the
+// drop, so these callbacks never fire there.
+func (a *App) OnDragEnter(fn func(paths []string, x, y float64)) *App {
+	a.onDragEnter = fn
+	return a
+}
+
+// OnDragMove sets the callback for an OS file drag moving over the window.
+// It fires after OnDragEnter, as often as the platform reports motion, with x
+// and y in the same units as OnDragDrop's. See OnDragEnter for platform
+// support.
+func (a *App) OnDragMove(fn func(x, y float64)) *App {
+	a.onDragMove = fn
+	return a
+}
+
+// OnDragLeave sets the callback for an OS file drag leaving the window
+// without dropping, or being canceled over it. A drag that ends in a drop
+// reports OnDragDrop instead. See OnDragEnter for platform support.
+func (a *App) OnDragLeave(fn func()) *App {
+	a.onDragLeave = fn
 	return a
 }
 
@@ -872,13 +908,29 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 			Height:      event.Height,
 		})
 		a.RequestRedraw()
-	case platform.EventDragDrop:
-		if a.onFileDrop != nil {
-			a.onFileDrop(event.DragPaths, event.DragX, event.DragY)
-			a.RequestRedraw()
-		}
+	case platform.EventDragEnter, platform.EventDragMove, platform.EventDragLeave, platform.EventDragDrop:
+		a.dispatchDragEvent(event)
 	}
 	return lastResize, secondaryResizes
+}
+
+// dispatchDragEvent hands an OS file drag event to its callback: OnDragEnter,
+// OnDragMove and OnDragLeave while the drag is in progress, OnDragDrop for
+// the drop. A step without a callback is ignored.
+func (a *App) dispatchDragEvent(event *platform.Event) {
+	switch {
+	case event.Type == platform.EventDragEnter && a.onDragEnter != nil:
+		a.onDragEnter(event.DragPaths, event.DragX, event.DragY)
+	case event.Type == platform.EventDragMove && a.onDragMove != nil:
+		a.onDragMove(event.DragX, event.DragY)
+	case event.Type == platform.EventDragLeave && a.onDragLeave != nil:
+		a.onDragLeave()
+	case event.Type == platform.EventDragDrop && a.onFileDrop != nil:
+		a.onFileDrop(event.DragPaths, event.DragX, event.DragY)
+	default:
+		return
+	}
+	a.RequestRedraw()
 }
 
 // dispatchKeyEvent handles EventKeyDown and EventKeyUp from the platform.
