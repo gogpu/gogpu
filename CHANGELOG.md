@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`App.OnDragEnter` / `OnDragMove` / `OnDragLeave`** — a file drag in progress, not only the drop. The macOS, X11 and Wayland platform layers already queued `EventDragEnter` / `EventDragMove` / `EventDragLeave`, but `App` passed on only `EventDragDrop`, so an application could not show where a drop would land until it had happened. Same coordinate units as `OnDragDrop`; Windows (`WM_DROPFILES`) reports only the drop, so they never fire there.
+
 ### Fixed
 
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
