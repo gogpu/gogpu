@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"errors"
 	"io"
 	"runtime"
 	"sync"
@@ -1402,6 +1403,26 @@ func (a *App) SetAppName(name string) {
 // Safe to call from any goroutine. After startRunLoop, also wakes
 // WaitEvents so the idle (event-driven) loop notices running=false
 // without waiting for a device input event (GLFW/winit/SDL pattern).
+// SetLayerKeyboardInteractivity changes the keyboard interactivity of a
+// wlr-layer-shell surface at runtime. It is how a launcher takes keyboard focus
+// when summoned and gives it back when dismissed: a layer surface that stays
+// mapped never "appears" again, so the compositor has no other signal to focus
+// it. Only layer-shell surfaces are affected; ordinary windows return an error.
+func (a *App) SetLayerKeyboardInteractivity(mode LayerShellKeyboard) error {
+	type layerKeyboardWindow interface {
+		SetLayerKeyboardInteractivity(uint32) error
+	}
+	if a.platWindow == nil {
+		return errors.New("gogpu: no platform window")
+	}
+	w, ok := a.platWindow.(layerKeyboardWindow)
+	if !ok {
+		return errors.New("gogpu: layer keyboard interactivity is only supported on Wayland layer surfaces")
+	}
+	return w.SetLayerKeyboardInteractivity(uint32(mode))
+}
+
+// Quit requests the application to exit.
 func (a *App) Quit() {
 	a.running.Store(false)
 	if v := a.wakeupFn.Load(); v != nil {

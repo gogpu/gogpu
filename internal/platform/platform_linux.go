@@ -641,6 +641,16 @@ func (w *waylandPlatformWindow) GetHandle() (uintptr, uintptr) {
 	return 0, 0
 }
 
+// SetLayerKeyboardInteractivity changes the layer surface's keyboard mode at
+// runtime. It is a no-op for ordinary windows.
+func (w *waylandPlatformWindow) SetLayerKeyboardInteractivity(mode uint32) error {
+	libwl := w.libwayland()
+	if libwl == nil {
+		return fmt.Errorf("wayland: no layer surface")
+	}
+	return libwl.SetKeyboardInteractivity(mode)
+}
+
 func (w *waylandPlatformWindow) libwayland() *wayland.LibwaylandHandle {
 	return w.platform.libwl
 }

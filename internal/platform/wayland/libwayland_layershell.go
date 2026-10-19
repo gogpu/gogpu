@@ -394,6 +394,19 @@ func (h *LibwaylandHandle) WaitForLayerConfigure() error {
 	return nil
 }
 
+// SetKeyboardInteractivity changes the layer surface's keyboard interactivity
+// at runtime and commits it. Layer surface state is double-buffered, so the
+// change takes effect on the next commit; the caller does not need to commit
+// anything else.
+func (h *LibwaylandHandle) SetKeyboardInteractivity(mode uint32) error {
+	if h.layerSurface == 0 {
+		return fmt.Errorf("wayland: not a layer surface")
+	}
+	h.marshalVoid(h.layerSurface, uint32(layerSurfaceSetKeyboardInteractivity), uintptr(mode))
+	h.marshalVoid(h.surface, uint32(surfaceCommit))
+	return h.flush()
+}
+
 // IsLayerShell reports whether this handle owns a layer surface rather than an
 // xdg_toplevel. Toplevel-only requests must be skipped when it is true.
 func (h *LibwaylandHandle) IsLayerShell() bool {
