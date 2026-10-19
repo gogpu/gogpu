@@ -587,11 +587,12 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Transparent: a.config.Transparent,
 		UseDirectComposition: a.config.Transparent &&
 			a.config.GraphicsAPI == types.GraphicsAPIDX12,
-		MinWidth:  a.config.MinWidth,
-		MinHeight: a.config.MinHeight,
-		MaxWidth:  a.config.MaxWidth,
-		MaxHeight: a.config.MaxHeight,
-		Icon:      a.config.Icon,
+		MinWidth:   a.config.MinWidth,
+		MinHeight:  a.config.MinHeight,
+		MaxWidth:   a.config.MaxWidth,
+		MaxHeight:  a.config.MaxHeight,
+		Icon:       a.config.Icon,
+		LayerShell: layerShellFromConfig(a.config.LayerShell),
 	})
 	if err != nil {
 		return nil, err

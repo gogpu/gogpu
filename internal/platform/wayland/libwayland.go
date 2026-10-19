@@ -48,6 +48,17 @@ type LibwaylandHandle struct {
 	xdgSurface  uintptr // xdg_surface* proxy
 	xdgToplevel uintptr // xdg_toplevel* proxy
 
+	// Layer-shell objects (alternative role: overlay/panel surface).
+	// When set, the surface has no xdg_toplevel and toplevel-only requests
+	// must be skipped (see IsLayerShell).
+	layerShell      uintptr // zwlr_layer_shell_v1* proxy
+	layerSurface    uintptr // zwlr_layer_surface_v1* proxy
+	layerMu         sync.Mutex
+	layerConfigured bool  // initial configure received
+	layerClosed     bool  // compositor sent closed()
+	layerW          int32 // compositor-assigned logical size
+	layerH          int32
+
 	// Decoration objects (optional, zxdg_decoration_manager_v1)
 	decorManager  uintptr // zxdg_decoration_manager_v1* proxy
 	toplevelDecor uintptr // zxdg_toplevel_decoration_v1* proxy
@@ -266,7 +277,10 @@ func (h *LibwaylandHandle) DisplayUnlock() { h.displayMu.Unlock() }
 // registry — global names are server-assigned and identical across all client connections.
 // The xdg-shell role is required for Vulkan presentation (without it, the compositor
 // won't composite the surface and vkQueuePresentKHR blocks forever).
-func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion uint32) (*LibwaylandHandle, error) {
+// layerOpts, when non-nil, gives the surface a zwlr_layer_shell_v1 role
+// instead of an xdg_toplevel window. xdgWmBaseName/xdgWmBaseVersion are then
+// unused and may be zero.
+func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion uint32, layerOpts *LayerShellOptions) (*LibwaylandHandle, error) {
 	h := &LibwaylandHandle{}
 
 	// Step 1: Load library
@@ -370,10 +384,16 @@ func OpenLibwayland(compositorName, compositorVersion, xdgWmBaseName, xdgWmBaseV
 		return nil, fmt.Errorf("wayland: flush failed: %w", err)
 	}
 
-	// Step 9: Set up xdg-shell role (xdg_surface + xdg_toplevel).
-	// Without a role, the compositor won't composite the surface,
-	// buffer release events never arrive, and vkQueuePresentKHR blocks forever.
-	if err := h.setupXdgRole(xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion); err != nil {
+	// Step 9: Give the surface a role — a layer surface (overlay/panel) when
+	// requested, otherwise the ordinary xdg_toplevel window. Without a role the
+	// compositor won't composite the surface, buffer release events never
+	// arrive, and vkQueuePresentKHR blocks forever.
+	if layerOpts != nil {
+		if err := h.setupLayerShellRole(layerOpts.GlobalName, layerOpts.GlobalVersion, *layerOpts); err != nil {
+			h.disconnectDisplay()
+			return nil, err
+		}
+	} else if err := h.setupXdgRole(xdgWmBaseName, xdgWmBaseVersion, decorName, decorVersion); err != nil {
 		h.disconnectDisplay()
 		return nil, err
 	}
@@ -391,6 +411,7 @@ func (h *LibwaylandHandle) Close() {
 	h.CancelFrameCallback()
 
 	// Remove from per-proxy callback maps before destroying proxies.
+	h.unregisterLayerSurface()
 	h.UnregisterXdgProxies()
 	h.UnregisterToplevel()
 
