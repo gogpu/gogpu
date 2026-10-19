@@ -219,6 +219,58 @@ func layerSurfaceClosedCb(data, layerSurface uintptr) {
 	slog.Info("zwlr_layer_surface_v1.closed — compositor asked the overlay to close")
 }
 
+// validateLayerSizeAnchors reports whether the requested size and anchors are a
+// valid combination.
+//
+// The protocol lets a client pass 0 for an axis to let the compositor choose the
+// size, but only if that axis is anchored to both its opposite edges: a surface
+// asking the compositor to choose a width it cannot derive is a protocol error.
+// Compositors report that as "width 0 requested without setting left and right
+// anchors", which is hard to connect back to a config value, so it is checked
+// here first.
+func validateLayerSizeAnchors(width, height, anchor uint32) error {
+	const horizontal = AnchorLeft | AnchorRight
+	const vertical = AnchorTop | AnchorBottom
+
+	if width == 0 && anchor&horizontal != horizontal {
+		return fmt.Errorf(
+			"layer surface width 0 asks the compositor to choose a width, which requires both left and right anchors (anchors: %s)",
+			describeAnchors(anchor))
+	}
+	if height == 0 && anchor&vertical != vertical {
+		return fmt.Errorf(
+			"layer surface height 0 asks the compositor to choose a height, which requires both top and bottom anchors (anchors: %s)",
+			describeAnchors(anchor))
+	}
+	return nil
+}
+
+// describeAnchors renders an anchor bitmask for error messages.
+func describeAnchors(anchor uint32) string {
+	names := make([]string, 0, 4)
+	for _, a := range []struct {
+		bit  uint32
+		name string
+	}{
+		{AnchorTop, "top"},
+		{AnchorBottom, "bottom"},
+		{AnchorLeft, "left"},
+		{AnchorRight, "right"},
+	} {
+		if anchor&a.bit != 0 {
+			names = append(names, a.name)
+		}
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	out := names[0]
+	for _, n := range names[1:] {
+		out += "+" + n
+	}
+	return out
+}
+
 // setupLayerShellRole gives the C wl_surface a zwlr_layer_shell_v1 role.
 //
 // Protocol flow (all state requests MUST precede the first commit):
@@ -229,6 +281,10 @@ func layerSurfaceClosedCb(data, layerSurface uintptr) {
 //  5. First commit (empty) — the compositor replies with configure
 //  6. Roundtrip until configure arrives, callback acks it
 func (h *LibwaylandHandle) setupLayerShellRole(shellName, shellVersion uint32, opts LayerShellOptions) error {
+	if err := validateLayerSizeAnchors(uint32(opts.Width), uint32(opts.Height), opts.Anchor); err != nil {
+		return fmt.Errorf("wayland: %w", err)
+	}
+
 	initLayerShellInterfaces()
 	initLayerShellListeners()
 

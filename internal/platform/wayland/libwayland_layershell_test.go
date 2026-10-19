@@ -162,3 +162,64 @@ func TestLayerShellNotEnabledByDefault(t *testing.T) {
 		t.Errorf("LayerSize = %d,%d before configure, want 0,0", w, hgt)
 	}
 }
+
+// TestValidateLayerSizeAnchors covers the size/anchor rules the compositor
+// enforces. A zero size means "compositor chooses", which is only legal when
+// that axis is anchored to both opposite edges; getting it wrong is reported by
+// the compositor as "width 0 requested without setting left and right anchors",
+// so it is worth catching before a connection is made.
+func TestValidateLayerSizeAnchors(t *testing.T) {
+	const (
+		all    = AnchorTop | AnchorBottom | AnchorLeft | AnchorRight
+		corner = AnchorLeft | AnchorTop
+	)
+
+	tests := []struct {
+		name          string
+		width, height uint32
+		anchor        uint32
+		wantErr       bool
+	}{
+		{"explicit size with a corner anchor", 100, 100, corner, false},
+		{"explicit size with all anchors", 100, 100, all, false},
+		{"both axes left to the compositor", 0, 0, all, false},
+		{"width stretched, height explicit", 0, 100, all, false},
+		{"height stretched, width explicit", 100, 0, all, false},
+		{"zero width with a corner anchor", 0, 100, corner, true},
+		{"zero height with a corner anchor", 100, 0, corner, true},
+		{"zero width, height anchored only", 0, 100, AnchorTop | AnchorBottom, true},
+		{"no anchors at all", 0, 0, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLayerSizeAnchors(tt.width, tt.height, tt.anchor)
+			if tt.wantErr && err == nil {
+				t.Fatalf("validateLayerSizeAnchors(%d, %d, %d) = nil, want error",
+					tt.width, tt.height, tt.anchor)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("validateLayerSizeAnchors(%d, %d, %d) = %v, want nil",
+					tt.width, tt.height, tt.anchor, err)
+			}
+		})
+	}
+}
+
+// TestDescribeAnchors checks the error-message rendering, since a bad anchor
+// mask is otherwise invisible to the caller.
+func TestDescribeAnchors(t *testing.T) {
+	tests := []struct {
+		anchor uint32
+		want   string
+	}{
+		{0, "none"},
+		{AnchorLeft, "left"},
+		{AnchorLeft | AnchorTop, "top+left"}, // fixed order: top, bottom, left, right
+		{AnchorTop | AnchorBottom | AnchorLeft | AnchorRight, "top+bottom+left+right"},
+	}
+	for _, tt := range tests {
+		if got := describeAnchors(tt.anchor); got != tt.want {
+			t.Errorf("describeAnchors(%d) = %q, want %q", tt.anchor, got, tt.want)
+		}
+	}
+}
