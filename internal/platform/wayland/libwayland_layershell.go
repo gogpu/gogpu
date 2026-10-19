@@ -298,6 +298,7 @@ func (h *LibwaylandHandle) setupLayerShellRole(shellName, shellVersion uint32, o
 		return fmt.Errorf("wayland: failed to bind zwlr_layer_shell_v1: %w", err)
 	}
 	h.layerShell = shell
+	h.layerShellVersion = version
 
 	// namespace is a C string argument: NULL-terminated and kept alive for the call.
 	ns := opts.Namespace
@@ -426,9 +427,18 @@ func (h *LibwaylandHandle) unregisterLayerSurface() {
 	delete(layerSurfaceHndls, h.layerSurface)
 	layerShellHandlesMu.Unlock()
 
+	// Ask the compositor to drop the objects, then free the client proxies.
+	// Without the proxyDestroy calls the proxies stay attached to the event
+	// queue, which libwayland reports at shutdown as "queue destroyed while
+	// proxies still attached".
 	h.marshalVoid(h.layerSurface, uint32(layerSurfaceDestroy))
+	h.proxyDestroy(h.layerSurface)
 	if h.layerShell != 0 {
-		h.marshalVoid(h.layerShell, uint32(layerShellDestroy))
+		// zwlr_layer_shell_v1.destroy only exists since protocol version 3.
+		if h.layerShellVersion >= 3 {
+			h.marshalVoid(h.layerShell, uint32(layerShellDestroy))
+		}
+		h.proxyDestroy(h.layerShell)
 	}
 	h.layerSurface = 0
 	h.layerShell = 0

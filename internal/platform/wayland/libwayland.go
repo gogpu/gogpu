@@ -51,13 +51,14 @@ type LibwaylandHandle struct {
 	// Layer-shell objects (alternative role: overlay/panel surface).
 	// When set, the surface has no xdg_toplevel and toplevel-only requests
 	// must be skipped (see IsLayerShell).
-	layerShell      uintptr // zwlr_layer_shell_v1* proxy
-	layerSurface    uintptr // zwlr_layer_surface_v1* proxy
-	layerMu         sync.Mutex
-	layerConfigured bool  // initial configure received
-	layerClosed     bool  // compositor sent closed()
-	layerW          int32 // compositor-assigned logical size
-	layerH          int32
+	layerShell        uintptr // zwlr_layer_shell_v1* proxy
+	layerShellVersion uint32  // bound version (destroy exists since v3)
+	layerSurface      uintptr // zwlr_layer_surface_v1* proxy
+	layerMu           sync.Mutex
+	layerConfigured   bool  // initial configure received
+	layerClosed       bool  // compositor sent closed()
+	layerW            int32 // compositor-assigned logical size
+	layerH            int32
 
 	// Decoration objects (optional, zxdg_decoration_manager_v1)
 	decorManager  uintptr // zxdg_decoration_manager_v1* proxy
