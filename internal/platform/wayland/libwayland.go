@@ -224,6 +224,7 @@ type LibwaylandHandle struct {
 	registryInterface      unsafe.Pointer // &wl_registry_interface
 	compositorInterface    unsafe.Pointer // &wl_compositor_interface
 	surfaceInterface       unsafe.Pointer // &wl_surface_interface
+	regionInterface        unsafe.Pointer // &wl_region_interface
 	subcompositorInterface unsafe.Pointer // &wl_subcompositor_interface
 	subsurfaceInterface    unsafe.Pointer // &wl_subsurface_interface
 	shmInterface           unsafe.Pointer // &wl_shm_interface
@@ -592,6 +593,7 @@ func (h *LibwaylandHandle) resolveSymbols() error {
 	}{
 		{"wl_registry_interface", &h.registryInterface},
 		{"wl_compositor_interface", &h.compositorInterface},
+		{"wl_region_interface", &h.regionInterface},
 		{"wl_surface_interface", &h.surfaceInterface},
 		{"wl_subcompositor_interface", &h.subcompositorInterface},
 		{"wl_subsurface_interface", &h.subsurfaceInterface},

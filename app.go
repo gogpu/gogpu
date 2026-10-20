@@ -1422,6 +1422,23 @@ func (a *App) SetLayerKeyboardInteractivity(mode LayerShellKeyboard) error {
 	return w.SetLayerKeyboardInteractivity(uint32(mode))
 }
 
+// SetInputRegion controls whether the window (or layer surface) receives
+// pointer input. A fullscreen layer surface covers its output, so a shell that
+// hides without emptying its input region keeps swallowing every click.
+func (a *App) SetInputRegion(interactive bool) error {
+	type inputRegionWindow interface {
+		SetInputRegion(bool) error
+	}
+	if a.platWindow == nil {
+		return errors.New("gogpu: no platform window")
+	}
+	w, ok := a.platWindow.(inputRegionWindow)
+	if !ok {
+		return errors.New("gogpu: input regions are only supported on Wayland layer surfaces")
+	}
+	return w.SetInputRegion(interactive)
+}
+
 // Quit requests the application to exit.
 func (a *App) Quit() {
 	a.running.Store(false)

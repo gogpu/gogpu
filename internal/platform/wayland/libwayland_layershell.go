@@ -407,6 +407,38 @@ func (h *LibwaylandHandle) SetKeyboardInteractivity(mode uint32) error {
 	return h.flush()
 }
 
+// SetInputRegion controls whether the surface receives pointer input. A
+// fullscreen layer surface covers the whole output, so leaving the input region
+// at its default (the entire surface) swallows every click on the desktop even
+// while the shell is hidden and drawing nothing.
+//
+// Passing false sets an empty input region; true restores the default (NULL,
+// meaning the whole surface).
+func (h *LibwaylandHandle) SetInputRegion(interactive bool) error {
+	if h.surface == 0 {
+		return fmt.Errorf("wayland: no surface")
+	}
+	var region uintptr
+	if !interactive {
+		r, err := h.marshalConstructor(h.compositor, 1 /* create_region */, h.regionInterface)
+		if err != nil {
+			return fmt.Errorf("wayland: create empty input region: %w", err)
+		}
+		region = r
+	}
+	// wl_surface.set_input_region (opcode 5) takes an object or NULL.
+	h.marshalVoid(h.surface, uint32(surfaceSetInputRegion), region)
+	h.marshalVoid(h.surface, uint32(surfaceCommit))
+	if err := h.flush(); err != nil {
+		return err
+	}
+	if region != 0 {
+		// The region's contents are copied on commit; the proxy can go.
+		h.proxyDestroy(region)
+	}
+	return nil
+}
+
 // IsLayerShell reports whether this handle owns a layer surface rather than an
 // xdg_toplevel. Toplevel-only requests must be skipped when it is true.
 func (h *LibwaylandHandle) IsLayerShell() bool {
