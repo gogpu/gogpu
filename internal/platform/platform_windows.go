@@ -899,6 +899,11 @@ func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 			w.setModalFrameCallback(cb)
 		}
 	}
+	// Apply the initial state while the window is still hidden, so the first
+	// surface is created at the monitor size and no windowed frame is shown.
+	if config.Fullscreen {
+		w.SetFullscreen(true)
+	}
 	return w, nil
 }
 
