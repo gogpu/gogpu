@@ -467,14 +467,16 @@ func (h *LibwaylandHandle) ClipboardWrite(text string) error {
 	}
 
 	// Offer our mime type: opcode 0 on wl_data_source, signature "s"
+	// Also offer plain text/plain for broader compatibility.
+	// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
 	mimeBuf := []byte(clipboardMIME + "\x00")
-	h.marshalVoid(source, 0, uintptr(unsafe.Pointer(&mimeBuf[0])))
-	runtime.KeepAlive(mimeBuf)
-
-	// Also offer plain text/plain for broader compatibility
 	plainBuf := []byte("text/plain\x00")
+	var pinner runtime.Pinner
+	pinner.Pin(&mimeBuf[0])
+	pinner.Pin(&plainBuf[0])
+	h.marshalVoid(source, 0, uintptr(unsafe.Pointer(&mimeBuf[0])))
 	h.marshalVoid(source, 0, uintptr(unsafe.Pointer(&plainBuf[0])))
-	runtime.KeepAlive(plainBuf)
+	pinner.Unpin()
 
 	h.clipboardMu.Lock()
 	h.clipboardSource = source
@@ -529,8 +531,11 @@ func (h *LibwaylandHandle) ClipboardRead() (string, error) {
 	// Args: mime_type (string), fd (file descriptor)
 	// The fd is passed via SCM_RIGHTS by libwayland when it sees 'h' in the signature.
 	mimeBuf := []byte(clipboardMIME + "\x00")
+	// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&mimeBuf[0])
 	h.marshalVoid(offer, 1, uintptr(unsafe.Pointer(&mimeBuf[0])), uintptr(writeFD))
-	runtime.KeepAlive(mimeBuf)
+	pinner.Unpin()
 
 	// Flush to send the receive request to the compositor.
 	// Use flushWithRetry: clipboard read happens on event loop (paste action),

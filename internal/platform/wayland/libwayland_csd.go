@@ -756,7 +756,7 @@ func (h *LibwaylandHandle) marshalConstructor2Obj(proxy uintptr, opcode uint32, 
 	argBuf[0] = 0    // new_id placeholder
 	argBuf[1] = obj1 // first object arg
 	argBuf[2] = obj2 // second object arg
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(iface)
 
 	var result uintptr
@@ -781,7 +781,7 @@ func (h *LibwaylandHandle) marshalConstructorFD(proxy uintptr, opcode uint32, if
 	argBuf[0] = 0                   // new_id placeholder
 	argBuf[1] = uintptr(uint32(fd)) // fd in wl_argument.h (int32)
 	argBuf[2] = uintptr(uint32(size))
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(iface)
 
 	var result uintptr
@@ -804,7 +804,7 @@ func (h *LibwaylandHandle) marshalConstructorArgs(proxy uintptr, opcode uint32, 
 	var argBuf [8]uintptr
 	argBuf[0] = 0 // new_id placeholder
 	copy(argBuf[1:], args)
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(iface)
 
 	var result uintptr

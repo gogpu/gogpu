@@ -1428,7 +1428,9 @@ func AllocateClassPair(superclass Class, name string) Class {
 	}
 
 	super := uintptr(superclass)
-	namePtr := uintptr(unsafe.Pointer(&nameBytes[0]))
+	// namePtr is an unsafe.Pointer, not a uintptr, so the GC keeps nameBytes alive
+	// and the stack copier updates namePtr if they move (P1-FFI-001).
+	namePtr := unsafe.Pointer(&nameBytes[0])
 	var extraBytes uintptr
 
 	var result uintptr
@@ -1471,7 +1473,8 @@ func ClassAddMethod(cls Class, sel SEL, imp uintptr, typeEncoding string) bool {
 
 	clsPtr := uintptr(cls)
 	selPtr := uintptr(sel)
-	typePtr := uintptr(unsafe.Pointer(&typeBytes[0]))
+	// typePtr is an unsafe.Pointer, not a uintptr (see AllocateClassPair, P1-FFI-001).
+	typePtr := unsafe.Pointer(&typeBytes[0])
 
 	var result uintptr
 	if _, err := ffi.CallFunction(cif,

@@ -3,6 +3,7 @@
 package darwin
 
 import (
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -326,9 +327,13 @@ func RegisterForDraggedTypes(view ID) {
 	objects := [2]uintptr{uintptr(legacyType.ID()), uintptr(modernType.ID())}
 	arrayWithObjectsCount := RegisterSelector("arrayWithObjects:count:")
 
-	// Call [NSArray arrayWithObjects:&objects count:2]
+	// Call [NSArray arrayWithObjects:&objects count:2]. The array address goes
+	// through the msgSend wrapper as a uintptr: pin it for the call (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&objects[0])
 	typesArray := msgSend(ID(nsArrayClass), arrayWithObjectsCount,
 		uintptr(unsafe.Pointer(&objects[0])), 2)
+	pinner.Unpin()
 	if typesArray.IsNil() {
 		return
 	}
