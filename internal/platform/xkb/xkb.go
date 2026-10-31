@@ -225,37 +225,20 @@ func (h *Handle) SetKeymapFromRMLVO(rules, model, layout, variant, options strin
 	h.destroyState()
 	h.destroyKeymap()
 
-	// Build null-terminated C strings.
-	// These slices MUST stay alive until after the FFI call returns
-	// (Go GC could collect them if no references remain).
-	rulesC := append([]byte(rules), 0)
-	modelC := append([]byte(model), 0)
-	layoutC := append([]byte(layout), 0)
-	variantC := append([]byte(variant), 0)
-	optionsC := append([]byte(options), 0)
-
-	// Build xkb_rule_names struct: 5 consecutive pointer-sized fields.
-	// struct xkb_rule_names { const char *rules, *model, *layout, *variant, *options; }
-	var rulesPtr, modelPtr, layoutPtr, variantPtr, optionsPtr uintptr
-	if rules != "" {
-		rulesPtr = uintptr(unsafe.Pointer(&rulesC[0]))
+	// Build xkb_rule_names: 5 consecutive pointer-sized fields,
+	// struct xkb_rule_names { const char *rules, *model, *layout, *variant, *options; }.
+	// The fields are unsafe.Pointer, not uintptr, so the GC keeps the C strings
+	// alive while names is reachable and the stack copier updates every field
+	// if they move (P1-FFI-001). An empty string stays NULL: xkbcommon then
+	// takes the default for that field.
+	var names [5]unsafe.Pointer
+	for i, s := range [5]string{rules, model, layout, variant, options} {
+		if s != "" {
+			cstr := append([]byte(s), 0)
+			names[i] = unsafe.Pointer(&cstr[0])
+		}
 	}
-	if model != "" {
-		modelPtr = uintptr(unsafe.Pointer(&modelC[0]))
-	}
-	if layout != "" {
-		layoutPtr = uintptr(unsafe.Pointer(&layoutC[0]))
-	}
-	if variant != "" {
-		variantPtr = uintptr(unsafe.Pointer(&variantC[0]))
-	}
-	if options != "" {
-		optionsPtr = uintptr(unsafe.Pointer(&optionsC[0]))
-	}
-
-	// xkb_rule_names struct in memory: 5 pointers
-	names := [5]uintptr{rulesPtr, modelPtr, layoutPtr, variantPtr, optionsPtr}
-	namesPtr := uintptr(unsafe.Pointer(&names[0]))
+	namesPtr := unsafe.Pointer(&names[0])
 
 	flags := XKBKeymapCompileNoFlags
 	var result uintptr
@@ -280,13 +263,6 @@ func (h *Handle) SetKeymapFromRMLVO(rules, model, layout, variant, options strin
 
 	// Resolve modifier indices for the new keymap
 	h.resolveModsIndices()
-
-	// Keep references alive past FFI call (prevent premature GC).
-	_ = rulesC
-	_ = modelC
-	_ = layoutC
-	_ = variantC
-	_ = optionsC
 
 	slog.Debug("xkbcommon: keymap loaded from RMLVO", "layout", layout, "model", model, "options", options)
 	return nil
@@ -740,7 +716,8 @@ func (h *Handle) keymapNewFromString(keymapStr []byte) (uintptr, error) {
 	// Ensure null terminator (allocate new slice to avoid mutating input)
 	cstr := make([]byte, len(keymapStr)+1)
 	copy(cstr, keymapStr)
-	strPtr := uintptr(unsafe.Pointer(&cstr[0]))
+	// unsafe.Pointer, not uintptr: the GC and the stack copier see it (P1-FFI-001).
+	strPtr := unsafe.Pointer(&cstr[0])
 	format := XKBKeymapFormatTextV1
 	flags := XKBKeymapCompileNoFlags
 
@@ -771,9 +748,11 @@ func (h *Handle) stateNew(keymap uintptr) (uintptr, error) {
 
 // stateKeyGetUtf8 calls xkb_state_key_get_utf8(state, key, buffer, size) -> int.
 func (h *Handle) stateKeyGetUtf8(key uint32, buf []byte, bufSize uint32) int32 {
-	var bufPtr uintptr
+	// unsafe.Pointer, not uintptr: xkbcommon writes into buf, which must stay in
+	// place and alive for the call (P1-FFI-001).
+	var bufPtr unsafe.Pointer
 	if len(buf) > 0 {
-		bufPtr = uintptr(unsafe.Pointer(&buf[0]))
+		bufPtr = unsafe.Pointer(&buf[0])
 	}
 
 	var result int32
@@ -831,7 +810,8 @@ func (h *Handle) destroyContext() {
 // xkbcommon returns XKB_MOD_INVALID (0xFFFFFFFF) for unknown modifiers.
 func (h *Handle) keymapModGetIndex(name string) int32 {
 	nameBytes := []byte(name)
-	namePtr := uintptr(unsafe.Pointer(&nameBytes[0]))
+	// unsafe.Pointer, not uintptr: the GC and the stack copier see it (P1-FFI-001).
+	namePtr := unsafe.Pointer(&nameBytes[0])
 
 	var result uint32
 	args := [2]unsafe.Pointer{
@@ -851,7 +831,8 @@ func (h *Handle) keymapModGetIndex(name string) int32 {
 // name must be a null-terminated C string. Returns 1 if active, 0 if not.
 func (h *Handle) stateModNameIsActive(name string) int32 {
 	nameBytes := []byte(name)
-	namePtr := uintptr(unsafe.Pointer(&nameBytes[0]))
+	// unsafe.Pointer, not uintptr: the GC and the stack copier see it (P1-FFI-001).
+	namePtr := unsafe.Pointer(&nameBytes[0])
 	stateType := XKBStateModsEffective
 
 	var result int32

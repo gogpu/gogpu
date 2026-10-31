@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
+- **Go memory passed to C as `uintptr`** — 39 places on macOS, Linux (Wayland, X11, xkbcommon) and in Windows printing handed a Go address to native code as a plain `uintptr` through a Go wrapper (objc `msgSend`, the Wayland marshal helpers, a goffi argument slot, a func value). Such an address is invisible to the GC and to the stack copier: if the goroutine stack grew on the way to the call, the native side read or wrote the old stack. The objects are now pinned with `runtime.Pinner` or passed as `unsafe.Pointer`. `xkb_rule_names` is built from `unsafe.Pointer` fields, and the `_ = buf` lines that were meant to keep the strings alive (and did not) are gone. `TestFFIPointersArePinned` guards the pattern (39 failures on the old code).
 
 ### Changed
 
