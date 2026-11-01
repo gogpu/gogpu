@@ -31,7 +31,10 @@ var ffiPointerAllowed = map[string]string{}
 // package-level variable, or be listed in ffiPointerAllowed with a reason.
 //
 // The check is syntactic. It recognizes the address-of form (&x, &x[i], &x.f);
-// a pointer variable converted to uintptr is not checked. A Call receiver counts
+// a pointer variable converted to uintptr is not checked, except when the
+// uintptr is stored in a struct field (composite literal or field assignment):
+// C reads such a field outside any argument list, so no Call keeps the referent
+// alive. A field pointing into a package-level variable passes. A Call receiver counts
 // as a proc only when the same package declares it with type *syscall.Proc,
 // *syscall.LazyProc, *windows.Proc or *windows.LazyProc, or initializes it with
 // NewProc, FindProc or MustFindProc on a DLL from NewLazyDLL, NewLazySystemDLL,
@@ -269,6 +272,17 @@ func unpinnedFFIAddresses(fset *token.FileSet, file *ast.File, rel string, procs
 				return true
 			}
 			stack = append(stack, n)
+			if operand, ok := pointerToUintptr(n); ok && storedInStructField(stack) {
+				if addr, ok := operand.(*ast.UnaryExpr); ok && addr.Op == token.AND && addressOfPackageVar(addr, globals) {
+					return true
+				}
+				text := exprString(fset, operand)
+				key := rel + ":" + fn.Name.Name + ":field " + text
+				if _, ok := ffiPointerAllowed[key]; !ok && !pinned[text] {
+					found = append(found, fset.Position(n.Pos()).String()+" "+key)
+				}
+				return true
+			}
 			addr, ok := addressToUintptr(n)
 			if !ok {
 				return true
@@ -294,8 +308,8 @@ func unpinnedFFIAddresses(fset *token.FileSet, file *ast.File, rel string, procs
 	return found
 }
 
-// addressToUintptr matches uintptr(unsafe.Pointer(&x...)) and returns &x....
-func addressToUintptr(n ast.Node) (ast.Expr, bool) {
+// pointerToUintptr matches uintptr(unsafe.Pointer(x)) and returns x.
+func pointerToUintptr(n ast.Node) (ast.Expr, bool) {
 	call, ok := n.(*ast.CallExpr)
 	if !ok || len(call.Args) != 1 {
 		return nil, false
@@ -314,11 +328,43 @@ func addressToUintptr(n ast.Node) (ast.Expr, bool) {
 	if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "unsafe" {
 		return nil, false
 	}
-	addr, ok := inner.Args[0].(*ast.UnaryExpr)
+	return inner.Args[0], true
+}
+
+// addressToUintptr matches uintptr(unsafe.Pointer(&x...)) and returns &x....
+func addressToUintptr(n ast.Node) (ast.Expr, bool) {
+	operand, ok := pointerToUintptr(n)
+	if !ok {
+		return nil, false
+	}
+	addr, ok := operand.(*ast.UnaryExpr)
 	if !ok || addr.Op != token.AND {
 		return nil, false
 	}
 	return addr, true
+}
+
+// storedInStructField reports whether the innermost node of stack is the value
+// of a keyed composite-literal element (T{f: v}) or the right-hand side of an
+// assignment to a selector (s.f = v).
+func storedInStructField(stack []ast.Node) bool {
+	if len(stack) < 3 {
+		return false
+	}
+	n := stack[len(stack)-1]
+	switch parent := stack[len(stack)-2].(type) {
+	case *ast.KeyValueExpr:
+		_, inLiteral := stack[len(stack)-3].(*ast.CompositeLit)
+		return inLiteral && parent.Value == n
+	case *ast.AssignStmt:
+		for i, rhs := range parent.Rhs {
+			if rhs == n && i < len(parent.Lhs) {
+				_, isField := parent.Lhs[i].(*ast.SelectorExpr)
+				return isField
+			}
+		}
+	}
+	return false
 }
 
 // keepsUintptrReferent reports whether call is one whose uintptr arguments the
@@ -369,11 +415,14 @@ func exprString(fset *token.FileSet, e ast.Expr) string {
 // TestFFIPointerGuardRejectsIndirectCall checks the guard itself: a direct Call
 // on a syscall or golang.org/x/sys/windows proc passes, the same Call through an
 // interface or a Go wrapper does not; through a wrapper, an address in a
-// package-level variable passes and a local that shadows it does not.
+// package-level variable passes and a local that shadows it does not; a pointer
+// stored as uintptr in a struct field fails unless it is pinned or points into a
+// package-level variable.
 func TestFFIPointerGuardRejectsIndirectCall(t *testing.T) {
 	const src = `package p
 
 import (
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -407,6 +456,29 @@ func shadow() {
 	var table [4]uintptr
 	send(uintptr(unsafe.Pointer(&table[0])))
 }
+
+type item struct{ data uintptr }
+
+func fieldLiteral(s *uint16) {
+	procXSys.Call(uintptr(unsafe.Pointer(&item{data: uintptr(unsafe.Pointer(s))})))
+}
+
+func fieldAssign(s *uint16) {
+	var it item
+	it.data = uintptr(unsafe.Pointer(s))
+	procXSys.Call(uintptr(unsafe.Pointer(&it)))
+}
+
+func fieldPinned(s *uint16) {
+	var p runtime.Pinner
+	p.Pin(s)
+	defer p.Unpin()
+	procXSys.Call(uintptr(unsafe.Pointer(&item{data: uintptr(unsafe.Pointer(s))})))
+}
+
+func fieldGlobal() {
+	procXSys.Call(uintptr(unsafe.Pointer(&item{data: uintptr(unsafe.Pointer(&table[0]))})))
+}
 `
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte(src), 0o600); err != nil {
@@ -422,7 +494,7 @@ func shadow() {
 		funcs = append(funcs, parts[len(parts)-2])
 	}
 	sort.Strings(funcs)
-	if got, want := strings.Join(funcs, ","), "shadow,viaInterface,viaWrapper"; got != want {
-		t.Fatalf("flagged functions = %q, want %q (direct proc Calls and package-level vars must pass)", got, want)
+	if got, want := strings.Join(funcs, ","), "fieldAssign,fieldLiteral,shadow,viaInterface,viaWrapper"; got != want {
+		t.Fatalf("flagged functions = %q, want %q (direct proc Calls, package-level vars and pinned fields must pass)", got, want)
 	}
 }
