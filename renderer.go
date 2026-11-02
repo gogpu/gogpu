@@ -127,6 +127,20 @@ type RenderTarget struct {
 	// present and cleans up stale state instead.
 	pixelPresented bool
 
+	// identityPresent is a PresentTexture deferred to the end of the frame
+	// (P1-PRESENT-002). On a CPU adapter a full-surface, alpha-1 texture that
+	// is the frame's first content is presented through PresentPixels instead
+	// of the textured-quad shader, which the software backend interprets per
+	// pixel. Any later work on this surface in the same frame draws it through
+	// the pipeline first (materializeIdentityPresent), so frame order holds.
+	identityPresent *Texture
+
+	// surfaceExposed records that the surface view or the shared encoder was
+	// handed to code gogpu does not see (Context.SurfaceView, CommandEncoder).
+	// After that the frame may already hold content, so a PresentTexture can
+	// no longer be treated as the first content.
+	surfaceExposed bool
+
 	// frameStarted tracks whether beginFrame was called this frame cycle.
 	// With lazy acquire, beginFrame is deferred until the first draw call.
 	// If OnDraw produces no GPU work, beginFrame is never called → no
@@ -200,6 +214,12 @@ type Renderer struct {
 
 	// Backend metadata
 	backendName string
+
+	// pixelPresent enables the PresentPixels route for identity frames
+	// (P1-PRESENT-002). Set for CPU adapters at device creation; cleared for
+	// good the first time PresentPixels refuses (a CPU adapter whose surface
+	// is not a pixel presenter, e.g. llvmpipe on Vulkan).
+	pixelPresent bool
 
 	// Submission tracker for non-blocking resource recycling.
 	tracker submissionTracker
@@ -387,6 +407,7 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	info := r.adapter.Info()
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
+	r.pixelPresent = info.DeviceType == gputypes.DeviceTypeCPU
 
 	r.device, err = r.adapter.RequestDevice(nil)
 	if err != nil {
@@ -662,6 +683,8 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	ws.externalContent = false
 	ws.hasPendingClear = false
 	ws.hasGPUWork = false
+	ws.identityPresent = nil
+	ws.surfaceExposed = false
 
 	return true
 }
@@ -709,6 +732,10 @@ func (r *Renderer) EndFrame() {
 // it does NOT poll submissions -- the caller polls once after all windows.
 // Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
+	// A PresentTexture deferred as the whole frame (P1-PRESENT-002): present
+	// its pixels, or draw it through the pipeline if that route fails.
+	r.presentIdentityFrame(ws)
+
 	// PresentPixels already presented — skip normal present path (ADR-052).
 	if ws.pixelPresented {
 		ws.discardFrameEncoder()
@@ -980,6 +1007,7 @@ func (ws *RenderTarget) ensureFrameEncoder() (*wgpu.CommandEncoder, error) {
 	if !ws.ensureFrameStarted() {
 		return nil, fmt.Errorf("gogpu: surface frame not available")
 	}
+	ws.materializeIdentityPresent()
 	if ws.frameEncoder != nil {
 		return ws.frameEncoder, nil
 	}
@@ -1076,6 +1104,7 @@ func (ws *RenderTarget) discardFrameEncoder() {
 
 // releaseFrame releases per-frame resources after presentation.
 func (ws *RenderTarget) releaseFrame() {
+	ws.identityPresent = nil
 	ws.discardFrameEncoder()
 	if ws.currentView != nil {
 		ws.currentView.Release()
@@ -1232,6 +1261,8 @@ func (ws *RenderTarget) clear(red, green, blue, alpha float64) {
 	if !ws.ensureFrameStarted() {
 		return
 	}
+	// A deferred PresentTexture must not consume this later clear.
+	ws.materializeIdentityPresent()
 	ws.pendingClearColor = gputypes.Color{R: red, G: green, B: blue, A: alpha}
 	ws.hasPendingClear = true
 	ws.hasGPUWork = true
@@ -1387,6 +1418,7 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	if !ws.ensureFrameStarted() {
 		return nil
 	}
+	ws.materializeIdentityPresent()
 	ws.hasGPUWork = true
 
 	// Initialize pipeline on first use
@@ -1620,13 +1652,14 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 	return bg, nil
 }
 
-// drawTexturedQuad draws a textured quad with the given options.
-// This is an internal method called by Context.DrawTextureEx.
-func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
-	ws := r.activeSurface()
+// drawTexturedQuad draws a textured quad with the given options onto ws.
+// Called by Context.DrawTextureEx, Context.PresentTexture and
+// materializeIdentityPresent.
+func (r *Renderer) drawTexturedQuad(ws *RenderTarget, tex *Texture, opts DrawTextureOptions) error {
 	if !ws.ensureFrameStarted() {
 		return fmt.Errorf("gogpu: surface frame not available")
 	}
+	ws.materializeIdentityPresent()
 	ws.hasGPUWork = true
 
 	// HiDPI diagnostic logging (first 3 frames per surface to avoid spam).
@@ -1808,50 +1841,81 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 // renderToImageReadback copies an off-screen texture to CPU memory and returns
 // the pixels as *image.RGBA. Extracted from RenderToImage for funlen compliance.
 func (r *Renderer) renderToImageReadback(offscreen *wgpu.Texture, texFmt gputypes.TextureFormat, width, height int) (*image.RGBA, error) {
+	// BGRA8Unorm (default surfaceFormat) has B and R swapped vs image.RGBA.
+	isBGRA := texFmt == gputypes.TextureFormatBGRA8Unorm || texFmt == gputypes.TextureFormatBGRA8UnormSrgb
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	err := r.readbackTexture(offscreen, width, height, "RenderToImage", func(raw []byte, rowBytes int) {
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				src := y*rowBytes + x*4
+				dst := img.PixOffset(x, y)
+				if isBGRA {
+					img.Pix[dst+0] = raw[src+2] // R ← blue slot
+					img.Pix[dst+1] = raw[src+1] // G
+					img.Pix[dst+2] = raw[src+0] // B ← red slot
+					img.Pix[dst+3] = raw[src+3] // A
+				} else {
+					copy(img.Pix[dst:dst+4], raw[src:src+4])
+				}
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+// readbackTexture copies a 4-byte-per-pixel texture (which needs CopySrc) to
+// a staging buffer, waits for it, and calls visit with the mapped bytes while
+// the buffer is mapped. Rows in raw are rowBytes apart (padded to 256, as
+// wgpu requires). visit must not keep raw. label prefixes error messages and
+// resource labels.
+func (r *Renderer) readbackTexture(src *wgpu.Texture, width, height int, label string, visit func(raw []byte, rowBytes int)) error {
 	// wgpu requires BytesPerRow to be a multiple of 256.
 	const rowAlign = 256
-	rowBytes := uint32(width) * 4 //nolint:gosec // G115: validated positive in RenderToImage
+	rowBytes := uint32(width) * 4 //nolint:gosec // G115: callers pass positive sizes
 	if rem := rowBytes % rowAlign; rem != 0 {
 		rowBytes += rowAlign - rem
 	}
-	bufSize := uint64(rowBytes) * uint64(height) //nolint:gosec // G115: validated positive in RenderToImage
+	bufSize := uint64(rowBytes) * uint64(height) //nolint:gosec // G115: callers pass positive sizes
 
 	stagingBuf, err := r.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "RenderToImage-staging",
+		Label: label + "-staging",
 		Size:  bufSize,
 		Usage: wgpu.BufferUsageCopyDst | wgpu.BufferUsageMapRead,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: create staging buffer: %w", err)
+		return fmt.Errorf("gogpu: %s: create staging buffer: %w", label, err)
 	}
 	defer stagingBuf.Release()
 
 	enc, err := r.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
-		Label: "RenderToImage-copy",
+		Label: label + "-copy",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: create encoder: %w", err)
+		return fmt.Errorf("gogpu: %s: create encoder: %w", label, err)
 	}
 
-	enc.CopyTextureToBuffer(offscreen, stagingBuf, []wgpu.BufferTextureCopy{
+	enc.CopyTextureToBuffer(src, stagingBuf, []wgpu.BufferTextureCopy{
 		{
 			TextureBase: wgpu.ImageCopyTexture{
-				Texture:  offscreen,
+				Texture:  src,
 				MipLevel: 0,
 				Aspect:   gputypes.TextureAspectAll,
 			},
 			BufferLayout: wgpu.ImageDataLayout{
 				Offset:       0,
 				BytesPerRow:  rowBytes,
-				RowsPerImage: uint32(height), //nolint:gosec // G115: validated positive in RenderToImage
+				RowsPerImage: uint32(height), //nolint:gosec // G115: callers pass positive sizes
 			},
-			Size: wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1}, //nolint:gosec // G115: validated positive in RenderToImage
+			Size: wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1}, //nolint:gosec // G115: callers pass positive sizes
 		},
 	})
 
 	cmds, err := enc.Finish()
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: finish encoder: %w", err)
+		return fmt.Errorf("gogpu: %s: finish encoder: %w", label, err)
 	}
 	r.submitTracked(cmds)
 
@@ -1860,45 +1924,26 @@ func (r *Renderer) renderToImageReadback(offscreen *wgpu.Texture, texFmt gputype
 
 	pending, err := stagingBuf.MapAsync(wgpu.MapModeRead, 0, bufSize)
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: MapAsync: %w", err)
+		return fmt.Errorf("gogpu: %s: MapAsync: %w", label, err)
 	}
 	r.device.Poll(wgpu.PollWait)
 
 	ready, statusErr := pending.Status()
 	if !ready {
-		return nil, errors.New("gogpu: RenderToImage: buffer not ready after poll")
+		return fmt.Errorf("gogpu: %s: buffer not ready after poll", label)
 	}
 	if statusErr != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: map status: %w", statusErr)
+		return fmt.Errorf("gogpu: %s: map status: %w", label, statusErr)
 	}
 
 	mapped, err := stagingBuf.MappedRange(0, bufSize)
 	if err != nil {
 		_ = stagingBuf.Unmap()
-		return nil, fmt.Errorf("gogpu: RenderToImage: MappedRange: %w", err)
+		return fmt.Errorf("gogpu: %s: MappedRange: %w", label, err)
 	}
-	raw := mapped.Bytes()
-
-	// BGRA8Unorm (default surfaceFormat) has B and R swapped vs image.RGBA.
-	isBGRA := texFmt == gputypes.TextureFormatBGRA8Unorm || texFmt == gputypes.TextureFormatBGRA8UnormSrgb
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			src := y*int(rowBytes) + x*4
-			dst := img.PixOffset(x, y)
-			if isBGRA {
-				img.Pix[dst+0] = raw[src+2] // R ← blue slot
-				img.Pix[dst+1] = raw[src+1] // G
-				img.Pix[dst+2] = raw[src+0] // B ← red slot
-				img.Pix[dst+3] = raw[src+3] // A
-			} else {
-				copy(img.Pix[dst:dst+4], raw[src:src+4])
-			}
-		}
-	}
-
+	visit(mapped.Bytes(), int(rowBytes))
 	_ = stagingBuf.Unmap()
-	return img, nil
+	return nil
 }
 
 // WaitForGPU blocks until all submitted GPU work completes.
