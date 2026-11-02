@@ -1777,6 +1777,25 @@ func (a *App) IsFullscreen() bool {
 	return false
 }
 
+// MonitorSize returns the size in device pixels of the monitor the window is
+// on. ok is false before the window exists or when the platform cannot tell.
+//
+// Platform support:
+//   - Windows: the monitor nearest the window, the area SetFullscreen covers.
+//   - macOS: the screen most of the window is on. SetFullscreen covers all of
+//     it, except on a screen with a camera notch, where fullscreen stops below
+//     the menu bar and is shorter than this.
+//   - Linux/X11: the default X screen. With several monitors it spans all of
+//     them, so it is larger than the monitor SetFullscreen covers.
+//   - Linux/Wayland: unknown, ok is false.
+//   - Browser: screen.width and screen.height times devicePixelRatio.
+func (a *App) MonitorSize() (width, height int, ok bool) {
+	if a.platWindow != nil {
+		return a.platWindow.MonitorSize()
+	}
+	return 0, 0, false
+}
+
 // ToggleFullscreen toggles between fullscreen and windowed mode.
 // Convenience method equivalent to SetFullscreen(!IsFullscreen()).
 func (a *App) ToggleFullscreen() {

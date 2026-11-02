@@ -581,6 +581,10 @@ func (w *x11PlatformWindow) IsFullscreen() bool {
 	return w.inner().IsFullscreen()
 }
 
+func (w *x11PlatformWindow) MonitorSize() (width, height int, ok bool) {
+	return w.inner().ScreenSize()
+}
+
 func (w *x11PlatformWindow) SetHeaderAlignment(_ int) {} // X11 title bar is compositor-controlled
 
 func (w *x11PlatformWindow) Close() { w.inner().CloseWindow() }
@@ -880,6 +884,11 @@ func (w *waylandPlatformWindow) SetFullscreen(fullscreen bool) {
 
 func (w *waylandPlatformWindow) IsFullscreen() bool {
 	return w.platform.IsFullscreen()
+}
+
+// MonitorSize is unknown on Wayland: wl_output modes are not tracked yet.
+func (w *waylandPlatformWindow) MonitorSize() (width, height int, ok bool) {
+	return 0, 0, false
 }
 
 // Close requests this window close. For a secondary window this must not
