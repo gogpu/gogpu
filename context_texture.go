@@ -144,9 +144,7 @@ func (c *Context) DrawTextureEx(tex *Texture, opts DrawTextureOptions) error {
 		opts.Alpha = 1
 	}
 
-	// Delegate to renderer's internal method
-	// This will be implemented in INT-002
-	return c.renderer.drawTexturedQuad(tex, opts)
+	return c.renderer.drawTexturedQuad(c.renderer.activeSurface(), tex, opts)
 }
 
 // validateTexture checks if a texture is valid for drawing.
