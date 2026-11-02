@@ -149,6 +149,7 @@ func (m *mockPlatformWindow) Hide()                            {}
 func (m *mockPlatformWindow) SetPosition(_, _ int)             {}
 func (m *mockPlatformWindow) SetFullscreen(bool)               {}
 func (m *mockPlatformWindow) IsFullscreen() bool               { return false }
+func (m *mockPlatformWindow) MonitorSize() (int, int, bool)    { return 0, 0, false }
 func (m *mockPlatformWindow) SetModalFrameCallback(func())     {}
 func (m *mockPlatformWindow) Destroy()                         {}
 func (m *mockPlatformWindow) StartDrag(_ []string, done func(DragResult)) {

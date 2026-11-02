@@ -2419,6 +2419,19 @@ func (p *Platform) IsFullscreen() bool {
 	return w.fullscreen
 }
 
+// ScreenSize returns the default screen's size in pixels. On a multi-head
+// desktop the screen spans every monitor. ok is false without a connection.
+func (p *Platform) ScreenSize() (width, height int, ok bool) {
+	if p.conn == nil {
+		return 0, 0, false
+	}
+	screen := p.conn.DefaultScreen()
+	if screen == nil || screen.WidthInPixels == 0 || screen.HeightInPixels == 0 {
+		return 0, 0, false
+	}
+	return int(screen.WidthInPixels), int(screen.HeightInPixels), true
+}
+
 func (p *Platform) CloseWindow() {
 	w := p.primary
 	w.eventMu.Lock()

@@ -468,6 +468,20 @@ func (w *browserWindow) IsFullscreen() bool {
 	return !fse.IsNull() && !fse.IsUndefined()
 }
 
+// MonitorSize returns screen.width/height times devicePixelRatio.
+func (w *browserWindow) MonitorSize() (width, height int, ok bool) {
+	screen := js.Global().Get("screen")
+	if screen.IsUndefined() || screen.IsNull() {
+		return 0, 0, false
+	}
+	cssW, cssH := screen.Get("width").Int(), screen.Get("height").Int()
+	if cssW <= 0 || cssH <= 0 {
+		return 0, 0, false
+	}
+	dpr := w.ScaleFactor()
+	return int(float64(cssW)*dpr + 0.5), int(float64(cssH)*dpr + 0.5), true
+}
+
 // SetHitTestCallback is a no-op on browser — hit testing is not applicable.
 func (w *browserWindow) SetHitTestCallback(_ func(x, y float64) gpucontext.HitTestResult) {}
 

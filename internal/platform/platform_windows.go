@@ -1047,6 +1047,21 @@ func (w *win32Window) IsFullscreen() bool {
 	return w.fullscreen
 }
 
+// MonitorSize returns the device-pixel size of the monitor nearest the window,
+// the rect SetFullscreen covers.
+func (w *win32Window) MonitorSize() (width, height int, ok bool) {
+	monitor, _, _ := procMonitorFromWindow.Call(uintptr(w.hwnd), monitorDefaultToNearest)
+	if monitor == 0 {
+		return 0, 0, false
+	}
+	var mi monitorInfo
+	mi.cbSize = uint32(unsafe.Sizeof(mi))
+	if ret, _, _ := procGetMonitorInfoW.Call(monitor, uintptr(unsafe.Pointer(&mi))); ret == 0 {
+		return 0, 0, false
+	}
+	return int(mi.rcMonitor.right - mi.rcMonitor.left), int(mi.rcMonitor.bottom - mi.rcMonitor.top), true
+}
+
 // RequestSize resizes the window's content area to the given logical size in DIP.
 // Ignores the request when fullscreen. If the window is maximized, it is restored
 // first (winit pattern). The window position is preserved (SWP_NOMOVE).

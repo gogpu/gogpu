@@ -260,6 +260,16 @@ type PlatformWindow interface {
 	// IsFullscreen returns true if the window is currently in fullscreen mode.
 	IsFullscreen() bool
 
+	// MonitorSize returns the size in device pixels of the monitor the window
+	// is on, the size fullscreen would cover. ok is false when the platform
+	// cannot tell.
+	// On Windows: the window's monitor rect (the process is per-monitor DPI aware).
+	// On macOS: the main screen's frame times its backing scale factor.
+	// On X11: the default screen, which spans every monitor of a multi-head desktop.
+	// On Wayland: unknown.
+	// On Browser: screen.width/height times devicePixelRatio.
+	MonitorSize() (width, height int, ok bool)
+
 	// SetHitTestCallback sets the callback for custom hit testing in frameless mode.
 	SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult)
 
