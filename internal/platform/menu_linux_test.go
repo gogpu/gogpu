@@ -576,6 +576,7 @@ func (s *stubWindow) SetFrameless(_ bool)                                       
 func (s *stubWindow) IsFrameless() bool                                                    { return false }
 func (s *stubWindow) SetFullscreen(fs bool)                                                { s.fullscreen = fs }
 func (s *stubWindow) IsFullscreen() bool                                                   { return s.fullscreen }
+func (s *stubWindow) MonitorSize() (int, int, bool)                                        { return 0, 0, false }
 func (s *stubWindow) SetHitTestCallback(_ func(float64, float64) gpucontext.HitTestResult) {}
 func (s *stubWindow) Minimize()                                                            { s.minimized = true }
 func (s *stubWindow) Maximize()                                                            { s.maximized = true }

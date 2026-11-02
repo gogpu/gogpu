@@ -25,6 +25,8 @@ type mockWindow struct {
 	closed          bool
 	visible         bool
 	posX, posY      int
+	monitorW        int
+	monitorH        int
 	hitTestCallback func(float64, float64) gpucontext.HitTestResult
 	closeFn         func() bool
 
@@ -81,6 +83,9 @@ func (m *mockWindow) Maximize()            { m.maximized = !m.maximized }
 func (m *mockWindow) IsMaximized() bool    { return m.maximized }
 func (m *mockWindow) SetFullscreen(v bool) { m.fullscreen = v }
 func (m *mockWindow) IsFullscreen() bool   { return m.fullscreen }
+func (m *mockWindow) MonitorSize() (int, int, bool) {
+	return m.monitorW, m.monitorH, m.monitorW > 0 && m.monitorH > 0
+}
 func (m *mockWindow) Close()               { m.closed = true }
 func (m *mockWindow) Show()                { m.visible = true }
 func (m *mockWindow) Hide()                { m.visible = false }

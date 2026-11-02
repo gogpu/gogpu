@@ -461,6 +461,28 @@ func (w *Window) BackingScaleFactor() float64 {
 	return scale
 }
 
+// ScreenPixelSize returns the size in device pixels of the screen most of the
+// window is on: the screen's frame, in points, times its backing scale factor.
+// ok is false when the window is on no screen.
+func (w *Window) ScreenPixelSize() (width, height int, ok bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return 0, 0, false
+	}
+	screen := w.nsWindow.Send(selectors.screen)
+	if screen.IsNil() {
+		return 0, 0, false
+	}
+	frame := screen.GetRect(selectors.frame)
+	scale := screen.GetDouble(selectors.backingScaleFactor)
+	if frame.Size.Width <= 0 || frame.Size.Height <= 0 || scale <= 0 {
+		return 0, 0, false
+	}
+	return int(float64(frame.Size.Width)*scale + 0.5), int(float64(frame.Size.Height)*scale + 0.5), true
+}
+
 // UpdateSize updates the cached size from the actual window size.
 // Stores LOGICAL size in platform points (not physical pixels).
 // Use FramebufferSize() for physical pixel dimensions.
