@@ -1654,6 +1654,16 @@ func (a *App) IsFullscreen() bool {
 	return false
 }
 
+// MonitorSize returns the size in device pixels of the monitor the window is
+// on, the size fullscreen would cover. ok is false before the window exists or
+// when the platform cannot tell (Wayland).
+func (a *App) MonitorSize() (width, height int, ok bool) {
+	if a.platWindow != nil {
+		return a.platWindow.MonitorSize()
+	}
+	return 0, 0, false
+}
+
 // ToggleFullscreen toggles between fullscreen and windowed mode.
 // Convenience method equivalent to SetFullscreen(!IsFullscreen()).
 func (a *App) ToggleFullscreen() {

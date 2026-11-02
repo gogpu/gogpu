@@ -110,6 +110,27 @@ func MainScreenScaleFactor() float64 {
 	return scale
 }
 
+// MainScreenPixelSize returns the size of the primary display in device
+// pixels: its frame, in points, times its backing scale factor. ok is false
+// when there is no main screen.
+func MainScreenPixelSize() (width, height int, ok bool) {
+	initSelectors()
+	initClasses()
+	screen := classes.NSScreen.Send(selectors.mainScreen)
+	if screen.IsNil() {
+		return 0, 0, false
+	}
+	frame := screen.GetRect(selectors.frame)
+	if frame.Size.Width <= 0 || frame.Size.Height <= 0 {
+		return 0, 0, false
+	}
+	scale := screen.GetDouble(selectors.backingScaleFactor)
+	if scale <= 0 {
+		scale = 1.0
+	}
+	return int(float64(frame.Size.Width)*scale + 0.5), int(float64(frame.Size.Height)*scale + 0.5), true
+}
+
 // SetAppName sets the name of the application that will
 // be displayed in the About, Quit and other menus.
 func (a *Application) SetAppName(name string) {
