@@ -43,6 +43,6 @@ Rendering is demand-driven: a frame is drawn when something requests it (input, 
 
 ## Ecosystem
 
-- [GoGPU on GitHub](https://github.com/gogpu): all modules (wgpu, naga, gg, ui, g3d, gpucontext, gputypes, …)
+- [GoGPU ecosystem](https://gogpu.dev/llms.txt): map of all modules
 - [gpucontext](https://pkg.go.dev/github.com/gogpu/gpucontext): the interfaces gogpu implements for other packages
 - [wgpu](https://pkg.go.dev/github.com/gogpu/wgpu): the WebGPU implementation underneath
