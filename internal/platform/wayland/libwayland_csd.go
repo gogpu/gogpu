@@ -585,10 +585,12 @@ func (h *LibwaylandHandle) ResizeCSD(contentW, contentH int) { //nolint:gocognit
 				// Release SHM resources — not needed while hidden; recreated on restore.
 				if h.csdBuffers[i] != 0 {
 					h.marshalVoid(h.csdBuffers[i], 0)
+					h.proxyDestroy(h.csdBuffers[i])
 					h.csdBuffers[i] = 0
 				}
 				if h.csdPools[i] != 0 {
 					h.marshalVoid(h.csdPools[i], 1)
+					h.proxyDestroy(h.csdPools[i])
 					h.csdPools[i] = 0
 				}
 				if h.csdData[i] != nil {
@@ -709,9 +711,11 @@ func (h *LibwaylandHandle) resizeCSDEdge(i, w, ht int, state CSDState) {
 	// Destroy old resources AFTER new buffer attached.
 	if oldBuffer != 0 {
 		h.marshalVoid(oldBuffer, 0)
+		h.proxyDestroy(oldBuffer)
 	}
 	if oldPool != 0 {
 		h.marshalVoid(oldPool, 1)
+		h.proxyDestroy(oldPool)
 	}
 	if oldData != nil {
 		unix.Munmap(oldData)
@@ -894,6 +898,67 @@ func socketHasData(fd int) bool {
 	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 	n, err := unix.Poll(fds, 0) // timeout=0 = non-blocking
 	return err == nil && n > 0 && fds[0].Revents&unix.POLLIN != 0
+}
+
+// destroyCSD tears down the client-side decorations: each edge's buffer,
+// pool, mapping, subsurface and surface, then the CSD pointer, both CSD
+// seats, the CSD event queue, wl_shm and wl_subcompositor. A destroy request
+// tells the compositor; wl_proxy_destroy frees the client's proxy, without
+// which libwayland warns that the proxy is still attached when its queue is
+// destroyed. Close calls this before it destroys the parent surface.
+func (h *LibwaylandHandle) destroyCSD() {
+	for i := range h.csdSurfaces {
+		if h.csdBuffers[i] != 0 {
+			h.marshalVoid(h.csdBuffers[i], 0) // wl_buffer.destroy
+			h.proxyDestroy(h.csdBuffers[i])
+			h.csdBuffers[i] = 0
+		}
+		if h.csdPools[i] != 0 {
+			h.marshalVoid(h.csdPools[i], 1) // wl_shm_pool.destroy
+			h.proxyDestroy(h.csdPools[i])
+			h.csdPools[i] = 0
+		}
+		if h.csdData[i] != nil {
+			_ = unix.Munmap(h.csdData[i])
+			h.csdData[i] = nil
+		}
+		if h.csdFDs[i] > 0 {
+			_ = unix.Close(h.csdFDs[i])
+			h.csdFDs[i] = -1
+		}
+		if h.csdSubsurf[i] != 0 {
+			h.marshalVoid(h.csdSubsurf[i], 0) // wl_subsurface.destroy
+			h.proxyDestroy(h.csdSubsurf[i])
+			h.csdSubsurf[i] = 0
+		}
+		if h.csdSurfaces[i] != 0 {
+			h.marshalVoid(h.csdSurfaces[i], 0) // wl_surface.destroy
+			h.proxyDestroy(h.csdSurfaces[i])
+			h.csdSurfaces[i] = 0
+		}
+	}
+	h.csdActive = false
+
+	h.proxyDestroy(h.csdPointer)
+	h.csdPointer = 0
+	h.csdPointerSurface = 0
+	h.proxyDestroy(h.csdSeat)
+	h.csdSeat = 0
+	h.proxyDestroy(h.csdSeatDefault)
+	h.csdSeatDefault = 0
+	if h.csdQueue != 0 && h.fnDestroyQueue != nil {
+		args := [1]unsafe.Pointer{unsafe.Pointer(&h.csdQueue)}
+		_, _ = ffi.CallFunction(&h.cifDestroyQueue, h.fnDestroyQueue, nil, args[:])
+		h.csdQueue = 0
+	}
+
+	h.proxyDestroy(h.shm) // wl_shm version 1 has no destroy request
+	h.shm = 0
+	if h.subcompositor != 0 {
+		h.marshalVoid(h.subcompositor, 0) // wl_subcompositor.destroy
+		h.proxyDestroy(h.subcompositor)
+		h.subcompositor = 0
+	}
 }
 
 // roundtrip is defined in libwayland_xdg.go
