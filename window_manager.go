@@ -46,6 +46,9 @@ type Window struct {
 	onPointer    func(gpucontext.PointerEvent)
 	onScroll     func(gpucontext.ScrollEvent)
 	visible      bool
+
+	// frameContext is reused by BeginFrame, so a frame allocates no Context.
+	frameContext Context
 }
 
 // ID returns the unique identifier for this window.
