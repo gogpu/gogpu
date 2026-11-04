@@ -675,8 +675,7 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 		slog.Debug("gogpu: surface outdated, reconfiguring", "width", ws.width, "height", ws.height)
 		if ws.width > 0 && ws.height > 0 {
 			if cfgErr := ws.configure(device, adapter); cfgErr != nil {
-				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
-				ws.state = SurfaceLost
+				ws.reconfigureFailed(cfgErr)
 			}
 		}
 	case errors.Is(err, wgpu.ErrSurfaceLost):
@@ -688,6 +687,21 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 			_ = ws.configure(device, adapter)
 		}
 	}
+}
+
+// reconfigureFailed records a reconfigure after an outdated surface that
+// failed. ErrZeroArea means the window was minimized and the surface saw the
+// zero extent before the pump read the minimize: the surface waits
+// unconfigured, as a minimize leaves it, and the next frame after the
+// restore configures it again. Any other failure loses the surface.
+func (ws *RenderTarget) reconfigureFailed(err error) {
+	if isZeroArea(err) {
+		slog.Debug("gogpu: surface has zero area, waiting for restore", "width", ws.width, "height", ws.height)
+		ws.state = SurfaceReady
+		return
+	}
+	slog.Error("gogpu: reconfigure after outdated failed", "err", err)
+	ws.state = SurfaceLost
 }
 
 // EndFrame presents the rendered frame on the primary surface.
@@ -874,8 +888,7 @@ func (ws *RenderTarget) present() (reconfigured, presented bool) {
 		slog.Debug("gogpu: surface outdated on present, reconfiguring", "width", ws.width, "height", ws.height)
 		if ws.width > 0 && ws.height > 0 {
 			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
-				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
-				ws.state = SurfaceLost
+				ws.reconfigureFailed(cfgErr)
 				return false, false
 			}
 			return true, false
@@ -1905,6 +1918,13 @@ func (r *Renderer) renderToImageReadback(offscreen *wgpu.Texture, texFmt gputype
 // Call this before destroying user-created GPU resources to prevent
 // Vulkan validation errors about resources still in use by command buffers.
 func (r *Renderer) WaitForGPU() {
+	// Only the device-less renderer that tests inject through newRendererFn
+	// gets here without a device: shutdown runs only after a renderer was
+	// created successfully. The guard keeps shutdown as safe without a device
+	// as Destroy already is.
+	if r.device == nil {
+		return
+	}
 	r.tracker.waitAll(r.device)
 }
 
