@@ -4,6 +4,19 @@ package darwin
 
 import "runtime"
 
+// PushFramePool opens a fresh NSAutoreleasePool for a frame split across two
+// calls; PopFramePool drains it.
+func PushFramePool() uintptr {
+	initSelectors()
+	initClasses()
+	return uintptr(classes.NSAutoreleasePool.Send(selectors.new))
+}
+
+// PopFramePool drains the pool PushFramePool returned.
+func PopFramePool(pool uintptr) {
+	ID(pool).Send(selectors.drain)
+}
+
 // RunInFramePool executes fn inside a fresh NSAutoreleasePool.
 //
 // Use on the render thread once per frame. Metal drawables and transient ObjC

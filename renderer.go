@@ -2180,6 +2180,13 @@ func (r *Renderer) readbackTexture(src *wgpu.Texture, width, height int, label s
 // Call this before destroying user-created GPU resources to prevent
 // Vulkan validation errors about resources still in use by command buffers.
 func (r *Renderer) WaitForGPU() {
+	// Only the device-less renderer that tests inject through newRendererFn
+	// gets here without a device: shutdown runs only after a renderer was
+	// created successfully. The guard keeps shutdown as safe without a device
+	// as Destroy already is.
+	if r.device == nil {
+		return
+	}
 	r.tracker.waitAll(r.device)
 }
 
