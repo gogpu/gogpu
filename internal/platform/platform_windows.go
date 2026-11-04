@@ -630,7 +630,12 @@ type win32Window struct {
 // Holds process-level state and a registry of windows keyed by HWND.
 type windowsPlatform struct {
 	hinstance windows.Handle
-	cursor    uintptr // Default arrow cursor for WM_SETCURSOR
+
+	// polledMessage is the MSG PeekMessage fills. It lives here, not on the
+	// stack, so passing its address to the API does not move it to the heap
+	// on every poll.
+	polledMessage msg
+	cursor        uintptr // Default arrow cursor for WM_SETCURSOR
 
 	// Window registry keyed by HWND for WndProc routing.
 	windowMu sync.RWMutex
@@ -1337,18 +1342,16 @@ func (w *win32Window) updateSize() {
 
 func (p *windowsPlatform) PollEvents() Event {
 	// Process all pending Windows messages (NULL HWND = all windows on this thread).
-	var m msg
+	// syscall.SyscallN directly: LazyProc.Call is //go:uintptrescapes and
+	// allocates its arguments on every call.
+	message := uintptr(unsafe.Pointer(&p.polledMessage))
 	for {
-		ret, _, _ := procPeekMessageW.Call(
-			uintptr(unsafe.Pointer(&m)),
-			0, 0, 0,
-			pmRemove,
-		)
+		ret, _, _ := syscall.SyscallN(procPeekMessageW.Addr(), message, 0, 0, 0, pmRemove)
 		if ret == 0 {
 			break
 		}
-		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+		syscall.SyscallN(procTranslateMessage.Addr(), message)
+		syscall.SyscallN(procDispatchMessageW.Addr(), message)
 	}
 
 	// If an IME ended without a post-END WM_CHAR result, terminate the pending
