@@ -439,6 +439,10 @@ func (h *LibwaylandHandle) Close() {
 		h.inputSeat = 0
 	}
 
+	// Destroy client-side decorations: their subsurfaces before the parent
+	// surface, their seats and pointer with the CSD queue.
+	h.destroyCSD()
+
 	// Destroy decoration objects (reverse order: decoration → manager)
 	if h.toplevelDecor != 0 {
 		h.proxyDestroy(h.toplevelDecor)
