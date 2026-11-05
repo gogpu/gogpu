@@ -45,6 +45,7 @@ var selectors struct {
 	setFrame                                 SEL
 	setFrameOrigin                           SEL
 	frame                                    SEL
+	contentLayoutRect                        SEL
 	contentRectForFrameRect                  SEL
 	frameRectForContentRect                  SEL
 	styleMask                                SEL
@@ -65,6 +66,8 @@ var selectors struct {
 	windowWillStartLiveResize                SEL
 	windowDidEndLiveResize                   SEL
 	windowDidResize                          SEL
+	windowDidBecomeKey                       SEL
+	windowDidResignKey                       SEL
 
 	// NSWindow titlebar transparency / title visibility
 	setTitlebarAppearsTransparent SEL
@@ -162,6 +165,7 @@ var selectors struct {
 	hasPreciseScrollingDeltas   SEL
 	deltaX                      SEL
 	deltaY                      SEL
+	mouseLocation               SEL // NSEvent class method: cursor position on screen
 
 	// NSEvent - scroll gesture phases (macOS trackpad)
 	phase         SEL // NSEventPhase bitmask for active gesture
@@ -299,6 +303,7 @@ func initSelectors() {
 		selectors.setFrame = RegisterSelector("setFrame:display:")
 		selectors.setFrameOrigin = RegisterSelector("setFrameOrigin:")
 		selectors.frame = RegisterSelector("frame")
+		selectors.contentLayoutRect = RegisterSelector("contentLayoutRect")
 		selectors.contentRectForFrameRect = RegisterSelector("contentRectForFrameRect:")
 		selectors.frameRectForContentRect = RegisterSelector("frameRectForContentRect:")
 		selectors.styleMask = RegisterSelector("styleMask")
@@ -319,6 +324,8 @@ func initSelectors() {
 		selectors.windowWillStartLiveResize = RegisterSelector("windowWillStartLiveResize:")
 		selectors.windowDidEndLiveResize = RegisterSelector("windowDidEndLiveResize:")
 		selectors.windowDidResize = RegisterSelector("windowDidResize:")
+		selectors.windowDidBecomeKey = RegisterSelector("windowDidBecomeKey:")
+		selectors.windowDidResignKey = RegisterSelector("windowDidResignKey:")
 		selectors.setTitlebarAppearsTransparent = RegisterSelector("setTitlebarAppearsTransparent:")
 		selectors.setTitleVisibility = RegisterSelector("setTitleVisibility:")
 		selectors.setOpaque = RegisterSelector("setOpaque:")
@@ -414,6 +421,7 @@ func initSelectors() {
 		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
 		selectors.deltaX = RegisterSelector("deltaX")
 		selectors.deltaY = RegisterSelector("deltaY")
+		selectors.mouseLocation = RegisterSelector("mouseLocation")
 
 		// NSEvent - scroll gesture phases (macOS trackpad)
 		selectors.phase = RegisterSelector("phase")

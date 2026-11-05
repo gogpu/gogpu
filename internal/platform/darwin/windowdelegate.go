@@ -74,6 +74,22 @@ func registerWindowDelegateClass() (Class, error) {
 	)
 	ClassAddMethod(cls, selectors.windowDidChangeScreen, screenChangedIMP, "v@:@")
 
+	// windowDidBecomeKey: and windowDidResignKey: fire when the window gains
+	// or loses key status. Wake the event loop so that the focus check in
+	// pollEvents runs promptly: once the application is deactivated, no
+	// further event may arrive to end a WaitEvents, and a held cursor mode
+	// would stay held.
+	keyChangedIMP := ffi.NewCallback(
+		func(self, sel, notification uintptr) uintptr {
+			if getWindowFromDelegate(ID(self)) != nil {
+				WakeEventLoop()
+			}
+			return 0
+		},
+	)
+	ClassAddMethod(cls, selectors.windowDidBecomeKey, keyChangedIMP, "v@:@")
+	ClassAddMethod(cls, selectors.windowDidResignKey, keyChangedIMP, "v@:@")
+
 	// windowDidResize: fires after each resize step, including during AppKit's
 	// live-resize modal loop (inside sendEvent:) where our outer event loop is
 	// blocked. Only invoke the hook while InLiveResize is true — this limits
