@@ -158,6 +158,8 @@ func (m *mockPlatformWindow) StartDrag(_ []string, done func(DragResult)) {
 }
 func (m *mockPlatformWindow) SetOnClose(func() bool) {}
 
+func (m *mockPlatformWindow) SetCursorPosition(float64, float64) error { return nil }
+
 func (m *mockPlatformWindow) SetFrameless(v bool) { m.frameless = v }
 func (m *mockPlatformWindow) IsFrameless() bool   { return m.frameless }
 func (m *mockPlatformWindow) SetHitTestCallback(fn func(x, y float64) gpucontext.HitTestResult) {

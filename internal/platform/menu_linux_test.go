@@ -586,6 +586,7 @@ func (s *stubWindow) Hide()                                                     
 func (s *stubWindow) SetPosition(_, _ int)                                                 {}
 func (s *stubWindow) SyncFrame()                                                           {}
 func (s *stubWindow) SetCursorMode(_ int)                                                  {}
+func (s *stubWindow) SetCursorPosition(_, _ float64) error                                 { return nil }
 func (s *stubWindow) CursorMode() int                                                      { return 0 }
 func (s *stubWindow) SetModalFrameCallback(_ func())                                       {}
 func (s *stubWindow) Destroy()                                                             {}

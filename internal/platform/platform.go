@@ -2,6 +2,7 @@
 package platform
 
 import (
+	"errors"
 	"image"
 	"sync/atomic"
 
@@ -12,6 +13,10 @@ import (
 type WindowID uint32
 
 var nextWindowID atomic.Uint32
+
+// ErrCursorPositionUnsupported means the platform cannot move the cursor: on
+// Wayland while the pointer is not locked, and in the browser.
+var ErrCursorPositionUnsupported = errors.New("gogpu: setting the cursor position is unsupported")
 
 // NewWindowID allocates a new unique window ID.
 func NewWindowID() WindowID {
@@ -298,6 +303,13 @@ type PlatformWindow interface {
 
 	// CursorMode returns the current cursor mode.
 	CursorMode() int
+
+	// SetCursorPosition moves the cursor to (x, y), in logical points from the
+	// content area's top-left, without a pointer event. While the cursor is
+	// Locked it stays parked and the point is where releasing the lock puts
+	// it; while Confined the point is clamped to the content area. It returns
+	// ErrCursorPositionUnsupported where the platform cannot move the cursor.
+	SetCursorPosition(x, y float64) error
 
 	// SetModalFrameCallback registers a callback for platform modal operations.
 	SetModalFrameCallback(fn func())

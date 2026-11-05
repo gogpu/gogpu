@@ -1472,7 +1472,11 @@ func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 //   - Windows: Full support (ClipCursor + ShowCursor + SetCursorPos).
 //   - Linux/X11: Full support (XGrabPointer + XWarpPointer + invisible cursor).
 //   - Linux/Wayland: Stub (not yet implemented, requires pointer constraints protocol).
-//   - macOS: Stub (not yet implemented, requires CGAssociateMouseAndMouseCursorPosition).
+//   - macOS: Full support. Both modes detach the cursor from the mouse
+//     (CGAssociateMouseAndMouseCursorPosition); Locked hides it (NSCursor),
+//     Confined keeps it visible and moves it by each move's delta, clamped to
+//     the content area (CGWarpMouseCursorPosition). While the window is not
+//     key the mode is released and CursorMode reports CursorModeNormal.
 func (a *App) SetCursorMode(mode gpucontext.CursorMode) {
 	if a.platWindow != nil {
 		a.platWindow.SetCursorMode(int(mode))
@@ -1485,6 +1489,35 @@ func (a *App) CursorMode() gpucontext.CursorMode {
 		return gpucontext.CursorMode(a.platWindow.CursorMode())
 	}
 	return gpucontext.CursorModeNormal
+}
+
+// SetCursorPosition moves the cursor to (x, y) in the primary window, in
+// logical points from the content area's top-left: the coordinates PointerEvent
+// reports. Equivalent to SDL_WarpMouseInWindow and glfwSetCursorPos.
+//
+// Setting the position is not the user's doing, so it produces no
+// PointerEvent; the next PointerMove comes from the user moving the mouse. While the cursor mode is
+// CursorModeLocked the cursor stays parked, and the point is where releasing
+// the lock puts it. While CursorModeConfined the point is clamped to the
+// content area.
+//
+// It returns ErrNotInitialized before the window exists, and
+// ErrCursorPositionUnsupported where the platform cannot move the cursor.
+//
+// Platform support:
+//   - Windows: SetCursorPos.
+//   - macOS: CGWarpMouseCursorPosition.
+//   - Linux/X11: XWarpPointer.
+//   - Linux/Wayland: only while CursorModeLocked, through the locked
+//     pointer's position hint (zwp_locked_pointer_v1.set_cursor_position_hint);
+//     a compositor may ignore the hint. Wayland lets no client move the cursor
+//     otherwise.
+//   - Browser: unsupported.
+func (a *App) SetCursorPosition(x, y float64) error {
+	if a.platWindow == nil {
+		return ErrNotInitialized
+	}
+	return a.platWindow.SetCursorPosition(x, y)
 }
 
 // DarkMode returns true if the system dark mode is active.

@@ -1,6 +1,10 @@
 package gogpu
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/gogpu/gogpu/internal/platform"
+)
 
 // Common errors
 var (
@@ -23,4 +27,9 @@ var (
 	// Unlike ErrSurfaceLost (transient, surface-level), device loss requires
 	// full re-initialization of the renderer.
 	ErrDeviceLost = errors.New("gogpu: GPU device lost")
+
+	// ErrCursorPositionUnsupported is returned by SetCursorPosition where the
+	// platform cannot move the cursor: on Wayland while the cursor is not
+	// locked, and in the browser.
+	ErrCursorPositionUnsupported = platform.ErrCursorPositionUnsupported
 )
