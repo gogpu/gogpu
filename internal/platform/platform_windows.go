@@ -48,6 +48,7 @@ const (
 	wsVisible          = 0x10000000
 	cwUseDefault       = 0x80000000
 	vkEscape           = 0x1B
+	vkProcessKey       = 0xE5   // VK_PROCESSKEY: key consumed by the IME
 	swpNoActivate      = 0x0010 // SWP_NOACTIVATE
 
 	// Mouse messages
@@ -2066,6 +2067,115 @@ const (
 	vkOEM7      = 0xDE // '"
 )
 
+// keyByScancode maps a scancode, with kfExtended set for extended keys, to the
+// key at that position on a US QWERTY keyboard.
+var keyByScancode = map[uintptr]gpucontext.Key{
+	0x01:  gpucontext.KeyEscape,
+	0x02:  gpucontext.Key1,
+	0x03:  gpucontext.Key2,
+	0x04:  gpucontext.Key3,
+	0x05:  gpucontext.Key4,
+	0x06:  gpucontext.Key5,
+	0x07:  gpucontext.Key6,
+	0x08:  gpucontext.Key7,
+	0x09:  gpucontext.Key8,
+	0x0A:  gpucontext.Key9,
+	0x0B:  gpucontext.Key0,
+	0x0C:  gpucontext.KeyMinus,
+	0x0D:  gpucontext.KeyEqual,
+	0x0E:  gpucontext.KeyBackspace,
+	0x0F:  gpucontext.KeyTab,
+	0x10:  gpucontext.KeyQ,
+	0x11:  gpucontext.KeyW,
+	0x12:  gpucontext.KeyE,
+	0x13:  gpucontext.KeyR,
+	0x14:  gpucontext.KeyT,
+	0x15:  gpucontext.KeyY,
+	0x16:  gpucontext.KeyU,
+	0x17:  gpucontext.KeyI,
+	0x18:  gpucontext.KeyO,
+	0x19:  gpucontext.KeyP,
+	0x1A:  gpucontext.KeyLeftBracket,
+	0x1B:  gpucontext.KeyRightBracket,
+	0x1C:  gpucontext.KeyEnter,
+	0x1E:  gpucontext.KeyA,
+	0x1F:  gpucontext.KeyS,
+	0x20:  gpucontext.KeyD,
+	0x21:  gpucontext.KeyF,
+	0x22:  gpucontext.KeyG,
+	0x23:  gpucontext.KeyH,
+	0x24:  gpucontext.KeyJ,
+	0x25:  gpucontext.KeyK,
+	0x26:  gpucontext.KeyL,
+	0x27:  gpucontext.KeySemicolon,
+	0x28:  gpucontext.KeyApostrophe,
+	0x29:  gpucontext.KeyGrave,
+	0x2B:  gpucontext.KeyBackslash,
+	0x2C:  gpucontext.KeyZ,
+	0x2D:  gpucontext.KeyX,
+	0x2E:  gpucontext.KeyC,
+	0x2F:  gpucontext.KeyV,
+	0x30:  gpucontext.KeyB,
+	0x31:  gpucontext.KeyN,
+	0x32:  gpucontext.KeyM,
+	0x33:  gpucontext.KeyComma,
+	0x34:  gpucontext.KeyPeriod,
+	0x35:  gpucontext.KeySlash,
+	0x37:  gpucontext.KeyNumpadMultiply,
+	0x39:  gpucontext.KeySpace,
+	0x3A:  gpucontext.KeyCapsLock,
+	0x3B:  gpucontext.KeyF1,
+	0x3C:  gpucontext.KeyF2,
+	0x3D:  gpucontext.KeyF3,
+	0x3E:  gpucontext.KeyF4,
+	0x3F:  gpucontext.KeyF5,
+	0x40:  gpucontext.KeyF6,
+	0x41:  gpucontext.KeyF7,
+	0x42:  gpucontext.KeyF8,
+	0x43:  gpucontext.KeyF9,
+	0x44:  gpucontext.KeyF10,
+	0x45:  gpucontext.KeyPause, // Num Lock is the extended 0x145
+	0x46:  gpucontext.KeyScrollLock,
+	0x47:  gpucontext.KeyNumpad7,
+	0x48:  gpucontext.KeyNumpad8,
+	0x49:  gpucontext.KeyNumpad9,
+	0x4A:  gpucontext.KeyNumpadSubtract,
+	0x4B:  gpucontext.KeyNumpad4,
+	0x4C:  gpucontext.KeyNumpad5,
+	0x4D:  gpucontext.KeyNumpad6,
+	0x4E:  gpucontext.KeyNumpadAdd,
+	0x4F:  gpucontext.KeyNumpad1,
+	0x50:  gpucontext.KeyNumpad2,
+	0x51:  gpucontext.KeyNumpad3,
+	0x52:  gpucontext.KeyNumpad0,
+	0x53:  gpucontext.KeyNumpadDecimal,
+	0x57:  gpucontext.KeyF11,
+	0x58:  gpucontext.KeyF12,
+	0x11C: gpucontext.KeyEnter, // Numpad Enter
+	0x135: gpucontext.KeyNumpadDivide,
+	0x145: gpucontext.KeyNumLock,
+	0x147: gpucontext.KeyHome,
+	0x148: gpucontext.KeyUp,
+	0x149: gpucontext.KeyPageUp,
+	0x14B: gpucontext.KeyLeft,
+	0x14D: gpucontext.KeyRight,
+	0x14F: gpucontext.KeyEnd,
+	0x150: gpucontext.KeyDown,
+	0x151: gpucontext.KeyPageDown,
+	0x152: gpucontext.KeyInsert,
+	0x153: gpucontext.KeyDelete,
+
+	scLeftShift:    gpucontext.KeyLeftShift,
+	scRightShift:   gpucontext.KeyRightShift,
+	0x136:          gpucontext.KeyRightShift, // CJK IMEs set the extended flag on Right Shift
+	scLeftControl:  gpucontext.KeyLeftControl,
+	scRightControl: gpucontext.KeyRightControl,
+	scLeftAlt:      gpucontext.KeyLeftAlt,
+	scRightAlt:     gpucontext.KeyRightAlt,
+	scLeftSuper:    gpucontext.KeyLeftSuper,
+	scRightSuper:   gpucontext.KeyRightSuper,
+}
+
 // getKeyState calls GetKeyState to check if a key is pressed.
 var procGetKeyState = user32.NewProc("GetKeyState")
 
@@ -2113,9 +2223,9 @@ func getKeyModifiers() gpucontext.Modifiers {
 	return mods
 }
 
-// vkCodeToKey converts a Windows virtual key code to gpucontext.Key.
-//
-// vkCodeToKey converts a Windows virtual key code to gpucontext.Key.
+// vkCodeToKey converts a Windows virtual key code to gpucontext.Key. The
+// virtual key follows the layout, so it serves only messages without a
+// scancode; keyFromMessage uses keyByScancode otherwise.
 func vkCodeToKey(vkCode uintptr) gpucontext.Key {
 	// Letters A-Z (0x41-0x5A)
 	if vkCode >= 0x41 && vkCode <= 0x5A {
@@ -2233,6 +2343,31 @@ func vkCodeToKey(vkCode uintptr) gpucontext.Key {
 		return gpucontext.KeyNumLock
 	case vkPause:
 		return gpucontext.KeyPause
+	}
+
+	return gpucontext.KeyUnknown
+}
+
+// translateKey converts a Windows key message to the gpucontext.Key at the
+// key's physical position, as keyFromMessage does, and drops the Left Ctrl
+// that Windows sends ahead of Right Alt for AltGr on European layouts.
+func translateKey(wParam, lParam uintptr) gpucontext.Key {
+	key := keyFromMessage(wParam, lParam)
+	if key == gpucontext.KeyLeftControl && isAltGrSequence() {
+		return gpucontext.KeyUnknown // Skip Ctrl part of AltGr
+	}
+	return key
+}
+
+// keyFromMessage names the key of a WM_KEYDOWN/WM_KEYUP message by its
+// scancode and extended flag, not by its virtual key code, which follows the
+// layout: the key in the Q position reports KeyQ on AZERTY too, as on macOS,
+// Wayland and the browser. GLFW and SDL translate the same way.
+func keyFromMessage(wParam, lParam uintptr) gpucontext.Key {
+	switch wParam {
+	case vkProcessKey:
+		// The IME consumed the key.
+		return gpucontext.KeyUnknown
 	case vkCancel:
 		// Ctrl+Break is delivered as VK_CANCEL (0x03), distinct from the
 		// plain Pause key (VK_PAUSE). Report it as KeyCancel so hosts can
@@ -2240,50 +2375,13 @@ func vkCodeToKey(vkCode uintptr) gpucontext.Key {
 		return gpucontext.KeyCancel
 	}
 
-	return gpucontext.KeyUnknown
-}
-
-// translateKey converts a Windows key event to gpucontext.Key using the GLFW/Ebiten pattern.
-// It uses scancode and KF_EXTENDED flag for accurate Left/Right modifier detection,
-// and handles AltGr (Ctrl+Alt on European keyboards) correctly.
-//
-// This is the enterprise-grade approach used by GLFW, SDL, and Ebiten.
-func translateKey(wParam, lParam uintptr) gpucontext.Key {
-	// Extract scancode with extended bit from lParam
 	// Bits 16-23: scancode, bit 24: extended flag
-	scancode := int((lParam >> 16) & (kfExtended | 0xFF))
-
-	// Special handling for modifier keys (GLFW pattern)
-	switch wParam {
-	case vkShift:
-		// Distinguish Left/Right Shift by scancode
-		if scancode == scRightShift {
-			return gpucontext.KeyRightShift
-		}
-		return gpucontext.KeyLeftShift
-
-	case vkControl:
-		// Check extended bit for Right Control
-		if scancode&kfExtended != 0 {
-			return gpucontext.KeyRightControl
-		}
-		// AltGr detection: Left Ctrl + Right Alt sent together
-		// GLFW/Ebiten hack: check if next message is Right Alt with same timestamp
-		if isAltGrSequence() {
-			return gpucontext.KeyUnknown // Skip Ctrl part of AltGr
-		}
-		return gpucontext.KeyLeftControl
-
-	case vkMenu: // Alt
-		// Check extended bit for Right Alt
-		if scancode&kfExtended != 0 {
-			return gpucontext.KeyRightAlt
-		}
-		return gpucontext.KeyLeftAlt
+	scancode := (lParam >> 16) & (kfExtended | 0xFF)
+	if scancode == 0 {
+		// Injected input may carry a virtual key alone.
+		return vkCodeToKey(wParam)
 	}
-
-	// For non-modifier keys, use the standard vkCode mapping
-	return vkCodeToKey(wParam)
+	return keyByScancode[scancode]
 }
 
 // isAltGrSequence checks if the current Left Ctrl is part of an AltGr sequence.
