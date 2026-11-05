@@ -90,6 +90,11 @@ type EventInfo struct {
 	TiltY              float64 // -1.0 to 1.0
 	Rotation           float64 // 0-360 degrees
 	PointingDeviceType NSUInteger
+
+	// Mouse motion of move and drag events, y down. It is reported even
+	// while the cursor is detached from the mouse and does not move.
+	MotionDeltaX float64
+	MotionDeltaY float64
 }
 
 // GetEventWindow returns the NSWindow associated with an NSEvent.
@@ -147,6 +152,14 @@ func GetEventInfo(event ID) EventInfo {
 			info.Rotation = event.GetDouble(selectors.rotation)
 			info.PointingDeviceType = event.GetUint64(selectors.pointingDeviceType)
 		}
+	}
+
+	// Mouse motion
+	switch info.Type {
+	case NSEventTypeMouseMoved, NSEventTypeLeftMouseDragged,
+		NSEventTypeRightMouseDragged, NSEventTypeOtherMouseDragged:
+		info.MotionDeltaX = event.GetDouble(selectors.deltaX)
+		info.MotionDeltaY = event.GetDouble(selectors.deltaY)
 	}
 
 	// Scroll deltas and gesture phases
