@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 func TestDefaultConfigValues(t *testing.T) {
@@ -193,6 +194,36 @@ func TestConfigWithTransparent(t *testing.T) {
 				t.Errorf("Transparent = %v, want %v", cfg.Transparent, tt.transparent)
 			}
 		})
+	}
+}
+
+func TestConfigWithRequiredFeatures(t *testing.T) {
+	tests := []struct {
+		name     string
+		features gputypes.Features
+	}{
+		{"none", 0},
+		{"single", gputypes.Features(gputypes.FeatureIndirectFirstInstance)},
+		{"several", gputypes.Features(gputypes.FeatureIndirectFirstInstance) |
+			gputypes.Features(gputypes.FeatureShaderF16)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig().WithRequiredFeatures(tt.features)
+			if cfg.RequiredFeatures != tt.features {
+				t.Errorf("RequiredFeatures = %v, want %v", cfg.RequiredFeatures, tt.features)
+			}
+		})
+	}
+}
+
+// TestConfigDefaultRequiredFeaturesNone pins the default: an app that asks for
+// nothing gets a device with no optional features, which is what an app drawing
+// through gogpu's own Context needs.
+func TestConfigDefaultRequiredFeaturesNone(t *testing.T) {
+	if got := DefaultConfig().RequiredFeatures; got != 0 {
+		t.Errorf("RequiredFeatures = %v, want 0", got)
 	}
 }
 
