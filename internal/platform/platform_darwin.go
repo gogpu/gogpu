@@ -487,6 +487,14 @@ func (dw *darwinPlatformWindow) SetCursorMode(mode int) { dw.state.cursor.setMod
 // key, whatever was requested.
 func (dw *darwinPlatformWindow) CursorMode() int { return dw.state.cursor.mode() }
 
+// SetCursorPosition moves the cursor to a point in the content area
+// (CGWarpMouseCursorPosition), which produces no mouse event. While Locked is
+// requested the point is where releasing the lock puts the cursor.
+func (dw *darwinPlatformWindow) SetCursorPosition(x, y float64) error {
+	dw.state.cursor.setPosition(x, y)
+	return nil
+}
+
 func (dw *darwinPlatformWindow) SyncFrame() {}
 
 func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {

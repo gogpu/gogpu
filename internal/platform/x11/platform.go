@@ -3,6 +3,7 @@
 package x11
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"math"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/go-webgpu/goffi/ffi"
 	"github.com/go-webgpu/goffi/types"
+	"github.com/gogpu/gogpu/internal/platform/cursorposition"
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	xkbcommon "github.com/gogpu/gogpu/internal/platform/xkb"
 	"github.com/gogpu/gpucontext"
@@ -150,11 +152,15 @@ type x11Window struct {
 
 	// Cursor mode state (0=normal, 1=locked, 2=confined)
 	cursorMode    int
-	savedMouseX   float64 // saved position before locking
+	savedMouseX   float64 // saved position before locking, in physical pixels
 	savedMouseY   float64
 	cursorCenterX int16 // window center for warp-back in locked mode
 	cursorCenterY int16
 	cursorGrabbed bool // whether XGrabPointer is active
+
+	// pendingPositions are the SetCursorPosition moves, in physical pixels,
+	// whose MotionNotify has not arrived yet. Guarded by eventMu.
+	pendingPositions cursorposition.Pending
 
 	// XDND drag-and-drop state for this window.
 	xdndState xdndState
@@ -544,6 +550,15 @@ func (p *Platform) ScaleFactor() float64 {
 func (p *Platform) physicalToLogical(x, y float64) (float64, float64) {
 	if scale := p.ScaleFactor(); scale > 1.0 {
 		return x / scale, y / scale
+	}
+	return x, y
+}
+
+// logicalToPhysical converts logical DIP coordinates to X11 physical pixels,
+// undoing physicalToLogical.
+func (p *Platform) logicalToPhysical(x, y float64) (float64, float64) {
+	if scale := p.ScaleFactor(); scale > 1.0 {
+		return x * scale, y * scale
 	}
 	return x, y
 }
@@ -1104,15 +1119,23 @@ func (p *Platform) handleMotionNotify(w *x11Window, e *MotionNotifyEvent) {
 	w.mouseY = y
 	w.buttons = extractButtons(e.State)
 	w.modifiers = extractModifiers(e.State)
+	// A SetCursorPosition move is not the user's: its position is taken
+	// above, nothing is reported.
+	positionSet := w.pendingPositions.Arrived(int32(e.EventX), int32(e.EventY))
 	w.eventMu.Unlock()
+	if positionSet {
+		return
+	}
 
-	// In locked mode, compute delta from center and warp back
+	// In locked mode, compute delta from center and warp back. The center
+	// and the event are in physical pixels; the delta and the frozen
+	// position are reported in logical units, as X and Y are.
 	if cursorMode == 1 {
-		deltaX := x - centerX
-		deltaY := y - centerY
+		physicalDeltaX := float64(e.EventX) - centerX
+		physicalDeltaY := float64(e.EventY) - centerY
 
 		// Skip the warp-back event (delta=0)
-		if deltaX == 0 && deltaY == 0 {
+		if physicalDeltaX == 0 && physicalDeltaY == 0 {
 			return
 		}
 
@@ -1121,7 +1144,9 @@ func (p *Platform) handleMotionNotify(w *x11Window, e *MotionNotifyEvent) {
 			int16(centerX), int16(centerY))
 
 		// Emit event with relative deltas
-		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, x, y, e.State)
+		frozenX, frozenY := p.physicalToLogical(centerX, centerY)
+		deltaX, deltaY := p.physicalToLogical(physicalDeltaX, physicalDeltaY)
+		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, frozenX, frozenY, e.State)
 		ev.DeltaX = deltaX
 		ev.DeltaY = deltaY
 		w.dispatchPointerEvent(ev)
@@ -2561,13 +2586,15 @@ func (p *Platform) SetCursorMode(mode int) {
 
 	oldMode := w.cursorMode
 	w.cursorMode = mode
+	w.eventMu.Lock()
+	w.pendingPositions.Clear()
+	w.eventMu.Unlock()
 
 	switch mode {
 	case 1: // Locked
 		// Save current mouse position
 		if oldMode == 0 {
-			w.savedMouseX = w.mouseX
-			w.savedMouseY = w.mouseY
+			w.savedMouseX, w.savedMouseY = p.logicalToPhysical(w.mouseX, w.mouseY)
 		}
 
 		// Compute window center
@@ -2619,6 +2646,46 @@ func (p *Platform) SetCursorMode(mode int) {
 	}
 }
 
+// SetCursorPosition moves the pointer to (x, y), logical points from the
+// window's top-left (XWarpPointer). The server reports the move as a MotionNotify,
+// which is dropped. While Locked the pointer stays parked and the point is
+// where releasing the lock puts it; while Confined the point is clamped to
+// the window.
+func (p *Platform) SetCursorPosition(x, y float64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	w := p.primary
+	if p.conn == nil || w == nil || w.window == 0 {
+		return errors.New("x11: SetCursorPosition: no window")
+	}
+
+	physicalX, physicalY := p.logicalToPhysical(x, y)
+	targetX := int16(math.Round(physicalX))
+	targetY := int16(math.Round(physicalY))
+
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+
+	switch w.cursorMode {
+	case 1: // Locked
+		w.savedMouseX = float64(targetX)
+		w.savedMouseY = float64(targetY)
+		return nil
+	case 2: // Confined
+		// The grab confines the pointer to the window; clamp here too, so
+		// the MotionNotify is found at the target.
+		targetX = min(max(targetX, 0), int16(w.width-1))
+		targetY = min(max(targetY, 0), int16(w.height-1))
+	}
+
+	if err := p.conn.WarpPointer(0, w.window, 0, 0, 0, 0, targetX, targetY); err != nil {
+		return err
+	}
+	w.pendingPositions.Add(int32(targetX), int32(targetY))
+	return nil
+}
+
 // GetCursorMode returns the current cursor mode.
 func (p *Platform) GetCursorMode() int {
 	w := p.primary
@@ -2635,10 +2702,21 @@ func (p *Platform) handleFocusIn(w *x11Window) {
 	if mode != 0 {
 		w.cursorMode = 0
 	}
+	// Taking the lock again is not a new request: releasing it still puts
+	// the pointer where it was when the lock was asked for, or where
+	// SetCursorPosition since then said.
+	savedMouseX := w.savedMouseX
+	savedMouseY := w.savedMouseY
 	w.eventMu.Unlock()
 
 	if mode != 0 {
 		p.SetCursorMode(mode)
+	}
+	if mode == 1 {
+		w.eventMu.Lock()
+		w.savedMouseX = savedMouseX
+		w.savedMouseY = savedMouseY
+		w.eventMu.Unlock()
 	}
 }
 

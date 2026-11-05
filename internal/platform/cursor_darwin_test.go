@@ -17,11 +17,17 @@ type fakeCursorSystem struct {
 	associated bool
 	hideCount  int // hides minus unhides, as NSCursor counts them
 	warpCount  int
+	// associatedAfterWarp is whether Associate(true) came after the last
+	// warp, which ends the moment macOS freezes the cursor after one.
+	associatedAfterWarp bool
 }
 
-func (s *fakeCursorSystem) Hide()                      { s.hideCount++ }
-func (s *fakeCursorSystem) Unhide()                    { s.hideCount-- }
-func (s *fakeCursorSystem) Associate(associated bool)  { s.associated = associated }
+func (s *fakeCursorSystem) Hide()   { s.hideCount++ }
+func (s *fakeCursorSystem) Unhide() { s.hideCount-- }
+func (s *fakeCursorSystem) Associate(associated bool) {
+	s.associated = associated
+	s.associatedAfterWarp = associated
+}
 func (s *fakeCursorSystem) Location() darwin.NSPoint   { return s.location }
 func (s *fakeCursorSystem) Focused() bool              { return s.focused }
 func (s *fakeCursorSystem) ContentRect() darwin.NSRect { return s.content }
@@ -29,6 +35,7 @@ func (s *fakeCursorSystem) ContentRect() darwin.NSRect { return s.content }
 func (s *fakeCursorSystem) Warp(point darwin.NSPoint) {
 	s.location = point
 	s.warpCount++
+	s.associatedAfterWarp = false
 }
 
 // newFocusedCursorSystem is an 800x600 content area at (100, 200) on screen,
@@ -466,5 +473,79 @@ func TestDarwinCursorNewLockRequestSavesNewLocation(t *testing.T) {
 
 	if want := (darwin.NSPoint{X: 600, Y: 400}); system.location != want {
 		t.Errorf("location = %v, want %v", system.location, want)
+	}
+}
+
+func TestDarwinCursorNormalSetPositionMovesCursorAndUnfreezesIt(t *testing.T) {
+	system := newFocusedCursorSystem()
+	cursor := darwinCursor{system: system}
+
+	cursor.setPosition(10, 20)
+
+	// Window (10, 20) is screen (110, 780): the content's top is at 800.
+	if want := (darwin.NSPoint{X: 110, Y: 780}); system.location != want {
+		t.Errorf("location = %v, want %v", system.location, want)
+	}
+	if !system.associatedAfterWarp {
+		t.Error("cursor not associated after the warp, so macOS freezes it")
+	}
+}
+
+func TestDarwinCursorConfinedSetPositionMovesWithinContent(t *testing.T) {
+	system := newFocusedCursorSystem()
+	cursor := darwinCursor{system: system}
+	cursor.setMode(cursorModeConfined) // the cursor stays at window (50, 550)
+
+	cursor.setPosition(-10, 20)
+
+	if want := (darwin.NSPoint{X: 100, Y: 780}); system.location != want {
+		t.Errorf("location = %v, want the target clamped to %v", system.location, want)
+	}
+	if system.associated {
+		t.Error("confined cursor attached to the mouse again")
+	}
+	// The next event sits where setting the position put the cursor, and
+	// macOS adds that move to its delta: 50 left, 530 up.
+	motion, _ := cursor.move(0, 20, -50+3, -530+4)
+	if want := (pointerMotion{X: 3, Y: 24}); motion != want {
+		t.Errorf("move after setting the position = %+v, want %+v", motion, want)
+	}
+}
+
+func TestDarwinCursorLockedSetPositionSetsWhereUnlockPutsCursor(t *testing.T) {
+	system := newFocusedCursorSystem()
+	cursor := darwinCursor{system: system}
+	cursor.setMode(cursorModeLocked)
+	warpCount := system.warpCount
+
+	cursor.setPosition(10, 20)
+
+	if system.warpCount != warpCount {
+		t.Error("setting the position while locked moved the cursor")
+	}
+	cursor.setMode(cursorModeNormal)
+	if want := (darwin.NSPoint{X: 110, Y: 780}); system.location != want {
+		t.Errorf("location after unlock = %v, want the set position %v", system.location, want)
+	}
+}
+
+func TestDarwinCursorLockedSetPositionWhileUnfocusedSetsWhereUnlockPutsCursor(t *testing.T) {
+	system := newFocusedCursorSystem()
+	cursor := darwinCursor{system: system}
+	cursor.setMode(cursorModeLocked)
+	system.focused = false
+	cursor.update()
+	location := system.location
+
+	cursor.setPosition(10, 20)
+
+	if system.location != location {
+		t.Error("setting the position while the lock waits for focus moved the cursor")
+	}
+	system.focused = true
+	cursor.update()
+	cursor.setMode(cursorModeNormal)
+	if want := (darwin.NSPoint{X: 110, Y: 780}); system.location != want {
+		t.Errorf("location after unlock = %v, want the set position %v", system.location, want)
 	}
 }

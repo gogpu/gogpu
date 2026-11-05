@@ -216,6 +216,27 @@ func (c *darwinCursor) contentChanged() {
 	}
 }
 
+// setPosition moves the cursor to a window point at the application's
+// request, which produces no mouse event. While Locked is requested, the
+// cursor stays parked and the point is where releasing the lock puts it.
+// While Confined is in effect, the point is clamped to the content area.
+func (c *darwinCursor) setPosition(x, y float64) {
+	switch {
+	case c.requestedMode == cursorModeLocked:
+		c.lockedLocation = c.screenPoint(x, y)
+		c.lockedLocationSaved = true
+	case c.effectiveMode == cursorModeConfined:
+		c.confinedX = x
+		c.confinedY = y
+		c.confine()
+	default:
+		// Associating again right after the warp ends the moment macOS
+		// otherwise freezes the cursor after one.
+		c.system.Warp(c.screenPoint(x, y))
+		c.system.Associate(true)
+	}
+}
+
 // move turns a mouse move event into the motion to report. x and y are the
 // event's window coordinates and deltaX, deltaY its delta, y down. reported
 // is false when the move changes nothing: a Locked move without motion, or a
