@@ -1472,7 +1472,11 @@ func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 //   - Windows: Full support (ClipCursor + ShowCursor + SetCursorPos).
 //   - Linux/X11: Full support (XGrabPointer + XWarpPointer + invisible cursor).
 //   - Linux/Wayland: Stub (not yet implemented, requires pointer constraints protocol).
-//   - macOS: Stub (not yet implemented, requires CGAssociateMouseAndMouseCursorPosition).
+//   - macOS: Full support. Both modes detach the cursor from the mouse
+//     (CGAssociateMouseAndMouseCursorPosition); Locked hides it (NSCursor),
+//     Confined keeps it visible and moves it by each move's delta, clamped to
+//     the content area (CGWarpMouseCursorPosition). While the window is not
+//     key the mode is released and CursorMode reports CursorModeNormal.
 func (a *App) SetCursorMode(mode gpucontext.CursorMode) {
 	if a.platWindow != nil {
 		a.platWindow.SetCursorMode(int(mode))

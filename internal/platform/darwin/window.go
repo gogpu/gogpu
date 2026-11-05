@@ -525,6 +525,25 @@ func (w *Window) ContentRect() NSRect {
 	return w.contentView.GetRect(selectors.bounds)
 }
 
+// ContentScreenRect returns the content area in Cocoa screen coordinates:
+// origin at the bottom-left of the primary display, y up.
+func (w *Window) ContentScreenRect() NSRect {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() || w.contentView.IsNil() {
+		return NSRect{}
+	}
+
+	// The content view's frame is in window coordinates, whose origin is the
+	// window frame's bottom-left corner on screen.
+	frame := w.nsWindow.GetRect(selectors.frame)
+	content := w.contentView.GetRect(selectors.frame)
+	content.Origin.X += frame.Origin.X
+	content.Origin.Y += frame.Origin.Y
+	return content
+}
+
 // Center centers the window on the screen.
 func (w *Window) Center() {
 	w.mu.Lock()
