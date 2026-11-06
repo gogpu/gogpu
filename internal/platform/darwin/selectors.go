@@ -148,6 +148,12 @@ var selectors struct {
 	setMaximumDrawableCount SEL
 	setDisplaySyncEnabled   SEL
 
+	// CATransaction (class methods)
+	transactionBegin             SEL
+	transactionCommit            SEL
+	transactionFlush             SEL
+	transactionSetDisableActions SEL
+
 	// NSEvent
 	eventType                   SEL
 	locationInWindow            SEL
@@ -250,6 +256,7 @@ var classes struct {
 	NSRunLoop            Class
 	CALayer              Class
 	CAMetalLayer         Class
+	CATransaction        Class
 	NSPasteboard         Class
 	NSCursor             Class
 	NSWorkspace          Class
@@ -398,6 +405,10 @@ func initSelectors() {
 		selectors.nextDrawable = RegisterSelector("nextDrawable")
 		selectors.setFramebufferOnly = RegisterSelector("setFramebufferOnly:")
 		selectors.setMaximumDrawableCount = RegisterSelector("setMaximumDrawableCount:")
+		selectors.transactionBegin = RegisterSelector("begin")
+		selectors.transactionCommit = RegisterSelector("commit")
+		selectors.transactionFlush = RegisterSelector("flush")
+		selectors.transactionSetDisableActions = RegisterSelector("setDisableActions:")
 		selectors.setDisplaySyncEnabled = RegisterSelector("setDisplaySyncEnabled:")
 
 		// NSEvent
@@ -506,6 +517,7 @@ func initClasses() {
 		classes.NSRunLoop = GetClass("NSRunLoop")
 		classes.CALayer = GetClass("CALayer")
 		classes.CAMetalLayer = GetClass("CAMetalLayer")
+		classes.CATransaction = GetClass("CATransaction")
 		classes.NSPasteboard = GetClass("NSPasteboard")
 		classes.NSCursor = GetClass("NSCursor")
 		classes.NSWorkspace = GetClass("NSWorkspace")
