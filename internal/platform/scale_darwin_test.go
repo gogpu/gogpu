@@ -250,6 +250,7 @@ func TestPrepareFrameSyncsContentsScale(t *testing.T) {
 	steps := []struct {
 		scale        float64
 		physW, physH int
+		liveResize   bool
 		wantChanged  bool
 		wantScales   []float64 // cumulative SetContentsScale calls
 	}{
@@ -257,10 +258,12 @@ func TestPrepareFrameSyncsContentsScale(t *testing.T) {
 		{scale: 2, physW: 1600, physH: 1200, wantScales: []float64{2}},                     // unchanged: no call
 		{scale: 1, physW: 800, physH: 600, wantChanged: true, wantScales: []float64{2, 1}}, // 2x -> 1x
 		{scale: math.NaN(), physW: 800, physH: 600, wantScales: []float64{2, 1}},           // ignored
+		// A scale change during live resize waits for the drag to end.
+		{scale: 2, physW: 1600, physH: 1200, liveResize: true, wantScales: []float64{2, 1}},
 		{scale: 2, physW: 1600, physH: 1200, wantChanged: true, wantScales: []float64{2, 1, 2}},
 	}
 	for i, st := range steps {
-		got := dw.prepareFrame(st.scale, st.physW, st.physH)
+		got := dw.prepareFrame(st.scale, st.physW, st.physH, st.liveResize)
 		if got.ScaleChanged != st.wantChanged {
 			t.Fatalf("step %d: ScaleChanged = %v, want %v", i, got.ScaleChanged, st.wantChanged)
 		}
@@ -273,5 +276,5 @@ func TestPrepareFrameSyncsContentsScale(t *testing.T) {
 	}
 
 	// No surface (Metal surface creation failed): no panic.
-	(&darwinPlatformWindow{}).prepareFrame(2, 1600, 1200)
+	(&darwinPlatformWindow{}).prepareFrame(2, 1600, 1200, false)
 }

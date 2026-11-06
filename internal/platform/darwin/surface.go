@@ -134,9 +134,9 @@ func (l *MetalLayer) DrawableSize() (width, height int) {
 		return 0, 0
 	}
 
-	// Get size struct - this requires GetSize method which we need to add
-	// For now, return 0,0 - this would need proper implementation
-	return 0, 0
+	// CGSize is two doubles, returned like NSPoint.
+	size := l.id.GetPoint(selectors.drawableSize)
+	return int(size.X), int(size.Y)
 }
 
 // SetFrame sets the layer's frame rectangle in the superlayer's coordinate space.
@@ -384,22 +384,45 @@ func (s *Surface) Layer() *MetalLayer {
 }
 
 // SetContentsScale updates only the layer's contentsScale, leaving the
-// drawable size and layer frame alone. The render thread calls it from
-// PrepareFrame when the window's backing scale changed (moved to another
-// display), just before it reconfigures the drawable to the new physical
-// size, so the two stay in step. Nil-safe, also after Destroy; scales that
-// fail ValidScale are ignored.
+// drawable size and layer frame alone, and commits the change to the screen.
+// The render thread calls it from PrepareFrame when the window's backing
+// scale changed (moved to another display); the drawable was already
+// resized to the new physical size earlier in the frame. It does nothing
+// when the layer already has this scale, and ignores scales that fail
+// ValidScale. Nil-safe, also after Destroy.
 //
-// Threading: PrepareFrame runs only inside RunOnRenderThreadVoid, which
-// blocks the calling main thread until it returns, so it never overlaps the
-// main thread's Show/UpdateSize. Teardown destroys the GPU surface on the
-// render thread (Renderer.Destroy, or RenderTarget.destroy on window close)
-// before the platform window and this Surface are destroyed.
+// Threading: must run on one OS-locked thread (the render thread), since
+// the CATransaction begin/commit pair below is per thread. PrepareFrame
+// runs only inside RunOnRenderThreadVoid, which blocks the calling main
+// thread until it returns, so it never overlaps the main thread's
+// Show/UpdateSize. Teardown destroys the GPU surface on the render thread
+// (Renderer.Destroy, or RenderTarget.destroy on window close) before the
+// platform window and this Surface are destroyed.
 func (s *Surface) SetContentsScale(scale float64) {
 	if s == nil || s.layer == nil || !ValidScale(scale) {
 		return
 	}
+	if s.layer.id.GetDouble(selectors.contentsScale) == scale {
+		return
+	}
+
+	// The render thread has no run loop, so nothing commits the implicit
+	// CATransaction that wgpu's Configure opens on it (setContentsGravity:,
+	// setOpaque: and other Core Animation properties). Until some other
+	// commit happens to carry it, a contentsScale change made here stays
+	// pending: the resized drawable is shown at the old scale (2x->1x: the
+	// picture in the top-left quarter). An explicit begin/commit nested in
+	// that implicit transaction does not reach the screen either; it only
+	// scopes setDisableActions:, which stops contentsScale from animating.
+	// flush commits the implicit transaction, and with it every pending
+	// Core Animation change of this thread, so this runs only when the scale
+	// actually changes.
+	tx := classes.CATransaction
+	tx.Send(selectors.transactionBegin)
+	ID(tx).SendBool(selectors.transactionSetDisableActions, true)
 	s.layer.SetContentsScale(scale)
+	tx.Send(selectors.transactionCommit)
+	tx.Send(selectors.transactionFlush)
 }
 
 // ValidScale reports whether s is usable as a backing scale factor:

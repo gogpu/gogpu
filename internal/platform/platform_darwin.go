@@ -470,22 +470,29 @@ func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
 
 	scale := dw.window.BackingScaleFactor()
 	physW, physH := dw.window.FramebufferSize()
-	return dw.prepareFrame(scale, physW, physH)
+	return dw.prepareFrame(scale, physW, physH, dw.window.InLiveResize())
 }
 
 // prepareFrame is PrepareFrame after the window reads: it syncs the layer's
 // contentsScale when the backing scale changed and builds the result.
-func (dw *darwinPlatformWindow) prepareFrame(scale float64, physW, physH int) PrepareFrameResult {
+// During live resize the sync (and its ScaleChanged report) waits until the
+// drag ends: the main thread is parked in windowDidResize: inside its own
+// open transaction, and SetContentsScale's flush would publish that
+// half-applied state early.
+func (dw *darwinPlatformWindow) prepareFrame(scale float64, physW, physH int, liveResize bool) PrepareFrameResult {
 	scaleChanged, syncScale := scaleTransition(dw.lastScale, scale)
+	if liveResize {
+		scaleChanged, syncScale = false, false
+	}
 	if syncScale {
-		// The caller (RenderTarget.beginFrame) reconfigures the drawable to
-		// the new physical size right after this returns; contentsScale must
-		// follow, or the drawable is presented at the old scale: 1x->2x
-		// magnified and cropped, 2x->1x in the top-left quarter. Setting it
-		// here, on the render thread that owns the drawable (RETINA-002),
-		// keeps the two in step. PrepareFrame runs inside
-		// RunOnRenderThreadVoid, so the main thread is blocked meanwhile; see
-		// darwin.Surface.SetContentsScale for the full threading contract.
+		// The drawable follows the new physical size (renderFrameGPU, and
+		// beginFrame when PhysicalWidth/Height below differ); contentsScale
+		// must follow too, or the drawable is presented at the old scale:
+		// 1x->2x magnified and cropped, 2x->1x in the top-left quarter.
+		// Setting it here, on the render thread that owns the drawable
+		// (RETINA-002), keeps the two close; for about one refresh the
+		// previous frame may still show at the new scale. See
+		// darwin.Surface.SetContentsScale for the commit and threading.
 		if dw.surface != nil {
 			dw.surface.SetContentsScale(scale)
 		}
