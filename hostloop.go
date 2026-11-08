@@ -28,8 +28,10 @@ import (
 // documented, not checked, as for Run. gogpu runs no render thread for a
 // HostLoop: acquire and present happen on the caller's thread.
 //
-// Windows: no modal timer runs, so during a move or resize the frame freezes
-// and resumes at the new size when the user lets go.
+// Windows and macOS: a move or resize the user drags on Windows, and a live
+// resize on macOS, run the platform's own loop inside PumpEvents, which
+// returns when the user lets go. gogpu draws nothing meanwhile, so the frame
+// freezes and resumes at the new size.
 //
 // macOS: each frame runs inside an autorelease pool that BeginFrame pushes and
 // EndFrame pops.
@@ -68,8 +70,9 @@ func (loop *HostLoop) Start() error {
 // under Run; the surface itself is resized at the next BeginFrame. It ends
 // the gesture frame.
 //
-// It never waits, runs onUpdate or draws, and returns once the queue is
-// empty. A close is reported through Running, not acted on. A pump allocates
+// It never runs onUpdate or draws, and returns once the queue is empty. It
+// waits only while the user drags a move or resize (see HostLoop). A close is
+// reported through Running, not acted on. A pump allocates
 // nothing apart from boxing each event it puts into the input-event queue,
 // once per event, and the text of a typed character outside ASCII, once for
 // every text-input callback. Its first pumps also resolve the system

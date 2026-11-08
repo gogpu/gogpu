@@ -32,10 +32,22 @@ func (m *queuedEventManager) PollEvents() platform.Event {
 
 func (m *queuedEventManager) rewind() { m.nextEvent = 0 }
 
-// startedHostLoop starts a HostLoop over window, with a renderer that has no
-// GPU: its surface is sized to the window and never configured, so an
-// acquire is attempted and fails.
+// startedHostLoop starts a HostLoop over window, on mockedPlatform.
 func startedHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
+	t.Helper()
+	manager := mockedPlatform(t, window, events...)
+	app := NewApp(DefaultConfig())
+	loop := NewHostLoop(app)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	return app, loop, manager
+}
+
+// mockedPlatform makes the next start open window, poll events from it, and
+// get a renderer that has no GPU: its surface is sized to the window and
+// never configured, so an acquire is attempted and fails.
+func mockedPlatform(t *testing.T, window platform.PlatformWindow, events ...platform.Event) *queuedEventManager {
 	t.Helper()
 	manager := &queuedEventManager{mockManagerWithWindow: mockManagerWithWindow{win: window}, events: events}
 
@@ -57,13 +69,7 @@ func startedHostLoop(t *testing.T, window platform.PlatformWindow, events ...pla
 		newPlatformManagerFn = oldManager
 		newRendererFn = oldRenderer
 	})
-
-	app := NewApp(DefaultConfig())
-	loop := NewHostLoop(app)
-	if err := loop.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	return app, loop, manager
+	return manager
 }
 
 // enabledStats turns frame stats on for the test: a failed acquire records a
@@ -206,6 +212,51 @@ func TestHostLoop_StartDestroysPlatformWhenWindowFails(t *testing.T) {
 	loop.Stop()
 	if manager.destroyCount != 1 {
 		t.Errorf("platform after a Start whose window failed, and Stop: destroyed %d times, want 1", manager.destroyCount)
+	}
+}
+
+// liveResizeWindow records the live-resize hooks installed on it.
+type liveResizeWindow struct {
+	mockWindow
+	resizeHook     func()
+	phaseStartHook func()
+	phaseEndHook   func()
+}
+
+func (w *liveResizeWindow) SetLiveResizeHook(hook func()) { w.resizeHook = hook }
+
+func (w *liveResizeWindow) SetLiveResizePhaseHooks(start, end func()) {
+	w.phaseStartHook = start
+	w.phaseEndHook = end
+}
+
+func TestHostLoop_StartInstallsNoLiveResizeHooks(t *testing.T) {
+	window := &liveResizeWindow{mockWindow: mockWindow{width: 800, height: 600}}
+	_, loop, _ := startedHostLoop(t, window)
+	defer loop.Stop()
+
+	if window.resizeHook != nil {
+		t.Error("live-resize hook after Start: installed, want none, so nothing draws inside PumpEvents")
+	}
+	if window.phaseStartHook != nil || window.phaseEndHook != nil {
+		t.Error("live-resize phase hooks after Start: installed, want none")
+	}
+}
+
+func TestRun_InstallsLiveResizeHooks(t *testing.T) {
+	window := &liveResizeWindow{mockWindow: mockWindow{width: 800, height: 600}}
+	mockedPlatform(t, window)
+	app := NewApp(DefaultConfig())
+	app.OnUpdate(func(float64) { app.Quit() })
+
+	if err := app.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if window.resizeHook == nil {
+		t.Error("live-resize hook after Run: none, want Run's, which draws during a macOS live resize")
+	}
+	if window.phaseStartHook == nil || window.phaseEndHook == nil {
+		t.Error("live-resize phase hooks after Run: none, want Run's")
 	}
 }
 
