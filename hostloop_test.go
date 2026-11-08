@@ -424,6 +424,51 @@ func TestHostLoop_PumpEventsAllocatesOnlyQueuedInputEvents(t *testing.T) {
 	}
 }
 
+// Events routed to a window, with callbacks on the window and on the event
+// source, allocate as unrouted ones do: each is boxed once into the
+// input-event queue, apart from a character under 256, which the runtime
+// boxes without allocating. A typed character outside ASCII also allocates
+// its text, once for both callbacks; an ASCII one does not.
+func TestHostLoop_PumpEventsAllocatesOncePerRoutedEvent(t *testing.T) {
+	app, loop, manager := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{&mockWindow{windowID: 1, width: 800, height: 600}},
+		platform.Event{Type: platform.EventKeyDown, Key: gpucontext.KeyA, WindowID: 1},
+		platform.Event{Type: platform.EventChar, Char: 'a', WindowID: 1},
+		platform.Event{Type: platform.EventKeyUp, Key: gpucontext.KeyA, WindowID: 1},
+		platform.Event{Type: platform.EventPointerMove, WindowID: 1},
+		platform.Event{Type: platform.EventPointerDown, WindowID: 1},
+		platform.Event{Type: platform.EventPointerUp, WindowID: 1},
+		platform.Event{Type: platform.EventScroll, WindowID: 1},
+		platform.Event{Type: platform.EventChar, Char: 'ж', WindowID: 1},
+	)
+	defer loop.Stop()
+	window, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	window.Show()
+	var keys, pointers, scrolls int
+	var text string
+	window.SetOnKeyPress(func(gpucontext.Key, gpucontext.Modifiers) { keys++ })
+	window.SetOnTextInput(func(typed string) { text = typed })
+	window.SetOnPointer(func(gpucontext.PointerEvent) { pointers++ })
+	window.SetOnScroll(func(gpucontext.ScrollEvent) { scrolls++ })
+	app.EventSource().OnTextInput(func(typed string) { text = typed })
+
+	skipWhenRaceInstrumented(t)
+	allocations := testing.AllocsPerRun(100, func() {
+		manager.rewind()
+		loop.PumpEvents()
+	})
+	// One boxing for each of the 8 events but 'a', and one text for 'ж'.
+	const want = 8
+	if allocations != want {
+		t.Errorf("PumpEvents with %d routed events: %v allocations per pump, want %d", len(manager.events), allocations, want)
+	}
+	if keys == 0 || pointers == 0 || scrolls == 0 || text != "ж" {
+		t.Errorf("callbacks: %d keys, %d pointer events, %d scrolls, text %q; want each reached and the text \"ж\"", keys, pointers, scrolls, text)
+	}
+}
+
 // Run's frame pumps through the same step as PumpEvents, which clears the
 // previous pump's edges before applying new events: onUpdate sees a key
 // press as JustPressed on the frame it arrived, and not on the next.

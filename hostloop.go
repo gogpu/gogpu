@@ -110,9 +110,11 @@ func (loop *HostLoop) NewWindow(config Config) (*Window, error) {
 //
 // It never waits, runs onUpdate or draws, and returns once the queue is
 // empty. A pump allocates nothing apart from boxing each event it puts into
-// the input-event queue, once per event, and what a resize's surface
-// reconfigure allocates. Its first pumps also resolve the system functions
-// they call and grow its buffers to their largest size; neither recurs.
+// the input-event queue, once per event, the text of a typed character
+// outside ASCII, once for every text-input callback, and what a resize's
+// surface reconfigure allocates. Its first pumps also resolve the system
+// functions they call and grow its buffers to their largest size; neither
+// recurs.
 func (loop *HostLoop) PumpEvents() {
 	loop.app.processEventsMultiThread()
 }
