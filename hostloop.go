@@ -4,7 +4,11 @@
 package gogpu
 
 import (
+	"fmt"
+	"slices"
 	"sync/atomic"
+
+	"github.com/gogpu/gogpu/internal/platform"
 )
 
 // HostLoop lets a host that owns its loop drive an App one step at a time,
@@ -14,9 +18,14 @@ import (
 //	if err := loop.Start(); err != nil {
 //		return err
 //	}
+//	window, err := loop.NewWindow(gogpu.DefaultConfig())
+//	if err != nil {
+//		return err
+//	}
+//	window.Show()
 //	for loop.Running() {
 //		loop.PumpEvents()
-//		if context, ok := loop.BeginFrame(app.PrimaryWindow()); ok {
+//		if context, ok := loop.BeginFrame(window); ok {
 //			context.Clear(0.1, 0.2, 0.3, 1)
 //			loop.EndFrame(context)
 //		}
@@ -43,41 +52,74 @@ func NewHostLoop(app *App) *HostLoop {
 	return &HostLoop{app: app}
 }
 
-// Start creates the window, device and surface, shows the window and marks
-// the app running, then returns without blocking. When the platform or the
-// GPU cannot start, it returns the error and destroys what it had created.
-// While a HostLoop is started, Run and a second Start return
-// ErrHostLoopStarted.
+// Start brings up the platform and the GPU instance, adapter and device, with
+// no window and no surface, and marks the app running, then returns without
+// blocking. Windows open through NewWindow. When the platform or the GPU
+// cannot start, it returns the error and destroys what it had created. While
+// a HostLoop is started, Run and a second Start return ErrHostLoopStarted.
+//
+// The app's Config chooses the graphics API and the power preference; its
+// window fields are not used, since Start opens no window.
 func (loop *HostLoop) Start() error {
-	if loop.app.hostLoopStarted {
+	a := loop.app
+	if a.hostLoopStarted {
 		return ErrHostLoopStarted
 	}
-	// No modal tick: nothing may call into the frame path from inside PumpEvents.
-	if err := loop.start(&inlineRenderLoop{}, nil); err != nil {
+	if err := a.initPlatformManager(); err != nil {
 		return err
 	}
-	loop.app.hostLoopStarted = true
+	// No modal tick: nothing may call into the frame path from inside PumpEvents.
+	a.renderLoop = &inlineRenderLoop{}
+	renderer, err := newWindowlessRendererFn(a.config.GraphicsAPI, a.config.PowerPreference)
+	if err != nil {
+		a.manager.Destroy()
+		return err
+	}
+	a.renderer = renderer
+	a.windowManager = newWindowManager()
+	a.startRunLoop()
+	a.hostLoopStarted = true
 	return nil
+}
+
+// NewWindow opens a window with its surface, from config's title, size,
+// resizability, frame, transparency, header alignment and macOS tabbing.
+// The surface presents with vsync when config.VSync is set. Every window of
+// a HostLoop, the first included, opens here.
+//
+// The window opens hidden, and BeginFrame skips it until Show. A window
+// asked fullscreen is shown fullscreen. Its surface is configured at once
+// when the window already reports a size, and otherwise at the first
+// BeginFrame that finds one.
+//
+// It must be called after Start, on Start's thread. A window closed by the
+// user, or by Window.Close, is destroyed with its surface as App.NewWindow's
+// windows are.
+func (loop *HostLoop) NewWindow(config Config) (*Window, error) {
+	if !loop.app.hostLoopStarted {
+		return nil, fmt.Errorf("gogpu: HostLoop.NewWindow called before Start")
+	}
+	return loop.app.openWindow(config, config.VSync)
 }
 
 // PumpEvents clears the previous pump's input edges, then drains every
 // pending platform event and dispatches it to the callbacks and the
-// input-event queue registered on the App, for every window. It records the
-// latest primary-window resize and calls onResize; the surface itself is
-// resized at the next BeginFrame. It ends the gesture frame.
+// input-event queue registered on the App, for every window. A window's
+// resize reconfigures its surface at once and calls the window's OnResize.
+// A close destroys the window with its surface. It ends the gesture frame.
 //
 // It never waits, runs onUpdate or draws, and returns once the queue is
-// empty. A close is reported through Running, not acted on. A pump allocates
-// nothing apart from boxing each event it puts into the input-event queue.
+// empty. A pump allocates nothing apart from boxing each event it puts into
+// the input-event queue and what a resize's surface reconfigure allocates.
 func (loop *HostLoop) PumpEvents() {
 	loop.app.processEventsMultiThread()
 }
 
-// Running reports whether the app is still running: false once the primary
-// window was closed or Quit was called.
+// Running reports whether the app is still running: false once Quit was
+// called, or once the last window closed while the app quits on its last
+// window closed (see App.SetQuitOnLastWindowClosed).
 func (loop *HostLoop) Running() bool {
-	a := loop.app
-	return a.running.Load() && (a.platWindow == nil || !a.platWindow.ShouldClose())
+	return loop.app.running.Load()
 }
 
 // BeginFrame applies the window's latest size to its surface and acquires the
@@ -86,13 +128,13 @@ func (loop *HostLoop) Running() bool {
 // unchanged size.
 //
 // It returns ok=false without acquiring when the window is nil, hidden or
-// reports a zero size, and without blocking when the compositor's frame
-// gate (Wayland) is closed. It returns ok=false when the acquire fails; the
-// host skips the frame and tries again next tick. HostLoop does not track
-// whether a window is minimized: the acquire decides. A minimized Vulkan
-// surface fails its acquire; a minimized DX12 window keeps acquiring and
-// drawing, as Run does. With Fifo present the acquire blocks for up to about
-// one refresh, which paces the loop to vsync.
+// reports a zero size, and without blocking when the window's compositor
+// frame gate (Wayland) is closed. It returns ok=false when the acquire
+// fails; the host skips the frame and tries again next tick. HostLoop does
+// not track whether a window is minimized: the acquire decides. A minimized
+// Vulkan surface fails its acquire; a minimized DX12 window keeps acquiring
+// and drawing, as Run does. With Fifo present the acquire blocks for up to
+// about one refresh, which paces the loop to vsync.
 //
 // Each Window reuses one Context. It is valid until EndFrame, which must be
 // called once for every BeginFrame that returned ok=true.
@@ -102,11 +144,6 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
 		return nil, false
 	}
 	ws := window.surface
-	if window == a.primaryWindow {
-		if w, h, ok := a.renderLoop.ConsumePendingResize(); ok {
-			a.renderer.Resize(int(w), int(h))
-		}
-	}
 	physW, physH := window.platWindow.PhysicalSize()
 	if physW <= 0 || physH <= 0 {
 		// A surface cannot be configured at zero size: unconfigure it and
@@ -121,7 +158,7 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
 		ws.height = 0
 	}
 	a.syncFrameSurfaceSize(ws, physW, physH)
-	if !a.frameCallbackReady() {
+	if gate, ok := window.platWindow.(platform.FrameGater); ok && !gate.FrameCallbackReady() {
 		return nil, false
 	}
 
@@ -166,22 +203,36 @@ func (loop *HostLoop) EndFrame(context *Context) {
 	loop.framePool = 0
 }
 
-// Stop waits for the GPU, releases the device and surface and closes the
-// window, in Run's teardown order: GPU wait, deferred destroys, tracked
-// resources and onClose; renderer; window and platform; GPU instance. It
-// works after the user closed the window. The app cannot be started again.
+// Stop closes every window still open, with its surface, as a close does,
+// then waits for the GPU and releases the device and the platform, in Run's
+// teardown order: GPU wait, deferred destroys, tracked resources and
+// onClose; renderer; platform; GPU instance. The app cannot be started
+// again.
 func (loop *HostLoop) Stop() {
+	a := loop.app
+	a.windowManager.mu.RLock()
+	windows := slices.Clone(a.windowManager.order)
+	a.windowManager.mu.RUnlock()
+	for _, window := range windows {
+		a.closeSecondaryWindow(window)
+	}
+	loop.stop()
+}
+
+// stop marks the app stopped and tears it down in Run's order, closing the
+// window start created, if any.
+func (loop *HostLoop) stop() {
 	a := loop.app
 	a.running.Store(false)
 	a.lifecycle = AppIdle
 	a.shutdown(a.startedWindow)
 }
 
-// start creates the window, device and surface, shows the window and marks
-// the app running. GPU work goes through renderLoop: the calling thread for
-// a HostLoop, the render thread for Run. modalFrameCallback runs frames
-// inside a Windows modal move or resize loop; nil runs none. When the
-// platform or the renderer cannot start, it destroys what it had created.
+// start creates Run's window, device and surface, shows the window and marks
+// the app running. GPU work goes through renderLoop: the render thread for
+// Run. modalFrameCallback runs frames inside a Windows modal move or resize
+// loop; nil runs none. When the platform or the renderer cannot start, it
+// destroys what it had created.
 func (loop *HostLoop) start(renderLoop appRenderLoop, modalFrameCallback func()) error {
 	a := loop.app
 	platWindow, err := a.initPlatform()

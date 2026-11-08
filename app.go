@@ -393,7 +393,7 @@ func (a *App) Run() error {
 	if err := loop.start(thread.NewRenderLoop(), a.modalFrameTick); err != nil {
 		return err
 	}
-	defer loop.Stop()
+	defer loop.stop()
 
 	// Main loop with three rendering modes (ADR-023):
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
@@ -424,7 +424,7 @@ func (a *App) syncInitialSurfaceSize() {
 // safety.
 //  1. WaitForGPU / DrainDeferredDestroys / tracker.CloseAll / onClose
 //  2. Renderer.Destroy()     — release GPU surface/device/adapter (NOT instance)
-//  3. platWindow + manager   — close the OS window and the X11 Display
+//  3. platWindow + manager   — close the OS window, if any, and the X11 Display
 //  4. Renderer.ReleaseInstance() — unload the Vulkan driver (ICD) LAST
 //  5. renderLoop.Stop()      — stop the render thread last of all
 //
@@ -448,7 +448,9 @@ func (a *App) shutdown(platWindow platform.PlatformWindow) {
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer.Destroy()
 	})
-	platWindow.Destroy()
+	if platWindow != nil {
+		platWindow.Destroy()
+	}
 	a.manager.Destroy()
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer.ReleaseInstance()
@@ -537,22 +539,16 @@ var newPlatformManagerFn func() platform.PlatformManager = platform.NewManager
 // newRendererFn creates the renderer; replaced in tests to run without a GPU.
 var newRendererFn = newRenderer
 
+// newWindowlessRendererFn creates the renderer HostLoop starts with, before
+// any window; replaced in tests to run without a GPU.
+var newWindowlessRendererFn = newWindowlessRenderer
+
 // initPlatform initializes the platform manager, applies pending menu,
 // and creates the primary window. All operations must be on the main thread.
 func (a *App) initPlatform() (platform.PlatformWindow, error) {
-	// Initialize platform manager (process-level) — must be on main thread.
-	platform.SetLogger(slogger())
-	a.manager = newPlatformManagerFn()
-	if err := a.manager.Init(); err != nil {
+	if err := a.initPlatformManager(); err != nil {
 		return nil, err
 	}
-
-	// Apply application name if set in config.
-	if a.config.AppName != "" {
-		a.manager.SetAppName(a.config.AppName)
-	}
-
-	a.applyPendingMenus()
 
 	// Create primary platform window.
 	platWindow, err := a.manager.CreateWindow(platform.Config{
@@ -584,17 +580,36 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 
 	applyHeaderAlignment(platWindow, a.config.HeaderAlignment)
 
+	a.setupLiveResizeHook(platWindow)
+	a.setupLiveResizePhaseHooks(platWindow)
+
+	return platWindow, nil
+}
+
+// initPlatformManager initializes the platform manager with no window,
+// names the app, applies pending menus and creates the input subsystems.
+// It must run on the main thread.
+func (a *App) initPlatformManager() error {
+	platform.SetLogger(slogger())
+	a.manager = newPlatformManagerFn()
+	if err := a.manager.Init(); err != nil {
+		return err
+	}
+
+	// Apply application name if set in config.
+	if a.config.AppName != "" {
+		a.manager.SetAppName(a.config.AppName)
+	}
+
+	a.applyPendingMenus()
+
 	// Ensure input subsystems exist. Both EventSource() and Input() use
 	// lazy init so callers can register callbacks before Run(). We must
 	// NOT overwrite instances that were already created — UI frameworks
 	// register callbacks on the EventSource obtained before Run().
 	_ = a.Input()       // ensures a.inputState is initialized
 	_ = a.EventSource() // ensures a.eventSource is initialized
-
-	a.setupLiveResizeHook(platWindow)
-	a.setupLiveResizePhaseHooks(platWindow)
-
-	return platWindow, nil
+	return nil
 }
 
 // applyPendingMenus installs the menu bar and any system menu items that

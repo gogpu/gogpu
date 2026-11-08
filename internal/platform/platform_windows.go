@@ -904,6 +904,11 @@ func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 			w.setModalFrameCallback(cb)
 		}
 	}
+	// Borderless fullscreen restyles the window and covers its monitor
+	// without showing it, so a window opened fullscreen is shown fullscreen.
+	if config.Fullscreen {
+		w.SetFullscreen(true)
+	}
 	return w, nil
 }
 
@@ -1344,7 +1349,12 @@ func (p *windowsPlatform) WaitEvents() {
 
 // WakeUp unblocks WaitEvents from any goroutine.
 // PostMessageW is thread-safe and wakes MsgWaitForMultipleObjectsEx.
+// With no window open there is nothing to post to, and nothing waits:
+// only a HostLoop runs with no window, and it never calls WaitEvents.
 func (p *windowsPlatform) WakeUp() {
+	if p.primary == nil {
+		return
+	}
 	procPostMessageW.Call(uintptr(p.primary.hwnd), uintptr(wmWakeUp), 0, 0)
 }
 

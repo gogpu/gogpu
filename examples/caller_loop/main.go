@@ -1,5 +1,6 @@
 // Command caller_loop drives a window from a plain for loop through
-// gogpu.HostLoop, with no App.Run and no gogpu render thread. It clears each
+// gogpu.HostLoop, with no App.Run and no gogpu render thread: Start brings
+// up the device with no window, and NewWindow opens one. It clears each
 // frame to a shifting colour and prints, every second, the pump and frame
 // counts, allocations per pump and per frame, and the longest PumpEvents,
 // BeginFrame and EndFrame. Use it to check a platform by hand: move, resize,
@@ -32,6 +33,7 @@ func main() {
 	apiName := flag.String("api", "auto", "auto, vulkan, dx12, metal, gles")
 	vsync := flag.Bool("vsync", true, "Fifo present")
 	seconds := flag.Int("seconds", 0, "quit after this many seconds; 0 runs until the window closes")
+	fullscreen := flag.Bool("fullscreen", false, "open the window fullscreen")
 	memoryProfile := flag.String("memprofile", "", "write an allocation profile of every allocation here")
 	flag.Parse()
 	if *memoryProfile != "" {
@@ -42,17 +44,25 @@ func main() {
 		"dx12": types.GraphicsAPIDX12, "metal": types.GraphicsAPIMetal, "gles": types.GraphicsAPIGLES,
 	}[*apiName]
 
-	app := gogpu.NewApp(gogpu.DefaultConfig().
+	config := gogpu.DefaultConfig().
 		WithTitle("caller loop").
 		WithSize(800, 600).
 		WithGraphicsAPI(api).
-		WithVSync(*vsync))
-	app.OnResize(func(width, height int) { fmt.Printf("resize %dx%d\n", width, height) })
+		WithVSync(*vsync)
+	if *fullscreen {
+		config = config.WithFullscreen()
+	}
+	app := gogpu.NewApp(config)
 	loop := gogpu.NewHostLoop(app)
 	if err := loop.Start(); err != nil {
 		log.Fatal(err)
 	}
-	window := app.PrimaryWindow()
+	window, err := loop.NewWindow(config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	window.SetOnResize(func(width, height int) { fmt.Printf("resize %dx%d\n", width, height) })
+	window.Show()
 
 	allocations := []metrics.Sample{{Name: "/gc/heap/allocs:objects"}}
 	allocationCount := func() uint64 {

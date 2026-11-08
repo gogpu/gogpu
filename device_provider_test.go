@@ -31,7 +31,7 @@ func TestRendererDeviceProviderImplementation(t *testing.T) {
 // TestRendererDeviceProviderMethods tests the methods of rendererDeviceProvider.
 func TestRendererDeviceProviderMethods(t *testing.T) {
 	// Create a renderer with nil wgpu objects (no actual GPU needed).
-	// Surface format is stored on the primary RenderTarget.
+	// Surface format is stored on the renderer, shared by every window.
 	renderer := newTestRendererFull(800, 600, gputypes.TextureFormatBGRA8Unorm, "test")
 	renderer.device = nil // wgpu device is nil in test
 
