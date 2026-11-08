@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refocus or a workspace switch arrived. The wait now follows libwayland's multi-threaded protocol — `prepare_read` →
   `flush` → `poll` → `read_events`/`cancel_read` — and returns at once when the queue already holds events (SDL3
   `Wayland_WaitEventTimeout`, winit's wayland pump thread). No display lock is held across the poll.
+- **`EventSource.OnResize` never fired** (found in the #458 review). The callback was stored and nothing dispatched a
+  window resize to the event source, so `EventSource` subscribers never heard about one; a resize now reaches them
+  with the logical size, the same values `App.OnResize` receives.
 
 ## [0.54.1] - 2026-11-08
 

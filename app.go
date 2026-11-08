@@ -775,6 +775,12 @@ func (a *App) processEventsMultiThread() {
 			a.onResize(lastResize.Width, lastResize.Height)
 		}
 
+		// The EventSource contract carries the same callback; subscribers only
+		// saw it if the adapter was dispatched here (P2-EVENT-007).
+		if a.eventSource != nil {
+			a.eventSource.dispatchResize(lastResize.Width, lastResize.Height)
+		}
+
 		// Resize requires a render to reconfigure swapchain and repaint.
 		a.RequestRedraw()
 	}
