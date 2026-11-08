@@ -35,6 +35,7 @@ import (
 // EndFrame pops.
 type HostLoop struct {
 	app       *App
+	started   bool    // start succeeded and Stop has not torn the app down yet
 	framePool uintptr // macOS autorelease pool open between BeginFrame and EndFrame
 }
 
@@ -174,7 +175,15 @@ func (loop *HostLoop) EndFrame(context *Context) {
 // window, in Run's teardown order: GPU wait, deferred destroys, tracked
 // resources and onClose; renderer; window and platform; GPU instance. It
 // works after the user closed the window. The app cannot be started again.
+//
+// Stop does nothing unless this loop's Start succeeded, and nothing the
+// second time: a Start that failed has already destroyed what it created, so
+// a deferred Stop is safe whether Start succeeded or not.
 func (loop *HostLoop) Stop() {
+	if !loop.started {
+		return
+	}
+	loop.started = false
 	a := loop.app
 	a.running.Store(false)
 	a.lifecycle = AppIdle
@@ -207,6 +216,7 @@ func (loop *HostLoop) start(renderLoop appRenderLoop, modalFrameCallback func())
 	a.syncInitialSurfaceSize()
 	a.registerPrimaryWindow(platWindow)
 	a.startRunLoop()
+	loop.started = true
 	return nil
 }
 
