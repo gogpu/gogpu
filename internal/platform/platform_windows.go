@@ -278,6 +278,9 @@ const (
 	// Registry constants
 	hkeyCurrentUser uintptr = 0x80000001
 	keyRead         uintptr = 0x20019
+
+	// GDI GetDeviceCaps index for the screen DPI fallback (issue #472).
+	logpixelsx = 88 // LOGPIXELSX
 )
 
 // msgStruct is the Windows MSG structure for PeekMessage.
@@ -401,6 +404,7 @@ var (
 	gdi32                 = windows.NewLazyDLL("gdi32.dll")
 	procGetDC             = user32.NewProc("GetDC")
 	procReleaseDC         = user32.NewProc("ReleaseDC")
+	procGetDeviceCaps     = gdi32.NewProc("GetDeviceCaps")
 	procSetDIBitsToDevice = gdi32.NewProc("SetDIBitsToDevice")
 	procGetStockObject    = gdi32.NewProc("GetStockObject")
 	procCreateRectRgn     = gdi32.NewProc("CreateRectRgn")
@@ -751,6 +755,43 @@ func monitorDpiFromPoint(x, y int32, usePrimary bool) uint32 {
 	return dpiX
 }
 
+// dpiForWindow returns the window's effective DPI. user32!GetDpiForWindow
+// exists only from Windows 10 1607; on older systems the lazy call would panic
+// at the first window (issue #472), so the export is probed once and the screen
+// DC's LOGPIXELSX is the fallback. hwnd may be 0, which also selects the
+// fallback.
+func dpiForWindow(hwnd uintptr) uint32 {
+	dpiForWindowOnce.Do(func() {
+		dpiForWindowFound = procGetDpiForWindow.Find() == nil
+	})
+	return dpiForWindowWith(dpiForWindowFound, hwnd)
+}
+
+// dpiForWindowWith is the testable form of dpiForWindow: found says whether
+// user32 exports GetDpiForWindow.
+func dpiForWindowWith(found bool, hwnd uintptr) uint32 {
+	if found && hwnd != 0 {
+		if dpi, _, _ := procGetDpiForWindow.Call(hwnd); dpi != 0 {
+			return uint32(dpi)
+		}
+	}
+	hdc, _, _ := procGetDC.Call(0) // screen DC
+	if hdc == 0 {
+		return 96
+	}
+	dpi, _, _ := procGetDeviceCaps.Call(hdc, logpixelsx)
+	procReleaseDC.Call(0, hdc)
+	if dpi == 0 {
+		return 96
+	}
+	return uint32(dpi)
+}
+
+var (
+	dpiForWindowOnce  sync.Once
+	dpiForWindowFound bool
+)
+
 // adjustWindowRectForDpi adjusts r (initially client rect) to include the window frame
 // at the given DPI. Falls back to AdjustWindowRectEx on pre-Win10 1607 systems.
 func adjustWindowRectForDpi(r *rect, style uintptr, dpi uint32) {
@@ -868,8 +909,8 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 	// Post-create verify — if the window landed on a monitor with a
 	// different DPI than our guess, recalculate and reposition.
-	actualDpi, _, _ := procGetDpiForWindow.Call(hwnd)
-	if actualDpi != 0 && uint32(actualDpi) != guessDpi {
+	actualDpi := dpiForWindow(hwnd)
+	if actualDpi != guessDpi {
 		actualScale := float64(actualDpi) / 96.0
 		fixRect := rect{
 			left:   0,
@@ -877,7 +918,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 			right:  int32(float64(config.Width) * actualScale),
 			bottom: int32(float64(config.Height) * actualScale),
 		}
-		adjustWindowRectForDpi(&fixRect, style, uint32(actualDpi))
+		adjustWindowRectForDpi(&fixRect, style, actualDpi)
 		fixW := fixRect.right - fixRect.left
 		fixH := fixRect.bottom - fixRect.top
 		procSetWindowPos.Call(hwnd, 0, 0, 0,
@@ -1162,10 +1203,7 @@ func (w *win32Window) RequestSize(width, height int) {
 	}
 
 	// Scale logical DIP to physical pixels.
-	dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
-	if dpi == 0 {
-		dpi = 96
-	}
+	dpi := dpiForWindow(uintptr(w.hwnd))
 	scale := float64(dpi) / 96.0
 	physW := int32(float64(width) * scale)
 	physH := int32(float64(height) * scale)
@@ -1173,7 +1211,7 @@ func (w *win32Window) RequestSize(width, height int) {
 	// Add window frame to get outer dimensions.
 	style, _, _ := procGetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle)
 	outerRect := rect{left: 0, top: 0, right: physW, bottom: physH}
-	adjustWindowRectForDpi(&outerRect, style, uint32(dpi))
+	adjustWindowRectForDpi(&outerRect, style, dpi)
 
 	outerW := uintptr(outerRect.right - outerRect.left)
 	outerH := uintptr(outerRect.bottom - outerRect.top)
@@ -1217,10 +1255,7 @@ func (w *win32Window) Hide() {
 // scaling to physical pixels with the window's current DPI. Size and
 // Z-order are preserved (winit pattern).
 func (w *win32Window) SetPosition(x, y int) {
-	dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
-	if dpi == 0 {
-		dpi = 96
-	}
+	dpi := dpiForWindow(uintptr(w.hwnd))
 	scale := float64(dpi) / 96.0
 	physX := int32(float64(x) * scale)
 	physY := int32(float64(y) * scale)
@@ -1371,10 +1406,7 @@ func (w *win32Window) PhysicalSize() (width, height int) {
 // scaleFactor returns the DPI scale factor for the window.
 // Must NOT hold sizeMu (calls syscall).
 func (w *win32Window) scaleFactor() float64 {
-	dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
-	if dpi == 0 {
-		return 1.0
-	}
+	dpi := dpiForWindow(uintptr(w.hwnd))
 	return float64(dpi) / 96.0
 }
 
@@ -3081,8 +3113,8 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			// On Windows, WM_SIZE provides physical pixels (client rect).
 			// Compute logical size from DPI scale for the event.
 			logW, logH := newWidth, newHeight
-			dpi, _, _ := procGetDpiForWindow.Call(uintptr(w.hwnd))
-			if dpi > 0 && dpi != 96 {
+			dpi := dpiForWindow(uintptr(w.hwnd))
+			if dpi != 96 {
 				scale := float64(dpi) / 96.0
 				logW = int(float64(newWidth) / scale)
 				logH = int(float64(newHeight) / scale)

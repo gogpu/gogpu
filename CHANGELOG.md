@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows: startup on systems older than Windows 10 1607** (#472, @unxed). `user32!GetDpiForWindow` does not
+  exist there, and the lazy call panicked at the first window. The export is now probed once, and the screen DPI
+  (`GetDeviceCaps(LOGPIXELSX)`) is the fallback for every call site.
 - **Wayland: input stalls until the compositor sends unrelated traffic** (gogpu/ui#240). `WaitEvents` polled the
   display socket without holding libwayland's read intent, so the render thread's Mesa Vulkan WSI could read input
   events into our queue and leave the socket empty: the loop then slept through keyboard and mouse input until a
