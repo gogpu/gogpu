@@ -3215,25 +3215,23 @@ func (p *waylandPlatform) InSizeMove() bool {
 func (p *waylandPlatform) SetModalFrameCallback(_ func()) {}
 
 // WaitEvents blocks until at least one OS event is available.
-// Uses unix.Poll on the C display fd, wakeup pipe, and timerfd (BUG-INPUT-006)
-// to block with 0% CPU. The timerfd fires when a key repeat is due, unblocking
-// Poll so PollEvents can generate repeat events on the main thread.
+//
+// The wait follows libwayland's multi-threaded read protocol: take the read
+// intent (prepare_read) on every connection, flush, poll the socket fds, then
+// read_events on the readable ones and cancel_read on the rest. Without the
+// intent, a second reader — the render thread's Mesa Vulkan WSI on the same
+// wl_display (ADR-041) — can move events into our queue and leave the socket
+// empty, and this poll then sleeps through input until unrelated compositor
+// traffic arrives (gogpu/ui#240). No display lock is held across the poll.
 func (p *waylandPlatform) WaitEvents() {
 	if p.libwl == nil {
 		return
 	}
-	dispFd := p.libwl.GetDisplayFD()
-	if dispFd < 0 {
+	if p.libwl.GetDisplayFD() < 0 {
 		return
 	}
 
-	fds := []unix.PollFd{
-		{Fd: int32(dispFd), Events: unix.POLLIN | unix.POLLERR},
-		{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN},
-	}
-
-	// Add secondary connection FDs so WaitEvents unblocks when a secondary window
-	// receives compositor events (resize, close, etc.).
+	// Secondary connections take their own read intent: each has its own display.
 	// Safety: secs copies the slice header (pointer+len) under RLock. Iteration
 	// happens after RUnlock, which is safe because WaitEvents and all secondary
 	// creation/destruction run on the same main thread — no concurrent mutation
@@ -3241,28 +3239,29 @@ func (p *waylandPlatform) WaitEvents() {
 	p.secondaryMu.RLock()
 	secs := p.secondaries
 	p.secondaryMu.RUnlock()
+
+	conns := make([]wayland.EventConn, 0, 1+len(secs))
+	conns = append(conns, p.libwl)
 	for _, sec := range secs {
-		if fd := sec.libwl.GetDisplayFD(); fd >= 0 {
-			fds = append(fds, unix.PollFd{Fd: int32(fd), Events: unix.POLLIN | unix.POLLERR})
+		if sec.libwl != nil && sec.libwl.GetDisplayFD() >= 0 {
+			conns = append(conns, sec.libwl)
 		}
 	}
 
-	// BUG-INPUT-006: Add timerfd to poll set when a key is actively repeating.
-	// This makes unix.Poll wake up when the repeat timer fires instead of
-	// requiring a goroutine + WakeUp() call.
+	// BUG-INPUT-006: the repeat timerfd joins the wait so a due key repeat
+	// unblocks the wait without a goroutine and a WakeUp call.
 	w := p.primary
 	w.repeatMu.Lock()
 	repeatFd := w.repeatFd
 	hasRepeat := w.repeatKey != 0
 	w.repeatMu.Unlock()
 
+	extra := []unix.PollFd{{Fd: int32(p.wakePipe[0]), Events: unix.POLLIN}}
 	if repeatFd >= 0 && hasRepeat {
-		fds = append(fds, unix.PollFd{Fd: int32(repeatFd), Events: unix.POLLIN})
+		extra = append(extra, unix.PollFd{Fd: int32(repeatFd), Events: unix.POLLIN})
 	}
 
-	// Block indefinitely until an event arrives, WakeUp is called,
-	// or the repeat timer fires.
-	_, _ = unix.Poll(fds, -1)
+	wayland.WaitForReadable(conns, extra)
 
 	// Drain the wakeup pipe so it is ready for the next WakeUp call.
 	drainPipe(p.wakePipe[0])

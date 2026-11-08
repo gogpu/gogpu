@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after recording, the same way Rust wgpu handles a dropped handle, and Vulkan descriptor pools always include the
   dynamic buffer types.
 
+### Fixed
+
+- **Wayland: input stalls until the compositor sends unrelated traffic** (gogpu/ui#240). `WaitEvents` polled the
+  display socket without holding libwayland's read intent, so the render thread's Mesa Vulkan WSI could read input
+  events into our queue and leave the socket empty: the loop then slept through keyboard and mouse input until a
+  refocus or a workspace switch arrived. The wait now follows libwayland's multi-threaded protocol — `prepare_read` →
+  `flush` → `poll` → `read_events`/`cancel_read` — and returns at once when the queue already holds events (SDL3
+  `Wayland_WaitEventTimeout`, winit's wayland pump thread). No display lock is held across the poll.
+
 ## [0.54.1] - 2026-11-08
 
 ### Fixed
