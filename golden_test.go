@@ -49,7 +49,7 @@ type goldenScene struct {
 //   - timing_test     — uses internal/platform directly, no wgpu
 //   - window_only     — no wgpu
 //   - gpucontext_integration — no pixel output (prints adapter info)
-//   - particles       — GPU compute via DeviceProvider (not available headlessly)
+//   - particles       — GPU compute via GPUContextProvider (not available headlessly)
 //   - multistage_particle_pipeline — same as particles
 func goldenScenes() []goldenScene {
 	return []goldenScene{

@@ -31,9 +31,6 @@ func TestDefaultConfigValues(t *testing.T) {
 	if cfg.Fullscreen {
 		t.Error("Fullscreen = true, want false")
 	}
-	if cfg.Backend != types.BackendAuto {
-		t.Errorf("Backend = %v, want BackendAuto", cfg.Backend)
-	}
 	if cfg.GraphicsAPI != types.GraphicsAPIAuto {
 		t.Errorf("GraphicsAPI = %v, want GraphicsAPIAuto", cfg.GraphicsAPI)
 	}
@@ -92,36 +89,6 @@ func TestConfigWithSize(t *testing.T) {
 				t.Errorf("Height = %d, want %d", cfg.Height, tt.height)
 			}
 		})
-	}
-}
-
-func TestDeprecatedConfigWithBackendCompatibility(t *testing.T) {
-	tests := []struct {
-		name    string
-		backend types.BackendType
-	}{
-		{"auto", types.BackendAuto},
-		{"rust", types.BackendRust},
-		{"native", types.BackendNative},
-		{"go alias", types.BackendGo},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := DefaultConfig().WithBackend(tt.backend)
-			if cfg.Backend != tt.backend {
-				t.Errorf("Backend = %v, want %v", cfg.Backend, tt.backend)
-			}
-		})
-	}
-}
-
-func TestDeprecatedBackendDoesNotOverrideGraphicsAPI(t *testing.T) {
-	cfg := DefaultConfig().
-		WithGraphicsAPI(types.GraphicsAPIVulkan).
-		WithBackend(types.BackendRust)
-	if cfg.GraphicsAPI != types.GraphicsAPIVulkan {
-		t.Fatalf("deprecated backend selection changed GraphicsAPI to %v", cfg.GraphicsAPI)
 	}
 }
 
@@ -261,11 +228,6 @@ func TestConfigImmutability(t *testing.T) {
 		t.Errorf("Original Size was mutated to %dx%d, want 800x600", original.Width, original.Height)
 	}
 
-	_ = original.WithBackend(types.BackendRust)
-	if original.Backend != types.BackendAuto {
-		t.Errorf("Original Backend was mutated to %v, want BackendAuto", original.Backend)
-	}
-
 	_ = original.WithGraphicsAPI(types.GraphicsAPIVulkan)
 	if original.GraphicsAPI != types.GraphicsAPIAuto {
 		t.Errorf("Original GraphicsAPI was mutated to %v, want GraphicsAPIAuto", original.GraphicsAPI)
@@ -279,21 +241,6 @@ func TestConfigImmutability(t *testing.T) {
 	_ = original.WithFrameless(true)
 	if original.Frameless {
 		t.Error("Original Frameless was mutated to true, want false")
-	}
-}
-
-func TestDeprecatedBackendConstantsCompatibility(t *testing.T) {
-	if BackendAuto != types.BackendAuto {
-		t.Errorf("BackendAuto = %v, want %v", BackendAuto, types.BackendAuto)
-	}
-	if BackendRust != types.BackendRust {
-		t.Errorf("BackendRust = %v, want %v", BackendRust, types.BackendRust)
-	}
-	if BackendNative != types.BackendNative {
-		t.Errorf("BackendNative = %v, want %v", BackendNative, types.BackendNative)
-	}
-	if BackendGo != types.BackendGo {
-		t.Errorf("BackendGo = %v, want %v", BackendGo, types.BackendGo)
 	}
 }
 
@@ -315,12 +262,6 @@ func TestReExportedGraphicsAPIConstants(t *testing.T) {
 	}
 	if GraphicsAPISoftware != types.GraphicsAPISoftware {
 		t.Errorf("GraphicsAPISoftware = %v, want %v", GraphicsAPISoftware, types.GraphicsAPISoftware)
-	}
-}
-
-func TestDeprecatedBackendGoIsNativeAlias(t *testing.T) {
-	if BackendGo != BackendNative {
-		t.Errorf("BackendGo (%v) != BackendNative (%v), expected them to be the same", BackendGo, BackendNative)
 	}
 }
 
@@ -467,5 +408,37 @@ func TestConfigWithIcon(t *testing.T) {
 	cfg2 := cfg.WithIcon(nil)
 	if cfg2.Icon != nil {
 		t.Fatal("WithIcon(nil): Icon field not cleared")
+	}
+}
+
+// TestDefaultConfig verifies default configuration.
+func TestDefaultConfig(t *testing.T) {
+	config := DefaultConfig()
+
+	if config.Title == "" {
+		t.Error("DefaultConfig should have a non-empty Title")
+	}
+	if config.Width <= 0 {
+		t.Error("DefaultConfig should have positive Width")
+	}
+	if config.Height <= 0 {
+		t.Error("DefaultConfig should have positive Height")
+	}
+}
+
+// TestConfigBuilder tests the fluent configuration API.
+func TestConfigBuilder(t *testing.T) {
+	config := DefaultConfig().
+		WithTitle("Test Window").
+		WithSize(1024, 768)
+
+	if config.Title != "Test Window" {
+		t.Errorf("Title = %q, want %q", config.Title, "Test Window")
+	}
+	if config.Width != 1024 {
+		t.Errorf("Width = %d, want %d", config.Width, 1024)
+	}
+	if config.Height != 768 {
+		t.Errorf("Height = %d, want %d", config.Height, 768)
 	}
 }
