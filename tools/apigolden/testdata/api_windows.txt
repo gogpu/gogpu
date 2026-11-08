@@ -320,6 +320,7 @@ type HeaderAlignment int
 type HostLoop struct {
 }
 method (*HostLoop) BeginFrame(window *Window) (*Context, bool)
+method (*HostLoop) ConsumeRedrawRequest() bool
 method (*HostLoop) EndFrame(context *Context)
 method (*HostLoop) PumpEvents()
 method (*HostLoop) Running() bool

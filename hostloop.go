@@ -86,6 +86,22 @@ func (loop *HostLoop) Running() bool {
 	return a.running.Load() && (a.platWindow == nil || !a.platWindow.ShouldClose())
 }
 
+// ConsumeRedrawRequest reports whether a redraw was requested since its last
+// call, and clears the request. Requests come from App.RequestRedraw and the
+// GPU context provider's RequestRedraw, from any goroutine; from the events
+// PumpEvents dispatches that change what a window shows, such as a resize or
+// a focus change; and from an EndFrame whose surface turned out outdated.
+// Start requests the first frame.
+//
+// A host that draws on demand calls it once per tick and draws its windows
+// when it reports true, as Run does: the request is the App's, not one
+// window's. Config.ContinuousRender does not apply to a HostLoop; the host
+// draws whenever it chooses.
+func (loop *HostLoop) ConsumeRedrawRequest() bool {
+	invalidator := loop.app.invalidator
+	return invalidator != nil && invalidator.Consume()
+}
+
 // BeginFrame applies the window's latest size to its surface and acquires the
 // next swapchain image, so the returned Context can be recorded into at once.
 // A surface that was lost or unconfigured is reconfigured, even at an
