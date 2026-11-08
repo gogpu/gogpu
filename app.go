@@ -714,8 +714,8 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer, initErr = newRendererFn(
-			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
-			a.config.Transparent, a.config.RequiredFeatures,
+			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.Transparent,
+			deviceRequestFrom(&a.config),
 		)
 	})
 	if initErr != nil {

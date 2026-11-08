@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -232,11 +234,8 @@ type Renderer struct {
 	deferredDestroys   []func()
 	deferredDestroysMu sync.Mutex
 
-	// PowerPreference for adapter selection
-	powerPreference gputypes.PowerPreference
-
-	// requiredFeatures are the optional device features Config asked for.
-	requiredFeatures gputypes.Features
+	// deviceRequest is what Config asks of the adapter and its device.
+	deviceRequest deviceRequest
 
 	// Primary RenderTarget — backward compatibility for single-window API.
 	// TODO(lifecycle-phase3): remove once all callers use per-window surfaces.
@@ -261,11 +260,8 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool, requiredFeatures gputypes.Features) (*Renderer, error) {
-	r := &Renderer{
-		powerPreference:  powerPref,
-		requiredFeatures: requiredFeatures,
-	}
+func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, transparent bool, request deviceRequest) (*Renderer, error) {
+	r := &Renderer{deviceRequest: request}
 	r.primary = &RenderTarget{
 		renderer:    r,
 		platWindow:  platWin,
@@ -303,10 +299,8 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 // surface, for HostLoop, whose windows bring their own. It has no primary
 // surface. A Vulkan adapter requested without a surface picks its graphics
 // queue without asking whether it can present.
-func newWindowlessRenderer(graphicsAPI types.GraphicsAPI, powerPref gputypes.PowerPreference) (*Renderer, error) {
-	r := &Renderer{
-		powerPreference: powerPref,
-	}
+func newWindowlessRenderer(graphicsAPI types.GraphicsAPI, request deviceRequest) (*Renderer, error) {
+	r := &Renderer{deviceRequest: request}
 	if err := r.initInstance(graphicsAPI); err != nil {
 		r.ReleaseInstance()
 		return nil, err
@@ -356,7 +350,7 @@ func newHeadlessRendererWithRuntime(graphicsAPI []types.GraphicsAPI, runtime hea
 	}
 
 	r := &Renderer{
-		powerPreference: gputypes.PowerPreferenceHighPerformance,
+		deviceRequest: deviceRequest{powerPreference: gputypes.PowerPreferenceHighPerformance},
 	}
 	r.primary = &RenderTarget{renderer: r}
 
@@ -399,9 +393,11 @@ func (r *Renderer) initInstance(graphicsAPI types.GraphicsAPI) error {
 // surfaceHint is non-nil only for GLES: it feeds EnumerateAdapters so the
 // backend can return a real adapter backed by a live EGL context.
 func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
+	request := r.deviceRequest
 	opts := &wgpu.RequestAdapterOptions{
-		PowerPreference:   r.powerPreference,
-		CompatibleSurface: surfaceHint,
+		PowerPreference:      request.powerPreference,
+		ForceFallbackAdapter: request.forceFallbackAdapter,
+		CompatibleSurface:    surfaceHint,
 	}
 	var err error
 	r.adapter, err = r.instance.RequestAdapter(opts)
@@ -412,6 +408,13 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
 
+	// Check the request before making it: Vulkan and Metal ignore the
+	// features and limits an adapter lacks, and DX12 checks only features, so
+	// a device could come back that quietly cannot do what was asked.
+	if err := request.check(r.adapter); err != nil {
+		return err
+	}
+
 	// Create the device with the features the app asked for. Passing nil here
 	// creates a device with no optional features at all, which silently costs
 	// any consumer reaching for one through DeviceProvider - a non-zero
@@ -419,11 +422,66 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	// IndirectFirstInstance.
 	r.device, err = r.adapter.RequestDevice(&wgpu.DeviceDescriptor{
 		Label:            "gogpu",
-		RequiredFeatures: r.requiredFeatures,
+		RequiredFeatures: request.requiredFeatures,
+		RequiredLimits:   request.requiredLimits,
 	})
 	if err != nil {
 		return fmt.Errorf("gogpu: failed to request device with features %v (adapter supports %v): %w",
-			r.requiredFeatures, r.adapter.Features(), err)
+			request.requiredFeatures, r.adapter.Features(), err)
+	}
+	return nil
+}
+
+// deviceRequest is what Config asks of the adapter and its device.
+type deviceRequest struct {
+	powerPreference      gputypes.PowerPreference
+	forceFallbackAdapter bool
+	requiredFeatures     gputypes.Features
+	// requiredLimits are zero when Config asked for the adapter's own.
+	requiredLimits gputypes.Limits
+}
+
+// deviceRequestFrom returns the device request config makes.
+func deviceRequestFrom(config *Config) deviceRequest {
+	request := deviceRequest{
+		powerPreference:      config.PowerPreference,
+		forceFallbackAdapter: config.ForceFallbackAdapter,
+		requiredFeatures:     config.RequiredFeatures,
+	}
+	if config.RequiredLimits != nil {
+		request.requiredLimits = *config.RequiredLimits
+	}
+	return request
+}
+
+// check returns an error naming every required feature adapter lacks and
+// every required limit it cannot supply: a maximum above its own, or an
+// alignment (a limit named Min...) below it. Zero required limits, the
+// adapter's own, are not checked.
+func (request deviceRequest) check(adapter *wgpu.Adapter) error {
+	var lacking []string
+	missing := request.requiredFeatures &^ adapter.Features()
+	for bit := gputypes.Feature(1); missing != 0; bit <<= 1 {
+		if missing&gputypes.Features(bit) != 0 {
+			lacking = append(lacking, "feature "+bit.String())
+			missing &^= gputypes.Features(bit)
+		}
+	}
+	if request.requiredLimits != (gputypes.Limits{}) {
+		required := reflect.ValueOf(request.requiredLimits)
+		supported := reflect.ValueOf(adapter.Limits())
+		for i := range required.NumField() {
+			name := required.Type().Field(i).Name
+			want := required.Field(i).Uint()
+			have := supported.Field(i).Uint()
+			alignment := strings.HasPrefix(name, "Min")
+			if (alignment && want < have) || (!alignment && want > have) {
+				lacking = append(lacking, fmt.Sprintf("limit %s %d (adapter: %d)", name, want, have))
+			}
+		}
+	}
+	if len(lacking) > 0 {
+		return fmt.Errorf("gogpu: adapter %q cannot supply %s", adapter.Info().Name, strings.Join(lacking, ", "))
 	}
 	return nil
 }

@@ -70,7 +70,7 @@ func (loop *HostLoop) Start() error {
 	}
 	// No modal tick: nothing may call into the frame path from inside PumpEvents.
 	a.renderLoop = &inlineRenderLoop{}
-	renderer, err := newWindowlessRendererFn(a.config.GraphicsAPI, a.config.PowerPreference)
+	renderer, err := newWindowlessRendererFn(a.config.GraphicsAPI, deviceRequestFrom(&a.config))
 	if err != nil {
 		a.manager.Destroy()
 		return err

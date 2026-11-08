@@ -11,6 +11,8 @@ import (
 	"github.com/gogpu/gogpu/input"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu"
 )
 
 // queuedEventManager hands out its windows in order from CreateWindow,
@@ -48,10 +50,21 @@ func (m *queuedEventManager) PollEvents() platform.Event {
 func (m *queuedEventManager) rewind() { m.nextEvent = 0 }
 
 // startedHostLoopWithNoWindow starts a HostLoop on the software backend over a
+// platform that hands out windows, in order, to NewWindow.
+func startedHostLoopWithNoWindow(t *testing.T, windows []platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
+	t.Helper()
+	app, loop, manager := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), windows, events...)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	return app, loop, manager
+}
+
+// hostLoopOver returns a HostLoop, not started, over an app with config and a
 // platform that hands out windows, in order, to NewWindow. It locks the test
 // to its OS thread, as HostLoop requires: on macOS a frame's autorelease pool
 // must be popped on the thread that pushed it.
-func startedHostLoopWithNoWindow(t *testing.T, windows []platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
+func hostLoopOver(t *testing.T, config Config, windows []platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
 	t.Helper()
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
@@ -60,12 +73,8 @@ func startedHostLoopWithNoWindow(t *testing.T, windows []platform.PlatformWindow
 	newPlatformManagerFn = func() platform.PlatformManager { return manager }
 	t.Cleanup(func() { newPlatformManagerFn = oldManager })
 
-	app := NewApp(DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware))
-	loop := NewHostLoop(app)
-	if err := loop.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	return app, loop, manager
+	app := NewApp(config)
+	return app, NewHostLoop(app), manager
 }
 
 // startedHostLoop starts a HostLoop on the software backend, then opens
@@ -139,6 +148,84 @@ func TestHostLoop_StartOpensNoWindow(t *testing.T) {
 	}
 	if app.DeviceProvider().Device() == nil {
 		t.Error("Start with no window brought up no device")
+	}
+}
+
+func TestHostLoop_StartRequestsTheFallbackAdapter(t *testing.T) {
+	config := DefaultConfig().WithGraphicsAPI(types.GraphicsAPIAuto)
+	config.ForceFallbackAdapter = true
+	app, loop, _ := hostLoopOver(t, config, nil)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer loop.Stop()
+
+	if got := app.renderer.adapter.Info().DeviceType; got != gputypes.DeviceTypeCPU {
+		t.Errorf("adapter type with ForceFallbackAdapter: got %v, want %v", got, gputypes.DeviceTypeCPU)
+	}
+}
+
+func TestHostLoop_StartKeepsTheRequiredLimits(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	limits.MaxTextureDimension2D = 1024
+	config := DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware)
+	config.RequiredLimits = &limits
+	app, loop, _ := hostLoopOver(t, config, nil)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer loop.Stop()
+
+	device := app.renderer.device
+	if got := device.Limits(); got != limits {
+		t.Errorf("device limits: got %+v, want %+v", got, limits)
+	}
+	texture, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Size:          wgpu.Extent3D{Width: 2048, Height: 1, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
+	})
+	if err == nil {
+		texture.Release()
+		t.Error("CreateTexture beyond the required MaxTextureDimension2D: got no error")
+	}
+}
+
+func TestHostLoop_StartFailsNamingWhatTheAdapterLacks(t *testing.T) {
+	beyondBindGroups := gputypes.DefaultLimits()
+	beyondBindGroups.MaxBindGroups = 1 << 20
+	belowAlignment := gputypes.DefaultLimits()
+	belowAlignment.MinUniformBufferOffsetAlignment = 1
+	tests := []struct {
+		name     string
+		features gputypes.Features
+		limits   *gputypes.Limits
+		want     []string
+	}{
+		{"feature", gputypes.Features(gputypes.FeatureTimestampQuery), nil, []string{"TimestampQuery"}},
+		{"maximum beyond", 0, &beyondBindGroups, []string{"MaxBindGroups"}},
+		{"alignment below", 0, &belowAlignment, []string{"MinUniformBufferOffsetAlignment"}},
+		{"feature and limit", gputypes.Features(gputypes.FeatureTimestampQuery), &beyondBindGroups, []string{"TimestampQuery", "MaxBindGroups"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware).WithRequiredFeatures(test.features)
+			config.RequiredLimits = test.limits
+			_, loop, _ := hostLoopOver(t, config, nil)
+			err := loop.Start()
+			if err == nil {
+				loop.Stop()
+				t.Fatal("Start: got no error")
+			}
+			for _, name := range test.want {
+				if !strings.Contains(err.Error(), name) {
+					t.Errorf("Start error %q does not name %s", err, name)
+				}
+			}
+		})
 	}
 }
 

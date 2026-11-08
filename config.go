@@ -108,6 +108,18 @@ type Config struct {
 	// DeviceProvider is the one that has to say.
 	RequiredFeatures gputypes.Features
 
+	// RequiredLimits are the limits the device is created with and validates
+	// against, a full set as gputypes.DefaultLimits returns one. A limit the
+	// adapter cannot supply fails the request by name, as a feature does: a
+	// maximum above the adapter's, or an alignment below it.
+	//
+	// Nil asks for the adapter's own limits.
+	RequiredLimits *gputypes.Limits
+
+	// ForceFallbackAdapter requests wgpu's software adapter whatever the
+	// GraphicsAPI, for rendering where no GPU is available.
+	ForceFallbackAdapter bool
+
 	// RenderMode controls 2D rendering path selection (ADR-020).
 	// RenderModeAuto (default): CPU rasterizer on software adapter, GPU on real hardware.
 	// Can be overridden via GOGPU_RENDER_MODE=auto|cpu|gpu environment variable.
