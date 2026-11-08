@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **API cleanup** (#458, @besmpl). `FileDialogOptions` and `FileTypeFilter` are now gogpu-owned types instead of
+  aliases into the platform package: the dialog path converts them at the platform boundary and copies the caller's
+  slices, so a platform dialog cannot mutate them. `App.DeviceProvider`, the `DeviceProvider` interface,
+  `Config.Backend`, `WithBackend` and the `BackendAuto`/`BackendRust`/`BackendNative`/`BackendGo` constants are
+  deprecated: the implementation is chosen by wgpu build tags (ADR-038), and `GraphicsAPI` or `GOGPU_GRAPHICS_API`
+  selects the graphics API. Use `App.GPUContextProvider()` with `wgpu.DeviceFromHandle` instead. The deprecated
+  symbols are removed in a follow-up before the next minor release. Dead event-source dispatch helpers are gone,
+  `mapTextureFormat` becomes `allowedSurfaceFormat`, and `doc.go`, the README and ARCHITECTURE.md now describe the
+  current platform support and DIP dimensions.
 - **Dependencies:** wgpu v0.34.10, naga v0.21.5. wgpu now accepts command buffers whose resources were released
   after recording, the same way Rust wgpu handles a dropped handle, and Vulkan descriptor pools always include the
   dynamic buffer types.
