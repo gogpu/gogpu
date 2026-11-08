@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Textured quads share the frame encoder** (#461, @besmpl). `DrawTexture*` records into the frame's single command
+  encoder and batches consecutive quads in one render pass, with per-frame uniform chunks addressed by dynamic offsets.
+  One encoder and one submit per frame instead of one per quad. Clear and external passes keep their order.
+
 ### Changed
 
 - **Dependencies:** wgpu v0.34.10, naga v0.21.5. wgpu now accepts command buffers whose resources were released
