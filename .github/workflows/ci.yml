@@ -85,6 +85,10 @@ jobs:
     name: Test - ${{ matrix.os }} - Go ${{ matrix.go-version }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # Each OS and Go version is separate evidence: with the default, one
+      # failure cancels the other legs and their results never show
+      # (gogpu/ui#247, run 42469289570, 2026-11-08).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         # The two supported releases. The go.mod minimum is the test-minimum
