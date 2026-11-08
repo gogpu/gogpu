@@ -57,6 +57,14 @@ jobs:
     - name: Build examples
       run: go build ./examples/...
 
+    # The browser platform (js && wasm files) is compiled nowhere else in CI.
+    - name: Build for the browser (js/wasm)
+      if: matrix.os == 'ubuntu-latest'
+      env:
+        GOOS: js
+        GOARCH: wasm
+      run: go build ./...
+
   # Unit tests - Cross-platform
   test:
     name: Test - ${{ matrix.os }}
@@ -152,7 +160,46 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v8
       with:
-        version: latest
+        # Pinned: with "latest" a new golangci-lint release can enable or
+        # tighten a linter and turn an unchanged commit red. Bump on purpose,
+        # in its own PR, and keep lint-targets on the same version.
+        version: v2.15.0
+        args: --timeout=5m
+
+  # Lint for the other desktop targets. golangci-lint type-checks only the
+  # files the target's build compiles, so the darwin and windows files are
+  # never linted by the Linux job above. The code is pure Go (CGO_ENABLED=0),
+  # so GOOS/GOARCH on a Linux runner select exactly those files, with no need
+  # for slower macOS or Windows runners. A file that does not type-check makes
+  # golangci-lint exit non-zero, so a broken target cannot pass as "0 issues".
+  # One GOARCH per GOOS is enough: no file in the module is arch-specific.
+  lint-targets:
+    name: Lint - ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v8
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      with:
+        version: v2.15.0
         args: --timeout=5m
 
   # Code formatting check
@@ -264,3 +311,27 @@ jobs:
           exit 1
         fi
         echo "✅ internal/compositor has no reverse imports"
+
+  # The one check the main-protection ruleset requires. Every job that must
+  # pass goes into needs, so adding a job or a matrix entry never touches the
+  # ruleset. if: always() and the explicit result check are both needed: a job
+  # skipped because a job it needs failed or was cancelled counts as passed
+  # for a required check, so without them a red PR could go green.
+  required:
+    name: Required checks
+    if: always()
+    needs: [build, test, golden-tests, lint, lint-targets, formatting, deps]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Every required job succeeded
+      env:
+        RESULTS: ${{ join(needs.*.result, ' ') }}
+      run: |
+        echo "results: $RESULTS"
+        for r in $RESULTS; do
+          if [ "$r" != success ]; then
+            echo "::error::a required job ended with: $r"
+            exit 1
+          fi
+        done
