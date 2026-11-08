@@ -7,15 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.54.1] - 2026-11-08
+
 ### Fixed
 
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
 - **Go memory passed to C as `uintptr`** — 39 places on macOS, Linux (Wayland, X11, xkbcommon) and in Windows printing handed a Go address to native code as a plain `uintptr` through a Go wrapper (objc `msgSend`, the Wayland marshal helpers, a goffi argument slot, a func value). Such an address is invisible to the GC and to the stack copier: if the goroutine stack grew on the way to the call, the native side read or wrote the old stack. The objects are now pinned with `runtime.Pinner` or passed as `unsafe.Pointer`. `xkb_rule_names` is built from `unsafe.Pointer` fields, and the `_ = buf` lines that were meant to keep the strings alive (and did not) are gone. `TestFFIPointersArePinned` guards the pattern (39 failures on the old code).
-- **`PresentTexture` on the software backend no longer runs a shader** (P1-PRESENT-002). A texture that fills the surface at its size as the frame's only content is read back and presented as pixels at `EndFrame`, the route `ggcanvas` already uses for CPU pixmaps. Any later draw or clear in the same frame draws it through the pipeline first, so the frame is unchanged. Upcoming wgpu releases run the software backend's shaders instead of treating such draws as a plain copy; without this change a 1280×720 present would take seconds per frame. Textured draws that are positioned, scaled or translucent (`DrawTexture`, `DrawTextureEx`) stay on the pipeline: correct, but slow on the software backend until it compiles shaders (wgpu P1-SW-023). On a CPU adapter, gogpu textures now also carry `CopySrc` usage.
+- **`PresentTexture` on the software backend no longer runs a shader** (P1-PRESENT-002). A texture that fills the surface at its size as the frame's only content is read back and presented as pixels at `EndFrame`, the route `ggcanvas` already uses for CPU pixmaps. Any later draw or clear in the same frame draws it through the pipeline first, so the frame is unchanged. Since wgpu v0.34.7 the software backend runs these shaders instead of treating such draws as a plain copy; without this change a 1280×720 present would take seconds per frame. Textured draws that are positioned, scaled or translucent (`DrawTexture`, `DrawTextureEx`) stay on the pipeline: correct, but slow on the software backend until it compiles shaders (wgpu P1-SW-023). On a CPU adapter, gogpu textures now also carry `CopySrc` usage.
+
+- **Windows: `WithFullscreen()` opened a normal decorated window** (#493, #508, @kivutar). The initial fullscreen state is now applied while the window is still hidden, so the first surface is created at monitor size and toggling back restores the configured size and decorations.
+- **Wayland: about 20 "still attached" warnings at exit with client-side decorations** (#518, @dvoyni). `Close` now destroys the decoration surfaces, subsurfaces, SHM pools and buffers, the CSD pointer and seats, `wl_shm` and `wl_subcompositor`, and the resize and hide paths free the client proxies they used to leak.
+- **macOS: `SetFullscreen` on a running window froze the main thread** (#522, @dvoyni). `ToggleFullScreen` held the window mutex while AppKit delivered the live-resize callbacks synchronously, and those take the same mutex.
+- **macOS: the cursor stayed hidden after `SetCursor(CursorNone)`** (#523, @dvoyni). Any other shape now unhides it, and repeated `CursorNone` calls no longer stack hides.
+- **Panics inside `Call`/`CallVoid` lost the original stack** (#481, #494, @lkmavi). The worker's stack is captured at `recover` and printed before the re-panic on the caller.
 
 ### Changed
 
+- **Windows: keys are reported by physical position (scancode), not by virtual key** (#520, @dvoyni). This matches macOS, X11, Wayland and the browser, and GLFW and winit. On non-US layouts a key now reports the US QWERTY key in its position: on AZERTY the key labelled A reports `KeyQ`. Use `OnTextInput` for the character a key types. Numpad keys report `KeyNumpad0`–`KeyNumpad9` and `KeyNumpadDecimal` with Num Lock off too.
+- **Dependencies:** wgpu v0.34.2 → v0.34.9, naga v0.19.0 → v0.21.4, goffi v0.6.3 → v0.6.8, gputypes v0.8.0 → v0.8.2. golang.org/x/sys stays at v0.47.0, the last release that supports Go 1.25. naga v0.21.4 contains the fix for GHSA-887q-cf99-367r (stack overflow in the WGSL parser on untrusted shaders), so `govulncheck` no longer flags gogpu builds.
+- **Golden tests:** the `texture` and `hidpi-lowres` goldens were regenerated. Up to wgpu v0.34.6 they recorded the software backend's old full-surface-copy shortcut instead of positioned, scaled, translucent and bilinear-filtered quads. A new hermetic test checks both against a CPU reference of WebGPU semantics, within one 8-bit step.
 - **CONTRIBUTING.md** — merge strategy (squash vs regular merge), project structure, AI-assisted contributions (Smart Coding) policy, ecosystem versions, platform support
+
+### Known issues
+
+- A module that requires the latest gogpu **and** the latest gg (v0.52.5) does not build yet, because gg v0.52.5 predates an API change in gogpu (gogpu/ui#239). gg v0.52.6 fixes it.
 
 ## [0.54.0] - 2026-08-31
 
@@ -2918,7 +2933,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.20.5...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.54.1...HEAD
+[0.54.1]: https://github.com/gogpu/gogpu/compare/v0.54.0...v0.54.1
 [0.20.5]: https://github.com/gogpu/gogpu/compare/v0.20.4...v0.20.5
 [0.20.4]: https://github.com/gogpu/gogpu/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/gogpu/gogpu/compare/v0.20.2...v0.20.3
