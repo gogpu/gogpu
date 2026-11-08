@@ -1028,3 +1028,113 @@ func TestDarwinApplicationInitDestroyLoop(t *testing.T) {
 		}
 	})
 }
+
+// TestDarwinSurfaceSetContentsScale covers the display-change path: the
+// window moved to a display with another backing scale, and PrepareFrame
+// updates contentsScale on the render thread without touching the drawable.
+//
+// The steps run like the render thread: on a locked OS thread with no run
+// loop, while the main thread waits, each after wgpu-style layer updates
+// (setContentsGravity:) that open an implicit CATransaction nothing commits.
+// The new scale must still reach the presentation layer; before the flush in
+// SetContentsScale it stayed at the old value, and a 2x->1x move showed the
+// picture in the top-left quarter.
+//
+// Failures use t.Errorf: t.Fatalf on the main-thread runner would end the
+// task loop and hang the test binary.
+func TestDarwinSurfaceSetContentsScale(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("struct argument/return tests require arm64")
+	}
+	rt := loadObjcRuntime(t)
+
+	runOnMainThread(t, func() {
+		app := platformdarwin.GetApplication()
+		if err := app.Init(); err != nil {
+			t.Errorf("Application.Init failed: %v", err)
+			return
+		}
+		defer app.Destroy()
+
+		w, err := platformdarwin.NewWindow(platformdarwin.WindowConfig{Title: "gogpu", Width: 320, Height: 240})
+		if err != nil {
+			t.Errorf("NewWindow: %v", err)
+			return
+		}
+		defer w.Destroy()
+		s, err := platformdarwin.NewSurface(w, false)
+		if err != nil {
+			t.Errorf("NewSurface: %v", err)
+			return
+		}
+		defer s.Destroy()
+		s.Configure(platformdarwin.DefaultSurfaceConfig())
+		w.Show()
+		// Commit the setup, so the steps below start from a clean thread
+		// state and a populated presentation layer.
+		txClass := rt.getClass(t, "CATransaction")
+		objcCallVoid(t, rt, txClass, rt.sel(t, "flush"))
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+			withAutoreleasePool(t, rt, func() { checkContentsScaleOnRenderThread(t, rt, s) })
+		}()
+		<-done
+	})
+}
+
+// checkContentsScaleOnRenderThread runs TestDarwinSurfaceSetContentsScale's
+// steps; it must run on a locked thread without a run loop.
+func checkContentsScaleOnRenderThread(t *testing.T, rt *objcRuntime, s *platformdarwin.Surface) {
+	layer := s.LayerPtr()
+	selContentsScale := rt.sel(t, "contentsScale")
+	selPresentation := rt.sel(t, "presentationLayer")
+	modelScale := func() float64 { return objcCallRet[float64](t, rt, layer, selContentsScale) }
+	presentedScale := func() float64 {
+		pres := objcCallRet[uintptr](t, rt, layer, selPresentation)
+		if pres == 0 {
+			return 0
+		}
+		return objcCallRet[float64](t, rt, pres, selContentsScale)
+	}
+	differs := func(got, want float64) bool { return math.IsNaN(got) || math.Abs(got-want) > 1e-9 }
+
+	// End on 1.5, which no display uses, so a fallback to the window's
+	// backing scale cannot pass the invalid-input checks below.
+	scales := []float64{2, 1, 1.5}
+	for i, scale := range scales {
+		wantW, wantH := 640+i, 480+i
+		s.Layer().SetDrawableSize(wantW, wantH)
+		// wgpu's Configure sets Core Animation properties like this on the
+		// render thread, opening the implicit transaction.
+		s.Layer().SetContentsGravity("topLeft")
+
+		s.SetContentsScale(scale)
+
+		if got := modelScale(); differs(got, scale) {
+			t.Errorf("contentsScale = %v after SetContentsScale(%v)", got, scale)
+		}
+		if got := presentedScale(); differs(got, scale) {
+			t.Errorf("presentationLayer contentsScale = %v after SetContentsScale(%v): change not committed", got, scale)
+		}
+		// The drawable is untouched (RETINA-002).
+		if gotW, gotH := s.Layer().DrawableSize(); gotW != wantW || gotH != wantH {
+			t.Errorf("drawableSize = %dx%d after SetContentsScale(%v), want %dx%d untouched", gotW, gotH, scale, wantW, wantH)
+		}
+	}
+
+	// Invalid scales are ignored.
+	last := scales[len(scales)-1]
+	for _, bad := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		s.SetContentsScale(bad)
+		if got := modelScale(); differs(got, last) {
+			t.Errorf("contentsScale = %v after SetContentsScale(%v), want %v kept", got, bad, last)
+		}
+	}
+
+	var nilSurface *platformdarwin.Surface
+	nilSurface.SetContentsScale(2) // must not panic
+}
