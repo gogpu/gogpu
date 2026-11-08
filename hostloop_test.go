@@ -270,6 +270,35 @@ func TestHostLoop_PumpEventsDispatches(t *testing.T) {
 	}
 }
 
+// primaryResize is a resize of the window startedHostLoop opens when that
+// window has ID 7: an ID the platform gave it, not the 0 classifyEvent takes
+// for the primary window on its own.
+var primaryResize = platform.Event{Type: platform.EventResize, WindowID: 7, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768}
+
+func TestHostLoop_PumpEventsReportsPrimaryResize(t *testing.T) {
+	app, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
+	defer loop.Stop()
+
+	var appWidth, appHeight, sourceWidth, sourceHeight int
+	app.OnResize(func(width, height int) {
+		appWidth = width
+		appHeight = height
+	})
+	app.EventSource().OnResize(func(width, height int) {
+		sourceWidth = width
+		sourceHeight = height
+	})
+
+	loop.PumpEvents()
+
+	if appWidth != 1024 || appHeight != 768 {
+		t.Errorf("App.OnResize: got %dx%d, want 1024x768", appWidth, appHeight)
+	}
+	if sourceWidth != 1024 || sourceHeight != 768 {
+		t.Errorf("EventSource.OnResize: got %dx%d, want 1024x768", sourceWidth, sourceHeight)
+	}
+}
+
 func TestHostLoop_PumpEventsAllocatesNothingWhenIdle(t *testing.T) {
 	_, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()

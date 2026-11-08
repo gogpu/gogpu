@@ -63,9 +63,10 @@ func (loop *HostLoop) Start() error {
 
 // PumpEvents clears the previous pump's input edges, then drains every
 // pending platform event and dispatches it to the callbacks and the
-// input-event queue registered on the App, for every window. It records the
-// latest primary-window resize and calls onResize; the surface itself is
-// resized at the next BeginFrame. It ends the gesture frame.
+// input-event queue registered on the App, for every window. The primary
+// window's latest resize reaches App.OnResize and EventSource.OnResize, as
+// under Run; the surface itself is resized at the next BeginFrame. It ends
+// the gesture frame.
 //
 // It never waits, runs onUpdate or draws, and returns once the queue is
 // empty. A close is reported through Running, not acted on. A pump allocates
