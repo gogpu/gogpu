@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Windows: input method (IME) support (IMM32)**, based on #462 by @besmpl. `App` implements `gpucontext.IMEController`:
+  composition start, update and end reach `EventSource.OnIMEComposition*` with the preedit and UTF-8 byte-offset cursor
+  and selection ranges, cancel and disable arrive through the optional `gpucontext.IMEEventSource`, and
+  `SetIMECursorArea` places the candidate window at the caret. The native composition window is hidden (the application
+  renders the preedit) and a committed result is delivered exactly once, covering Hangul IMEs that send
+  `WM_IME_COMPOSITION` after `WM_IME_ENDCOMPOSITION` and legacy providers that echo the result as `WM_CHAR`. IME starts
+  disabled, a password, hidden or sensitive content type keeps it disabled, and the surrounding text is dropped as soon
+  as input is disabled. Controller methods are safe from any goroutine: the native IMM32 state is applied on the window
+  thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
+  with the later TSF backend. X11, Wayland and macOS backends follow in their own changes.
+
 ### Performance
 
 - **Textured quads share the frame encoder** (#461, @besmpl). `DrawTexture*` records into the frame's single command

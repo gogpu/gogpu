@@ -54,6 +54,14 @@ type Event struct {
 	// Character input (EventChar)
 	Char rune
 
+	// IME composition events. Text positions are UTF-8 byte offsets, as
+	// gpucontext.IMEState defines. IMECommitted is set on
+	// EventIMECompositionEnd only: the committed string is delivered exactly
+	// once and is not repeated as an EventChar.
+	IMEState     gpucontext.IMEState
+	IMECommitted string
+	IMEDelete    gpucontext.IMEDeleteSurroundingEvent
+
 	// Pointer (EventPointer*)
 	Pointer gpucontext.PointerEvent
 
@@ -92,6 +100,16 @@ const (
 	EventDragDrop     // Files dropped on window
 	EventDragLeave    // Files left window area
 	EventScaleChanged // DPI scale factor changed (ADR-059)
+
+	// IME lifecycle events. Composition text travels separately from EventChar
+	// so the app layer routes preedit and committed text without double
+	// dispatching the native character messages.
+	EventIMECompositionStart
+	EventIMECompositionUpdate
+	EventIMECompositionEnd
+	EventIMECanceled
+	EventIMEDisabled
+	EventIMEDeleteSurrounding
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.
