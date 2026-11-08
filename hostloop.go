@@ -25,9 +25,15 @@ import (
 //	window.Show()
 //	for loop.Running() {
 //		loop.PumpEvents()
-//		if context, ok := loop.BeginFrame(window); ok {
+//		context, ok, err := loop.BeginFrame(window)
+//		if err != nil {
+//			log.Print(err)
+//		}
+//		if ok {
 //			context.Clear(0.1, 0.2, 0.3, 1)
-//			loop.EndFrame(context)
+//			if err := loop.EndFrame(context); err != nil {
+//				log.Print(err)
+//			}
 //		}
 //	}
 //	loop.Stop()
@@ -131,21 +137,25 @@ func (loop *HostLoop) Running() bool {
 // A surface that was lost or unconfigured is reconfigured, even at an
 // unchanged size.
 //
-// It returns ok=false without acquiring when the window is nil, hidden or
-// reports a zero size, and without blocking when the window's compositor
-// frame gate (Wayland) is closed. It returns ok=false when the acquire
-// fails; the host skips the frame and tries again next tick. HostLoop does
-// not track whether a window is minimized: the acquire decides. A minimized
-// Vulkan surface fails its acquire; a minimized DX12 window keeps acquiring
-// and drawing, as Run does. With Fifo present the acquire blocks for up to
-// about one refresh, which paces the loop to vsync.
+// It returns ok=false and no error without acquiring when the window is nil,
+// hidden or reports a zero size, and without blocking when the window's
+// compositor frame gate (Wayland) is closed. When the acquire fails it
+// returns ok=false and the error, which it does not log, typed as wgpu types
+// it: wgpu.ErrSurfaceOutdated once the surface is reconfigured, or the
+// reconfigure's own error when that fails too; wgpu.ErrSurfaceLost;
+// wgpu.ErrTimeout; wgpu.ErrDeviceLost. The host skips the frame and tries
+// again next tick. HostLoop does not track whether
+// a window is minimized: the acquire decides. A minimized Vulkan surface
+// fails its acquire; a minimized DX12 window keeps acquiring and drawing, as
+// Run does. With Fifo present the acquire blocks for up to about one
+// refresh, which paces the loop to vsync.
 //
 // Each Window reuses one Context. It is valid until EndFrame, which must be
 // called once for every BeginFrame that returned ok=true.
-func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
+func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool, error) {
 	a := loop.app
 	if window == nil || !window.visible || window.surface == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	ws := window.surface
 	physW, physH := window.platWindow.PhysicalSize()
@@ -153,7 +163,7 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
 		// A surface cannot be configured at zero size: unconfigure it and
 		// skip the acquire until the window reports a size again.
 		a.renderer.ResizeSurface(ws, 0, 0)
-		return nil, false
+		return nil, false, nil
 	}
 	if !ws.CanRender() && ws.surface != nil {
 		// Unconfigured or lost: force the reconfigure even at an unchanged
@@ -163,7 +173,7 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
 	}
 	a.syncFrameSurfaceSize(ws, physW, physH)
 	if gate, ok := window.platWindow.(platform.FrameGater); ok && !gate.FrameCallbackReady() {
-		return nil, false
+		return nil, false, nil
 	}
 
 	loop.framePool = pushFramePool()
@@ -171,12 +181,13 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
 	ws.prepareLazyAcquire()
 	a.renderer.currentSurface = ws
 	if !ws.ensureFrameStarted() {
+		err := ws.acquireErr
 		a.renderer.endFrameStats(true)
 		ws.resetLazyState()
 		a.renderer.currentSurface = nil
 		popFramePool(loop.framePool)
 		loop.framePool = 0
-		return nil, false
+		return nil, false, err
 	}
 
 	window.frameContext = Context{
@@ -187,17 +198,20 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool) {
 	if window.frameContext.scaleFactor <= 0 {
 		window.frameContext.scaleFactor = 1
 	}
-	return &window.frameContext, true
+	return &window.frameContext, true, nil
 }
 
 // EndFrame submits what the frame recorded, with gogpu's own overlay and
-// composition work, and presents it. When the surface turned out outdated,
-// that one frame is dropped and a redraw requested; the next BeginFrame
-// reconfigures the surface.
-func (loop *HostLoop) EndFrame(context *Context) {
+// composition work, and presents it. It returns the present's error, which
+// it does not log, typed as wgpu types it. When the surface turned out
+// outdated, the error is wgpu.ErrSurfaceOutdated: that one frame is dropped,
+// the surface reconfigured and a redraw requested. A lost surface answers
+// wgpu.ErrSurfaceLost, and the next BeginFrame reconfigures it.
+func (loop *HostLoop) EndFrame(context *Context) error {
 	a := loop.app
 	ws := context.surface
-	if a.renderer.endFrameForSurface(ws) {
+	reconfigured, err := a.renderer.endFrameForSurface(ws)
+	if reconfigured {
 		a.RequestRedraw()
 	}
 	ws.resetLazyState()
@@ -205,6 +219,7 @@ func (loop *HostLoop) EndFrame(context *Context) {
 	a.renderer.pollSubmissions()
 	popFramePool(loop.framePool)
 	loop.framePool = 0
+	return err
 }
 
 // Stop closes every window still open, with its surface, as a close does,

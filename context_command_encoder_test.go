@@ -235,8 +235,8 @@ func TestEndFrameDiscardsEncoderAfterPixelPresent(t *testing.T) {
 	}
 	target.pixelPresented = true
 
-	if target.renderer.endFrameForSurface(target) {
-		t.Fatal("pixel-presented frame unexpectedly reconfigured")
+	if reconfigured, err := target.renderer.endFrameForSurface(target); reconfigured || err != nil {
+		t.Fatalf("pixel-presented frame: got reconfigured=%v, error %v; want false, nil", reconfigured, err)
 	}
 	if target.frameEncoder != nil {
 		t.Fatal("pixel-presented frame retained its encoder")

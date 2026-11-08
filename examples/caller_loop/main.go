@@ -87,8 +87,11 @@ func main() {
 
 		beginAt := time.Now()
 		before = allocationCount()
-		context, ok := loop.BeginFrame(window)
+		context, ok, err := loop.BeginFrame(window)
 		longestBegin = max(longestBegin, time.Since(beginAt))
+		if err != nil {
+			log.Printf("BeginFrame: %v", err)
+		}
 		if !ok {
 			skipped++
 			time.Sleep(time.Millisecond)
@@ -98,7 +101,9 @@ func main() {
 			phase := time.Since(start).Seconds()
 			context.Clear(float32(0.5+0.5*math.Sin(phase)), 0.2, float32(0.5+0.5*math.Cos(phase)), 1)
 			endAt := time.Now()
-			loop.EndFrame(context)
+			if err := loop.EndFrame(context); err != nil {
+				log.Printf("EndFrame: %v", err)
+			}
 			longestEnd = max(longestEnd, time.Since(endAt))
 			frameAllocations += allocationCount() - before
 			frames++

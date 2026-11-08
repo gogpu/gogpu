@@ -1144,6 +1144,9 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// even when the application's OnDraw callback draws nothing.
 		if !ws.frameStarted && !ws.tryOverlayOnlyFrame() {
 			if ws.acquireFailed {
+				if ws.acquireErr != nil {
+					logFrameError(ws.acquireErr)
+				}
 				a.RequestRedraw()
 			}
 			a.renderer.endFrameStats(true) // idle: no acquire → present skipped (#484 FrameStats)
@@ -1156,10 +1159,10 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// live scale (a DPI change is an outdated trigger, so frame.scale may be
 		// stale). One retry only — looping can livelock a live resize; if still
 		// outdated, request another frame since nothing else reschedules on-demand.
-		if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+		if ws.frameStarted && a.endWindowFrame(ws) {
 			ws.prepareLazyAcquire()
 			frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
-			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+			if ws.frameStarted && a.endWindowFrame(ws) {
 				a.RequestRedraw()
 			}
 		}
@@ -1177,6 +1180,17 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 
 	// Poll submissions once after all windows are presented.
 	a.renderer.pollSubmissions()
+}
+
+// endWindowFrame presents ws's frame for Run's loop and answers whether
+// present reconfigured an outdated surface. Run has no caller to give the
+// present's error to, so it logs it.
+func (a *App) endWindowFrame(ws *RenderTarget) bool {
+	reconfigured, err := a.renderer.endFrameForSurface(ws)
+	if err != nil {
+		logFrameError(err)
+	}
+	return reconfigured
 }
 
 func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
