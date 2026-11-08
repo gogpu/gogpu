@@ -139,6 +139,45 @@ func TestHostLoop_NotRunningAfterWindowCloses(t *testing.T) {
 	loop.Stop() // the close cleared the app's window; Stop must not panic
 }
 
+func TestHostLoop_StopBeforeStartDoesNothing(t *testing.T) {
+	loop := NewHostLoop(NewApp(DefaultConfig()))
+
+	loop.Stop() // nothing was created; Stop must not panic
+}
+
+func TestHostLoop_StopAfterFailedStartDoesNothing(t *testing.T) {
+	manager := &queuedEventManager{mockManagerWithWindow: mockManagerWithWindow{win: &mockWindow{width: 800, height: 600}}}
+	oldManager := newPlatformManagerFn
+	newPlatformManagerFn = func() platform.PlatformManager { return manager }
+	errNoGPU := errors.New("no GPU")
+	oldRenderer := newRendererFn
+	newRendererFn = func(platform.PlatformWindow, types.GraphicsAPI, bool, gputypes.PowerPreference, bool) (*Renderer, error) {
+		return nil, errNoGPU
+	}
+	t.Cleanup(func() {
+		newPlatformManagerFn = oldManager
+		newRendererFn = oldRenderer
+	})
+
+	loop := NewHostLoop(NewApp(DefaultConfig()))
+	if err := loop.Start(); !errors.Is(err, errNoGPU) {
+		t.Fatalf("Start without a renderer: got %v, want %v", err, errNoGPU)
+	}
+	loop.Stop() // Start destroyed what it created; Stop must not panic
+}
+
+func TestHostLoop_StopTwiceTearsDownOnce(t *testing.T) {
+	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	closeCount := 0
+	app.OnClose(func() { closeCount++ })
+
+	loop.Stop()
+	loop.Stop()
+	if closeCount != 1 {
+		t.Errorf("onClose after two Stops: called %d times, want 1", closeCount)
+	}
+}
+
 func TestHostLoop_BeginFrameAttemptsAcquire(t *testing.T) {
 	enabledStats(t)
 	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
