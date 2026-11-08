@@ -3,6 +3,7 @@ package gogpu
 import (
 	"errors"
 	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu/types"
@@ -90,6 +91,22 @@ func enabledStats(t *testing.T) {
 			DisableStats()
 		}
 	})
+}
+
+// skipWhenRaceInstrumented skips an allocation count in a build instrumented
+// by github.com/kolkov/racedetector, the race detector CI runs: the calls it
+// adds to the code allocate, so the count no longer measures the code.
+func skipWhenRaceInstrumented(t *testing.T) {
+	t.Helper()
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	for _, dependency := range info.Deps {
+		if dependency.Path == "github.com/kolkov/racedetector" {
+			t.Skip("allocation counts include racedetector's instrumentation")
+		}
+	}
 }
 
 func TestHostLoop_StartTwice(t *testing.T) {
@@ -378,6 +395,7 @@ func TestHostLoop_PumpEventsAllocatesNothingWhenIdle(t *testing.T) {
 	_, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
+	skipWhenRaceInstrumented(t)
 	allocations := testing.AllocsPerRun(100, loop.PumpEvents)
 	if allocations != 0 {
 		t.Errorf("PumpEvents with no events: %v allocations per pump, want 0", allocations)
@@ -399,6 +417,7 @@ func TestHostLoop_PumpEventsAllocatesOnlyQueuedInputEvents(t *testing.T) {
 	}
 	window.Show()
 
+	skipWhenRaceInstrumented(t)
 	allocations := testing.AllocsPerRun(100, func() {
 		manager.rewind()
 		loop.PumpEvents()

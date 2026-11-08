@@ -1,7 +1,7 @@
 // Command caller_loop drives a window from a plain for loop through
 // gogpu.HostLoop, with no App.Run and no gogpu render thread: Start brings
 // up the device with no window, and NewWindow opens one. It clears each
-// frame to a shifting colour and prints, every second, the pump and frame
+// frame to a shifting color and prints, every second, the pump and frame
 // counts, allocations per pump and per frame, and the longest PumpEvents,
 // BeginFrame and EndFrame. Use it to check a platform by hand: move, resize,
 // minimize and restore, and close the window.
