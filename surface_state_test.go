@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -124,8 +123,8 @@ func TestBeginFrame_SkipsWhenNotConfigured(t *testing.T) {
 				state:  tt.state,
 				format: gputypes.TextureFormatBGRA8Unorm,
 			}
-			if ws.beginFrame(nil, nil, nil) {
-				t.Error("beginFrame should return false when not configured")
+			if started, err := ws.beginFrame(nil, nil, nil); started || err != nil {
+				t.Errorf("beginFrame when not configured: got %v, error %v; want false, nil", started, err)
 			}
 		})
 	}
@@ -144,15 +143,19 @@ func errorRecords(t *testing.T) *bytes.Buffer {
 
 // A minimized window's surface reports a zero extent before the pump has
 // read the minimize, so the reconfigure fails with ErrZeroArea. That is a
-// minimize, not a failure: the surface waits unconfigured for the restore.
+// minimize, not a failure: the surface waits unconfigured for the restore,
+// and the outdated surface is what is reported.
 func TestReconfigureFailed_ZeroAreaWaitsForRestore(t *testing.T) {
 	records := errorRecords(t)
 	ws := &RenderTarget{state: SurfaceConfigured, width: 800, height: 600}
 
-	ws.reconfigureFailed(hal.ErrZeroArea)
+	err := ws.reconfigureFailed(wgpu.ErrSurfaceOutdated, hal.ErrZeroArea)
 
 	if ws.state != SurfaceReady {
 		t.Errorf("state after a zero-area reconfigure: got %v, want SurfaceReady", ws.state)
+	}
+	if !errors.Is(err, wgpu.ErrSurfaceOutdated) {
+		t.Errorf("error after a zero-area reconfigure: got %v, want ErrSurfaceOutdated", err)
 	}
 	if records.Len() != 0 {
 		t.Errorf("a zero-area reconfigure logged an error: %s", records.String())
@@ -162,13 +165,17 @@ func TestReconfigureFailed_ZeroAreaWaitsForRestore(t *testing.T) {
 func TestReconfigureFailed_OtherErrorLosesSurface(t *testing.T) {
 	records := errorRecords(t)
 	ws := &RenderTarget{state: SurfaceConfigured, width: 800, height: 600}
+	configureErr := errors.New("device gone")
 
-	ws.reconfigureFailed(errors.New("device gone"))
+	err := ws.reconfigureFailed(wgpu.ErrSurfaceOutdated, configureErr)
 
 	if ws.state != SurfaceLost {
 		t.Errorf("state after a failed reconfigure: got %v, want SurfaceLost", ws.state)
 	}
-	if !strings.Contains(records.String(), "reconfigure after outdated failed") {
-		t.Errorf("a failed reconfigure logged no error, got: %q", records.String())
+	if !errors.Is(err, configureErr) {
+		t.Errorf("error after a failed reconfigure: got %v, want the configure's", err)
+	}
+	if records.Len() != 0 {
+		t.Errorf("a failed reconfigure logged the error it answered: %s", records.String())
 	}
 }
