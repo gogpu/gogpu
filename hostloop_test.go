@@ -3,6 +3,7 @@ package gogpu
 import (
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -32,9 +33,13 @@ func (m *queuedEventManager) PollEvents() platform.Event {
 
 func (m *queuedEventManager) rewind() { m.nextEvent = 0 }
 
-// startedHostLoop starts a HostLoop over window, on mockedPlatform.
+// startedHostLoop starts a HostLoop over window, on mockedPlatform. It locks
+// the test to its OS thread, as HostLoop requires: on macOS a frame's
+// autorelease pool must be popped on the thread that pushed it.
 func startedHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
 	t.Helper()
+	runtime.LockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
 	manager := mockedPlatform(t, window, events...)
 	app := NewApp(DefaultConfig())
 	loop := NewHostLoop(app)
@@ -70,6 +75,27 @@ func mockedPlatform(t *testing.T, window platform.PlatformWindow, events ...plat
 		newRendererFn = oldRenderer
 	})
 	return manager
+}
+
+// startedSoftwareHostLoop starts a HostLoop over window on the mock platform,
+// with the real renderer on wgpu's software backend, so its frames acquire
+// and present without a GPU. It locks the test to its OS thread, as
+// startedHostLoop does.
+func startedSoftwareHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop) {
+	t.Helper()
+	runtime.LockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	manager := &queuedEventManager{mockManagerWithWindow: mockManagerWithWindow{win: window}, events: events}
+	oldManager := newPlatformManagerFn
+	newPlatformManagerFn = func() platform.PlatformManager { return manager }
+	t.Cleanup(func() { newPlatformManagerFn = oldManager })
+
+	app := NewApp(DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware))
+	loop := NewHostLoop(app)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start on the software backend: %v", err)
+	}
+	return app, loop
 }
 
 // enabledStats turns frame stats on for the test: a failed acquire records a
@@ -378,6 +404,78 @@ func TestHostLoop_PumpEventsReportsPrimaryResize(t *testing.T) {
 	}
 	if sourceWidth != 1024 || sourceHeight != 768 {
 		t.Errorf("EventSource.OnResize: got %dx%d, want 1024x768", sourceWidth, sourceHeight)
+	}
+}
+
+func TestHostLoop_PumpEventsKeepsOtherWindowsResizeFromApp(t *testing.T) {
+	otherResize := platform.Event{Type: platform.EventResize, WindowID: 8, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768}
+	app, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, otherResize)
+	defer loop.Stop()
+
+	appResized := false
+	sourceResized := false
+	app.OnResize(func(int, int) { appResized = true })
+	app.EventSource().OnResize(func(int, int) { sourceResized = true })
+
+	loop.PumpEvents()
+
+	if appResized {
+		t.Error("App.OnResize after another window's resize: called, want only the primary's")
+	}
+	if sourceResized {
+		t.Error("EventSource.OnResize after another window's resize: called, want only the primary's")
+	}
+}
+
+func TestHostLoop_FrameAcquiresAndPresents(t *testing.T) {
+	app, loop := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
+	defer loop.Stop()
+
+	for frame := range 2 {
+		context, ok := loop.BeginFrame(app.PrimaryWindow())
+		if !ok {
+			t.Fatalf("BeginFrame %d on the software backend: got ok=false, want true", frame)
+		}
+		context.Clear(0.1, 0.2, 0.3, 1)
+		loop.EndFrame(context)
+		if app.renderer.currentSurface != nil {
+			t.Errorf("renderer's current surface after EndFrame %d: set, want none", frame)
+		}
+	}
+}
+
+func TestHostLoop_BeginFrameConsumesPumpedResize(t *testing.T) {
+	app, loop := startedSoftwareHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
+	defer loop.Stop()
+
+	loop.PumpEvents()
+	renderLoop := app.renderLoop.(*inlineRenderLoop)
+	if !renderLoop.resizePending.Load() {
+		t.Fatal("pending resize after the pump: none, want the pumped one")
+	}
+	context, ok := loop.BeginFrame(app.PrimaryWindow())
+	if !ok {
+		t.Fatal("BeginFrame after a pumped resize: got ok=false, want true")
+	}
+	loop.EndFrame(context)
+	if renderLoop.resizePending.Load() {
+		t.Error("pending resize after BeginFrame: still pending, want it applied")
+	}
+}
+
+func TestHostLoop_BeginFrameReconfiguresLostSurface(t *testing.T) {
+	app, loop := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
+	defer loop.Stop()
+
+	surface := app.renderer.primary
+	surface.state = SurfaceLost
+	context, ok := loop.BeginFrame(app.PrimaryWindow())
+	if !ok {
+		t.Fatal("BeginFrame on a lost surface: got ok=false, want true after the reconfigure")
+	}
+	loop.EndFrame(context)
+	if !surface.CanRender() {
+		t.Error("surface after BeginFrame on a lost one: cannot render, want it reconfigured")
 	}
 }
 
