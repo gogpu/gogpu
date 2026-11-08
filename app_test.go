@@ -874,7 +874,7 @@ func TestApp_HandleSecondaryResize_NilWindow(t *testing.T) {
 	}
 
 	app.handleSecondaryResize(
-		platform.Event{
+		&platform.Event{
 			Type:     platform.EventResize,
 			WindowID: platform.NewWindowID(),
 			Width:    100, Height: 200,
@@ -899,7 +899,7 @@ func TestApp_HandleSecondaryResize_NoPhysicalResize(t *testing.T) {
 	w.SetOnResize(func(w, h int) { resizeCalled = true; newW, newH = w, h })
 
 	app.handleSecondaryResize(
-		platform.Event{
+		&platform.Event{
 			Type:     platform.EventResize,
 			WindowID: platformID,
 			Width:    320, Height: 240,
@@ -985,7 +985,7 @@ func TestApp_ProcessEvents_SecondaryResizeCycle(t *testing.T) {
 	_, secResizes = app.classifyEvent(&secondaryEv, nil, secResizes)
 
 	for i := range secResizes {
-		app.handleSecondaryResize(secResizes[i])
+		app.handleSecondaryResize(&secResizes[i])
 	}
 
 	if !resizeCalled {
