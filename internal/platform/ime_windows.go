@@ -308,18 +308,14 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 		w.imeMu.Unlock()
 		return
 	}
-	w.imeMu.Unlock()
-
-	// A message that carries a result while the post-END path is armed, or a
-	// result without any preedit, is a complete commit, not a preedit update:
-	// collect it into the armed path, swallow the late echo of a result END
-	// already delivered, or commit a provider's standalone result. The result
-	// is handled before the preedit so a provider that sends both flags after
-	// END cannot restart the tracker and merge the text into the next commit.
-	w.imeMu.Lock()
 	armed := w.ime.hasPendingCharResult()
 	w.imeMu.Unlock()
-	if flags&gcsResultStr != 0 && (flags&gcsCompStr == 0 || armed) {
+
+	// The route keeps a result that belongs to the post-END lifecycle or to a
+	// standalone commit out of the preedit session: reading it there as well
+	// would deliver the same text twice.
+	handleResult, resultInSession := imeCompositionRoute(flags, armed)
+	if handleResult {
 		w.handleIMEResult()
 		if flags&gcsCompStr == 0 {
 			return
@@ -347,7 +343,7 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 	if flags&gcsCompStr != 0 {
 		compositionText = w.immString(himc, gcsCompStr)
 	}
-	if flags&gcsResultStr != 0 {
+	if flags&gcsResultStr != 0 && resultInSession {
 		result := w.immString(himc, gcsResultStr)
 		w.imeMu.Lock()
 		w.ime.addResult(result)
@@ -634,6 +630,26 @@ func (w *win32Window) consumeIMEUnichar(char rune) bool {
 		}
 	}
 	return true
+}
+
+// imeCompositionRoute decides how a WM_IME_COMPOSITION splits between the
+// result path and the preedit path. armed reports whether WM_IME_ENDCOMPOSITION
+// left the post-END lifecycle open.
+//
+// A result is handled first when it arrives without a preedit (a standalone
+// commit) or while the post-END path is armed (Hangul sends the committed text
+// after END); in the second case, when the message also carries a preedit, the
+// preedit still starts a new composition but the result is not read into it.
+// Any other result belongs to the active composition session and is collected
+// there until its end.
+func imeCompositionRoute(flags uintptr, armed bool) (handleResult, resultInSession bool) {
+	if flags&gcsResultStr == 0 {
+		return false, false
+	}
+	if flags&gcsCompStr == 0 || armed {
+		return true, false
+	}
+	return false, true
 }
 
 // imeAreaIsValid rejects rectangles that cannot be placed: negative or

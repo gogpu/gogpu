@@ -141,6 +141,33 @@ func TestWin32ResultWhileDisabledIsDropped(t *testing.T) {
 	}
 }
 
+// TestWin32IMECompositionRoute locks in how a composition message splits
+// between the result path and the preedit path. The both-flags-after-END case
+// is the one that used to deliver the committed text twice.
+func TestWin32IMECompositionRoute(t *testing.T) {
+	both := uintptr(gcsResultStr | gcsCompStr)
+	cases := []struct {
+		name      string
+		flags     uintptr
+		armed     bool
+		handle    bool
+		inSession bool
+	}{
+		{"preedit only", uintptr(gcsCompStr), false, false, false},
+		{"result only", uintptr(gcsResultStr), false, true, false},
+		{"result only after end", uintptr(gcsResultStr), true, true, false},
+		{"result and preedit in session", both, false, false, true},
+		{"result and preedit after end", both, true, true, false},
+		{"no flags", 0, true, false, false},
+	}
+	for _, tc := range cases {
+		handle, inSession := imeCompositionRoute(tc.flags, tc.armed)
+		if handle != tc.handle || inSession != tc.inSession {
+			t.Errorf("%s: route = (%v, %v), want (%v, %v)", tc.name, handle, inSession, tc.handle, tc.inSession)
+		}
+	}
+}
+
 // TestWin32LateResultEchoIsSwallowed covers the other Hangul order: END reads
 // the result itself, and the late COMPOSITION only repeats it.
 func TestWin32LateResultEchoIsSwallowed(t *testing.T) {
