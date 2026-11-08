@@ -95,7 +95,7 @@ func TestConfigWithSize(t *testing.T) {
 	}
 }
 
-func TestConfigWithBackend(t *testing.T) {
+func TestDeprecatedConfigWithBackendCompatibility(t *testing.T) {
 	tests := []struct {
 		name    string
 		backend types.BackendType
@@ -113,6 +113,15 @@ func TestConfigWithBackend(t *testing.T) {
 				t.Errorf("Backend = %v, want %v", cfg.Backend, tt.backend)
 			}
 		})
+	}
+}
+
+func TestDeprecatedBackendDoesNotOverrideGraphicsAPI(t *testing.T) {
+	cfg := DefaultConfig().
+		WithGraphicsAPI(types.GraphicsAPIVulkan).
+		WithBackend(types.BackendRust)
+	if cfg.GraphicsAPI != types.GraphicsAPIVulkan {
+		t.Fatalf("deprecated backend selection changed GraphicsAPI to %v", cfg.GraphicsAPI)
 	}
 }
 
@@ -202,7 +211,6 @@ func TestConfigBuilderChaining(t *testing.T) {
 	cfg := DefaultConfig().
 		WithTitle("Test App").
 		WithSize(1024, 768).
-		WithBackend(types.BackendNative).
 		WithGraphicsAPI(types.GraphicsAPIVulkan).
 		WithContinuousRender(false).
 		WithFrameless(true).
@@ -216,9 +224,6 @@ func TestConfigBuilderChaining(t *testing.T) {
 	}
 	if cfg.Height != 768 {
 		t.Errorf("Height = %d, want 768", cfg.Height)
-	}
-	if cfg.Backend != types.BackendNative {
-		t.Errorf("Backend = %v, want BackendNative", cfg.Backend)
 	}
 	if cfg.GraphicsAPI != types.GraphicsAPIVulkan {
 		t.Errorf("GraphicsAPI = %v, want GraphicsAPIVulkan", cfg.GraphicsAPI)
@@ -277,7 +282,7 @@ func TestConfigImmutability(t *testing.T) {
 	}
 }
 
-func TestReExportedBackendConstants(t *testing.T) {
+func TestDeprecatedBackendConstantsCompatibility(t *testing.T) {
 	if BackendAuto != types.BackendAuto {
 		t.Errorf("BackendAuto = %v, want %v", BackendAuto, types.BackendAuto)
 	}
@@ -313,7 +318,7 @@ func TestReExportedGraphicsAPIConstants(t *testing.T) {
 	}
 }
 
-func TestBackendGoIsNativeAlias(t *testing.T) {
+func TestDeprecatedBackendGoIsNativeAlias(t *testing.T) {
 	if BackendGo != BackendNative {
 		t.Errorf("BackendGo (%v) != BackendNative (%v), expected them to be the same", BackendGo, BackendNative)
 	}

@@ -242,41 +242,6 @@ func (e *eventSourceAdapter) dispatchTextInput(text string) {
 	}
 }
 
-// dispatchMouseMove dispatches a mouse move event to registered callbacks.
-func (e *eventSourceAdapter) dispatchMouseMove(x, y float64) {
-	if e.onMouseMove != nil {
-		e.onMouseMove(x, y)
-	}
-}
-
-// dispatchMousePress dispatches a mouse press event to registered callbacks.
-func (e *eventSourceAdapter) dispatchMousePress(button gpucontext.MouseButton, x, y float64) {
-	if e.onMousePress != nil {
-		e.onMousePress(button, x, y)
-	}
-}
-
-// dispatchMouseRelease dispatches a mouse release event to registered callbacks.
-func (e *eventSourceAdapter) dispatchMouseRelease(button gpucontext.MouseButton, x, y float64) {
-	if e.onMouseRelease != nil {
-		e.onMouseRelease(button, x, y)
-	}
-}
-
-// dispatchScroll dispatches a scroll event to registered callbacks.
-func (e *eventSourceAdapter) dispatchScroll(dx, dy float64) {
-	if e.onScroll != nil {
-		e.onScroll(dx, dy)
-	}
-}
-
-// dispatchResize dispatches a resize event to registered callbacks.
-func (e *eventSourceAdapter) dispatchResize(width, height int) {
-	if e.onResize != nil {
-		e.onResize(width, height)
-	}
-}
-
 // dispatchFocus dispatches a focus event to registered callbacks.
 func (e *eventSourceAdapter) dispatchFocus(focused bool) {
 	if e.onFocus != nil {
