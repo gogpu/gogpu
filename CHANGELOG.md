@@ -90,6 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Vulkan: minimizing a window marked its surface lost** (#517, @dvoyni). The surface could see the zero extent
   before the pump read the minimize, and the failed reconfigure logged `reconfigure after outdated failed` and lost
   the surface. It now waits unconfigured, and is configured again on the first frame after the restore.
+- **A window that fails to open no longer leaks the platform** (#517, @dvoyni). When the platform started and its
+  first window could not be created, `Run` returned the error without destroying the platform manager.
 
 ## [0.54.1] - 2026-11-08
 
