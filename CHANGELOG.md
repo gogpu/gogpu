@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports whether a redraw was requested since its last call, so a host can draw on demand as `Run` does. `Stop` does
   nothing unless `Start` succeeded. `Run` is rebuilt on the same steps, and it returns `ErrHostLoopStarted` while a
   `HostLoop` is started, as does a second `Start`. This is the caller-owned loop of ADR-070 (discussion #468).
+- **`HostLoop.RequestDevice`** (@dvoyni). Requests the device after `Start`, with the required features and limits the
+  host chose once it read the adapter through `GPUContextProvider`. Nil limits are the adapter's own; a feature or limit
+  the adapter lacks fails the request by name, and no device is created.
 
 ### Performance
 
@@ -50,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Input edges are cleared at the start of each event pump** (#517, @dvoyni), not after `onUpdate`. `JustPressed`,
   `JustReleased` and `Mouse.Delta` now hold until the next pump, so `OnDraw` sees the same edges `onUpdate` saw.
   `onUpdate` is unchanged.
+- **`HostLoop.Start` brings up the adapter with no device** (@dvoyni). It brings up the platform, the instance and the
+  adapter; the device comes from `HostLoop.RequestDevice`, and `HostLoop.NewWindow` fails before it.
+  `Config.RequiredFeatures` and `Config.RequiredLimits` no longer apply to a `HostLoop`.
 
 ### Removed
 

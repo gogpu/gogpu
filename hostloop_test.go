@@ -54,12 +54,17 @@ func (m *queuedEventManager) PollEvents() platform.Event {
 func (m *queuedEventManager) rewind() { m.nextEvent = 0 }
 
 // startedHostLoopWithNoWindow starts a HostLoop on the software backend over a
-// platform that hands out windows, in order, to NewWindow.
+// platform that hands out windows, in order, to NewWindow, and requests its
+// device.
 func startedHostLoopWithNoWindow(t *testing.T, windows []platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
 	t.Helper()
 	app, loop, manager := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), windows, events...)
 	if err := loop.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	if err := loop.RequestDevice(0, nil); err != nil {
+		loop.Stop()
+		t.Fatalf("RequestDevice: %v", err)
 	}
 	return app, loop, manager
 }
@@ -163,8 +168,11 @@ func TestHostLoop_RunRefusesWhileStarted(t *testing.T) {
 	}
 }
 
-func TestHostLoop_StartOpensNoWindow(t *testing.T) {
-	app, loop, manager := startedHostLoopWithNoWindow(t, nil)
+func TestHostLoop_StartOpensNoWindowAndRequestsNoDevice(t *testing.T) {
+	app, loop, manager := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), nil)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
 	defer loop.Stop()
 
 	if manager.createdWindow != 0 {
@@ -176,8 +184,51 @@ func TestHostLoop_StartOpensNoWindow(t *testing.T) {
 	if !loop.Running() {
 		t.Error("Running after Start with no window: got false, want true")
 	}
+	if app.GPUContextProvider().Adapter().IsNil() {
+		t.Error("Start brought up no adapter")
+	}
+	if app.renderer.device != nil {
+		t.Error("Start brought up a device before RequestDevice")
+	}
+}
+
+func TestHostLoop_RequestDeviceBringsUpTheDevice(t *testing.T) {
+	app, loop, _ := startedHostLoopWithNoWindow(t, nil)
+	defer loop.Stop()
+
 	if app.renderer.device == nil {
-		t.Error("Start with no window brought up no device")
+		t.Error("RequestDevice brought up no device")
+	}
+}
+
+func TestHostLoop_RequestDeviceBeforeStartFails(t *testing.T) {
+	loop := NewHostLoop(NewApp(DefaultConfig()))
+	if err := loop.RequestDevice(0, nil); err == nil {
+		t.Error("RequestDevice before Start: got nil error")
+	}
+}
+
+func TestHostLoop_RequestDeviceTwiceFails(t *testing.T) {
+	_, loop, _ := startedHostLoopWithNoWindow(t, nil)
+	defer loop.Stop()
+
+	if err := loop.RequestDevice(0, nil); err == nil {
+		t.Error("second RequestDevice: got nil error")
+	}
+}
+
+func TestHostLoop_NewWindowBeforeRequestDeviceFails(t *testing.T) {
+	_, loop, manager := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), []platform.PlatformWindow{&mockWindow{width: 800, height: 600}})
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer loop.Stop()
+
+	if _, err := loop.NewWindow(DefaultConfig()); err == nil {
+		t.Error("NewWindow before RequestDevice: got nil error")
+	}
+	if manager.createdWindow != 0 {
+		t.Errorf("NewWindow before RequestDevice created %d platform windows, want 0", manager.createdWindow)
 	}
 }
 
@@ -195,16 +246,17 @@ func TestHostLoop_StartRequestsTheFallbackAdapter(t *testing.T) {
 	}
 }
 
-func TestHostLoop_StartKeepsTheRequiredLimits(t *testing.T) {
+func TestHostLoop_RequestDeviceKeepsTheRequiredLimits(t *testing.T) {
 	limits := gputypes.DefaultLimits()
 	limits.MaxTextureDimension2D = 1024
-	config := DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware)
-	config.RequiredLimits = &limits
-	app, loop, _ := hostLoopOver(t, config, nil)
+	app, loop, _ := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), nil)
 	if err := loop.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer loop.Stop()
+	if err := loop.RequestDevice(0, &limits); err != nil {
+		t.Fatalf("RequestDevice: %v", err)
+	}
 
 	device := app.renderer.device
 	if got := device.Limits(); got != limits {
@@ -224,7 +276,7 @@ func TestHostLoop_StartKeepsTheRequiredLimits(t *testing.T) {
 	}
 }
 
-func TestHostLoop_StartFailsNamingWhatTheAdapterLacks(t *testing.T) {
+func TestHostLoop_RequestDeviceFailsNamingWhatTheAdapterLacks(t *testing.T) {
 	beyondBindGroups := gputypes.DefaultLimits()
 	beyondBindGroups.MaxBindGroups = 1 << 20
 	belowAlignment := gputypes.DefaultLimits()
@@ -242,18 +294,22 @@ func TestHostLoop_StartFailsNamingWhatTheAdapterLacks(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			config := DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware).WithRequiredFeatures(test.features)
-			config.RequiredLimits = test.limits
-			_, loop, _ := hostLoopOver(t, config, nil)
-			err := loop.Start()
+			app, loop, _ := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), nil)
+			if err := loop.Start(); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			defer loop.Stop()
+			err := loop.RequestDevice(test.features, test.limits)
 			if err == nil {
-				loop.Stop()
-				t.Fatal("Start: got no error")
+				t.Fatal("RequestDevice: got no error")
 			}
 			for _, name := range test.want {
 				if !strings.Contains(err.Error(), name) {
-					t.Errorf("Start error %q does not name %s", err, name)
+					t.Errorf("RequestDevice error %q does not name %s", err, name)
 				}
+			}
+			if app.renderer.device != nil {
+				t.Error("a refused RequestDevice brought up a device")
 			}
 		})
 	}

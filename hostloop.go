@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gogpu/internal/platform"
+	"github.com/gogpu/gputypes"
 )
 
 // HostLoop lets a host that owns its loop drive an App one step at a time,
@@ -16,6 +17,9 @@ import (
 //
 //	loop := gogpu.NewHostLoop(app)
 //	if err := loop.Start(); err != nil {
+//		return err
+//	}
+//	if err := loop.RequestDevice(0, nil); err != nil {
 //		return err
 //	}
 //	window, err := loop.NewWindow(gogpu.DefaultConfig())
@@ -61,14 +65,18 @@ func NewHostLoop(app *App) *HostLoop {
 	return &HostLoop{app: app}
 }
 
-// Start brings up the platform and the GPU instance, adapter and device, with
-// no window and no surface, and marks the app running, then returns without
-// blocking. Windows open through NewWindow. When the platform or the GPU
-// cannot start, it returns the error and destroys what it had created. While
-// a HostLoop is started, Run and a second Start return ErrHostLoopStarted.
+// Start brings up the platform and the GPU instance and adapter, with no
+// device, no window and no surface, and marks the app running, then returns
+// without blocking. The device comes from RequestDevice, once the host has
+// read the adapter through GPUContextProvider; windows open through
+// NewWindow after it. When the platform or the GPU cannot start, it returns
+// the error and destroys what it had created. While a HostLoop is started,
+// Run and a second Start return ErrHostLoopStarted.
 //
-// The app's Config chooses the graphics API and the power preference; its
-// window fields are not used, since Start opens no window.
+// The app's Config chooses the graphics API, the power preference and the
+// fallback adapter. Its RequiredFeatures and RequiredLimits are not used,
+// since RequestDevice is given its own, nor are its window fields, since
+// Start opens no window.
 func (loop *HostLoop) Start() error {
 	a := loop.app
 	if a.hostLoopStarted {
@@ -92,6 +100,27 @@ func (loop *HostLoop) Start() error {
 	return nil
 }
 
+// RequestDevice requests the device from the adapter Start brought up, with
+// features and limits, as Config's RequiredFeatures and RequiredLimits ask
+// for Run: nil limits are the adapter's own. A feature or limit the adapter
+// lacks fails the request by name, and no device is created. It must be
+// called once, after Start and before NewWindow, on Start's thread.
+func (loop *HostLoop) RequestDevice(features gputypes.Features, limits *gputypes.Limits) error {
+	a := loop.app
+	if !a.hostLoopStarted {
+		return fmt.Errorf("gogpu: HostLoop.RequestDevice called before Start")
+	}
+	if a.renderer.device != nil {
+		return fmt.Errorf("gogpu: HostLoop.RequestDevice called twice")
+	}
+	a.renderer.deviceRequest.requiredFeatures = features
+	a.renderer.deviceRequest.requiredLimits = gputypes.Limits{}
+	if limits != nil {
+		a.renderer.deviceRequest.requiredLimits = *limits
+	}
+	return a.renderer.requestDevice()
+}
+
 // NewWindow opens a window with its surface, from config's title, size,
 // resizability, frame, transparency, header alignment and macOS tabbing.
 // The surface presents with vsync when config.VSync is set. Every window of
@@ -102,12 +131,15 @@ func (loop *HostLoop) Start() error {
 // when the window already reports a size, and otherwise at the first
 // BeginFrame that finds one.
 //
-// It must be called after Start, on Start's thread. A window closed by the
+// It must be called after RequestDevice, on Start's thread. A window closed by the
 // user, or by Window.Close, is destroyed with its surface as App.NewWindow's
 // windows are.
 func (loop *HostLoop) NewWindow(config Config) (*Window, error) {
 	if !loop.app.hostLoopStarted {
 		return nil, fmt.Errorf("gogpu: HostLoop.NewWindow called before Start")
+	}
+	if loop.app.renderer.device == nil {
+		return nil, fmt.Errorf("gogpu: HostLoop.NewWindow called before RequestDevice")
 	}
 	return loop.app.openWindow(config, config.VSync)
 }
@@ -255,10 +287,10 @@ func (loop *HostLoop) EndFrame(context *Context) error {
 }
 
 // Stop closes every window still open, with its surface, as a close does,
-// then waits for the GPU and releases the device and the platform, in Run's
-// teardown order: GPU wait, deferred destroys, tracked resources and
-// onClose; renderer; platform; GPU instance. The app cannot be started
-// again.
+// then waits for the GPU and releases the device, if one was requested, and
+// the platform, in Run's teardown order: GPU wait, deferred destroys, tracked
+// resources and onClose; renderer; platform; GPU instance. The app cannot be
+// started again.
 //
 // Stop does nothing unless this loop's Start succeeded, and nothing the
 // second time: a Start that failed has already destroyed what it created, so

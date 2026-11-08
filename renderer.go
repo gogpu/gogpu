@@ -366,17 +366,18 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 	return r, nil
 }
 
-// newWindowlessRenderer creates the instance, adapter and device with no
-// surface, for HostLoop, whose windows bring their own. It has no primary
-// surface. A Vulkan adapter requested without a surface picks its graphics
-// queue without asking whether it can present.
+// newWindowlessRenderer creates the instance and the adapter with no
+// surface, for HostLoop, which requests the device with requestDevice and
+// whose windows bring their own surfaces. It has no primary surface. A Vulkan
+// adapter requested without a surface picks its graphics queue without asking
+// whether it can present.
 func newWindowlessRenderer(graphicsAPI types.GraphicsAPI, request deviceRequest) (*Renderer, error) {
 	r := &Renderer{deviceRequest: request}
 	if err := r.initInstance(graphicsAPI); err != nil {
 		r.ReleaseInstance()
 		return nil, err
 	}
-	if err := r.initAdapterDevice(nil); err != nil {
+	if err := r.requestAdapter(nil); err != nil {
 		r.Destroy()
 		r.ReleaseInstance()
 		return nil, err
@@ -464,10 +465,18 @@ func (r *Renderer) initInstance(graphicsAPI types.GraphicsAPI) error {
 // surfaceHint is non-nil only for GLES: it feeds EnumerateAdapters so the
 // backend can return a real adapter backed by a live EGL context.
 func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
-	request := r.deviceRequest
+	if err := r.requestAdapter(surfaceHint); err != nil {
+		return err
+	}
+	return r.requestDevice()
+}
+
+// requestAdapter requests the adapter deviceRequest's power preference and
+// fallback ask for. surfaceHint is as initAdapterDevice's.
+func (r *Renderer) requestAdapter(surfaceHint *wgpu.Surface) error {
 	opts := &wgpu.RequestAdapterOptions{
-		PowerPreference:      request.powerPreference,
-		ForceFallbackAdapter: request.forceFallbackAdapter,
+		PowerPreference:      r.deviceRequest.powerPreference,
+		ForceFallbackAdapter: r.deviceRequest.forceFallbackAdapter,
 		CompatibleSurface:    surfaceHint,
 	}
 	var err error
@@ -479,6 +488,13 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
 	r.pixelPresent = info.DeviceType == gputypes.DeviceTypeCPU
+	return nil
+}
+
+// requestDevice creates the logical device from the adapter with
+// deviceRequest's features and limits, checked against the adapter first.
+func (r *Renderer) requestDevice() error {
+	request := r.deviceRequest
 
 	// Check the request before making it: Vulkan and Metal ignore the
 	// features and limits an adapter lacks, and DX12 checks only features, so
@@ -492,6 +508,7 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	// any consumer reaching for one through DeviceProvider - a non-zero
 	// firstInstance on a direct draw, say, which wgpu gates on
 	// IndirectFirstInstance.
+	var err error
 	r.device, err = r.adapter.RequestDevice(&wgpu.DeviceDescriptor{
 		Label:            "gogpu",
 		RequiredFeatures: request.requiredFeatures,

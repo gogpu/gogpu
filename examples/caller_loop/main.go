@@ -57,6 +57,9 @@ func main() {
 	if err := loop.Start(); err != nil {
 		log.Fatal(err)
 	}
+	if err := loop.RequestDevice(config.RequiredFeatures, config.RequiredLimits); err != nil {
+		log.Fatal(err)
+	}
 	window, err := loop.NewWindow(config)
 	if err != nil {
 		log.Fatal(err)
