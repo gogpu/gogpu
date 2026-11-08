@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies:** wgpu v0.34.10, naga v0.21.5. wgpu now accepts command buffers whose resources were released
+  after recording, the same way Rust wgpu handles a dropped handle, and Vulkan descriptor pools always include the
+  dynamic buffer types.
+
 ## [0.54.1] - 2026-11-08
 
 ### Fixed
