@@ -211,10 +211,11 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	}
 
 	dw := &darwinPlatformWindow{
-		platform:  p,
-		id:        id,
-		window:    w.window,
-		frameless: config.Frameless,
+		platform:         p,
+		id:               id,
+		window:           w.window,
+		frameless:        config.Frameless,
+		fullscreenOnShow: config.Fullscreen,
 	}
 
 	if config.MinWidth > 0 || config.MinHeight > 0 {
@@ -345,6 +346,11 @@ type darwinPlatformWindow struct {
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
 	callbackMu      sync.RWMutex
+
+	// fullscreenOnShow holds Config.Fullscreen until the first Show:
+	// toggleFullScreen: puts a hidden window on screen, so a window opened
+	// fullscreen enters fullscreen once it is shown.
+	fullscreenOnShow bool
 }
 
 func (dw *darwinPlatformWindow) ID() WindowID { return dw.id }
@@ -546,6 +552,10 @@ func (dw *darwinPlatformWindow) Show() {
 	dw.platform.mu.RUnlock()
 	if surface != nil {
 		surface.UpdateSize()
+	}
+	if dw.fullscreenOnShow {
+		dw.fullscreenOnShow = false
+		dw.SetFullscreen(true)
 	}
 }
 
