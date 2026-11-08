@@ -12,6 +12,6 @@
 //
 // # Subpackages
 //
-//   - gpu/types: BackendType enum and related constants
+//   - gpu/types: GraphicsAPI and power-preference constants
 //   - gpu/backend/native: Native HAL backend registration
 package gpu
