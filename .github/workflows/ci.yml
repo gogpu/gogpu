@@ -37,10 +37,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: ${{ matrix.go-version }}
         cache: true
@@ -76,10 +76,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: ${{ matrix.go-version }}
         cache: true
@@ -91,27 +91,27 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: go vet ./...
 
-    - name: Install race detector
-      run: go install github.com/kolkov/racedetector/cmd/racedetector@latest
-
-    - name: Run tests with race detector
+    # The build users ship: CGO_ENABLED=0, so goffi runs its fakecgo path.
+    - name: Run tests
       shell: bash
-      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
+      run: go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
 
-    - name: Verify coverage file
-      if: matrix.os == 'ubuntu-latest'
+    # Race detection uses the toolchain's -race (ThreadSanitizer, needs cgo).
+    # A pure-Go detector in the runtime is proposed in golang/go#76786; an external
+    # source-level instrumenter can't see the runtime, the standard library or
+    # dependencies, so we don't use one in CI.
+    # With CGO_ENABLED=1 goffi links the real runtime/cgo instead of its fakecgo,
+    # so this step tests that path, not the one above. A non-std cgo package in
+    # the test binary would fail to link here on Linux (goffi#72).
+    - name: Run tests with the race detector
       shell: bash
-      run: |
-        if [ -f coverage.txt ]; then
-          echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
-        else
-          echo "coverage.txt not found, generating separately..."
-          go test -coverprofile=coverage.txt -covermode=atomic ./... || true
-        fi
+      env:
+        CGO_ENABLED: "1"
+      run: go test -race -count=1 ./...
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
       with:
         use_oidc: true
         files: ./coverage.txt
@@ -128,10 +128,10 @@ jobs:
       GOGPU_GRAPHICS_API: software
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
@@ -149,10 +149,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
@@ -190,10 +190,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
@@ -217,10 +217,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
@@ -245,26 +245,25 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
 
-    - name: Install go-mod-outdated
-      run: go install github.com/psampaz/go-mod-outdated@latest
-
+    # go-mod-outdated is pinned in tools/go.mod (checksums in tools/go.sum,
+    # updated by Dependabot), never installed @latest.
     - name: Check all dependencies
       run: |
         echo "## All Dependencies Status"
-        go list -u -m -json all 2>/dev/null | go-mod-outdated -style markdown || true
+        go list -u -m -json all 2>/dev/null | go tool -modfile=tools/go.mod go-mod-outdated -style markdown || true
 
     - name: Check direct dependencies for updates
       run: |
         echo "## Direct Dependencies with Available Updates"
-        OUTDATED=$(go list -u -m -json all 2>/dev/null | go-mod-outdated -update -direct || true)
+        OUTDATED=$(go list -u -m -json all 2>/dev/null | go tool -modfile=tools/go.mod go-mod-outdated -update -direct || true)
         if [ -n "$OUTDATED" ]; then
           echo "$OUTDATED"
           echo ""
@@ -307,8 +306,9 @@ jobs:
     - name: Verify go.mod is tidy
       run: |
         go mod tidy
-        if ! git diff --exit-code go.mod go.sum; then
-          echo "::error::go.mod/go.sum are not tidy — run 'go mod tidy' and commit"
+        go -C tools mod tidy
+        if ! git diff --exit-code go.mod go.sum tools/go.mod tools/go.sum; then
+          echo "::error::go.mod/go.sum or tools/go.mod/go.sum are not tidy — run 'go mod tidy' (and in tools/) and commit"
           exit 1
         fi
 
