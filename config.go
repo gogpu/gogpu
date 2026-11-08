@@ -56,15 +56,9 @@ type Config struct {
 	// Fullscreen starts in fullscreen mode.
 	Fullscreen bool
 
-	// Backend is retained for source compatibility but is ignored.
-	//
-	// Deprecated: backend selection is controlled by wgpu build tags. Use
-	// GraphicsAPI or the documented build-tag configuration instead.
-	Backend types.BackendType
-
 	// GraphicsAPI specifies which graphics API to use (Vulkan, DX12, Metal).
 	// GraphicsAPIAuto (default) selects the best for the platform.
-	// This is orthogonal to Backend (Rust/Native implementation choice).
+	// The backend implementation itself is chosen by wgpu build tags (ADR-038).
 	GraphicsAPI types.GraphicsAPI
 
 	// ContinuousRender enables continuous rendering (game loop style).
@@ -235,15 +229,6 @@ func (c Config) WithSize(width, height int) Config {
 	return c
 }
 
-// WithBackend returns a copy retaining the legacy backend value.
-//
-// Deprecated: backend selection is controlled by wgpu build tags. This
-// method is retained for source compatibility and has no runtime effect.
-func (c Config) WithBackend(backend types.BackendType) Config {
-	c.Backend = backend
-	return c
-}
-
 // WithGraphicsAPI returns a copy with the graphics API set.
 // Use types.GraphicsAPIVulkan to force Vulkan (Windows/Linux).
 // Use types.GraphicsAPIDX12 to force DirectX 12 (Windows only).
@@ -388,20 +373,6 @@ func (c Config) WithIcon(img image.Image) Config {
 	c.Icon = img
 	return c
 }
-
-// Deprecated backend constants are retained for source compatibility. Backend
-// selection is controlled by wgpu build tags; use GraphicsAPI constants for
-// runtime graphics API selection.
-const (
-	// Deprecated: backend selection is controlled by wgpu build tags.
-	BackendAuto = types.BackendAuto
-	// Deprecated: backend selection is controlled by wgpu build tags.
-	BackendRust = types.BackendRust
-	// Deprecated: backend selection is controlled by wgpu build tags.
-	BackendNative = types.BackendNative
-	// Deprecated: backend selection is controlled by wgpu build tags.
-	BackendGo = types.BackendGo // Alias for BackendNative
-)
 
 // Re-export graphics API types for convenience.
 const (

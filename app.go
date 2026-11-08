@@ -1806,29 +1806,6 @@ func (a *App) Config() Config {
 	return a.config
 }
 
-// DeviceProvider returns the legacy gogpu GPU resource provider.
-//
-// Deprecated: use GPUContextProvider instead. It returns the shared
-// gpucontext.DeviceProvider contract used by gg, ui, and other consumers.
-//
-// Example:
-//
-//	app := gogpu.NewApp(gogpu.Config{Title: "My App"})
-//	provider := app.GPUContextProvider()
-//
-//	// Access GPU resources
-//	device := provider.Device()
-//	queue := provider.Queue()
-//
-// Note: DeviceProvider is only valid after Run() has initialized
-// the renderer. Calling before Run() returns nil.
-func (a *App) DeviceProvider() DeviceProvider {
-	if a.renderer == nil {
-		return nil
-	}
-	return &rendererDeviceProvider{renderer: a.renderer}
-}
-
 // updateMouseStateFromPointer updates input.MouseState from a pointer event.
 // This enables Ebiten-style polling for mouse state.
 func (a *App) updateMouseStateFromPointer(ev gpucontext.PointerEvent) {

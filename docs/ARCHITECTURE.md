@@ -131,10 +131,10 @@ There are **two different** software rendering options:
 
 ## Backend Selection
 
-The legacy `Config.Backend` field, `WithBackend` builder, and backend
-constants are retained only as deprecated source-compatibility shims. They
-are ignored at runtime; select the wgpu implementation with build tags and
-the graphics API with `GraphicsAPI` or `GOGPU_GRAPHICS_API`.
+The wgpu implementation is chosen by build tags (§ ADR-038); the graphics API
+comes from `GraphicsAPI` or `GOGPU_GRAPHICS_API`. The legacy `Config.Backend`
+field, `WithBackend` builder and backend constants no longer exist: they were
+deprecated once backend selection moved to the build, and removed before v1.0.
 
 ### Multi-Backend Auto-Selection (v0.44.0)
 
