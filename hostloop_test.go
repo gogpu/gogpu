@@ -178,6 +178,37 @@ func TestHostLoop_StopTwiceTearsDownOnce(t *testing.T) {
 	}
 }
 
+// windowlessManager starts, then fails to create any window, and counts how
+// often it is destroyed.
+type windowlessManager struct {
+	mockManager
+	destroyCount int
+}
+
+var errNoWindow = errors.New("no window")
+
+func (m *windowlessManager) CreateWindow(platform.Config) (platform.PlatformWindow, error) {
+	return nil, errNoWindow
+}
+
+func (m *windowlessManager) Destroy() { m.destroyCount++ }
+
+func TestHostLoop_StartDestroysPlatformWhenWindowFails(t *testing.T) {
+	manager := &windowlessManager{}
+	oldManager := newPlatformManagerFn
+	newPlatformManagerFn = func() platform.PlatformManager { return manager }
+	t.Cleanup(func() { newPlatformManagerFn = oldManager })
+
+	loop := NewHostLoop(NewApp(DefaultConfig()))
+	if err := loop.Start(); !errors.Is(err, errNoWindow) {
+		t.Fatalf("Start without a window: got %v, want %v", err, errNoWindow)
+	}
+	loop.Stop()
+	if manager.destroyCount != 1 {
+		t.Errorf("platform after a Start whose window failed, and Stop: destroyed %d times, want 1", manager.destroyCount)
+	}
+}
+
 func TestHostLoop_BeginFrameAttemptsAcquire(t *testing.T) {
 	enabledStats(t)
 	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})

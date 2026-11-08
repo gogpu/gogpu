@@ -664,6 +664,8 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Icon:      a.config.Icon,
 	})
 	if err != nil {
+		// Nothing tears the platform down after a start that failed.
+		a.manager.Destroy()
 		return nil, err
 	}
 
