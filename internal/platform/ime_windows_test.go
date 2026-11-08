@@ -95,3 +95,50 @@ func TestWin32CursorAreaValidation(t *testing.T) {
 		t.Fatal("a negative width was accepted")
 	}
 }
+
+// TestWin32LateResultDeliveredOnce covers the Hangul order: END delivers
+// nothing and arms the post-END path, the result arrives in a later
+// COMPOSITION, and it must reach consumers exactly once with its WM_CHAR echo
+// swallowed.
+func TestWin32LateResultDeliveredOnce(t *testing.T) {
+	p := &windowsPlatform{events: eventqueue.New[Event](eventqueue.DefaultCapacity)}
+	w := &win32Window{platform: p}
+	w.ime.setEnabled(true)
+	w.ime.start()
+	if _, ok := w.ime.end(); !ok {
+		t.Fatal("composition did not end")
+	}
+	w.ime.beginCharResult()
+	w.processIMEResult("한")
+
+	event, ok := p.events.Pop()
+	if !ok || event.Type != EventIMECompositionEnd || event.IME == nil || event.IME.Committed != "한" {
+		t.Fatalf("late result event = %+v (ok=%v), want one committed end", event, ok)
+	}
+	if _, ok := p.events.Pop(); ok {
+		t.Fatal("late result produced a duplicate terminal event")
+	}
+	if !w.ime.consumeCharUnit('한') {
+		t.Fatal("WM_CHAR echo of the late result was not suppressed")
+	}
+	if w.ime.consumeCharUnit('한') {
+		t.Fatal("echo suppression survived its single use")
+	}
+}
+
+// TestWin32LateResultEchoIsSwallowed covers the other Hangul order: END reads
+// the result itself, and the late COMPOSITION only repeats it.
+func TestWin32LateResultEchoIsSwallowed(t *testing.T) {
+	p := &windowsPlatform{events: eventqueue.New[Event](eventqueue.DefaultCapacity)}
+	w := &win32Window{platform: p}
+	w.ime.setEnabled(true)
+	w.ime.start()
+	w.ime.addResult("한")
+	if committed, ok := w.ime.end(); !ok || committed != "한" {
+		t.Fatalf("end = (%q, %v), want 한", committed, ok)
+	}
+	w.processIMEResult("한")
+	if event, ok := p.events.Pop(); ok {
+		t.Fatalf("late echo was delivered as a commit: %+v", event)
+	}
+}

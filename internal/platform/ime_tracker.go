@@ -85,7 +85,45 @@ func (t *imeTracker) addResult(result string) {
 		return
 	}
 	t.result += result
-	t.suppress = append(t.suppress, utf16.Encode([]rune(result))...)
+	t.suppressEcho(result)
+}
+
+// consumePostEndResult feeds a composition result that arrived as a
+// WM_IME_COMPOSITION after WM_IME_ENDCOMPOSITION into the armed post-END
+// result path and suppresses its character echo. It reports whether the
+// result was consumed.
+func (t *imeTracker) consumePostEndResult(result string) bool {
+	if !t.awaitingChars || result == "" {
+		return false
+	}
+	t.charResult = append(t.charResult, utf16.Encode([]rune(result))...)
+	t.suppressEcho(result)
+	return true
+}
+
+// suppressEcho records text whose WM_CHAR/WM_UNICHAR echo must be swallowed.
+func (t *imeTracker) suppressEcho(text string) {
+	if text == "" {
+		return
+	}
+	t.suppress = append(t.suppress, utf16.Encode([]rune(text))...)
+}
+
+// consumeResultEcho reports whether result repeats text whose echo is still
+// suppressed, and consumes that prefix. A different result is left alone so a
+// genuine commit is never swallowed.
+func (t *imeTracker) consumeResultEcho(result string) bool {
+	units := utf16.Encode([]rune(result))
+	if len(units) == 0 || len(units) > len(t.suppress) {
+		return false
+	}
+	for i, unit := range units {
+		if t.suppress[i] != unit {
+			return false
+		}
+	}
+	t.suppress = t.suppress[len(units):]
+	return true
 }
 
 func (t *imeTracker) end() (committed string, ok bool) {

@@ -1263,9 +1263,17 @@ func (w *win32Window) Destroy() {
 		delete(w.platform.windows, w.hwnd)
 		w.platform.windowMu.Unlock()
 	}
-	if w.hwnd != 0 {
-		procDestroyWindow.Call(uintptr(w.hwnd))
+	// The HWND is read under imeMu: IMEController calls from other goroutines
+	// capture it there (imeContext), and Destroy runs while they may still be
+	// in flight.
+	w.imeMu.Lock()
+	hwnd := uintptr(w.hwnd)
+	w.imeMu.Unlock()
+	if hwnd != 0 {
+		procDestroyWindow.Call(hwnd)
+		w.imeMu.Lock()
 		w.hwnd = 0
+		w.imeMu.Unlock()
 	}
 }
 
@@ -1427,8 +1435,11 @@ func (p *windowsPlatform) Destroy() {
 			continue
 		}
 		w.destroyIMEState()
-		if w.hwnd != 0 {
-			procDestroyWindow.Call(uintptr(w.hwnd))
+		w.imeMu.Lock()
+		hwnd := uintptr(w.hwnd)
+		w.imeMu.Unlock()
+		if hwnd != 0 {
+			procDestroyWindow.Call(hwnd)
 		}
 	}
 	p.hMenu = 0
@@ -2922,7 +2933,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 	case wmKillFocus:
 		p.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: false})
 		// Losing focus cancels any preedit and detaches the native IME before
-		// the next focus target can receive composition messages.
+		// the next focus target can receive composition messages. App keeps the
+		// enabled state a widget configured; that widget re-asserts
+		// SetIMEEnabled(true) when focus returns to it.
 		w.SetIMEEnabled(false)
 		return 0
 

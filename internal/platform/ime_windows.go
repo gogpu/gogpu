@@ -144,14 +144,24 @@ func (w *win32Window) CancelIME() {
 	w.notifyIMECancel()
 }
 
-// imeContext returns the current thread's IME context for the window. It must
-// be called on the window thread and followed by ImmReleaseContext.
-func (w *win32Window) imeContext() uintptr {
-	if w == nil || w.hwnd == 0 {
-		return 0
+// imeContext returns the window thread's IME context and the HWND it was
+// taken from. It must be called on the window thread, and the caller releases
+// the context with ImmReleaseContext(hwnd, himc). The HWND is captured under
+// imeMu because IMEController calls from other goroutines reach this function
+// while Destroy may be zeroing the handle.
+func (w *win32Window) imeContext() (himc, hwnd uintptr) {
+	if w == nil {
+		return 0, 0
 	}
-	himc, _, _ := procImmGetContext.Call(uintptr(w.hwnd))
-	return himc
+	w.imeMu.Lock()
+	hwnd = uintptr(w.hwnd)
+	destroyed := w.imeDestroyed
+	w.imeMu.Unlock()
+	if destroyed || hwnd == 0 {
+		return 0, 0
+	}
+	himc, _, _ = procImmGetContext.Call(hwnd)
+	return himc, hwnd
 }
 
 // notifyIMECancel asks the native IME to drop the composition on the window
@@ -204,9 +214,9 @@ func (w *win32Window) applyIMENativeState() {
 	w.imeMu.Unlock()
 
 	if cancel {
-		if himc := w.imeContext(); himc != 0 {
+		if himc, hwnd := w.imeContext(); himc != 0 {
 			procImmNotifyIME.Call(himc, immNicompositionstr, immCpsCancel, 0)
-			procImmReleaseContext.Call(uintptr(w.hwnd), himc)
+			procImmReleaseContext.Call(hwnd, himc)
 		}
 	}
 	if openChanged {
@@ -227,11 +237,11 @@ func (w *win32Window) applyIMENativeState() {
 // applyIMECursorAreaNative positions the candidate window and the (hidden)
 // composition window. Runs on the window thread.
 func (w *win32Window) applyIMECursorAreaNative(area gpucontext.IMECursorArea) {
-	himc := w.imeContext()
+	himc, hwnd := w.imeContext()
 	if himc == 0 {
 		return
 	}
-	defer procImmReleaseContext.Call(uintptr(w.hwnd), himc)
+	defer procImmReleaseContext.Call(hwnd, himc)
 
 	scale := w.scaleFactor()
 	if scale <= 0 {
@@ -241,7 +251,7 @@ func (w *win32Window) applyIMECursorAreaNative(area gpucontext.IMECursorArea) {
 		x: int32(math.Round(area.X * scale)),
 		y: int32(math.Round(area.Y * scale)),
 	}
-	procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&pt)))
+	procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 	form := candidateForm{
 		dwStyle:      immCFSCandidatePos,
 		ptCurrentPos: pt,
@@ -298,6 +308,19 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 		w.imeMu.Unlock()
 		return
 	}
+	w.imeMu.Unlock()
+
+	// A message that carries only a result is a complete commit, not a preedit
+	// update. Providers reach this branch in three orders: a result without any
+	// composition (deliver it), a Hangul-style COMPOSITION after END before the
+	// result was read (collect it into the armed post-END path), and the late
+	// echo of a result END already delivered (swallow it).
+	if flags&gcsResultStr != 0 && flags&gcsCompStr == 0 {
+		w.handleIMEResult()
+		return
+	}
+
+	w.imeMu.Lock()
 	started := w.ime.ensureActive()
 	enabled := w.ime.enabled
 	w.imeMu.Unlock()
@@ -308,11 +331,11 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 		w.queueIME(&Event{WindowID: w.id, Type: EventIMECompositionStart})
 	}
 
-	himc := w.imeContext()
+	himc, hwnd := w.imeContext()
 	if himc == 0 {
 		return
 	}
-	defer procImmReleaseContext.Call(uintptr(w.hwnd), himc)
+	defer procImmReleaseContext.Call(hwnd, himc)
 
 	compositionText := ""
 	if flags&gcsCompStr != 0 {
@@ -352,14 +375,87 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 	})
 }
 
+// handleIMEResult reads the result string of a result-only WM_IME_COMPOSITION
+// and hands it to processIMEResult.
+func (w *win32Window) handleIMEResult() {
+	himc, hwnd := w.imeContext()
+	if himc == 0 {
+		return
+	}
+	result := w.immString(himc, gcsResultStr)
+	procImmReleaseContext.Call(hwnd, himc)
+	w.processIMEResult(result)
+}
+
+// processIMEResult commits a result string that arrived in a
+// WM_IME_COMPOSITION carrying no preedit, exactly once.
+func (w *win32Window) processIMEResult(result string) {
+	if result == "" {
+		return
+	}
+
+	w.imeMu.Lock()
+	if w.imeDestroyed {
+		w.imeMu.Unlock()
+		return
+	}
+	if w.ime.consumePostEndResult(result) {
+		// END delivered nothing and armed the post-END path; this is the text
+		// it was waiting for (Windows Hangul sends it in a late COMPOSITION).
+		w.imeMu.Unlock()
+		w.finishIMECharResult()
+		return
+	}
+	if w.ime.consumeResultEcho(result) {
+		// END already read and delivered this result; the composition message
+		// is its echo.
+		w.imeMu.Unlock()
+		return
+	}
+	w.ime.addResult(result)
+	committed, active := w.ime.end()
+	w.imeMu.Unlock()
+	if !active {
+		// No composition was open (a provider that reports a complete result
+		// on its own): the result itself is the commit.
+		committed = result
+	}
+	w.queueIME(&Event{
+		WindowID: w.id,
+		Type:     EventIMECompositionEnd,
+		IME:      &IMEEvent{Committed: committed},
+	})
+}
+
+// handleIMEEnd ends the composition. IMM32 may expose the committed result
+// only here (Hangul sends the result in a COMPOSITION after END), so END reads
+// GCS_RESULTSTR itself when nothing was collected for the session, and a late
+// COMPOSITION then finds it already delivered.
 func (w *win32Window) handleIMEEnd() {
 	w.imeMu.Lock()
 	if w.imeDestroyed {
 		w.imeMu.Unlock()
 		return
 	}
+	active := w.ime.active
+	haveResult := w.ime.result != ""
+	w.imeMu.Unlock()
+
+	if active && !haveResult {
+		if himc, hwnd := w.imeContext(); himc != 0 {
+			result := w.immString(himc, gcsResultStr)
+			procImmReleaseContext.Call(hwnd, himc)
+			if result != "" {
+				w.imeMu.Lock()
+				w.ime.addResult(result)
+				w.imeMu.Unlock()
+			}
+		}
+	}
+
+	w.imeMu.Lock()
 	committed, ok := w.ime.end()
-	if ok && committed == "" {
+	if ok && committed == "" && !w.ime.hasPendingCharResult() {
 		// Legacy IMM32 providers may deliver the result as WM_CHAR after END
 		// instead of exposing GCS_RESULTSTR. Defer the end event until those
 		// UTF-16 units have been collected (or PollEvents flushes an empty one).

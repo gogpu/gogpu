@@ -161,3 +161,63 @@ func TestIMETrackerBoundaryPaths(t *testing.T) {
 		t.Fatalf("empty post-END finish = (%q, %v)", committed, ok)
 	}
 }
+
+func TestIMETrackerPostEndResultAfterEnd(t *testing.T) {
+	var tracker imeTracker
+	tracker.setEnabled(true)
+	tracker.start()
+	if committed, ok := tracker.end(); !ok || committed != "" {
+		t.Fatalf("empty end = (%q, %v)", committed, ok)
+	}
+	if tracker.consumePostEndResult("한") {
+		t.Fatal("post-END result was accepted before the path was armed")
+	}
+	tracker.beginCharResult()
+	if !tracker.consumePostEndResult("한") {
+		t.Fatal("post-END composition result was not collected")
+	}
+	for _, unit := range utf16.Encode([]rune("한")) {
+		if !tracker.consumeCharUnit(unit) {
+			t.Fatalf("post-END result echo %#x was not suppressed", unit)
+		}
+	}
+	committed, ok := tracker.finishCharResult()
+	if !ok || committed != "한" {
+		t.Fatalf("post-END commit = (%q, %v), want 한", committed, ok)
+	}
+	if tracker.consumePostEndResult("x") {
+		t.Fatal("post-END result was accepted after the path closed")
+	}
+}
+
+func TestIMETrackerResultEchoAfterEndRead(t *testing.T) {
+	var tracker imeTracker
+	tracker.setEnabled(true)
+	tracker.start()
+	tracker.addResult("한")
+	if committed, ok := tracker.end(); !ok || committed != "한" {
+		t.Fatalf("end = (%q, %v), want 한", committed, ok)
+	}
+	// END read the result itself, so the late COMPOSITION only repeats it.
+	if !tracker.consumeResultEcho("한") {
+		t.Fatal("late result echo not recognized")
+	}
+	if tracker.consumeResultEcho("한") {
+		t.Fatal("result echo was consumed twice")
+	}
+	tracker.suppressEcho("x")
+	if tracker.consumeResultEcho("y") {
+		t.Fatal("a different result was swallowed as an echo")
+	}
+	if !tracker.consumeResultEcho("x") {
+		t.Fatal("the real echo was not consumed after a mismatch")
+	}
+	// The next composition starts cleanly and commits only its own text.
+	if !tracker.start() {
+		t.Fatal("next composition did not start after the post-END result")
+	}
+	tracker.addResult("다")
+	if committed, ok := tracker.end(); !ok || committed != "다" {
+		t.Fatalf("next commit = (%q, %v), want 다", committed, ok)
+	}
+}
