@@ -157,13 +157,18 @@ jobs:
         go-version: '1.25'
         cache: true
 
+    # The pinned golangci-lint (version and sha256 live in the action) comes
+    # from the Actions cache, so lint does not depend on GitHub Releases being
+    # reachable on every run; on 2026-11-08 the release download URL returned
+    # 504 for over an hour. Bump golangci-lint in gogpu/.github, then move this
+    # pin. Keep lint-targets on the same commit.
+    - name: Set up golangci-lint
+      uses: gogpu/.github/actions/setup-golangci-lint@cdb7bd4a5bd3852541a05f0fa1fa92b09d1ee732 # main 2026-11-08, golangci-lint v2.15.0
+
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v8
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
-        # Pinned: with "latest" a new golangci-lint release can enable or
-        # tighten a linter and turn an unchanged commit red. Bump on purpose,
-        # in its own PR, and keep lint-targets on the same version.
-        version: v2.15.0
+        install-mode: none
         args: --timeout=5m
 
   # Lint for the other desktop targets. golangci-lint type-checks only the
@@ -193,13 +198,16 @@ jobs:
         go-version: '1.25'
         cache: true
 
+    - name: Set up golangci-lint
+      uses: gogpu/.github/actions/setup-golangci-lint@cdb7bd4a5bd3852541a05f0fa1fa92b09d1ee732 # main 2026-11-08, golangci-lint v2.15.0
+
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v8
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       env:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
       with:
-        version: v2.15.0
+        install-mode: none
         args: --timeout=5m
 
   # Code formatting check
