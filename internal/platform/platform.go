@@ -38,21 +38,21 @@ type Config struct {
 }
 
 // Event represents a platform event.
+//
+// Fields are ordered by alignment: every event travels through the queue by
+// value, and gocritic's hugeParam threshold is 256 bytes. Scattering the
+// one-, two- and four-byte fields through the struct cost 11 bytes of padding
+// and pushed it over that line, so they come last, largest fields first.
 type Event struct {
-	WindowID       WindowID
-	Type           EventType
-	Width          int  // for resize events: logical size (platform points/DIP)
-	Height         int  // for resize events: logical size (platform points/DIP)
-	PhysicalWidth  int  // for resize events: physical pixels (GPU framebuffer)
-	PhysicalHeight int  // for resize events: physical pixels (GPU framebuffer)
-	Focused        bool // for focus events: true = gained focus, false = lost focus
+	Width          int // for resize events: logical size (platform points/DIP)
+	Height         int // for resize events: logical size (platform points/DIP)
+	PhysicalWidth  int // for resize events: physical pixels (GPU framebuffer)
+	PhysicalHeight int // for resize events: physical pixels (GPU framebuffer)
 
-	// Keyboard (EventKeyDown, EventKeyUp)
-	Key  gpucontext.Key
-	Mods gpucontext.Modifiers
-
-	// Character input (EventChar)
-	Char rune
+	// IME composition events. The payload is behind a pointer, like DragPaths:
+	// only IME events allocate it, and every other event keeps Event small
+	// enough to pass by value through the queue and the platform helpers.
+	IME *IMEEvent
 
 	// Pointer (EventPointer*)
 	Pointer gpucontext.PointerEvent
@@ -67,6 +67,27 @@ type Event struct {
 
 	// Scale factor (EventScaleChanged)
 	ScaleFactor float64
+
+	WindowID WindowID
+	Char     rune // character input (EventChar)
+
+	// Keyboard (EventKeyDown, EventKeyUp)
+	Key gpucontext.Key
+
+	Mods    gpucontext.Modifiers
+	Type    EventType
+	Focused bool // for focus events: true = gained focus, false = lost focus
+}
+
+// IMEEvent is the payload of the IME lifecycle events. Text positions are
+// UTF-8 byte offsets, as gpucontext.IMEState defines. Committed is set on
+// EventIMECompositionEnd only: the committed string is delivered exactly once
+// and is not repeated as an EventChar. Delete carries a delete-surrounding
+// request from the platform IME.
+type IMEEvent struct {
+	State     gpucontext.IMEState
+	Committed string
+	Delete    gpucontext.IMEDeleteSurroundingEvent
 }
 
 // EventType represents the type of platform event.
@@ -92,6 +113,16 @@ const (
 	EventDragDrop     // Files dropped on window
 	EventDragLeave    // Files left window area
 	EventScaleChanged // DPI scale factor changed (ADR-059)
+
+	// IME lifecycle events. Composition text travels separately from EventChar
+	// so the app layer routes preedit and committed text without double
+	// dispatching the native character messages.
+	EventIMECompositionStart
+	EventIMECompositionUpdate
+	EventIMECompositionEnd
+	EventIMECanceled
+	EventIMEDisabled
+	EventIMEDeleteSurrounding
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.
