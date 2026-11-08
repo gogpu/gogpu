@@ -15,6 +15,7 @@ import (
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal"
 )
 
 // queuedEventManager hands out its windows in order from CreateWindow,
@@ -398,6 +399,205 @@ func TestHostLoop_EndFrameAnswersThePresentError(t *testing.T) {
 	}
 }
 
+// configureErrors are errors a surface's configure answers: those wgpu types,
+// the device's loss wrapped as a backend wraps it, and one wgpu does not type.
+var configureErrors = []error{
+	wgpu.ErrReleased,
+	wgpu.ErrSurfaceLost,
+	fmt.Errorf("vulkan: %w", wgpu.ErrDeviceLost),
+	errors.New("driver: no swapchain"),
+}
+
+// failedConfigures makes every surface configure for the rest of the test
+// fail with err, configuring nothing.
+func failedConfigures(t *testing.T, err error) {
+	t.Helper()
+	configure := configureSurfaceFn
+	configureSurfaceFn = func(*wgpu.Surface, *wgpu.Device, *wgpu.SurfaceConfiguration) error { return err }
+	t.Cleanup(func() { configureSurfaceFn = configure })
+}
+
+// preparingWindow is a mockWindow whose PrepareFrame reports prepared, and
+// no size until it is set, so a size it reports is seen by beginFrame alone,
+// and a resize by BeginFrame's sync alone.
+type preparingWindow struct {
+	mockWindow
+	prepared platform.PrepareFrameResult
+}
+
+func (w *preparingWindow) PrepareFrame() platform.PrepareFrameResult { return w.prepared }
+
+// beginFrameReconfigures are the ways BeginFrame configures an open window's
+// surface again: the window's size changed, preparing the frame reports a new
+// size, or an acquire failed. Each makes the next BeginFrame configure the
+// surface of a window opened through preparingWindow at 800x600.
+var beginFrameReconfigures = []struct {
+	name        string
+	reconfigure func(*testing.T, *preparingWindow)
+}{
+	{"resize", func(_ *testing.T, window *preparingWindow) {
+		window.width = 1024
+		window.height = 768
+	}},
+	{"prepared size", func(_ *testing.T, window *preparingWindow) {
+		window.prepared = platform.PrepareFrameResult{PhysicalWidth: 1024, PhysicalHeight: 768}
+	}},
+	{"acquire recovery", func(t *testing.T, _ *preparingWindow) {
+		failedAcquires(t, errors.New("driver: no frame"))
+	}},
+}
+
+// beginFrameReconfiguredWith runs the next BeginFrame on a window opened at
+// 800x600, after reconfigure, with every configure failing with configureErr,
+// and checks that the surface keeps that size. It answers whether BeginFrame
+// started a frame, which it ends, what it logged at error level, and its
+// error.
+func beginFrameReconfiguredWith(t *testing.T, reconfigure func(*testing.T, *preparingWindow), configureErr error) (bool, string, error) {
+	t.Helper()
+	platformWindow := &preparingWindow{mockWindow: mockWindow{width: 800, height: 600}}
+	_, loop, window := startedHostLoop(t, platformWindow)
+	t.Cleanup(loop.Stop)
+	reconfigure(t, platformWindow)
+	failedConfigures(t, configureErr)
+	records := errorRecords(t)
+	context, ok, err := loop.BeginFrame(window)
+	if width, height := window.surface.width, window.surface.height; width != 800 || height != 600 {
+		t.Errorf("surface after a failed configure: got %dx%d, want its previous 800x600", width, height)
+	}
+	if ok {
+		if endErr := loop.EndFrame(context); endErr != nil {
+			t.Errorf("EndFrame: %v", endErr)
+		}
+	}
+	return ok, records.String(), err
+}
+
+// Each configure's error is answered, not logged.
+func TestHostLoop_BeginFrameAnswersTheConfigureError(t *testing.T) {
+	for _, way := range beginFrameReconfigures {
+		for _, configureErr := range configureErrors {
+			t.Run(way.name+"/"+configureErr.Error(), func(t *testing.T) {
+				ok, records, err := beginFrameReconfiguredWith(t, way.reconfigure, configureErr)
+				if ok {
+					t.Fatal("BeginFrame with a failed configure: got ok=true, want false")
+				}
+				if !errors.Is(err, configureErr) {
+					t.Errorf("BeginFrame with a failed configure: got error %v, want %v", err, configureErr)
+				}
+				if records != "" {
+					t.Errorf("BeginFrame logged the error it answered: %s", records)
+				}
+			})
+		}
+	}
+}
+
+// A configure that fails because the surface has zero area is a minimize,
+// not a failure: BeginFrame answers no error of it, whichever way it
+// configured, and logs none.
+func TestHostLoop_BeginFrameAnswersNoZeroAreaConfigure(t *testing.T) {
+	for _, way := range beginFrameReconfigures {
+		t.Run(way.name, func(t *testing.T) {
+			_, records, err := beginFrameReconfiguredWith(t, way.reconfigure, hal.ErrZeroArea)
+			if errors.Is(err, hal.ErrZeroArea) {
+				t.Errorf("BeginFrame answered a zero-area configure: %v", err)
+			}
+			if records != "" {
+				t.Errorf("BeginFrame logged a zero-area configure: %s", records)
+			}
+		})
+	}
+}
+
+// A minimized Vulkan window on Windows keeps reporting its size while its
+// surface's extent drops to zero: the present at the minimize answers
+// outdated, and no configure succeeds until the restore. BeginFrame skips the
+// window meanwhile, with no error.
+func TestHostLoop_BeginFrameSkipsASurfaceOfZeroArea(t *testing.T) {
+	_, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	defer loop.Stop()
+	failedPresents(t, wgpu.ErrSurfaceOutdated)
+	failedConfigures(t, hal.ErrZeroArea)
+	context, ok, err := loop.BeginFrame(window)
+	if !ok {
+		t.Fatalf("BeginFrame: got ok=false, error %v", err)
+	}
+	context.Clear(0.1, 0.2, 0.3, 1)
+	if err := loop.EndFrame(context); !errors.Is(err, wgpu.ErrSurfaceOutdated) {
+		t.Fatalf("EndFrame at the minimize: got error %v, want %v", err, wgpu.ErrSurfaceOutdated)
+	}
+	records := errorRecords(t)
+
+	if _, ok, err := loop.BeginFrame(window); ok || err != nil {
+		t.Errorf("BeginFrame on a surface of zero area: got ok=%v, error %v; want false, nil", ok, err)
+	}
+	if records.Len() != 0 {
+		t.Errorf("BeginFrame on a surface of zero area logged: %s", records.String())
+	}
+}
+
+// A resize reaches a window's surface at that window's next BeginFrame, not
+// in the pump, which only reports it. Two windows resized in one pump each
+// take their own size.
+func TestHostLoop_ResizeAppliedAtTheWindowsBeginFrame(t *testing.T) {
+	platformWindows := []*mockWindow{
+		{windowID: 1, width: 800, height: 600},
+		{windowID: 2, width: 640, height: 480},
+	}
+	_, loop, manager := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{platformWindows[0], platformWindows[1]})
+	defer loop.Stop()
+	windows := make([]*Window, 0, len(platformWindows))
+	for range platformWindows {
+		window, err := loop.NewWindow(DefaultConfig())
+		if err != nil {
+			t.Fatalf("NewWindow: %v", err)
+		}
+		window.Show()
+		windows = append(windows, window)
+	}
+	oldSizes := []image.Point{image.Pt(800, 600), image.Pt(640, 480)}
+	newSizes := []image.Point{image.Pt(1024, 768), image.Pt(320, 240)}
+	for i, size := range newSizes {
+		platformWindows[i].width = size.X
+		platformWindows[i].height = size.Y
+		manager.events = append(manager.events, platform.Event{
+			Type:     platform.EventResize,
+			WindowID: platformWindows[i].windowID,
+			Width:    size.X, Height: size.Y,
+			PhysicalWidth: size.X, PhysicalHeight: size.Y,
+		})
+	}
+	surfaceSize := func(window *Window) image.Point {
+		return image.Pt(int(window.surface.width), int(window.surface.height))
+	}
+
+	loop.PumpEvents()
+
+	for i, window := range windows {
+		if size := surfaceSize(window); size != oldSizes[i] {
+			t.Errorf("window %d's surface after the pump: got %v, want %v until its BeginFrame", i, size, oldSizes[i])
+		}
+	}
+	for i, window := range windows {
+		context, ok, err := loop.BeginFrame(window)
+		if !ok {
+			t.Fatalf("BeginFrame on window %d: got ok=false, error %v", i, err)
+		}
+		if width, height := context.FramebufferSize(); image.Pt(width, height) != newSizes[i] {
+			t.Errorf("window %d's framebuffer: got %dx%d, want %v", i, width, height, newSizes[i])
+		}
+		context.Clear(0.1, 0.2, 0.3, 1)
+		if err := loop.EndFrame(context); err != nil {
+			t.Errorf("EndFrame on window %d: %v", i, err)
+		}
+		for j := i + 1; j < len(windows); j++ {
+			if size := surfaceSize(windows[j]); size != oldSizes[j] {
+				t.Errorf("window %d's surface after window %d's frame: got %v, want %v until its own BeginFrame", j, i, size, oldSizes[j])
+			}
+		}
+	}
+}
+
 func TestHostLoop_BeginFrameSkipsHiddenWindow(t *testing.T) {
 	enabledStats(t)
 	app, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
@@ -614,5 +814,39 @@ func TestRunFrame_LogsTheFrameErrors(t *testing.T) {
 				t.Errorf("Run's frame did not log %q at %v; logged:\n%s", test.err, test.level, records.String())
 			}
 		})
+	}
+}
+
+// Run's loop treats a surface it cannot configure at the window's size as a
+// failed acquire: it logs the error at error level, skips the window's draw
+// and asks for another frame.
+func TestRunFrame_LogsTheConfigureErrorAndSkipsTheWindow(t *testing.T) {
+	platformWindow := &mockWindow{width: 800, height: 600}
+	app, loop, window := startedHostLoop(t, platformWindow)
+	defer loop.Stop()
+	configureErr := fmt.Errorf("vulkan: %w", wgpu.ErrDeviceLost)
+	failedConfigures(t, configureErr)
+	platformWindow.width = 1024
+	platformWindow.height = 768
+	records := errorRecords(t)
+	app.invalidator.Consume()
+
+	drawn := false
+	app.renderFrameGPU([]windowFrame{{
+		window: window,
+		onDraw: func(*Context) { drawn = true },
+		scale:  1,
+		physW:  1024,
+		physH:  768,
+	}})
+
+	if !strings.Contains(records.String(), configureErr.Error()) {
+		t.Errorf("Run's frame did not log %q at error level; logged:\n%s", configureErr, records.String())
+	}
+	if drawn {
+		t.Error("Run's frame drew a window whose surface it could not configure")
+	}
+	if !app.invalidator.Consume() {
+		t.Error("Run's frame did not ask for another frame after a failed configure")
 	}
 }

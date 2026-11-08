@@ -111,16 +111,16 @@ func (loop *HostLoop) NewWindow(config Config) (*Window, error) {
 // PumpEvents clears the previous pump's input edges, then drains every
 // pending platform event and dispatches it to the callbacks and the
 // input-event queue registered on the App, for every window. A window's
-// resize reconfigures its surface at once and calls the window's OnResize.
-// A close destroys the window with its surface. It ends the gesture frame.
+// resize calls the window's OnResize, and its surface takes the new size at
+// the window's next BeginFrame. A close destroys the window with its surface.
+// It ends the gesture frame.
 //
 // It never waits, runs onUpdate or draws, and returns once the queue is
 // empty. A pump allocates nothing apart from boxing each event it puts into
-// the input-event queue, once per event, the text of a typed character
-// outside ASCII, once for every text-input callback, and what a resize's
-// surface reconfigure allocates. Its first pumps also resolve the system
-// functions they call and grow its buffers to their largest size; neither
-// recurs.
+// the input-event queue, once per event, and the text of a typed character
+// outside ASCII, once for every text-input callback. Its first pumps also
+// resolve the system functions they call and grow its buffers to their
+// largest size; neither recurs.
 func (loop *HostLoop) PumpEvents() {
 	loop.app.processEventsMultiThread()
 }
@@ -139,12 +139,14 @@ func (loop *HostLoop) Running() bool {
 //
 // It returns ok=false and no error without acquiring when the window is nil,
 // hidden or reports a zero size, and without blocking when the window's
-// compositor frame gate (Wayland) is closed. When the acquire fails it
-// returns ok=false and the error, which it does not log, typed as wgpu types
-// it: wgpu.ErrSurfaceOutdated once the surface is reconfigured, or the
-// reconfigure's own error when that fails too; wgpu.ErrSurfaceLost;
-// wgpu.ErrTimeout; wgpu.ErrDeviceLost. The host skips the frame and tries
-// again next tick.
+// compositor frame gate (Wayland) is closed. When the surface cannot be
+// configured at the window's size, or the acquire fails, it returns ok=false
+// and the error, which it does not log, typed as wgpu types it. A failed
+// configure keeps the surface's previous size, and the next BeginFrame tries
+// it again. A failed acquire answers wgpu.ErrSurfaceOutdated once the
+// surface is reconfigured, or the reconfigure's own error when that fails
+// too; wgpu.ErrSurfaceLost; wgpu.ErrTimeout; wgpu.ErrDeviceLost. The host
+// skips the frame and tries again next tick.
 //
 // HostLoop does not track whether a window is minimized. On Windows a
 // minimized window keeps reporting its last size: a DX12 window keeps
@@ -178,7 +180,9 @@ func (loop *HostLoop) BeginFrame(window *Window) (*Context, bool, error) {
 		ws.width = 0
 		ws.height = 0
 	}
-	a.syncFrameSurfaceSize(ws, physW, physH)
+	if err := a.syncFrameSurfaceSize(ws, physW, physH); err != nil {
+		return nil, false, err
+	}
 	if gate, ok := window.platWindow.(platform.FrameGater); ok && !gate.FrameCallbackReady() {
 		return nil, false, nil
 	}

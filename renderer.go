@@ -461,7 +461,7 @@ func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) er
 	presentMode := resolvePresentMode(caps, ws.vsync)
 	alphaMode := resolveAlphaMode(caps, ws.transparent)
 
-	return ws.surface.Configure(device, &wgpu.SurfaceConfiguration{
+	return configureSurfaceFn(ws.surface, device, &wgpu.SurfaceConfiguration{
 		Format:      ws.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       ws.width,
@@ -565,13 +565,19 @@ func (r *Renderer) Resize(width, height int) {
 	r.ResizeSurface(r.primary, width, height)
 }
 
-// ResizeSurface handles window resize for any surface.
+// ResizeSurface handles window resize for any surface. A configure that
+// fails keeps the surface's previous size, so the surface's next frame tries
+// it again and answers its error.
 func (r *Renderer) ResizeSurface(ws *RenderTarget, width, height int) {
-	ws.resize(width, height, r.device, r.adapter)
+	_ = ws.resize(width, height, r.device, r.adapter)
 }
 
-// resize handles window resize for this surface.
-func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) {
+// resize handles window resize for this surface, and answers the configure's
+// error. A configure that fails keeps the previous size, so the next frame
+// tries it again. One that fails because the surface has zero area, as a
+// minimized Vulkan window's does on Windows, answers no error: the surface
+// waits for the restore, as at a zero size.
+func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) error {
 	if width <= 0 || height <= 0 {
 		// Window minimized or invisible -- unconfigure surface to prevent
 		// zero-extent swapchain creation on the next frame (VK-VAL-001).
@@ -579,13 +585,13 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 			ws.surface.Unconfigure()
 			ws.state = SurfaceReady
 		}
-		return
+		return nil
 	}
 
 	// Skip no-op resize. ConfigureSurface is expensive (involves device wait idle
 	// and surface reconfiguration), so avoid calling it when dimensions are unchanged.
 	if uint32(width) == ws.width && uint32(height) == ws.height { //nolint:gosec // G115: validated positive above
-		return
+		return nil
 	}
 
 	// Save old dimensions in case Configure fails -- we must keep
@@ -611,9 +617,13 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 		// Next frame will retry with the new size.
 		ws.width = oldWidth
 		ws.height = oldHeight
-		return
+		if isZeroArea(err) {
+			return nil
+		}
+		return fmt.Errorf("gogpu: configuring the surface at %dx%d: %w", width, height, err)
 	}
 	ws.state = SurfaceConfigured
+	return nil
 }
 
 // BeginFrame prepares a new frame for rendering on the primary surface.
@@ -639,9 +649,11 @@ func (ws *RenderTarget) CanRender() bool {
 	return ws.state == SurfaceConfigured && ws.surface != nil
 }
 
-// acquireSurfaceTextureFn and presentSurfaceTextureFn acquire and present a
-// surface's texture; replaced in tests to fail as a driver does.
+// configureSurfaceFn configures a surface, and acquireSurfaceTextureFn and
+// presentSurfaceTextureFn acquire and present its texture; replaced in tests
+// to fail as a driver does.
 var (
+	configureSurfaceFn      = (*wgpu.Surface).Configure
 	acquireSurfaceTextureFn = (*wgpu.Surface).GetCurrentTexture
 	presentSurfaceTextureFn = (*wgpu.Surface).PresentWithDamage
 )
@@ -649,7 +661,8 @@ var (
 // beginFrame acquires the next surface texture for rendering on this window.
 // It returns false with no error when the surface is not configured, and
 // false with the error, after recovering the surface from it, when the
-// acquire or its view fails. Recovery follows the wgpu framework.rs pattern:
+// acquire or its view fails, or the configure at a size PrepareFrame reports.
+// Recovery follows the wgpu framework.rs pattern:
 //   - ErrSurfaceOutdated → reconfigure (swapchain stale after resize/DPI change)
 //   - ErrSurfaceLost → mark SurfaceLost (caller must recreate)
 func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) (bool, error) {
@@ -665,11 +678,10 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	// blocking nextDrawable + transaction present keep pool churn bounded.
 	if platWin != nil {
 		result := platWin.PrepareFrame()
-		if result.PhysicalWidth > 0 && result.PhysicalHeight > 0 &&
-			(result.PhysicalWidth != ws.width || result.PhysicalHeight != ws.height) {
-			ws.width = result.PhysicalWidth
-			ws.height = result.PhysicalHeight
-			_ = ws.configure(device, adapter)
+		if result.PhysicalWidth > 0 && result.PhysicalHeight > 0 {
+			if err := ws.resize(int(result.PhysicalWidth), int(result.PhysicalHeight), device, adapter); err != nil {
+				return false, err
+			}
 		}
 	}
 
@@ -708,7 +720,9 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 // answers the error to report, logging nothing. Outdated surfaces are
 // reconfigured (common after resize/DPI change); a reconfigure that fails is
 // answered in place of the outdated error. Lost surfaces transition to
-// SurfaceLost for caller-level recreation.
+// SurfaceLost for caller-level recreation. After any other error the surface
+// is reconfigured too, and a reconfigure that fails is answered with it,
+// unless it failed because the surface has zero area.
 func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, adapter *wgpu.Adapter) error {
 	switch {
 	case errors.Is(err, wgpu.ErrSurfaceOutdated):
@@ -721,7 +735,9 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 		ws.state = SurfaceLost
 	default:
 		if ws.width > 0 && ws.height > 0 {
-			_ = ws.configure(device, adapter)
+			if cfgErr := ws.configure(device, adapter); cfgErr != nil && !isZeroArea(cfgErr) {
+				return fmt.Errorf("%w; reconfiguring the surface: %w", err, cfgErr)
+			}
 		}
 	}
 	return err
@@ -996,9 +1012,10 @@ func (ws *RenderTarget) ensureFrameStarted() bool {
 	// keeping the first error when the retry answers none.
 	if !started && !ws.CanRender() && ws.platWindow != nil {
 		if pw, ph := ws.platWindow.PhysicalSize(); pw > 0 && ph > 0 {
-			ws.resize(pw, ph, ws.renderer.device, ws.renderer.adapter)
-			var retryErr error
-			started, retryErr = ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter)
+			retryErr := ws.resize(pw, ph, ws.renderer.device, ws.renderer.adapter)
+			if retryErr == nil {
+				started, retryErr = ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter)
+			}
 			err = cmp.Or(retryErr, err)
 		}
 	}

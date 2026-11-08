@@ -792,18 +792,13 @@ func (a *App) processEventsMultiThread() {
 	}
 }
 
-// handleSecondaryResize resizes a secondary window's surface on the render thread.
+// handleSecondaryResize reports a secondary window's resize to its OnResize
+// and asks for a frame. The window's surface takes the new size at the
+// window's next frame, as the primary's does.
 func (a *App) handleSecondaryResize(ev platform.Event) {
 	w := a.windowManager.getByPlatformID(ev.WindowID)
 	if w == nil || w.surface == nil {
 		return
-	}
-	physW, physH := ev.PhysicalWidth, ev.PhysicalHeight
-	if physW > 0 && physH > 0 {
-		ws := w.surface
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
-		})
 	}
 	if w.onResize != nil {
 		w.onResize(ev.Width, ev.Height)
@@ -1108,7 +1103,11 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		if ws == nil {
 			continue
 		}
-		a.syncFrameSurfaceSize(ws, frame.physW, frame.physH)
+		if err := a.syncFrameSurfaceSize(ws, frame.physW, frame.physH); err != nil {
+			// Nothing to draw to, as after a failed acquire below.
+			a.reportFailedFrame(err)
+			continue
+		}
 
 		// Lazy acquire: reset per-frame state for deferred beginFrame.
 		// beginFrame is called on first draw call, not upfront.
@@ -1144,10 +1143,7 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// even when the application's OnDraw callback draws nothing.
 		if !ws.frameStarted && !ws.tryOverlayOnlyFrame() {
 			if ws.acquireFailed {
-				if ws.acquireErr != nil {
-					logFrameError(ws.acquireErr)
-				}
-				a.RequestRedraw()
+				a.reportFailedFrame(ws.acquireErr)
 			}
 			a.renderer.endFrameStats(true) // idle: no acquire → present skipped (#484 FrameStats)
 			ws.resetLazyState()
@@ -1193,24 +1189,40 @@ func (a *App) endWindowFrame(ws *RenderTarget) bool {
 	return reconfigured
 }
 
-func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
+// reportFailedFrame handles a window's frame that Run's loop could not draw:
+// it logs err, when there is one, since Run has no caller to give it to, and
+// requests another frame, since the invalidation that asked for this one is
+// consumed.
+func (a *App) reportFailedFrame(err error) {
+	if err != nil {
+		logFrameError(err)
+	}
+	a.RequestRedraw()
+}
+
+// syncFrameSurfaceSize applies the window's physical size to its surface
+// before a frame, and answers the configure's error.
+func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) error {
 	// initRenderer may leave the surface unconfigured when PhysicalSize was 0.
 	if !ws.CanRender() && ws.platWindow != nil {
 		pw, ph := ws.platWindow.PhysicalSize()
 		if pw > 0 && ph > 0 {
-			ws.resize(pw, ph, a.renderer.device, a.renderer.adapter)
+			if err := ws.resize(pw, ph, a.renderer.device, a.renderer.adapter); err != nil {
+				return err
+			}
 		}
 	}
 	if physW <= 0 || physH <= 0 {
-		return
+		return nil
 	}
 	width, height, ok := physicalSizeUint32(physW, physH)
 	if !ok {
-		return
+		return nil
 	}
 	if ws.width != width || ws.height != height {
-		a.renderer.ResizeSurface(ws, physW, physH)
+		return ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
 	}
+	return nil
 }
 
 // modalFrameTick executes one update+render cycle during the Win32 modal
@@ -1306,7 +1318,8 @@ func (a *App) resizeSecondaryWindowsDuringModal() {
 	}
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		for _, r := range resizes {
-			r.ws.resize(r.w, r.h, a.renderer.device, a.renderer.adapter)
+			// The frame that follows tries a failed configure again and logs it.
+			_ = r.ws.resize(r.w, r.h, a.renderer.device, a.renderer.adapter)
 		}
 	})
 }

@@ -360,7 +360,8 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 			physW, physH := platWindow.PhysicalSize()
 			if physW > 0 && physH > 0 {
 				a.renderLoop.RunOnRenderThreadVoid(func() {
-					capturedWS.resize(physW, physH, a.renderer.device, a.renderer.adapter)
+					// The frame below tries a failed configure again and logs it.
+					_ = capturedWS.resize(physW, physH, a.renderer.device, a.renderer.adapter)
 				})
 			}
 			logW, logH := platWindow.LogicalSize()
