@@ -249,6 +249,13 @@ func (e *eventSourceAdapter) dispatchFocus(focused bool) {
 	}
 }
 
+// dispatchResize dispatches a resize event to registered callbacks.
+func (e *eventSourceAdapter) dispatchResize(width, height int) {
+	if e.onResize != nil {
+		e.onResize(width, height)
+	}
+}
+
 // dispatchPointerEvent dispatches a pointer event to registered callbacks.
 // It also dispatches to legacy mouse handlers for backward compatibility,
 // and feeds the gesture recognizer for multi-touch gesture computation.
