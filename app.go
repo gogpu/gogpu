@@ -972,15 +972,21 @@ func (a *App) dispatchIMEEvent(event *platform.Event) {
 	case platform.EventIMECompositionStart:
 		a.dispatchIMECompositionStart()
 	case platform.EventIMECompositionUpdate:
-		a.dispatchIMECompositionUpdate(event.IMEState)
+		if event.IME != nil {
+			a.dispatchIMECompositionUpdate(event.IME.State)
+		}
 	case platform.EventIMECompositionEnd:
-		a.dispatchIMECompositionEnd(event.IMECommitted)
+		if event.IME != nil {
+			a.dispatchIMECompositionEnd(event.IME.Committed)
+		}
 	case platform.EventIMECanceled:
 		a.dispatchIMECanceled()
 	case platform.EventIMEDisabled:
 		a.dispatchIMEDisabled()
 	case platform.EventIMEDeleteSurrounding:
-		a.dispatchIMEDeleteSurrounding(event.IMEDelete)
+		if event.IME != nil {
+			a.dispatchIMEDeleteSurrounding(event.IME.Delete)
+		}
 	}
 }
 

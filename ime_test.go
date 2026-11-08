@@ -78,22 +78,24 @@ func TestEventSourceCarriesIMEEventContract(t *testing.T) {
 	classify(&platform.Event{
 		WindowID: 1,
 		Type:     platform.EventIMECompositionUpdate,
-		IMEState: gpucontext.IMEState{
+		IME: &platform.IMEEvent{State: gpucontext.IMEState{
 			Composing:       true,
 			CompositionText: "你好",
 			Cursor:          gpucontext.IMETextRange{Start: 6, End: 6},
 			Selection:       gpucontext.IMETextRange{Start: 0, End: 3},
-		},
+		}},
 	})
-	classify(&platform.Event{WindowID: 1, Type: platform.EventIMECompositionEnd, IMECommitted: "你好"})
+	classify(&platform.Event{
+		WindowID: 1,
+		Type:     platform.EventIMECompositionEnd,
+		IME:      &platform.IMEEvent{Committed: "你好"},
+	})
 	classify(&platform.Event{WindowID: 1, Type: platform.EventIMECanceled})
 	classify(&platform.Event{WindowID: 1, Type: platform.EventIMEDisabled})
 	classify(&platform.Event{
 		WindowID: 1,
 		Type:     platform.EventIMEDeleteSurrounding,
-		IMEDelete: gpucontext.IMEDeleteSurroundingEvent{
-			Before: 3,
-		},
+		IME:      &platform.IMEEvent{Delete: gpucontext.IMEDeleteSurroundingEvent{Before: 3}},
 	})
 
 	want := []string{"start", "update:你好", "end:你好", "canceled", "disabled", "delete"}

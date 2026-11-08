@@ -44,7 +44,7 @@ func TestWin32PostEndCommitRemainsExactlyOnce(t *testing.T) {
 	w.finishIMECharResult()
 
 	event, ok := p.events.Pop()
-	if !ok || event.Type != EventIMECompositionEnd || event.IMECommitted != "你" {
+	if !ok || event.Type != EventIMECompositionEnd || event.IME == nil || event.IME.Committed != "你" {
 		t.Fatalf("post-END result event = %+v (ok=%v), want one committed end", event, ok)
 	}
 	if _, ok := p.events.Pop(); ok {

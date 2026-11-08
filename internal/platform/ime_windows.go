@@ -348,7 +348,7 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 	w.queueIME(&Event{
 		WindowID: w.id,
 		Type:     EventIMECompositionUpdate,
-		IMEState: state,
+		IME:      &IMEEvent{State: state},
 	})
 }
 
@@ -373,9 +373,9 @@ func (w *win32Window) handleIMEEnd() {
 		return
 	}
 	w.queueIME(&Event{
-		WindowID:     w.id,
-		Type:         EventIMECompositionEnd,
-		IMECommitted: committed,
+		WindowID: w.id,
+		Type:     EventIMECompositionEnd,
+		IME:      &IMEEvent{Committed: committed},
 	})
 }
 
@@ -431,9 +431,9 @@ func (w *win32Window) finishIMECharResult() {
 		return
 	}
 	w.queueIME(&Event{
-		WindowID:     w.id,
-		Type:         EventIMECompositionEnd,
-		IMECommitted: committed,
+		WindowID: w.id,
+		Type:     EventIMECompositionEnd,
+		IME:      &IMEEvent{Committed: committed},
 	})
 }
 
