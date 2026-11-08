@@ -12,6 +12,9 @@ name: CI
 
 env:
   CGO_ENABLED: "0"
+  # Never download a newer Go behind our back: each job must run the Go it asked
+  # for, or the minimum and oldstable legs prove nothing.
+  GOTOOLCHAIN: local
 
 on:
   push:
@@ -65,14 +68,28 @@ jobs:
         GOARCH: wasm
       run: go build ./...
 
+  # No 386 leg, decided by measurement (2026-11-08, main 57a36d0):
+  #   GOARCH=386 go build ./... fails with
+  #   - internal/platform/platform_windows.go:213: constant 18446744073709551614 overflows uintptr
+  #     (fixed in the same PR as this comment: the literal became ^uintptr(1));
+  #   - github.com/gogpu/wgpu/core/track: buffer.go:179, encoder_tracker.go:268, texture.go:250:
+  #     constant 4294967294 overflows int;
+  #   - github.com/gogpu/wgpu/internal/raytracing: build.go:198: math.MaxUint32 (4294967295)
+  #     overflows int.
+  # wgpu screens those in v0.34.11 (fix/goarch-386, 1183df5, comparisons moved to uint64).
+  # Add the leg — GOARCH=386 go build ./... and go test ./..., as the standard has it —
+  # once gogpu depends on wgpu >= v0.34.11 and that build passes.
+
   # Unit tests - Cross-platform
   test:
-    name: Test - ${{ matrix.os }}
+    name: Test - ${{ matrix.os }} - Go ${{ matrix.go-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.25']
+        # The two supported releases. The go.mod minimum is the test-minimum
+        # job below, which tests exactly the `go` line we promise importers.
+        go-version: [oldstable, stable]
 
     steps:
     - name: Checkout code
@@ -110,13 +127,39 @@ jobs:
       run: go test -race -count=1 ./...
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-latest' && matrix.go-version == 'stable'
       uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
       with:
         use_oidc: true
         files: ./coverage.txt
         flags: unittests
         name: codecov-gogpu
+
+  # The go.mod `go` line is a promise to every importer, and this machine never
+  # tests it (its toolchain is always >= go1.27.3). This job tests exactly that line.
+  test-minimum:
+    name: Test - ubuntu-latest - Go minimum
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    - name: Read the go.mod minimum
+      id: gomod
+      run: echo "go=$(awk '$1 == "go" { print $2; exit }' go.mod)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Go
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      with:
+        go-version: ${{ steps.gomod.outputs.go }}
+        cache: true
+
+    - name: Go version
+      run: go version
+
+    - name: Run tests
+      run: go test -count=1 ./...
 
   # Deterministic headless rendering against committed software fixtures.
   # Keep this separate from the broad matrix so a missing fixture or an
@@ -222,7 +265,9 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
-        go-version: '1.25'
+        # gofmt's output changes between Go releases: run it on stable, not on
+        # the go.mod minimum (gg hit this on curve.go).
+        go-version: stable
         cache: true
 
     - name: Check formatting
@@ -320,6 +365,25 @@ jobs:
         fi
         echo "✅ internal/compositor has no reverse imports"
 
+  # Informational on purpose: vulnerability data must be current, and a finding
+  # with no fixed version yet (govulncheck exit 3) would otherwise turn every PR
+  # red with nothing to fix. continue-on-error keeps the run green; the job is
+  # NOT in the gate's needs. A finding that has a fixed version is fixed by
+  # updating, never left here.
+  vulncheck:
+    name: Vulncheck
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    - name: Run govulncheck
+      uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+      with:
+        go-version-input: stable
+
   # The one check the main-protection ruleset requires. Every job that must
   # pass goes into needs, so adding a job or a matrix entry never touches the
   # ruleset. if: always() and the explicit result check are both needed: a job
@@ -328,7 +392,7 @@ jobs:
   required:
     name: Required checks
     if: always()
-    needs: [build, test, golden-tests, lint, lint-targets, formatting, deps]
+    needs: [build, test, test-minimum, golden-tests, lint, lint-targets, formatting, deps]
     runs-on: ubuntu-latest
 
     steps:
