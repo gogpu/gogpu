@@ -1499,7 +1499,12 @@ func (p *windowsPlatform) WaitEvents() {
 
 // WakeUp unblocks WaitEvents from any goroutine.
 // PostMessageW is thread-safe and wakes MsgWaitForMultipleObjectsEx.
+// With no window open there is nothing to post to, and nothing waits:
+// only a HostLoop runs with no window, and it never calls WaitEvents.
 func (p *windowsPlatform) WakeUp() {
+	if p.primary == nil {
+		return
+	}
 	syscall.SyscallN(procPostMessageW.Addr(), uintptr(p.primary.hwnd), uintptr(wmWakeUp), 0, 0)
 }
 

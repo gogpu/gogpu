@@ -360,6 +360,26 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 	return r, nil
 }
 
+// newWindowlessRenderer creates the instance, adapter and device with no
+// surface, for HostLoop, whose windows bring their own. It has no primary
+// surface. A Vulkan adapter requested without a surface picks its graphics
+// queue without asking whether it can present.
+func newWindowlessRenderer(graphicsAPI types.GraphicsAPI, powerPref gputypes.PowerPreference) (*Renderer, error) {
+	r := &Renderer{
+		powerPreference: powerPref,
+	}
+	if err := r.initInstance(graphicsAPI); err != nil {
+		r.ReleaseInstance()
+		return nil, err
+	}
+	if err := r.initAdapterDevice(nil); err != nil {
+		r.Destroy()
+		r.ReleaseInstance()
+		return nil, err
+	}
+	return r, nil
+}
+
 // NewHeadlessRenderer creates a renderer that does not require a native window
 // or display. The zero-argument form uses the deterministic Pure-Go software
 // backend, which is suitable for golden tests and CI. An optional graphics API

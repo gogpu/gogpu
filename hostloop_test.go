@@ -14,12 +14,27 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-// queuedEventManager returns its events from PollEvents in order, then
-// EventNone. Rewind makes the same events pending again.
+// queuedEventManager hands out its windows in order from CreateWindow,
+// recording each config it was asked for, and
+// returns its events from PollEvents in order, then EventNone. Rewind makes
+// the same events pending again.
 type queuedEventManager struct {
-	mockManagerWithWindow
-	events    []platform.Event
-	nextEvent int
+	mockManager
+	windows       []platform.PlatformWindow
+	windowConfigs []platform.Config
+	createdWindow int
+	events        []platform.Event
+	nextEvent     int
+}
+
+func (m *queuedEventManager) CreateWindow(config platform.Config) (platform.PlatformWindow, error) {
+	m.windowConfigs = append(m.windowConfigs, config)
+	if m.createdWindow == len(m.windows) {
+		return nil, errors.New("queuedEventManager: no window left to create")
+	}
+	window := m.windows[m.createdWindow]
+	m.createdWindow++
+	return window, nil
 }
 
 func (m *queuedEventManager) PollEvents() platform.Event {
@@ -33,29 +48,46 @@ func (m *queuedEventManager) PollEvents() platform.Event {
 
 func (m *queuedEventManager) rewind() { m.nextEvent = 0 }
 
-// startedHostLoop starts a HostLoop over window, on mockedPlatform. It locks
-// the test to its OS thread, as HostLoop requires: on macOS a frame's
-// autorelease pool must be popped on the thread that pushed it.
-func startedHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
+// startedHostLoopWithNoWindow starts a HostLoop on the software backend over a
+// platform that hands out windows, in order, to NewWindow. It locks the test
+// to its OS thread, as HostLoop requires: on macOS a frame's autorelease pool
+// must be popped on the thread that pushed it.
+func startedHostLoopWithNoWindow(t *testing.T, windows []platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
 	t.Helper()
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
-	manager := mockedPlatform(t, window, events...)
-	app := NewApp(DefaultConfig())
+	manager := &queuedEventManager{windows: windows, events: events}
+	oldManager := newPlatformManagerFn
+	newPlatformManagerFn = func() platform.PlatformManager { return manager }
+	t.Cleanup(func() { newPlatformManagerFn = oldManager })
+
+	app := NewApp(DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware))
 	loop := NewHostLoop(app)
 	if err := loop.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
+		t.Fatalf("Start on the software backend: %v", err)
 	}
 	return app, loop, manager
 }
 
-// mockedPlatform makes the next start open window, poll events from it, and
-// get a renderer that has no GPU: its surface is sized to the window and
-// never configured, so an acquire is attempted and fails.
-func mockedPlatform(t *testing.T, window platform.PlatformWindow, events ...platform.Event) *queuedEventManager {
+// startedHostLoop starts a HostLoop on the software backend, then opens
+// window through NewWindow and shows it.
+func startedHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *Window) {
 	t.Helper()
-	manager := &queuedEventManager{mockManagerWithWindow: mockManagerWithWindow{win: window}, events: events}
+	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{window}, events...)
+	opened, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	opened.Show()
+	return app, loop, opened
+}
 
+// mockedRunPlatform makes the next Run open window and get a renderer that
+// has no GPU: its surface is sized to the window and never configured, so an
+// acquire is attempted and fails.
+func mockedRunPlatform(t *testing.T, window platform.PlatformWindow) {
+	t.Helper()
+	manager := &queuedEventManager{windows: []platform.PlatformWindow{window}}
 	oldManager := newPlatformManagerFn
 	newPlatformManagerFn = func() platform.PlatformManager { return manager }
 	oldRenderer := newRendererFn
@@ -74,28 +106,6 @@ func mockedPlatform(t *testing.T, window platform.PlatformWindow, events ...plat
 		newPlatformManagerFn = oldManager
 		newRendererFn = oldRenderer
 	})
-	return manager
-}
-
-// startedSoftwareHostLoop starts a HostLoop over window on the mock platform,
-// with the real renderer on wgpu's software backend, so its frames acquire
-// and present without a GPU. It locks the test to its OS thread, as
-// startedHostLoop does.
-func startedSoftwareHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop) {
-	t.Helper()
-	runtime.LockOSThread()
-	t.Cleanup(runtime.UnlockOSThread)
-	manager := &queuedEventManager{mockManagerWithWindow: mockManagerWithWindow{win: window}, events: events}
-	oldManager := newPlatformManagerFn
-	newPlatformManagerFn = func() platform.PlatformManager { return manager }
-	t.Cleanup(func() { newPlatformManagerFn = oldManager })
-
-	app := NewApp(DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware))
-	loop := NewHostLoop(app)
-	if err := loop.Start(); err != nil {
-		t.Fatalf("Start on the software backend: %v", err)
-	}
-	return app, loop
 }
 
 // enabledStats turns frame stats on for the test: a failed acquire records a
@@ -124,7 +134,7 @@ func skipWhenRaceInstrumented(t *testing.T) {
 }
 
 func TestHostLoop_StartTwice(t *testing.T) {
-	_, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	_, loop, _ := startedHostLoopWithNoWindow(t, nil)
 	defer loop.Stop()
 
 	if err := loop.Start(); !errors.Is(err, ErrHostLoopStarted) {
@@ -133,11 +143,154 @@ func TestHostLoop_StartTwice(t *testing.T) {
 }
 
 func TestHostLoop_RunRefusesWhileStarted(t *testing.T) {
-	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	app, loop, _ := startedHostLoopWithNoWindow(t, nil)
 	defer loop.Stop()
 
 	if err := app.Run(); !errors.Is(err, ErrHostLoopStarted) {
 		t.Errorf("Run: got %v, want ErrHostLoopStarted", err)
+	}
+}
+
+func TestHostLoop_StartOpensNoWindow(t *testing.T) {
+	app, loop, manager := startedHostLoopWithNoWindow(t, nil)
+	defer loop.Stop()
+
+	if manager.createdWindow != 0 {
+		t.Errorf("Start created %d platform windows, want 0", manager.createdWindow)
+	}
+	if count := app.WindowCount(); count != 0 {
+		t.Errorf("WindowCount after Start: got %d, want 0", count)
+	}
+	if !loop.Running() {
+		t.Error("Running after Start with no window: got false, want true")
+	}
+	if app.renderer.device == nil {
+		t.Error("Start with no window brought up no device")
+	}
+}
+
+func TestHostLoop_NewWindowBeforeStartFails(t *testing.T) {
+	loop := NewHostLoop(NewApp(DefaultConfig()))
+	if _, err := loop.NewWindow(DefaultConfig()); err == nil {
+		t.Error("NewWindow before Start: got nil error")
+	}
+}
+
+func TestHostLoop_NewWindowOpensHidden(t *testing.T) {
+	platformWindow := &mockWindow{width: 800, height: 600}
+	_, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{platformWindow})
+	defer loop.Stop()
+
+	window, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	if platformWindow.visible || window.Visible() {
+		t.Error("NewWindow showed the window")
+	}
+	if _, ok := loop.BeginFrame(window); ok {
+		t.Error("BeginFrame before Show: got ok=true, want false")
+	}
+	window.Show()
+	if !platformWindow.visible || !window.Visible() {
+		t.Error("Show left the window hidden")
+	}
+}
+
+// macOS and Windows apply a window's fullscreen themselves, from the
+// platform config NewWindow passes on.
+func TestHostLoop_NewWindowAsksThePlatformForFullscreen(t *testing.T) {
+	_, loop, manager := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{&mockWindow{width: 800, height: 600}})
+	defer loop.Stop()
+
+	if _, err := loop.NewWindow(DefaultConfig().WithFullscreen()); err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	if len(manager.windowConfigs) != 1 || !manager.windowConfigs[0].Fullscreen {
+		t.Errorf("platform configs: got %+v, want one asking fullscreen", manager.windowConfigs)
+	}
+}
+
+func TestHostLoop_NewWindowPresentsWithConfigVSync(t *testing.T) {
+	_, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{
+		&mockWindow{windowID: 1, width: 800, height: 600},
+		&mockWindow{windowID: 2, width: 800, height: 600},
+	})
+	defer loop.Stop()
+
+	withVSync, err := loop.NewWindow(DefaultConfig().WithVSync(true))
+	if err != nil {
+		t.Fatalf("NewWindow with vsync: %v", err)
+	}
+	withoutVSync, err := loop.NewWindow(DefaultConfig().WithVSync(false))
+	if err != nil {
+		t.Fatalf("NewWindow without vsync: %v", err)
+	}
+	if !withVSync.surface.vsync || withoutVSync.surface.vsync {
+		t.Errorf("surface vsync: got %v and %v, want true and false", withVSync.surface.vsync, withoutVSync.surface.vsync)
+	}
+}
+
+func TestHostLoop_SeveralWindowsEachDrawAFrame(t *testing.T) {
+	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{
+		&mockWindow{windowID: 1, width: 800, height: 600},
+		&mockWindow{windowID: 2, width: 640, height: 480},
+		&mockWindow{windowID: 3, width: 320, height: 240},
+	})
+	defer loop.Stop()
+
+	windows := make([]*Window, 0, 3)
+	for range 3 {
+		window, err := loop.NewWindow(DefaultConfig())
+		if err != nil {
+			t.Fatalf("NewWindow: %v", err)
+		}
+		window.Show()
+		windows = append(windows, window)
+	}
+	if count := app.WindowCount(); count != 3 {
+		t.Errorf("WindowCount: got %d, want 3", count)
+	}
+	for i, window := range windows {
+		context, ok := loop.BeginFrame(window)
+		if !ok {
+			t.Fatalf("BeginFrame on window %d: got ok=false", i)
+		}
+		wantWidth, wantHeight := window.PhysicalSize()
+		if width, height := context.FramebufferSize(); width != wantWidth || height != wantHeight {
+			t.Errorf("window %d framebuffer: got %dx%d, want %dx%d", i, width, height, wantWidth, wantHeight)
+		}
+		context.Clear(0.1, 0.2, 0.3, 1)
+		loop.EndFrame(context)
+	}
+}
+
+func TestHostLoop_StopClosesOpenWindows(t *testing.T) {
+	var closedWindows []WindowID
+	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{
+		&mockWindow{windowID: 1, width: 800, height: 600},
+		&mockWindow{windowID: 2, width: 800, height: 600},
+	})
+	app.OnAnyWindowClosed(func(window WindowID) { closedWindows = append(closedWindows, window) })
+	first, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	second, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+
+	loop.Stop()
+
+	if count := app.WindowCount(); count != 0 {
+		t.Errorf("WindowCount after Stop: got %d, want 0", count)
+	}
+	if first.surface.surface != nil || second.surface.surface != nil {
+		t.Error("Stop left a window's surface unreleased")
+	}
+	if len(closedWindows) != 2 {
+		t.Errorf("windows reported closed by Stop: got %v, want both", closedWindows)
 	}
 }
 
@@ -160,15 +313,15 @@ func TestHostLoop_NotRunningAfterQuit(t *testing.T) {
 	}
 }
 
-func TestHostLoop_NotRunningAfterWindowCloses(t *testing.T) {
+func TestHostLoop_NotRunningAfterLastWindowCloses(t *testing.T) {
 	_, loop, _ := startedHostLoop(t, &mockWindow{windowID: 1, width: 800, height: 600},
 		platform.Event{Type: platform.EventClose, WindowID: 1})
 
 	loop.PumpEvents()
 	if loop.Running() {
-		t.Error("Running after the window closed: got true, want false")
+		t.Error("Running after the last window closed: got true, want false")
 	}
-	loop.Stop() // the close cleared the app's window; Stop must not panic
+	loop.Stop() // the close destroyed the window; Stop must not panic
 }
 
 func TestHostLoop_StopBeforeStartDoesNothing(t *testing.T) {
@@ -178,17 +331,17 @@ func TestHostLoop_StopBeforeStartDoesNothing(t *testing.T) {
 }
 
 func TestHostLoop_StopAfterFailedStartDoesNothing(t *testing.T) {
-	manager := &queuedEventManager{mockManagerWithWindow: mockManagerWithWindow{win: &mockWindow{width: 800, height: 600}}}
+	manager := &queuedEventManager{}
 	oldManager := newPlatformManagerFn
 	newPlatformManagerFn = func() platform.PlatformManager { return manager }
 	errNoGPU := errors.New("no GPU")
-	oldRenderer := newRendererFn
-	newRendererFn = func(platform.PlatformWindow, types.GraphicsAPI, bool, gputypes.PowerPreference, bool) (*Renderer, error) {
+	oldRenderer := newWindowlessRendererFn
+	newWindowlessRendererFn = func(types.GraphicsAPI, gputypes.PowerPreference) (*Renderer, error) {
 		return nil, errNoGPU
 	}
 	t.Cleanup(func() {
 		newPlatformManagerFn = oldManager
-		newRendererFn = oldRenderer
+		newWindowlessRendererFn = oldRenderer
 	})
 
 	loop := NewHostLoop(NewApp(DefaultConfig()))
@@ -225,19 +378,17 @@ func (m *windowlessManager) CreateWindow(platform.Config) (platform.PlatformWind
 
 func (m *windowlessManager) Destroy() { m.destroyCount++ }
 
-func TestHostLoop_StartDestroysPlatformWhenWindowFails(t *testing.T) {
+func TestRun_DestroysPlatformWhenWindowFails(t *testing.T) {
 	manager := &windowlessManager{}
 	oldManager := newPlatformManagerFn
 	newPlatformManagerFn = func() platform.PlatformManager { return manager }
 	t.Cleanup(func() { newPlatformManagerFn = oldManager })
 
-	loop := NewHostLoop(NewApp(DefaultConfig()))
-	if err := loop.Start(); !errors.Is(err, errNoWindow) {
-		t.Fatalf("Start without a window: got %v, want %v", err, errNoWindow)
+	if err := NewApp(DefaultConfig()).Run(); !errors.Is(err, errNoWindow) {
+		t.Fatalf("Run without a window: got %v, want %v", err, errNoWindow)
 	}
-	loop.Stop()
 	if manager.destroyCount != 1 {
-		t.Errorf("platform after a Start whose window failed, and Stop: destroyed %d times, want 1", manager.destroyCount)
+		t.Errorf("platform after a Run whose window failed: destroyed %d times, want 1", manager.destroyCount)
 	}
 }
 
@@ -256,22 +407,22 @@ func (w *liveResizeWindow) SetLiveResizePhaseHooks(start, end func()) {
 	w.phaseEndHook = end
 }
 
-func TestHostLoop_StartInstallsNoLiveResizeHooks(t *testing.T) {
+func TestHostLoop_NewWindowInstallsNoLiveResizeHooks(t *testing.T) {
 	window := &liveResizeWindow{mockWindow: mockWindow{width: 800, height: 600}}
 	_, loop, _ := startedHostLoop(t, window)
 	defer loop.Stop()
 
 	if window.resizeHook != nil {
-		t.Error("live-resize hook after Start: installed, want none, so nothing draws inside PumpEvents")
+		t.Error("live-resize hook after NewWindow: installed, want none, so nothing draws inside PumpEvents")
 	}
 	if window.phaseStartHook != nil || window.phaseEndHook != nil {
-		t.Error("live-resize phase hooks after Start: installed, want none")
+		t.Error("live-resize phase hooks after NewWindow: installed, want none")
 	}
 }
 
 func TestRun_InstallsLiveResizeHooks(t *testing.T) {
 	window := &liveResizeWindow{mockWindow: mockWindow{width: 800, height: 600}}
-	mockedPlatform(t, window)
+	mockedRunPlatform(t, window)
 	app := NewApp(DefaultConfig())
 	app.OnUpdate(func(float64) { app.Quit() })
 
@@ -286,26 +437,25 @@ func TestRun_InstallsLiveResizeHooks(t *testing.T) {
 	}
 }
 
-func TestHostLoop_BeginFrameAttemptsAcquire(t *testing.T) {
-	enabledStats(t)
-	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+func TestHostLoop_BeginFrameAcquires(t *testing.T) {
+	_, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
-	// The renderer has no GPU, so the acquire fails and is recorded.
-	if _, ok := loop.BeginFrame(app.PrimaryWindow()); ok {
-		t.Fatal("BeginFrame without a GPU: got ok=true, want false")
+	context, ok := loop.BeginFrame(window)
+	if !ok {
+		t.Fatal("BeginFrame on a shown window: got ok=false, want true")
 	}
-	if !app.renderer.GetFrameStats().PresentSkipped {
-		t.Error("BeginFrame with an open window recorded no acquire attempt")
+	if width, height := context.FramebufferSize(); width != 800 || height != 600 {
+		t.Errorf("framebuffer: got %dx%d, want 800x600", width, height)
 	}
+	loop.EndFrame(context)
 }
 
 func TestHostLoop_BeginFrameSkipsHiddenWindow(t *testing.T) {
 	enabledStats(t)
-	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
-	window := app.PrimaryWindow()
 	window.Hide()
 	if _, ok := loop.BeginFrame(window); ok {
 		t.Error("BeginFrame on a hidden window: got ok=true, want false")
@@ -317,10 +467,10 @@ func TestHostLoop_BeginFrameSkipsHiddenWindow(t *testing.T) {
 
 func TestHostLoop_BeginFrameSkipsZeroSizeWindow(t *testing.T) {
 	enabledStats(t)
-	app, loop, _ := startedHostLoop(t, &mockWindow{width: 0, height: 0})
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 0, height: 0})
 	defer loop.Stop()
 
-	if _, ok := loop.BeginFrame(app.PrimaryWindow()); ok {
+	if _, ok := loop.BeginFrame(window); ok {
 		t.Error("BeginFrame on a zero-size window: got ok=true, want false")
 	}
 	if app.renderer.GetFrameStats().PresentSkipped {
@@ -330,10 +480,10 @@ func TestHostLoop_BeginFrameSkipsZeroSizeWindow(t *testing.T) {
 
 func TestHostLoop_BeginFrameSkipsClosedFrameGate(t *testing.T) {
 	enabledStats(t)
-	app, loop, _ := startedHostLoop(t, &mockFrameGaterWindow{mockWindow: mockWindow{width: 800, height: 600}, ready: false})
+	app, loop, window := startedHostLoop(t, &mockFrameGaterWindow{mockWindow: mockWindow{width: 800, height: 600}, ready: false})
 	defer loop.Stop()
 
-	if _, ok := loop.BeginFrame(app.PrimaryWindow()); ok {
+	if _, ok := loop.BeginFrame(window); ok {
 		t.Error("BeginFrame with the frame gate closed: got ok=true, want false")
 	}
 	if app.renderer.GetFrameStats().PresentSkipped {
@@ -342,10 +492,10 @@ func TestHostLoop_BeginFrameSkipsClosedFrameGate(t *testing.T) {
 }
 
 func TestHostLoop_PumpEventsDispatches(t *testing.T) {
-	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600},
-		platform.Event{Type: platform.EventKeyDown, Key: gpucontext.KeyA},
-		platform.Event{Type: platform.EventKeyUp, Key: gpucontext.KeyA},
-		platform.Event{Type: platform.EventResize, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768},
+	app, loop, window := startedHostLoop(t, &mockWindow{windowID: 1, width: 800, height: 600},
+		platform.Event{Type: platform.EventKeyDown, Key: gpucontext.KeyA, WindowID: 1},
+		platform.Event{Type: platform.EventKeyUp, Key: gpucontext.KeyA, WindowID: 1},
+		platform.Event{Type: platform.EventResize, WindowID: 1, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768},
 	)
 	defer loop.Stop()
 
@@ -353,7 +503,7 @@ func TestHostLoop_PumpEventsDispatches(t *testing.T) {
 	var resizeWidth, resizeHeight int
 	app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) { pressedKey = key })
 	app.EventSource().OnKeyRelease(func(key gpucontext.Key, _ gpucontext.Modifiers) { releasedKey = key })
-	app.OnResize(func(width, height int) { resizeWidth, resizeHeight = width, height })
+	window.SetOnResize(func(width, height int) { resizeWidth, resizeHeight = width, height })
 
 	loop.PumpEvents()
 
@@ -378,61 +528,12 @@ func TestHostLoop_PumpEventsDispatches(t *testing.T) {
 	}
 }
 
-// primaryResize is a resize of the window startedHostLoop opens when that
-// window has ID 7: an ID the platform gave it, not the 0 classifyEvent takes
-// for the primary window on its own.
-var primaryResize = platform.Event{Type: platform.EventResize, WindowID: 7, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768}
-
-func TestHostLoop_PumpEventsReportsPrimaryResize(t *testing.T) {
-	app, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
-	defer loop.Stop()
-
-	var appWidth, appHeight, sourceWidth, sourceHeight int
-	app.OnResize(func(width, height int) {
-		appWidth = width
-		appHeight = height
-	})
-	app.EventSource().OnResize(func(width, height int) {
-		sourceWidth = width
-		sourceHeight = height
-	})
-
-	loop.PumpEvents()
-
-	if appWidth != 1024 || appHeight != 768 {
-		t.Errorf("App.OnResize: got %dx%d, want 1024x768", appWidth, appHeight)
-	}
-	if sourceWidth != 1024 || sourceHeight != 768 {
-		t.Errorf("EventSource.OnResize: got %dx%d, want 1024x768", sourceWidth, sourceHeight)
-	}
-}
-
-func TestHostLoop_PumpEventsKeepsOtherWindowsResizeFromApp(t *testing.T) {
-	otherResize := platform.Event{Type: platform.EventResize, WindowID: 8, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768}
-	app, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, otherResize)
-	defer loop.Stop()
-
-	appResized := false
-	sourceResized := false
-	app.OnResize(func(int, int) { appResized = true })
-	app.EventSource().OnResize(func(int, int) { sourceResized = true })
-
-	loop.PumpEvents()
-
-	if appResized {
-		t.Error("App.OnResize after another window's resize: called, want only the primary's")
-	}
-	if sourceResized {
-		t.Error("EventSource.OnResize after another window's resize: called, want only the primary's")
-	}
-}
-
 func TestHostLoop_FrameAcquiresAndPresents(t *testing.T) {
-	app, loop := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
 	for frame := range 2 {
-		context, ok := loop.BeginFrame(app.PrimaryWindow())
+		context, ok := loop.BeginFrame(window)
 		if !ok {
 			t.Fatalf("BeginFrame %d on the software backend: got ok=false, want true", frame)
 		}
@@ -444,32 +545,13 @@ func TestHostLoop_FrameAcquiresAndPresents(t *testing.T) {
 	}
 }
 
-func TestHostLoop_BeginFrameConsumesPumpedResize(t *testing.T) {
-	app, loop := startedSoftwareHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
-	defer loop.Stop()
-
-	loop.PumpEvents()
-	renderLoop := app.renderLoop.(*inlineRenderLoop)
-	if !renderLoop.resizePending.Load() {
-		t.Fatal("pending resize after the pump: none, want the pumped one")
-	}
-	context, ok := loop.BeginFrame(app.PrimaryWindow())
-	if !ok {
-		t.Fatal("BeginFrame after a pumped resize: got ok=false, want true")
-	}
-	loop.EndFrame(context)
-	if renderLoop.resizePending.Load() {
-		t.Error("pending resize after BeginFrame: still pending, want it applied")
-	}
-}
-
 func TestHostLoop_BeginFrameReconfiguresLostSurface(t *testing.T) {
-	app, loop := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
+	_, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
-	surface := app.renderer.primary
+	surface := window.surface
 	surface.state = SurfaceLost
-	context, ok := loop.BeginFrame(app.PrimaryWindow())
+	context, ok := loop.BeginFrame(window)
 	if !ok {
 		t.Fatal("BeginFrame on a lost surface: got ok=false, want true after the reconfigure")
 	}
@@ -510,7 +592,8 @@ func TestHostLoop_ConsumeRedrawRequestReportsEachRequestOnce(t *testing.T) {
 }
 
 func TestHostLoop_ConsumeRedrawRequestAfterPumpedResize(t *testing.T) {
-	_, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
+	_, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600},
+		platform.Event{Type: platform.EventResize, WindowID: 7, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768})
 	defer loop.Stop()
 
 	loop.ConsumeRedrawRequest() // Start's first frame
@@ -534,12 +617,17 @@ func TestHostLoop_PumpEventsAllocatesNothingWhenIdle(t *testing.T) {
 // Each event entering the input-event queue is boxed into a
 // gpucontext.InputEvent, one allocation, as in Run. Nothing else allocates.
 func TestHostLoop_PumpEventsAllocatesOnlyQueuedInputEvents(t *testing.T) {
-	_, loop, manager := startedHostLoop(t, &mockWindow{width: 800, height: 600},
+	_, loop, manager := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{&mockWindow{width: 800, height: 600}},
 		platform.Event{Type: platform.EventKeyDown, Key: gpucontext.KeyA},
 		platform.Event{Type: platform.EventKeyUp, Key: gpucontext.KeyA},
 		platform.Event{Type: platform.EventResize, Width: 1024, Height: 768, PhysicalWidth: 1024, PhysicalHeight: 768},
 	)
 	defer loop.Stop()
+	window, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	window.Show()
 
 	skipWhenRaceInstrumented(t)
 	allocations := testing.AllocsPerRun(100, func() {
@@ -557,7 +645,7 @@ func TestHostLoop_PumpEventsAllocatesOnlyQueuedInputEvents(t *testing.T) {
 // boxes without allocating. A typed character outside ASCII also allocates
 // its text, once for both callbacks; an ASCII one does not.
 func TestHostLoop_PumpEventsAllocatesOncePerRoutedEvent(t *testing.T) {
-	app, loop, manager := startedHostLoop(t, &mockWindow{windowID: 1, width: 800, height: 600},
+	app, loop, manager := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{&mockWindow{windowID: 1, width: 800, height: 600}},
 		platform.Event{Type: platform.EventKeyDown, Key: gpucontext.KeyA, WindowID: 1},
 		platform.Event{Type: platform.EventChar, Char: 'a', WindowID: 1},
 		platform.Event{Type: platform.EventKeyUp, Key: gpucontext.KeyA, WindowID: 1},
@@ -568,7 +656,11 @@ func TestHostLoop_PumpEventsAllocatesOncePerRoutedEvent(t *testing.T) {
 		platform.Event{Type: platform.EventChar, Char: 'ж', WindowID: 1},
 	)
 	defer loop.Stop()
-	window := app.PrimaryWindow()
+	window, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	window.Show()
 	var keys, pointers, scrolls int
 	var text string
 	window.SetOnKeyPress(func(gpucontext.Key, gpucontext.Modifiers) { keys++ })

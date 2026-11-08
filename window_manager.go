@@ -336,89 +336,23 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 		return nil, fmt.Errorf("gogpu: NewWindow called before Run()")
 	}
 
-	// Create platform window via PlatformManager.
-	platWindow, err := a.manager.CreateWindow(platform.Config{
-		Title:       config.Title,
-		Width:       config.Width,
-		Height:      config.Height,
-		Resizable:   config.Resizable,
-		Fullscreen:  config.Fullscreen,
-		Frameless:   config.Frameless,
-		Transparent: config.Transparent,
-		UseDirectComposition: config.Transparent &&
-			a.config.GraphicsAPI == GraphicsAPIDX12,
-		TabbingMode:       int(config.TabbingMode),
-		TabbingIdentifier: config.TabbingIdentifier,
-	})
+	// Secondary windows: Immediate (ADR-010 VSync strategy).
+	w, err := a.openWindow(config, false)
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: create window: %w", err)
+		return nil, err
 	}
-
-	// Create GPU surface for the new window on the render thread.
-	// GPU operations are thread-bound; surface creation must happen there.
-	var surface *wgpu.Surface
-	var surfaceErr error
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		displayHandle, windowHandle := platWindow.GetHandle()
-		surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
-	})
-	if surfaceErr != nil {
-		platWindow.Destroy()
-		return nil, fmt.Errorf("gogpu: create surface: %w", surfaceErr)
-	}
-
-	// Create RenderTarget for this window.
-	ws := &RenderTarget{
-		renderer:    a.renderer,
-		platWindow:  platWindow,
-		surface:     surface,
-		format:      a.renderer.surfaceFormat,
-		vsync:       false, // Secondary windows: Immediate (ADR-010 VSync strategy)
-		transparent: config.Transparent,
-		state:       SurfaceReady,
-	}
-
-	// Configure surface with initial dimensions on the render thread.
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		pw, ph := platWindow.PhysicalSize()
-		if pw > 0 && ph > 0 {
-			ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
-			ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
-			if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
-				slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
-			} else {
-				ws.state = SurfaceConfigured
-			}
-		}
-	})
 
 	// Show the window now that the GPU surface is ready — mirrors the primary
 	// window path in app.go where Show() is called after GPU init.
-	platWindow.Show()
-
-	// Allocate internal ID
-	internalID := a.windowManager.allocate()
-
-	// Create Window and register in WindowManager.
-	w := &Window{
-		id:              internalID,
-		platformID:      platWindow.ID(),
-		config:          config,
-		surface:         ws,
-		platWindow:      platWindow,
-		headerAlignment: config.HeaderAlignment,
-		visible:         true,
-	}
-
-	applyHeaderAlignment(platWindow, config.HeaderAlignment)
-	a.windowManager.add(w)
+	w.Show()
 
 	// Install live-resize hook for macOS so this window re-renders during drag.
 	// Without it, AppKit stretches the last frame to fill the new window size.
 	// Mirrors the primary window hook in registerPrimaryWindow.
+	platWindow := w.platWindow
 	if lr, ok := platWindow.(platform.LiveResizeRenderer); ok {
 		capturedW := w
-		capturedWS := ws
+		capturedWS := w.surface
 		lr.SetLiveResizeHook(func() {
 			if a.renderLoop == nil {
 				return
@@ -500,4 +434,82 @@ func (a *App) closeSecondaryWindow(id WindowID) {
 	if a.onAnyWindowClosed != nil {
 		a.onAnyWindowClosed(id)
 	}
+}
+
+// openWindow creates a hidden platform window with its surface, configured
+// when the window already reports a size, and registers it. vsync picks the
+// surface's present mode.
+func (a *App) openWindow(config Config, vsync bool) (*Window, error) {
+	// Create platform window via PlatformManager.
+	platWindow, err := a.manager.CreateWindow(platform.Config{
+		Title:       config.Title,
+		Width:       config.Width,
+		Height:      config.Height,
+		Resizable:   config.Resizable,
+		Fullscreen:  config.Fullscreen,
+		Frameless:   config.Frameless,
+		Transparent: config.Transparent,
+		UseDirectComposition: config.Transparent &&
+			a.config.GraphicsAPI == GraphicsAPIDX12,
+		TabbingMode:       int(config.TabbingMode),
+		TabbingIdentifier: config.TabbingIdentifier,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gogpu: create window: %w", err)
+	}
+
+	// Create GPU surface for the new window on the render thread.
+	// GPU operations are thread-bound; surface creation must happen there.
+	var surface *wgpu.Surface
+	var surfaceErr error
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		displayHandle, windowHandle := platWindow.GetHandle()
+		surface, surfaceErr = a.renderer.instance.CreateSurface(displayHandle, windowHandle)
+	})
+	if surfaceErr != nil {
+		platWindow.Destroy()
+		return nil, fmt.Errorf("gogpu: create surface: %w", surfaceErr)
+	}
+
+	// Create RenderTarget for this window.
+	ws := &RenderTarget{
+		renderer:    a.renderer,
+		platWindow:  platWindow,
+		surface:     surface,
+		format:      a.renderer.surfaceFormat,
+		vsync:       vsync,
+		transparent: config.Transparent,
+		state:       SurfaceReady,
+	}
+
+	// Configure surface with initial dimensions on the render thread.
+	a.renderLoop.RunOnRenderThreadVoid(func() {
+		pw, ph := platWindow.PhysicalSize()
+		if pw > 0 && ph > 0 {
+			ws.width = uint32(pw)  //nolint:gosec // G115: validated positive above
+			ws.height = uint32(ph) //nolint:gosec // G115: validated positive above
+			if cfgErr := ws.configure(a.renderer.device, a.renderer.adapter); cfgErr != nil {
+				slog.Warn("gogpu: failed to configure secondary surface", "err", cfgErr)
+			} else {
+				ws.state = SurfaceConfigured
+			}
+		}
+	})
+
+	// Allocate internal ID
+	internalID := a.windowManager.allocate()
+
+	// Create Window and register in WindowManager.
+	w := &Window{
+		id:              internalID,
+		platformID:      platWindow.ID(),
+		config:          config,
+		surface:         ws,
+		platWindow:      platWindow,
+		headerAlignment: config.HeaderAlignment,
+	}
+
+	applyHeaderAlignment(platWindow, config.HeaderAlignment)
+	a.windowManager.add(w)
+	return w, nil
 }
