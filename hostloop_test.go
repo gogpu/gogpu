@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
@@ -573,5 +574,45 @@ func TestRunFrame_OnUpdateSeesEachInputEdgeOnce(t *testing.T) {
 
 	if len(justPressed) != 2 || !justPressed[0] || justPressed[1] {
 		t.Errorf("JustPressed(KeyA) in onUpdate over two frames: got %v, want [true false]", justPressed)
+	}
+}
+
+// Run's loop has no caller to give a frame's error to, so it logs it: an
+// outdated surface at debug level, any other at error level.
+func TestRunFrame_LogsTheFrameErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		fail  func(*testing.T, error)
+		err   error
+		level slog.Level
+	}{
+		{"acquire outdated", failedAcquires, wgpu.ErrSurfaceOutdated, slog.LevelDebug},
+		{"acquire lost", failedAcquires, wgpu.ErrSurfaceLost, slog.LevelError},
+		{"present outdated", failedPresents, wgpu.ErrSurfaceOutdated, slog.LevelDebug},
+		{"present device lost", failedPresents, fmt.Errorf("vulkan: %w", wgpu.ErrDeviceLost), slog.LevelError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, loop, window := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+			defer loop.Stop()
+			test.fail(t, test.err)
+			records := recordsFrom(t, slog.LevelDebug)
+
+			app.renderFrameGPU([]windowFrame{{
+				window: window,
+				onDraw: func(context *Context) { context.Clear(0.1, 0.2, 0.3, 1) },
+				scale:  1,
+				physW:  800,
+				physH:  600,
+			}})
+
+			logged := false
+			for _, record := range strings.Split(records.String(), "\n") {
+				logged = logged || strings.Contains(record, "level="+test.level.String()) && strings.Contains(record, test.err.Error())
+			}
+			if !logged {
+				t.Errorf("Run's frame did not log %q at %v; logged:\n%s", test.err, test.level, records.String())
+			}
+		})
 	}
 }

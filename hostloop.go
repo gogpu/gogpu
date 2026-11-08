@@ -144,11 +144,18 @@ func (loop *HostLoop) Running() bool {
 // it: wgpu.ErrSurfaceOutdated once the surface is reconfigured, or the
 // reconfigure's own error when that fails too; wgpu.ErrSurfaceLost;
 // wgpu.ErrTimeout; wgpu.ErrDeviceLost. The host skips the frame and tries
-// again next tick. HostLoop does not track whether
-// a window is minimized: the acquire decides. A minimized Vulkan surface
-// fails its acquire; a minimized DX12 window keeps acquiring and drawing, as
-// Run does. With Fifo present the acquire blocks for up to about one
-// refresh, which paces the loop to vsync.
+// again next tick.
+//
+// HostLoop does not track whether a window is minimized. On Windows a
+// minimized window keeps reporting its last size: a DX12 window keeps
+// acquiring and drawing, as Run does, while a Vulkan surface's extent drops
+// to zero, so it cannot be configured, and BeginFrame returns ok=false and
+// no error until the window is restored. EndFrame answers
+// wgpu.ErrSurfaceOutdated for the presents around the minimize and the
+// restore.
+//
+// With Fifo present the acquire blocks for up to about one refresh, which
+// paces the loop to vsync.
 //
 // Each Window reuses one Context. It is valid until EndFrame, which must be
 // called once for every BeginFrame that returned ok=true.
