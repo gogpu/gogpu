@@ -70,6 +70,11 @@ type darwinPlatform struct {
 	// pending menu set before Init() was called
 	pendingMenu []MenuItem
 	hasPending  bool
+
+	// cursorHidden is whether setCursorImpl hid the cursor for CursorNone.
+	// NSCursor counts hides, so it hides once and any other shape unhides.
+	// Touched only on the main thread.
+	cursorHidden bool
 }
 
 // newPlatformManager returns a PlatformManager for macOS.
@@ -1031,10 +1036,18 @@ func (p *darwinPlatform) setCursorImpl(cursorID int) {
 	case 10: // CursorWait
 		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
 	case 11: // CursorNone
-		cursorClass.Send(darwin.RegisterSelector("hide"))
+		if !p.cursorHidden {
+			p.cursorHidden = true
+			cursorClass.Send(darwin.RegisterSelector("hide"))
+		}
 		return
 	default:
 		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	}
+
+	if p.cursorHidden {
+		p.cursorHidden = false
+		cursorClass.Send(darwin.RegisterSelector("unhide"))
 	}
 
 	if !cursor.IsNil() {
