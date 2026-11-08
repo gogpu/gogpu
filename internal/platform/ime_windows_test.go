@@ -126,6 +126,21 @@ func TestWin32LateResultDeliveredOnce(t *testing.T) {
 	}
 }
 
+// TestWin32ResultWhileDisabledIsDropped: the native detach is posted, so a
+// result queued after SetIMEEnabled(false) can still arrive; it must not be
+// committed while input is disabled.
+func TestWin32ResultWhileDisabledIsDropped(t *testing.T) {
+	p := &windowsPlatform{events: eventqueue.New[Event](eventqueue.DefaultCapacity)}
+	w := &win32Window{platform: p}
+	w.ime.setEnabled(true)
+	w.ime.start()
+	w.ime.setEnabled(false)
+	w.processIMEResult("한")
+	if event, ok := p.events.Pop(); ok {
+		t.Fatalf("result committed while IME was disabled: %+v", event)
+	}
+}
+
 // TestWin32LateResultEchoIsSwallowed covers the other Hangul order: END reads
 // the result itself, and the late COMPOSITION only repeats it.
 func TestWin32LateResultEchoIsSwallowed(t *testing.T) {

@@ -310,14 +310,20 @@ func (w *win32Window) handleIMEComposition(flags uintptr) {
 	}
 	w.imeMu.Unlock()
 
-	// A message that carries only a result is a complete commit, not a preedit
-	// update. Providers reach this branch in three orders: a result without any
-	// composition (deliver it), a Hangul-style COMPOSITION after END before the
-	// result was read (collect it into the armed post-END path), and the late
-	// echo of a result END already delivered (swallow it).
-	if flags&gcsResultStr != 0 && flags&gcsCompStr == 0 {
+	// A message that carries a result while the post-END path is armed, or a
+	// result without any preedit, is a complete commit, not a preedit update:
+	// collect it into the armed path, swallow the late echo of a result END
+	// already delivered, or commit a provider's standalone result. The result
+	// is handled before the preedit so a provider that sends both flags after
+	// END cannot restart the tracker and merge the text into the next commit.
+	w.imeMu.Lock()
+	armed := w.ime.hasPendingCharResult()
+	w.imeMu.Unlock()
+	if flags&gcsResultStr != 0 && (flags&gcsCompStr == 0 || armed) {
 		w.handleIMEResult()
-		return
+		if flags&gcsCompStr == 0 {
+			return
+		}
 	}
 
 	w.imeMu.Lock()
@@ -395,7 +401,7 @@ func (w *win32Window) processIMEResult(result string) {
 	}
 
 	w.imeMu.Lock()
-	if w.imeDestroyed {
+	if w.imeDestroyed || !w.ime.enabled {
 		w.imeMu.Unlock()
 		return
 	}
