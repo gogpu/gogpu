@@ -1228,7 +1228,11 @@ func (ws *RenderTarget) beginTexturedQuadPass(encoder *wgpu.CommandEncoder) erro
 // an abandoned frame. The shared encoder itself is discarded by the caller.
 func (ws *RenderTarget) abortTexturedQuadPassState() {
 	if ws.texturedQuadPass != nil {
-		_ = ws.texturedQuadPass.End()
+		// The frame is being abandoned and its encoder discarded, so a failed
+		// End changes nothing here; log it so the diagnostic is not lost.
+		if err := ws.texturedQuadPass.End(); err != nil {
+			slog.Warn("gogpu: end textured quad pass during abort", "err", err)
+		}
 		ws.texturedQuadPass = nil
 	}
 	if ws.texturedQuadPassConsumedClear {

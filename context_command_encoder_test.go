@@ -228,6 +228,71 @@ func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
 	}
 }
 
+// One chunk holds texQuadUniformChunkSlots uniforms. The next quad must open a
+// second chunk with its own buffer and bind group, start again at offset 0,
+// and have its deferred write target the new buffer, all in the same pass and
+// the same frame encoder.
+func TestTexturedQuadUniformsSpillIntoSecondChunk(t *testing.T) {
+	halDevice := &recordingCommandEncoderDevice{}
+	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
+	target.format = gputypes.TextureFormatBGRA8Unorm
+	target.width = 1
+	target.height = 1
+
+	tex, err := target.renderer.NewTextureFromRGBA(1, 1, []byte{255, 0, 0, 255})
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	t.Cleanup(tex.Destroy)
+
+	n := texQuadUniformChunkSlots + 1
+	for i := 0; i < n; i++ {
+		if err := ctx.DrawTextureEx(tex, DrawTextureOptions{Width: 1, Height: 1, Alpha: 1}); err != nil {
+			t.Fatalf("DrawTextureEx(%d): %v", i, err)
+		}
+	}
+
+	chunks := target.texQuadUniformChunks
+	if len(chunks) != 2 {
+		t.Fatalf("uniform chunks = %d, want 2", len(chunks))
+	}
+	if chunks[0].nextSlot != texQuadUniformChunkSlots || chunks[1].nextSlot != 1 {
+		t.Fatalf("chunk slots used = %d, %d; want %d, 1", chunks[0].nextSlot, chunks[1].nextSlot, texQuadUniformChunkSlots)
+	}
+	if chunks[0].buffer == chunks[1].buffer || chunks[0].bindGrp == chunks[1].bindGrp {
+		t.Fatal("second chunk reuses the first chunk's buffer or bind group")
+	}
+
+	if got := len(halDevice.encoders); got != 1 {
+		t.Fatalf("frame command encoders created = %d, want 1", got)
+	}
+	offsets := halDevice.encoders[0].uniformOffsets
+	if len(offsets) != n {
+		t.Fatalf("draws recorded = %d, want %d", len(offsets), n)
+	}
+	lastOfFirst := []uint32{uint32(texQuadUniformChunkSlots-1) * chunks[0].stride}
+	if got := offsets[n-2]; !equalOffsets([][]uint32{got}, [][]uint32{lastOfFirst}) {
+		t.Fatalf("offset of the last slot in chunk 0 = %v, want %v", got, lastOfFirst)
+	}
+	if got := offsets[n-1]; !equalOffsets([][]uint32{got}, [][]uint32{{0}}) {
+		t.Fatalf("offset of the first slot in chunk 1 = %v, want [0]", got)
+	}
+
+	writes := target.pendingTexQuadUniformWrites
+	if len(writes) != n {
+		t.Fatalf("deferred uniform writes = %d, want %d", len(writes), n)
+	}
+	if writes[n-2].buffer != chunks[0].buffer || writes[n-1].buffer != chunks[1].buffer {
+		t.Fatal("deferred writes do not target the chunk their slot came from")
+	}
+
+	target.submitFrameEncoder(target.renderer)
+	if queue.submits != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	}
+}
+
 func TestTexturedQuadPassPreservesExternalAndClearBoundaries(t *testing.T) {
 	halDevice := &recordingCommandEncoderDevice{}
 	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
