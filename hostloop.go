@@ -69,8 +69,10 @@ func (loop *HostLoop) Start() error {
 // It never waits, runs onUpdate or draws, and returns once the queue is
 // empty. A close is reported through Running, not acted on. A pump allocates
 // nothing apart from boxing each event it puts into the input-event queue,
-// once per event. Its first pumps also resolve the system functions they
-// call and grow its buffers to their largest size; neither recurs.
+// once per event, and the text of a typed character outside ASCII, once for
+// every text-input callback. Its first pumps also resolve the system
+// functions they call and grow its buffers to their largest size; neither
+// recurs.
 func (loop *HostLoop) PumpEvents() {
 	loop.app.processEventsMultiThread()
 }

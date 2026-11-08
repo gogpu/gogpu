@@ -912,11 +912,20 @@ func (a *App) dispatchKeyToInputState(key gpucontext.Key, pressed bool) {
 // dispatchCharEvent handles EventChar from the platform.
 func (a *App) dispatchCharEvent(event *platform.Event) {
 	w := a.windowManager.getByPlatformID(event.WindowID)
-	if w != nil && w.onTextInput != nil {
-		w.onTextInput(string(event.Char))
+	windowListens := w != nil && w.onTextInput != nil
+	sourceListens := a.eventSource != nil && a.eventSource.onTextInput != nil
+	if !windowListens && !sourceListens {
+		return
 	}
-	if a.eventSource != nil {
-		a.eventSource.dispatchTextInput(string(event.Char))
+	text := asciiText(event.Char)
+	if text == "" {
+		text = string(event.Char)
+	}
+	if windowListens {
+		w.onTextInput(text)
+	}
+	if sourceListens {
+		a.eventSource.dispatchTextInput(text)
 	}
 }
 
@@ -2056,4 +2065,21 @@ func gpucontextButtonToInputButton(button gpucontext.Button) input.MouseButton {
 	default:
 		return input.MouseButtonLeft
 	}
+}
+
+// asciiCharacters holds every ASCII character in order, so asciiText can
+// answer each one as a substring that shares its memory.
+const asciiCharacters = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f" +
+	"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" +
+	" !\"#$%&'()*+,-./0123456789:;<=>?" +
+	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_" +
+	"`abcdefghijklmnopqrstuvwxyz{|}~\x7f"
+
+// asciiText answers the one-character string of an ASCII rune without
+// allocating, and "" for any other rune, whose string must be made.
+func asciiText(char rune) string {
+	if char < 0 || char >= 0x80 {
+		return ""
+	}
+	return asciiCharacters[char : char+1]
 }
