@@ -77,6 +77,19 @@ type Config struct {
 	// WindowChrome.SetHitTestCallback for drag, resize, and button regions.
 	Frameless bool
 
+	// LayerShell, when non-nil, gives the window a wlr-layer-shell role
+	// instead of a regular desktop window: it is placed in a layer, anchored
+	// to output edges, and drawn without decorations. This is how shell
+	// components (panels, overlays, wallpapers, launchers) are built.
+	//
+	// Linux/Wayland only, and the compositor must advertise
+	// zwlr_layer_shell_v1. Ignored on other platforms.
+	//
+	// Note that a layer surface has no title bar, no move/resize, and no
+	// server-side decorations; window-management APIs such as SetTitle,
+	// SetMinSize, SetMaxSize and SetFullscreen do not apply to it.
+	LayerShell *LayerShellConfig
+
 	// Transparent enables a per-pixel-alpha window (rounded corners, tray
 	// popups, overlays). When true, the swapchain uses
 	// CompositeAlphaModePremultiplied when the surface supports it and the
@@ -286,6 +299,91 @@ func (c Config) WithFrameless(frameless bool) Config {
 	c.Frameless = frameless
 	return c
 }
+
+// WithLayerShell makes the window a wlr-layer-shell surface (Linux/Wayland
+// only) instead of a regular desktop window.
+//
+// The zero LayerShellConfig is not useful on its own: a surface with neither a
+// size nor anchors is a protocol error, so set Width/Height, or leave them zero
+// and anchor opposite edges to fill the output.
+func (c Config) WithLayerShell(layer LayerShellConfig) Config {
+	c.LayerShell = &layer
+	return c
+}
+
+// LayerShellConfig describes a wlr-layer-shell surface.
+//
+// It mirrors the layer-shell protocol: Layer selects the shell layer, Anchor is
+// a bitmask of edges, and Keyboard selects whether the surface can take
+// keyboard focus. The zero value means "background layer, centered, no keyboard
+// input", which is valid but rarely what a panel or overlay wants.
+type LayerShellConfig struct {
+	// Namespace is the surface namespace compositors use in their rules and in
+	// diagnostics (niri's `niri msg layers`, for example). Defaults to "gogpu".
+	Namespace string
+
+	// Layer is the shell layer: background, bottom, top or overlay.
+	Layer LayerShellLayer
+
+	// Anchor is the set of edges the surface is anchored to. Anchoring
+	// opposite edges makes the surface stretch along that axis, which is how
+	// an overlay fills the output.
+	Anchor LayerShellAnchor
+
+	// Keyboard selects whether the surface receives keyboard input. OnDemand
+	// lets the user focus and unfocus it like a normal window (protocol v4+).
+	Keyboard LayerShellKeyboard
+
+	// Width and Height are surface-local pixels. Zero asks the compositor to
+	// decide, which requires anchoring opposite edges on that axis.
+	Width  int32
+	Height int32
+
+	// ExclusiveZone is the reserved strut in surface-local pixels. Zero moves
+	// the surface to avoid other exclusive surfaces, -1 ignores them entirely
+	// (and extends the surface to the anchored edges).
+	ExclusiveZone int32
+}
+
+// LayerShellLayer is the shell layer a layer surface is drawn in, ordered by
+// increasing z-depth.
+type LayerShellLayer uint32
+
+// Layer shell layers.
+const (
+	LayerShellBackground LayerShellLayer = 0
+	LayerShellBottom     LayerShellLayer = 1
+	LayerShellTop        LayerShellLayer = 2
+	LayerShellOverlay    LayerShellLayer = 3
+)
+
+// LayerShellAnchor is a bitmask of output edges a layer surface is anchored to.
+type LayerShellAnchor uint32
+
+// Layer shell anchor edges. AnchorTop|AnchorLeft is the top-left corner; two
+// opposite edges stretch the surface along that axis.
+const (
+	LayerShellAnchorTop    LayerShellAnchor = 1 << 0
+	LayerShellAnchorBottom LayerShellAnchor = 1 << 1
+	LayerShellAnchorLeft   LayerShellAnchor = 1 << 2
+	LayerShellAnchorRight  LayerShellAnchor = 1 << 3
+)
+
+// LayerShellKeyboard describes how keyboard focus is granted to a layer
+// surface.
+type LayerShellKeyboard uint32
+
+// Layer shell keyboard interactivity modes.
+const (
+	// LayerShellKeyboardNone never grants keyboard focus (the protocol default).
+	LayerShellKeyboardNone LayerShellKeyboard = 0
+	// LayerShellKeyboardExclusive asks for exclusive focus, for lock screens and
+	// prompts.
+	LayerShellKeyboardExclusive LayerShellKeyboard = 1
+	// LayerShellKeyboardOnDemand lets the user focus and unfocus the surface the
+	// usual way. Requires layer-shell protocol version 4.
+	LayerShellKeyboardOnDemand LayerShellKeyboard = 2
+)
 
 // WithTransparent enables or disables per-pixel-alpha window transparency.
 // When true, the surface selects CompositeAlphaModePremultiplied when

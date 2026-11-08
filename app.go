@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"errors"
 	"io"
 	"runtime"
 	"sync/atomic"
@@ -570,11 +571,12 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Transparent: a.config.Transparent,
 		UseDirectComposition: a.config.Transparent &&
 			a.config.GraphicsAPI == types.GraphicsAPIDX12,
-		MinWidth:  a.config.MinWidth,
-		MinHeight: a.config.MinHeight,
-		MaxWidth:  a.config.MaxWidth,
-		MaxHeight: a.config.MaxHeight,
-		Icon:      a.config.Icon,
+		MinWidth:   a.config.MinWidth,
+		MinHeight:  a.config.MinHeight,
+		MaxWidth:   a.config.MaxWidth,
+		MaxHeight:  a.config.MaxHeight,
+		Icon:       a.config.Icon,
+		LayerShell: layerShellFromConfig(a.config.LayerShell),
 	})
 	if err != nil {
 		return nil, err
@@ -1300,6 +1302,43 @@ func (a *App) SetAppName(name string) {
 // Safe to call from any goroutine. After startRunLoop, also wakes
 // WaitEvents so the idle (event-driven) loop notices running=false
 // without waiting for a device input event (GLFW/winit/SDL pattern).
+// SetLayerKeyboardInteractivity changes the keyboard interactivity of a
+// wlr-layer-shell surface at runtime. It is how a launcher takes keyboard focus
+// when summoned and gives it back when dismissed: a layer surface that stays
+// mapped never "appears" again, so the compositor has no other signal to focus
+// it. Only layer-shell surfaces are affected; ordinary windows return an error.
+func (a *App) SetLayerKeyboardInteractivity(mode LayerShellKeyboard) error {
+	type layerKeyboardWindow interface {
+		SetLayerKeyboardInteractivity(uint32) error
+	}
+	if a.platWindow == nil {
+		return errors.New("gogpu: no platform window")
+	}
+	w, ok := a.platWindow.(layerKeyboardWindow)
+	if !ok {
+		return errors.New("gogpu: layer keyboard interactivity is only supported on Wayland layer surfaces")
+	}
+	return w.SetLayerKeyboardInteractivity(uint32(mode))
+}
+
+// SetInputRegion controls whether the window (or layer surface) receives
+// pointer input. A fullscreen layer surface covers its output, so a shell that
+// hides without emptying its input region keeps swallowing every click.
+func (a *App) SetInputRegion(interactive bool) error {
+	type inputRegionWindow interface {
+		SetInputRegion(bool) error
+	}
+	if a.platWindow == nil {
+		return errors.New("gogpu: no platform window")
+	}
+	w, ok := a.platWindow.(inputRegionWindow)
+	if !ok {
+		return errors.New("gogpu: input regions are only supported on Wayland layer surfaces")
+	}
+	return w.SetInputRegion(interactive)
+}
+
+// Quit requests the application to exit.
 func (a *App) Quit() {
 	a.running.Store(false)
 	if v := a.wakeupFn.Load(); v != nil {

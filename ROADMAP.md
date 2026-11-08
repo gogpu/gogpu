@@ -339,7 +339,7 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 |----------|-----------|--------------|--------|
 | **Windows** | Win32 | Vulkan, DX12, GLES, Software | Production |
 | **Linux X11** | X11 | Vulkan, GLES, Software | Community Testing |
-| **Linux Wayland** | Wayland (xdg-shell v6, CSD) | Vulkan, GLES, Software | Community Testing |
+| **Linux Wayland** | Wayland (xdg-shell v6, CSD, wlr-layer-shell) | Vulkan, GLES, Software | Community Testing |
 | **macOS** | Cocoa (AppKit) | Metal, Software | Community Testing |
 
 All platforms use Pure Go FFI (no CGO required).

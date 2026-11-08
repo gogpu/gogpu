@@ -30,6 +30,10 @@ const (
 	InterfaceZwpLinuxDmabuf          = "zwp_linux_dmabuf_v1"
 	InterfaceZxdgDecorationManagerV1 = "zxdg_decoration_manager_v1"
 
+	// wlr-layer-shell-unstable-v1: layer surfaces for shell components
+	// (panels, overlays, wallpapers, launchers).
+	InterfaceZwlrLayerShellV1 = "zwlr_layer_shell_v1"
+
 	// Pointer constraints and relative pointer protocols.
 	// Used for mouse grab / pointer lock (CursorModeLocked, CursorModeConfined).
 	InterfaceZwpPointerConstraintsV1     = "zwp_pointer_constraints_v1"
