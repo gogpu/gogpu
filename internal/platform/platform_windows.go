@@ -209,8 +209,8 @@ const (
 	gwlStyle = ^uintptr(15) // GWL_STYLE = -16 as unsigned uintptr
 
 	// SetWindowPos hwnd constants for Z-order
-	hwndTopmost   = ^uintptr(0)                 // HWND_TOPMOST (-1)
-	hwndNotopmost = uintptr(0xFFFFFFFFFFFFFFFE) // HWND_NOTOPMOST (-2)
+	hwndTopmost   = ^uintptr(0) // HWND_TOPMOST (-1)
+	hwndNotopmost = ^uintptr(1) // HWND_NOTOPMOST (-2)
 
 	// GetSystemMetrics / MonitorFromWindow constants
 	smCXSizeFrame           = 32 // SM_CXSIZEFRAME
