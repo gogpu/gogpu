@@ -22,11 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`HostLoop`: a loop the caller owns** (#517, @dvoyni). A host that owns its main loop, such as a game engine or an
   editor, drives an `App` one step at a time through `NewHostLoop(app)`: `Start`, `PumpEvents`, `Running`,
   `ConsumeRedrawRequest`, `BeginFrame`, `EndFrame` and `Stop`, every call on the OS main thread, with no render thread.
-  `PumpEvents` never waits or draws, and allocates nothing when no event is pending. `BeginFrame` skips a hidden,
-  zero-size or frame-gated window without acquiring. `ConsumeRedrawRequest` reports whether a redraw was requested
-  since its last call, so a host can draw on demand as `Run` does. `Stop` does nothing unless `Start` succeeded. `Run`
-  is rebuilt on the same steps, and it returns `ErrHostLoopStarted` while a `HostLoop` is started, as does a second
-  `Start`. This is the caller-owned loop of ADR-070 (discussion #468).
+  `PumpEvents` never draws, waits only while the user drags a move or resize, and allocates nothing when no event is
+  pending. `BeginFrame` skips a hidden, zero-size or frame-gated window without acquiring. `ConsumeRedrawRequest`
+  reports whether a redraw was requested since its last call, so a host can draw on demand as `Run` does. `Stop` does
+  nothing unless `Start` succeeded. `Run` is rebuilt on the same steps, and it returns `ErrHostLoopStarted` while a
+  `HostLoop` is started, as does a second `Start`. This is the caller-owned loop of ADR-070 (discussion #468).
 
 ### Performance
 

@@ -411,6 +411,12 @@ func (a *App) Run() error {
 	}
 	defer loop.Stop()
 
+	// macOS's live resize is the same kind of loop: AppKit runs the drag
+	// inside the event pump, and Run draws its frames from the live-resize
+	// hook. A HostLoop installs neither, so nothing draws inside its pump.
+	a.setupLiveResizeHook(a.platWindow)
+	a.setupLiveResizePhaseHooks(a.platWindow)
+
 	// Main loop with three rendering modes (ADR-023):
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
 	//   2. ANIMATING: StartAnimation() — loop active, onUpdate every tick,
@@ -610,9 +616,6 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	_ = a.Input()       // ensures a.inputState is initialized
 	_ = a.EventSource() // ensures a.eventSource is initialized
 
-	a.setupLiveResizeHook(platWindow)
-	a.setupLiveResizePhaseHooks(platWindow)
-
 	return platWindow, nil
 }
 
@@ -699,7 +702,7 @@ func (a *App) setupLiveResizePhaseHooks(platWindow platform.PlatformWindow) {
 }
 
 // setTransactionPresent toggles Metal transaction-based present on the
-// render thread. Called from the live-resize phase hooks (see initPlatform).
+// render thread. Called from the live-resize phase hooks (see Run).
 func (a *App) setTransactionPresent(enabled bool) {
 	if a.renderLoop == nil || a.renderer == nil {
 		return
