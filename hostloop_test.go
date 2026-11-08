@@ -2,8 +2,9 @@ package gogpu
 
 import (
 	"errors"
+	"os"
 	"runtime"
-	"runtime/debug"
+	"strings"
 	"testing"
 
 	"github.com/gogpu/gogpu/gpu/types"
@@ -95,17 +96,13 @@ func enabledStats(t *testing.T) {
 
 // skipWhenRaceInstrumented skips an allocation count in a build instrumented
 // by github.com/kolkov/racedetector, the race detector CI runs: the calls it
-// adds to the code allocate, so the count no longer measures the code.
+// adds to the code allocate, so the count no longer measures the code. The
+// tool runs go test with GONOSUMCHECK naming its own module, and the test
+// binary inherits that environment.
 func skipWhenRaceInstrumented(t *testing.T) {
 	t.Helper()
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return
-	}
-	for _, dependency := range info.Deps {
-		if dependency.Path == "github.com/kolkov/racedetector" {
-			t.Skip("allocation counts include racedetector's instrumentation")
-		}
+	if strings.Contains(os.Getenv("GONOSUMCHECK"), "github.com/kolkov/racedetector") {
+		t.Skip("allocation counts include racedetector's instrumentation")
 	}
 }
 
