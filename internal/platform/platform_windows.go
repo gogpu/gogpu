@@ -1343,15 +1343,16 @@ func (w *win32Window) updateSize() {
 func (p *windowsPlatform) PollEvents() Event {
 	// Process all pending Windows messages (NULL HWND = all windows on this thread).
 	// syscall.SyscallN directly: LazyProc.Call is //go:uintptrescapes and
-	// allocates its arguments on every call.
-	message := uintptr(unsafe.Pointer(&p.polledMessage))
+	// allocates its arguments on every call. The message's address is
+	// converted in each argument list, which keeps it valid for the call
+	// (unsafe.Pointer rule 4); a uintptr held in a variable would not.
 	for {
-		ret, _, _ := syscall.SyscallN(procPeekMessageW.Addr(), message, 0, 0, 0, pmRemove)
+		ret, _, _ := syscall.SyscallN(procPeekMessageW.Addr(), uintptr(unsafe.Pointer(&p.polledMessage)), 0, 0, 0, pmRemove)
 		if ret == 0 {
 			break
 		}
-		syscall.SyscallN(procTranslateMessage.Addr(), message)
-		syscall.SyscallN(procDispatchMessageW.Addr(), message)
+		syscall.SyscallN(procTranslateMessage.Addr(), uintptr(unsafe.Pointer(&p.polledMessage)))
+		syscall.SyscallN(procDispatchMessageW.Addr(), uintptr(unsafe.Pointer(&p.polledMessage)))
 	}
 
 	// If an IME ended without a post-END WM_CHAR result, terminate the pending
