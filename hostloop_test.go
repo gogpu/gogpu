@@ -299,6 +299,47 @@ func TestHostLoop_PumpEventsReportsPrimaryResize(t *testing.T) {
 	}
 }
 
+func TestHostLoop_ConsumeRedrawRequestBeforeStart(t *testing.T) {
+	app := NewApp(DefaultConfig())
+	loop := NewHostLoop(app)
+
+	app.RequestRedraw()
+	if loop.ConsumeRedrawRequest() {
+		t.Error("ConsumeRedrawRequest before Start: got true, want false")
+	}
+}
+
+func TestHostLoop_ConsumeRedrawRequestReportsEachRequestOnce(t *testing.T) {
+	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	defer loop.Stop()
+
+	if !loop.ConsumeRedrawRequest() {
+		t.Error("first call after Start: got false, want true for the first frame")
+	}
+	if loop.ConsumeRedrawRequest() {
+		t.Error("call with no request since the last: got true, want false")
+	}
+	app.RequestRedraw()
+	app.RequestRedraw()
+	if !loop.ConsumeRedrawRequest() {
+		t.Error("call after two RequestRedraw: got false, want true")
+	}
+	if loop.ConsumeRedrawRequest() {
+		t.Error("second call after two RequestRedraw: got true, want false, the requests coalesce")
+	}
+}
+
+func TestHostLoop_ConsumeRedrawRequestAfterPumpedResize(t *testing.T) {
+	_, loop, _ := startedHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
+	defer loop.Stop()
+
+	loop.ConsumeRedrawRequest() // Start's first frame
+	loop.PumpEvents()
+	if !loop.ConsumeRedrawRequest() {
+		t.Error("call after a pumped resize: got false, want true")
+	}
+}
+
 func TestHostLoop_PumpEventsAllocatesNothingWhenIdle(t *testing.T) {
 	_, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
