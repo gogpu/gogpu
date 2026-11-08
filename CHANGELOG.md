@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies:** gpucontext v0.31.3 → v0.32.0. The release replaces the IME interfaces with the single
+  `IMEController`/`IMEState` contract from ADR-045; gogpu needs no code change for it, the platform IME backends
+  follow in their own change.
 - **API cleanup** (#458, @besmpl). `FileDialogOptions` and `FileTypeFilter` are now gogpu-owned types instead of
   aliases into the platform package: the dialog path converts them at the platform boundary and copies the caller's
   slices, so a platform dialog cannot mutate them. Dead event-source dispatch helpers are gone,
