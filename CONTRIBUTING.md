@@ -258,13 +258,13 @@ GoGPU is a multi-repo ecosystem. Changes may span repositories:
 
 | Repository | Purpose | Version |
 |------------|---------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | App framework, windowing | v0.54.0 |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.34.2 |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | App framework, windowing | v0.54.1 |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.34.9 |
 | [gogpu/gg](https://github.com/gogpu/gg) | 2D graphics | v0.52.5 |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.19.0 |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.21.4 |
 | [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | v0.1.54 |
 | [gogpu/gpucontext](https://github.com/gogpu/gpucontext) | Shared interfaces | v0.31.3 |
-| [gogpu/gputypes](https://github.com/gogpu/gputypes) | WebGPU type definitions | v0.8.0 |
+| [gogpu/gputypes](https://github.com/gogpu/gputypes) | WebGPU type definitions | v0.8.2 |
 
 For cross-repo changes: start with the lowest dependency (gputypes → gpucontext → wgpu → gogpu/gg → ui).
 
