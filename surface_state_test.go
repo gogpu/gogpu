@@ -134,9 +134,16 @@ func TestBeginFrame_SkipsWhenNotConfigured(t *testing.T) {
 // for the rest of the test.
 func errorRecords(t *testing.T) *bytes.Buffer {
 	t.Helper()
+	return recordsFrom(t, slog.LevelError)
+}
+
+// recordsFrom returns the records of level and above logged through
+// slog.Default for the rest of the test, one a line.
+func recordsFrom(t *testing.T, level slog.Level) *bytes.Buffer {
+	t.Helper()
 	var records bytes.Buffer
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&records, &slog.HandlerOptions{Level: slog.LevelError})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(&records, &slog.HandlerOptions{Level: level})))
 	t.Cleanup(func() { slog.SetDefault(old) })
 	return &records
 }
