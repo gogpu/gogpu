@@ -25,16 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking: the legacy backend and provider API is gone** (#458, deprecated in the same cycle). `App.DeviceProvider()`,
   the `gogpu.DeviceProvider` interface, `Config.Backend`, `Config.WithBackend` and the
-  `BackendAuto`/`BackendRust`/`BackendNative`/`BackendGo` constants are removed.
+  `BackendAuto`/`BackendRust`/`BackendNative`/`BackendGo` constants are removed, and `gpu/types.BackendType` with its
+  `BackendAuto`/`BackendNative`/`BackendRust`/`BackendGo` constants goes with them.
   Migration:
   - `app.DeviceProvider().Device()` → `wgpu.DeviceFromHandle(app.GPUContextProvider().Device())`;
   - `app.DeviceProvider().Queue()` → the queue of that `*wgpu.Device`;
   - `app.DeviceProvider().SurfaceFormat()` → `app.GPUContextProvider().SurfaceFormat()`;
-  - `WithBackend`/`Backend*` → nothing: the implementation is chosen by wgpu build tags (ADR-038), and
-    `GraphicsAPI` or `GOGPU_GRAPHICS_API` selects the graphics API.
-
-  `BackendType` and its constants stay in `github.com/gogpu/gogpu/gpu/types` for code that still refers to them; gogpu
-  itself no longer uses them.
+  - `WithBackend`/`Backend*` → nothing: the implementation is chosen by wgpu build tags (ADR-038);
+  - `GraphicsAPI` or `GOGPU_GRAPHICS_API` selects the graphics API; `gputypes.Backends` describes the backend masks.
 - **Dependencies:** wgpu v0.34.10, naga v0.21.5. wgpu now accepts command buffers whose resources were released
   after recording, the same way Rust wgpu handles a dropped handle, and Vulkan descriptor pools always include the
   dynamic buffer types.

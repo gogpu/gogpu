@@ -1,47 +1,7 @@
 package types
 
-// BackendType specifies which WebGPU implementation to use.
-type BackendType uint8
-
-const (
-	// BackendAuto automatically selects the best available backend.
-	// Pure Go is default, Rust is opt-in with -tags rust.
-	BackendAuto BackendType = iota
-
-	// BackendNative uses pure Go WebGPU implementation (gogpu/wgpu).
-	// Zero dependencies, just `go build`. Default backend.
-	BackendNative
-
-	// BackendRust uses wgpu-gpu (Rust) via go-webgpu/webgpu.
-	// Maximum performance, requires wgpu-native shared library.
-	BackendRust
-
-	// BackendGo is an alias for BackendNative.
-	// Provided for user convenience ("I want the Go backend").
-	BackendGo = BackendNative
-)
-
-// Backend display names.
-const (
-	backendNameAuto   = "Auto"
-	backendNameNative = "Native (Pure Go)"
-	backendNameRust   = "Rust (wgpu-gpu)"
-)
-
-// String returns the backend name.
-func (b BackendType) String() string {
-	switch b {
-	case BackendRust:
-		return backendNameRust
-	case BackendNative:
-		return backendNameNative
-	default:
-		return backendNameAuto
-	}
-}
-
 // GraphicsAPI specifies which graphics API to use for rendering.
-// This is orthogonal to BackendType (Rust/Native implementation choice).
+// The backend implementation itself is chosen by wgpu build tags (ADR-038).
 type GraphicsAPI uint8
 
 const (
@@ -67,6 +27,10 @@ const (
 	GraphicsAPISoftware
 )
 
+// graphicsAPINameAuto is the display name of GraphicsAPIAuto, and the default
+// for unknown values.
+const graphicsAPINameAuto = "Auto"
+
 // String returns the graphics API name.
 func (g GraphicsAPI) String() string {
 	switch g {
@@ -81,6 +45,6 @@ func (g GraphicsAPI) String() string {
 	case GraphicsAPISoftware:
 		return "Software"
 	default:
-		return backendNameAuto
+		return graphicsAPINameAuto
 	}
 }
