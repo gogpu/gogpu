@@ -525,6 +525,11 @@ type win32Window struct {
 	savedPlacement windowPlacement
 	savedStyle     uint32
 
+	// fullscreenOnShow holds Config.Fullscreen until the first Show: DX12
+	// refuses a swap chain for a window made fullscreen while hidden, so a
+	// window opened fullscreen enters fullscreen once it is shown.
+	fullscreenOnShow bool
+
 	highSurrogate      uint16 // UTF-16 high surrogate for emoji/CJK supplementary chars
 	modalFrameCallback func() // Called on WM_TIMER during modal drag/resize
 	callbackMu         sync.RWMutex
@@ -821,6 +826,8 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		height:    config.Height,
 		frameless: config.Frameless,
 		startTime: time.Now(),
+
+		fullscreenOnShow: config.Fullscreen,
 	}
 
 	// Register window in the map for WndProc routing
@@ -903,11 +910,6 @@ func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		if cb != nil {
 			w.setModalFrameCallback(cb)
 		}
-	}
-	// Borderless fullscreen restyles the window and covers its monitor
-	// without showing it, so a window opened fullscreen is shown fullscreen.
-	if config.Fullscreen {
-		w.SetFullscreen(true)
 	}
 	return w, nil
 }
@@ -1132,6 +1134,10 @@ func (w *win32Window) Show() {
 	procSetForegroundWindow.Call(uintptr(w.hwnd))
 	procSetFocusW.Call(uintptr(w.hwnd))
 	procUpdateWindow.Call(uintptr(w.hwnd))
+	if w.fullscreenOnShow {
+		w.fullscreenOnShow = false
+		w.SetFullscreen(true)
+	}
 }
 
 // Hide hides the window (ShowWindow with SW_HIDE).
