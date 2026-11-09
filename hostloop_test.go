@@ -81,7 +81,7 @@ func mockedPlatform(t *testing.T, window platform.PlatformWindow, events ...plat
 // with the real renderer on wgpu's software backend, so its frames acquire
 // and present without a GPU. It locks the test to its OS thread, as
 // startedHostLoop does.
-func startedSoftwareHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop) {
+func startedSoftwareHostLoop(t *testing.T, window platform.PlatformWindow, events ...platform.Event) (*App, *HostLoop, *queuedEventManager) {
 	t.Helper()
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
@@ -95,7 +95,7 @@ func startedSoftwareHostLoop(t *testing.T, window platform.PlatformWindow, event
 	if err := loop.Start(); err != nil {
 		t.Fatalf("Start on the software backend: %v", err)
 	}
-	return app, loop
+	return app, loop, manager
 }
 
 // enabledStats turns frame stats on for the test: a failed acquire records a
@@ -257,8 +257,8 @@ func (w *liveResizeWindow) SetLiveResizePhaseHooks(start, end func()) {
 }
 
 func TestHostLoop_StartInstallsNoLiveResizeHooks(t *testing.T) {
-	window := &liveResizeWindow{mockWindow: mockWindow{width: 800, height: 600}}
-	_, loop, _ := startedHostLoop(t, window)
+	window := &liveResizeWindow{mockWindow: mockWindow{windowID: 1, width: 800, height: 600}}
+	app, loop, manager := startedSoftwareHostLoop(t, window)
 	defer loop.Stop()
 
 	if window.resizeHook != nil {
@@ -266,6 +266,15 @@ func TestHostLoop_StartInstallsNoLiveResizeHooks(t *testing.T) {
 	}
 	if window.phaseStartHook != nil || window.phaseEndHook != nil {
 		t.Error("live-resize phase hooks after Start: installed, want none")
+	}
+
+	second := &liveResizeWindow{mockWindow: mockWindow{windowID: 2, width: 640, height: 480}}
+	manager.win = second
+	if _, err := app.NewWindow(Config{Title: "second", Width: 640, Height: 480}); err != nil {
+		t.Fatalf("NewWindow on the software backend: %v", err)
+	}
+	if second.resizeHook != nil {
+		t.Error("live-resize hook on a window from App.NewWindow: installed, want none, so nothing draws inside PumpEvents")
 	}
 }
 
@@ -428,7 +437,7 @@ func TestHostLoop_PumpEventsKeepsOtherWindowsResizeFromApp(t *testing.T) {
 }
 
 func TestHostLoop_FrameAcquiresAndPresents(t *testing.T) {
-	app, loop := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
+	app, loop, _ := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
 	for frame := range 2 {
@@ -445,7 +454,7 @@ func TestHostLoop_FrameAcquiresAndPresents(t *testing.T) {
 }
 
 func TestHostLoop_BeginFrameConsumesPumpedResize(t *testing.T) {
-	app, loop := startedSoftwareHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
+	app, loop, _ := startedSoftwareHostLoop(t, &mockWindow{windowID: 7, width: 800, height: 600}, primaryResize)
 	defer loop.Stop()
 
 	loop.PumpEvents()
@@ -464,7 +473,7 @@ func TestHostLoop_BeginFrameConsumesPumpedResize(t *testing.T) {
 }
 
 func TestHostLoop_BeginFrameReconfiguresLostSurface(t *testing.T) {
-	app, loop := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
+	app, loop, _ := startedSoftwareHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()
 
 	surface := app.renderer.primary
