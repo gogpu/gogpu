@@ -36,7 +36,8 @@ func newTestRenderer(width, height uint32) *Renderer {
 // newTestRendererFull creates a Renderer with all commonly tested fields.
 func newTestRendererFull(width, height uint32, format gputypes.TextureFormat, backendName string) *Renderer {
 	r := &Renderer{
-		backendName: backendName,
+		backendName:   backendName,
+		surfaceFormat: format,
 		primary: &RenderTarget{
 			width:  width,
 			height: height,

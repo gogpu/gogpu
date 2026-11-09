@@ -148,10 +148,10 @@ func TestProcessEventsMultiThread_InSizeMoveAllowsResize(t *testing.T) {
 }
 
 // =============================================================================
-// initPlatform — LiveResizePhaser hooks
+// setupLiveResizePhaseHooks — LiveResizePhaser hooks
 // =============================================================================
 
-func TestInitPlatform_LiveResizePhaserHooks(t *testing.T) {
+func TestSetupLiveResizePhaseHooks(t *testing.T) {
 	mockWin := &mockLiveResizePhaserWindow{}
 
 	old := newPlatformManagerFn
@@ -166,9 +166,10 @@ func TestInitPlatform_LiveResizePhaserHooks(t *testing.T) {
 		t.Fatalf("initPlatform: %v", err)
 	}
 	defer platWin.Destroy()
+	app.setupLiveResizePhaseHooks(platWin)
 
 	if mockWin.startHook == nil || mockWin.endHook == nil {
-		t.Skip("window did not implement LiveResizePhaser — hooks not registered")
+		t.Fatal("setupLiveResizePhaseHooks registered no hooks on a LiveResizePhaser window")
 	}
 
 	// Case 1: renderLoop == nil → both hooks return early.

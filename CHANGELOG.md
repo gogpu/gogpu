@@ -19,12 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as input is disabled. Controller methods are safe from any goroutine: the native IMM32 state is applied on the window
   thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
   with the later TSF backend. X11, Wayland and macOS backends follow in their own changes.
+- **`HostLoop`: a loop the caller owns** (#517, @dvoyni). A host that owns its main loop, such as a game engine or an
+  editor, drives an `App` one step at a time through `NewHostLoop(app)`: `Start`, `PumpEvents`, `Running`,
+  `ConsumeRedrawRequest`, `BeginFrame`, `EndFrame` and `Stop`, every call on the OS main thread, with no render thread.
+  `PumpEvents` never draws, waits only while the user drags a move or resize, and allocates nothing when no event is
+  pending. `BeginFrame` skips a hidden, zero-size or frame-gated window without acquiring. `ConsumeRedrawRequest`
+  reports whether a redraw was requested since its last call, so a host can draw on demand as `Run` does. `Stop` does
+  nothing unless `Start` succeeded. `Run` is rebuilt on the same steps, and it returns `ErrHostLoopStarted` while a
+  `HostLoop` is started, as does a second `Start`. This is the caller-owned loop of ADR-070 (discussion #468).
+- **`HostLoop.RequestDevice`** (@dvoyni). Requests the device after `Start`, with the required features and limits the
+  host chose once it read the adapter through `GPUContextProvider`. Nil limits are the adapter's own; a feature or limit
+  the adapter lacks fails the request by name, and no device is created.
 
 ### Performance
 
 - **Textured quads share the frame encoder** (#461, @besmpl). `DrawTexture*` records into the frame's single command
   encoder and batches consecutive quads in one render pass, with per-frame uniform chunks addressed by dynamic offsets.
   One encoder and one submit per frame instead of one per quad. Clear and external passes keep their order.
+- **Event pumping allocates less** (#517, @dvoyni). On Windows, the `PeekMessage` pump and the window procedure's key,
+  mouse and size paths call Win32 through `syscall.SyscallN` instead of `LazyProc.Call`, which heap-allocated its
+  arguments on every call. A typed ASCII character reaches the text-input callbacks without allocating its string.
 
 ### Changed
 
@@ -36,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slices, so a platform dialog cannot mutate them. Dead event-source dispatch helpers are gone,
   `mapTextureFormat` becomes `allowedSurfaceFormat`, and `doc.go`, the README and ARCHITECTURE.md now describe the
   current platform support and DIP dimensions.
+- **Input edges are cleared at the start of each event pump** (#517, @dvoyni), not after `onUpdate`. `JustPressed`,
+  `JustReleased` and `Mouse.Delta` now hold until the next pump, so `OnDraw` sees the same edges `onUpdate` saw.
+  `onUpdate` is unchanged.
+- **`HostLoop.Start` brings up the adapter with no device** (@dvoyni). It brings up the platform, the instance and the
+  adapter; the device comes from `HostLoop.RequestDevice`, and `HostLoop.NewWindow` fails before it.
+  `Config.RequiredFeatures` and `Config.RequiredLimits` no longer apply to a `HostLoop`.
 
 ### Removed
 
@@ -67,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`EventSource.OnResize` never fired** (found in the #458 review). The callback was stored and nothing dispatched a
   window resize to the event source, so `EventSource` subscribers never heard about one; a resize now reaches them
   with the logical size, the same values `App.OnResize` receives.
+- **Vulkan: minimizing a window marked its surface lost** (#517, @dvoyni). The surface could see the zero extent
+  before the pump read the minimize, and the failed reconfigure logged `reconfigure after outdated failed` and lost
+  the surface. It now waits unconfigured, and is configured again on the first frame after the restore.
+- **A window that fails to open no longer leaks the platform** (#517, @dvoyni). When the platform started and its
+  first window could not be created, `Run` returned the error without destroying the platform manager.
 
 ## [0.54.1] - 2026-11-08
 

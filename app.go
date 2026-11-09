@@ -45,6 +45,8 @@ type App struct {
 	config            Config
 	manager           platform.PlatformManager // process-level (multi-window)
 	platWindow        platform.PlatformWindow  // primary window (per-window ops)
+	startedWindow     platform.PlatformWindow  // primary window HostLoop.Start created; kept for Stop after a close clears platWindow
+	hostLoopStarted   bool                     // a HostLoop owns the loop, so Run refuses
 	renderer          *Renderer
 	primaryPlatformID platform.WindowID
 
@@ -105,6 +107,10 @@ type App struct {
 	// Lazy-initialized on first PollInputEvent call. Events are collected
 	// during classifyEvent dispatch and drained each frame.
 	inputEvents []gpucontext.InputEvent
+
+	// Reused by every pump, so draining events allocates no slices.
+	pumpedEvents     []platform.Event
+	secondaryResizes []platform.Event
 
 	// Resource tracker for automatic GPU resource cleanup on shutdown.
 	tracker *resourceTracker
@@ -382,31 +388,34 @@ var _ ResourceTracker = (*App)(nil)
 // This ensures the window never shows "Not Responding" during heavy
 // GPU operations like swapchain recreation (vkDeviceWaitIdle).
 func (a *App) Run() error {
+	if a.hostLoopStarted {
+		return ErrHostLoopStarted
+	}
 	// Lock main goroutine to OS main thread.
 	// Required for Win32/Cocoa window operations.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	platWindow, err := a.initPlatform()
-	if err != nil {
+	// Run is a HostLoop with gogpu's own render thread and loop.
+	//
+	// On Windows, DefWindowProc enters a modal message loop during window
+	// drag/resize that blocks the main loop entirely. A WM_TIMER (~60fps)
+	// fires inside the modal loop to invoke modalFrameTick, which runs the
+	// same update+render cycle as the main loop, on the main thread, so
+	// onUpdate and onDraw stay serialized. On macOS/Linux it is never called.
+	// Future: an independent render thread running on its own schedule would
+	// eliminate this callback entirely. See ROADMAP.md for details.
+	loop := HostLoop{app: a}
+	if err := loop.start(thread.NewRenderLoop(), a.modalFrameTick); err != nil {
 		return err
 	}
-	a.renderLoop = thread.NewRenderLoop()
+	defer loop.stop()
 
-	if err := a.initRenderer(platWindow); err != nil {
-		a.renderLoop.Stop()
-		platWindow.Destroy()
-		a.manager.Destroy()
-		return err
-	}
-
-	platWindow.Show()
-	a.syncInitialSurfaceSize()
-
-	defer a.shutdown(platWindow)
-
-	a.registerPrimaryWindow(platWindow)
-	a.startRunLoop()
+	// macOS's live resize is the same kind of loop: AppKit runs the drag
+	// inside the event pump, and Run draws its frames from the live-resize
+	// hook. A HostLoop installs neither, so nothing draws inside its pump.
+	a.setupLiveResizeHook(a.platWindow)
+	a.setupLiveResizePhaseHooks(a.platWindow)
 
 	// Main loop with three rendering modes (ADR-023):
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
@@ -414,8 +423,6 @@ func (a *App) Run() error {
 	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
 	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
 	a.runMainLoop()
-
-	a.lifecycle = AppIdle
 	return nil
 }
 
@@ -439,7 +446,7 @@ func (a *App) syncInitialSurfaceSize() {
 // safety.
 //  1. WaitForGPU / DrainDeferredDestroys / tracker.CloseAll / onClose
 //  2. Renderer.Destroy()     — release GPU surface/device/adapter (NOT instance)
-//  3. platWindow + manager   — close the OS window and the X11 Display
+//  3. platWindow + manager   — close the OS window, if any, and the X11 Display
 //  4. Renderer.ReleaseInstance() — unload the Vulkan driver (ICD) LAST
 //  5. renderLoop.Stop()      — stop the render thread last of all
 //
@@ -463,7 +470,9 @@ func (a *App) shutdown(platWindow platform.PlatformWindow) {
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer.Destroy()
 	})
-	platWindow.Destroy()
+	if platWindow != nil {
+		platWindow.Destroy()
+	}
 	a.manager.Destroy()
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer.ReleaseInstance()
@@ -533,15 +542,6 @@ func (a *App) runFrame() {
 		a.onUpdate(deltaTime)
 	}
 
-	// Advance input state AFTER onUpdate so edge detectors (JustPressed,
-	// JustReleased, Mouse.Delta) are visible during the callback.
-	// Update() sets previous = current, clearing edges for the next frame.
-	// Order: events → onUpdate (user reads edges) → Update (clear).
-	// Matches Ebiten, Unity, Godot — all clear edges after user callback.
-	if a.inputState != nil {
-		a.inputState.Update()
-	}
-
 	// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
 	if a.invalidator.Consume() {
 		invalidated = true
@@ -558,22 +558,19 @@ func (a *App) runFrame() {
 // newPlatformManagerFn creates a platform manager; replaced in tests to inject mocks.
 var newPlatformManagerFn func() platform.PlatformManager = platform.NewManager
 
+// newRendererFn creates the renderer; replaced in tests to run without a GPU.
+var newRendererFn = newRenderer
+
+// newWindowlessRendererFn creates the renderer HostLoop starts with, before
+// any window; replaced in tests to run without a GPU.
+var newWindowlessRendererFn = newWindowlessRenderer
+
 // initPlatform initializes the platform manager, applies pending menu,
 // and creates the primary window. All operations must be on the main thread.
 func (a *App) initPlatform() (platform.PlatformWindow, error) {
-	// Initialize platform manager (process-level) — must be on main thread.
-	platform.SetLogger(slogger())
-	a.manager = newPlatformManagerFn()
-	if err := a.manager.Init(); err != nil {
+	if err := a.initPlatformManager(); err != nil {
 		return nil, err
 	}
-
-	// Apply application name if set in config.
-	if a.config.AppName != "" {
-		a.manager.SetAppName(a.config.AppName)
-	}
-
-	a.applyPendingMenus()
 
 	// Create primary platform window.
 	platWindow, err := a.manager.CreateWindow(platform.Config{
@@ -593,6 +590,8 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Icon:      a.config.Icon,
 	})
 	if err != nil {
+		// Nothing tears the platform down after a start that failed.
+		a.manager.Destroy()
 		return nil, err
 	}
 
@@ -606,33 +605,33 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 
 	applyHeaderAlignment(platWindow, a.config.HeaderAlignment)
 
+	return platWindow, nil
+}
+
+// initPlatformManager initializes the platform manager with no window,
+// names the app, applies pending menus and creates the input subsystems.
+// It must run on the main thread.
+func (a *App) initPlatformManager() error {
+	platform.SetLogger(slogger())
+	a.manager = newPlatformManagerFn()
+	if err := a.manager.Init(); err != nil {
+		return err
+	}
+
+	// Apply application name if set in config.
+	if a.config.AppName != "" {
+		a.manager.SetAppName(a.config.AppName)
+	}
+
+	a.applyPendingMenus()
+
 	// Ensure input subsystems exist. Both EventSource() and Input() use
 	// lazy init so callers can register callbacks before Run(). We must
 	// NOT overwrite instances that were already created — UI frameworks
 	// register callbacks on the EventSource obtained before Run().
 	_ = a.Input()       // ensures a.inputState is initialized
 	_ = a.EventSource() // ensures a.eventSource is initialized
-
-	// Enable rendering during Win32 modal drag/resize loop.
-	//
-	// On Windows, DefWindowProc enters a modal message loop during window
-	// drag/resize that blocks our main loop entirely. A WM_TIMER (~60fps)
-	// fires inside the modal loop to invoke this callback, which runs the
-	// same update+render cycle as the normal main loop.
-	//
-	// This callback runs on the main thread (same as the normal loop),
-	// preserving serialization between onUpdate and onDraw — no data races.
-	//
-	// On macOS/Linux this is a no-op (those platforms have no modal loops).
-	//
-	// Future: An independent render thread running on its own schedule
-	// would eliminate this callback entirely. See ROADMAP.md for details.
-	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
-
-	a.setupLiveResizeHook(platWindow)
-	a.setupLiveResizePhaseHooks(platWindow)
-
-	return platWindow, nil
+	return nil
 }
 
 // applyPendingMenus installs the menu bar and any system menu items that
@@ -718,7 +717,7 @@ func (a *App) setupLiveResizePhaseHooks(platWindow platform.PlatformWindow) {
 }
 
 // setTransactionPresent toggles Metal transaction-based present on the
-// render thread. Called from the live-resize phase hooks (see initPlatform).
+// render thread. Called from the live-resize phase hooks (see Run).
 func (a *App) setTransactionPresent(enabled bool) {
 	if a.renderLoop == nil || a.renderer == nil {
 		return
@@ -736,9 +735,9 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(
-			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
-			a.config.Transparent,
+		a.renderer, initErr = newRendererFn(
+			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.Transparent,
+			deviceRequestFrom(&a.config),
 		)
 	})
 	if initErr != nil {
@@ -755,26 +754,34 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 // This matches the winit/Flutter/Qt pattern: platform layer delivers events,
 // handlers decide whether to invalidate, render loop never guesses.
 func (a *App) processEventsMultiThread() {
+	// Clear the previous pump's input edges before applying this pump's
+	// events, so edge detectors (JustPressed, JustReleased, Mouse.Delta)
+	// hold from this pump until the next: onUpdate, which runs after the
+	// pump, sees each edge once. Update() sets previous = current.
+	if a.inputState != nil {
+		a.inputState.Update()
+	}
+
 	// Reset public input event queue (ADR-058). Reuse backing array.
 	a.inputEvents = a.inputEvents[:0]
 
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
 	var lastResize *platform.Event
-	var events []platform.Event
+	a.pumpedEvents = a.pumpedEvents[:0]
 
 	for {
 		event := a.manager.PollEvents()
 		if event.Type == platform.EventNone {
 			break
 		}
-		events = append(events, event)
+		a.pumpedEvents = append(a.pumpedEvents, event)
 	}
 
 	// Classify events by type and window.
-	var secondaryResizes []platform.Event
-	for i := range events {
-		lastResize, secondaryResizes = a.classifyEvent(&events[i], lastResize, secondaryResizes)
+	a.secondaryResizes = a.secondaryResizes[:0]
+	for i := range a.pumpedEvents {
+		lastResize, a.secondaryResizes = a.classifyEvent(&a.pumpedEvents[i], lastResize, a.secondaryResizes)
 	}
 
 	// Queue primary window resize for render thread (deferred pattern).
@@ -803,8 +810,8 @@ func (a *App) processEventsMultiThread() {
 	}
 
 	// Handle secondary window resize events.
-	for i := range secondaryResizes {
-		a.handleSecondaryResize(secondaryResizes[i])
+	for i := range a.secondaryResizes {
+		a.handleSecondaryResize(a.secondaryResizes[i])
 	}
 
 	// Dispatch end-of-frame events (gestures computed from pointer events)
@@ -813,18 +820,13 @@ func (a *App) processEventsMultiThread() {
 	}
 }
 
-// handleSecondaryResize resizes a secondary window's surface on the render thread.
+// handleSecondaryResize reports a secondary window's resize to its OnResize
+// and asks for a frame. The window's surface takes the new size at the
+// window's next frame, as the primary's does.
 func (a *App) handleSecondaryResize(ev platform.Event) {
 	w := a.windowManager.getByPlatformID(ev.WindowID)
 	if w == nil || w.surface == nil {
 		return
-	}
-	physW, physH := ev.PhysicalWidth, ev.PhysicalHeight
-	if physW > 0 && physH > 0 {
-		ws := w.surface
-		a.renderLoop.RunOnRenderThreadVoid(func() {
-			ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
-		})
 	}
 	if w.onResize != nil {
 		w.onResize(ev.Width, ev.Height)
@@ -952,11 +954,20 @@ func (a *App) dispatchKeyToInputState(key gpucontext.Key, pressed bool) {
 // dispatchCharEvent handles EventChar from the platform.
 func (a *App) dispatchCharEvent(event *platform.Event) {
 	w := a.windowManager.getByPlatformID(event.WindowID)
-	if w != nil && w.onTextInput != nil {
-		w.onTextInput(string(event.Char))
+	windowListens := w != nil && w.onTextInput != nil
+	sourceListens := a.eventSource != nil && a.eventSource.onTextInput != nil
+	if !windowListens && !sourceListens {
+		return
 	}
-	if a.eventSource != nil {
-		a.eventSource.dispatchTextInput(string(event.Char))
+	text := asciiText(event.Char)
+	if text == "" {
+		text = string(event.Char)
+	}
+	if windowListens {
+		w.onTextInput(text)
+	}
+	if sourceListens {
+		a.eventSource.dispatchTextInput(text)
 	}
 }
 
@@ -1184,7 +1195,11 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		if ws == nil {
 			continue
 		}
-		a.syncFrameSurfaceSize(ws, frame.physW, frame.physH)
+		if err := a.syncFrameSurfaceSize(ws, frame.physW, frame.physH); err != nil {
+			// Nothing to draw to, as after a failed acquire below.
+			a.reportFailedFrame(err)
+			continue
+		}
 
 		// Lazy acquire: reset per-frame state for deferred beginFrame.
 		// beginFrame is called on first draw call, not upfront.
@@ -1220,7 +1235,7 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// even when the application's OnDraw callback draws nothing.
 		if !ws.frameStarted && !ws.tryOverlayOnlyFrame() {
 			if ws.acquireFailed {
-				a.RequestRedraw()
+				a.reportFailedFrame(ws.acquireErr)
 			}
 			a.renderer.endFrameStats(true) // idle: no acquire → present skipped (#484 FrameStats)
 			ws.resetLazyState()
@@ -1232,10 +1247,10 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 		// live scale (a DPI change is an outdated trigger, so frame.scale may be
 		// stale). One retry only — looping can livelock a live resize; if still
 		// outdated, request another frame since nothing else reschedules on-demand.
-		if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+		if ws.frameStarted && a.endWindowFrame(ws) {
 			ws.prepareLazyAcquire()
 			frame.onDraw(newContextForSurface(a.renderer, ws, ws.platWindow.ScaleFactor()))
-			if ws.frameStarted && a.renderer.endFrameForSurface(ws) {
+			if ws.frameStarted && a.endWindowFrame(ws) {
 				a.RequestRedraw()
 			}
 		}
@@ -1255,24 +1270,51 @@ func (a *App) renderFrameGPU(frames []windowFrame) {
 	a.renderer.pollSubmissions()
 }
 
-func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) {
+// endWindowFrame presents ws's frame for Run's loop and answers whether
+// present reconfigured an outdated surface. Run has no caller to give the
+// present's error to, so it logs it.
+func (a *App) endWindowFrame(ws *RenderTarget) bool {
+	reconfigured, err := a.renderer.endFrameForSurface(ws)
+	if err != nil {
+		logFrameError(err)
+	}
+	return reconfigured
+}
+
+// reportFailedFrame handles a window's frame that Run's loop could not draw:
+// it logs err, when there is one, since Run has no caller to give it to, and
+// requests another frame, since the invalidation that asked for this one is
+// consumed.
+func (a *App) reportFailedFrame(err error) {
+	if err != nil {
+		logFrameError(err)
+	}
+	a.RequestRedraw()
+}
+
+// syncFrameSurfaceSize applies the window's physical size to its surface
+// before a frame, and answers the configure's error.
+func (a *App) syncFrameSurfaceSize(ws *RenderTarget, physW, physH int) error {
 	// initRenderer may leave the surface unconfigured when PhysicalSize was 0.
 	if !ws.CanRender() && ws.platWindow != nil {
 		pw, ph := ws.platWindow.PhysicalSize()
 		if pw > 0 && ph > 0 {
-			ws.resize(pw, ph, a.renderer.device, a.renderer.adapter)
+			if err := ws.resize(pw, ph, a.renderer.device, a.renderer.adapter); err != nil {
+				return err
+			}
 		}
 	}
 	if physW <= 0 || physH <= 0 {
-		return
+		return nil
 	}
 	width, height, ok := physicalSizeUint32(physW, physH)
 	if !ok {
-		return
+		return nil
 	}
 	if ws.width != width || ws.height != height {
-		a.renderer.ResizeSurface(ws, physW, physH)
+		return ws.resize(physW, physH, a.renderer.device, a.renderer.adapter)
 	}
+	return nil
 }
 
 // modalFrameTick executes one update+render cycle during the Win32 modal
@@ -1368,7 +1410,8 @@ func (a *App) resizeSecondaryWindowsDuringModal() {
 	}
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		for _, r := range resizes {
-			r.ws.resize(r.w, r.h, a.renderer.device, a.renderer.adapter)
+			// The frame that follows tries a failed configure again and logs it.
+			_ = r.ws.resize(r.w, r.h, a.renderer.device, a.renderer.adapter)
 		}
 	})
 }
@@ -2170,4 +2213,21 @@ func gpucontextButtonToInputButton(button gpucontext.Button) input.MouseButton {
 	default:
 		return input.MouseButtonLeft
 	}
+}
+
+// asciiCharacters holds every ASCII character in order, so asciiText can
+// answer each one as a substring that shares its memory.
+const asciiCharacters = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f" +
+	"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" +
+	" !\"#$%&'()*+,-./0123456789:;<=>?" +
+	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_" +
+	"`abcdefghijklmnopqrstuvwxyz{|}~\x7f"
+
+// asciiText answers the one-character string of an ASCII rune without
+// allocating, and "" for any other rune, whose string must be made.
+func asciiText(char rune) string {
+	if char < 0 || char >= 0x80 {
+		return ""
+	}
+	return asciiCharacters[char : char+1]
 }

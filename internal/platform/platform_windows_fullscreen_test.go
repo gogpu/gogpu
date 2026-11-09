@@ -28,7 +28,9 @@ func TestWindowsFullscreenStartup(t *testing.T) {
 		windows.NewLazySystemDLL("ole32.dll").NewProc("OleUninitialize").Call()
 	}()
 
-	// Exercise both the primary and secondary window creation paths.
+	// Exercise both the primary and secondary window creation paths. A window
+	// asked fullscreen opens hidden and enters fullscreen at its first Show:
+	// DX12 refuses a swap chain for a window made fullscreen while hidden.
 	for _, name := range []string{"primary", "secondary"} {
 		t.Log(name)
 		created, err := p.CreateWindow(Config{Title: "Fullscreen startup test", Width: 320, Height: 240, Fullscreen: true})
@@ -36,18 +38,21 @@ func TestWindowsFullscreenStartup(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := created.(*win32Window)
-		if !w.IsFullscreen() {
-			t.Fatal("fullscreen configuration was ignored during creation")
-		}
 		assertWindowVisible(t, w, false)
+		if w.IsFullscreen() {
+			t.Fatal("window entered fullscreen while hidden")
+		}
+
+		w.Show()
+		assertWindowVisible(t, w, true)
+		if !w.IsFullscreen() {
+			t.Fatal("fullscreen configuration was ignored at the first Show")
+		}
 		assertFullscreenBounds(t, w)
 		style, _, _ := procGetWindowLongPtrW.Call(uintptr(w.hwnd), gwlStyle)
 		if style&wsOverlappedWindow != 0 {
 			t.Errorf("fullscreen window retains decorations: style=%#x", style)
 		}
-
-		w.Show()
-		assertWindowVisible(t, w, true)
 		w.SetFullscreen(false)
 		assertWindowVisible(t, w, true)
 		if width, height := w.LogicalSize(); width != 320 || height != 240 {

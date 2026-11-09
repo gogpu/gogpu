@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -202,6 +205,11 @@ type RenderTarget struct {
 	// UI that correctly draws nothing when nothing changed.
 	acquireFailed bool
 
+	// acquireErr is the error of the failed acquire, nil when the surface was
+	// not ready to acquire from: HostLoop.BeginFrame answers it, Run's loop
+	// logs it.
+	acquireErr error
+
 	// Compositor-owned composition texture (ADR-067).
 	// When debug overlays are active, content renderers draw into this
 	// intermediate texture instead of the swapchain image directly.
@@ -297,8 +305,8 @@ type Renderer struct {
 	deferredDestroys   []func()
 	deferredDestroysMu sync.Mutex
 
-	// PowerPreference for adapter selection
-	powerPreference gputypes.PowerPreference
+	// deviceRequest is what Config asks of the adapter and its device.
+	deviceRequest deviceRequest
 
 	// Primary RenderTarget — backward compatibility for single-window API.
 	// TODO(lifecycle-phase3): remove once all callers use per-window surfaces.
@@ -323,10 +331,8 @@ type Renderer struct {
 }
 
 // newRenderer creates and initializes a new renderer.
-func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool) (*Renderer, error) {
-	r := &Renderer{
-		powerPreference: powerPref,
-	}
+func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, transparent bool, request deviceRequest) (*Renderer, error) {
+	r := &Renderer{deviceRequest: request}
 	r.primary = &RenderTarget{
 		renderer:    r,
 		platWindow:  platWin,
@@ -357,6 +363,25 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 		return nil, err
 	}
 
+	return r, nil
+}
+
+// newWindowlessRenderer creates the instance and the adapter with no
+// surface, for HostLoop, which requests the device with requestDevice and
+// whose windows bring their own surfaces. It has no primary surface. A Vulkan
+// adapter requested without a surface picks its graphics queue without asking
+// whether it can present.
+func newWindowlessRenderer(graphicsAPI types.GraphicsAPI, request deviceRequest) (*Renderer, error) {
+	r := &Renderer{deviceRequest: request}
+	if err := r.initInstance(graphicsAPI); err != nil {
+		r.ReleaseInstance()
+		return nil, err
+	}
+	if err := r.requestAdapter(nil); err != nil {
+		r.Destroy()
+		r.ReleaseInstance()
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -397,7 +422,7 @@ func newHeadlessRendererWithRuntime(graphicsAPI []types.GraphicsAPI, runtime hea
 	}
 
 	r := &Renderer{
-		powerPreference: gputypes.PowerPreferenceHighPerformance,
+		deviceRequest: deviceRequest{powerPreference: gputypes.PowerPreferenceHighPerformance},
 	}
 	r.primary = &RenderTarget{renderer: r}
 
@@ -440,9 +465,19 @@ func (r *Renderer) initInstance(graphicsAPI types.GraphicsAPI) error {
 // surfaceHint is non-nil only for GLES: it feeds EnumerateAdapters so the
 // backend can return a real adapter backed by a live EGL context.
 func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
+	if err := r.requestAdapter(surfaceHint); err != nil {
+		return err
+	}
+	return r.requestDevice()
+}
+
+// requestAdapter requests the adapter deviceRequest's power preference and
+// fallback ask for. surfaceHint is as initAdapterDevice's.
+func (r *Renderer) requestAdapter(surfaceHint *wgpu.Surface) error {
 	opts := &wgpu.RequestAdapterOptions{
-		PowerPreference:   r.powerPreference,
-		CompatibleSurface: surfaceHint,
+		PowerPreference:      r.deviceRequest.powerPreference,
+		ForceFallbackAdapter: r.deviceRequest.forceFallbackAdapter,
+		CompatibleSurface:    surfaceHint,
 	}
 	var err error
 	r.adapter, err = r.instance.RequestAdapter(opts)
@@ -453,10 +488,89 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
 	r.pixelPresent = info.DeviceType == gputypes.DeviceTypeCPU
+	return nil
+}
 
-	r.device, err = r.adapter.RequestDevice(nil)
+// requestDevice creates the logical device from the adapter with
+// deviceRequest's features and limits, checked against the adapter first.
+func (r *Renderer) requestDevice() error {
+	request := r.deviceRequest
+
+	// Check the request before making it: Vulkan and Metal ignore the
+	// features and limits an adapter lacks, and DX12 checks only features, so
+	// a device could come back that quietly cannot do what was asked.
+	if err := request.check(r.adapter); err != nil {
+		return err
+	}
+
+	// Create the device with the features the app asked for. Passing nil here
+	// creates a device with no optional features at all, which silently costs
+	// any consumer reaching for one through DeviceProvider - a non-zero
+	// firstInstance on a direct draw, say, which wgpu gates on
+	// IndirectFirstInstance.
+	var err error
+	r.device, err = r.adapter.RequestDevice(&wgpu.DeviceDescriptor{
+		Label:            "gogpu",
+		RequiredFeatures: request.requiredFeatures,
+		RequiredLimits:   request.requiredLimits,
+	})
 	if err != nil {
-		return fmt.Errorf("gogpu: failed to request device: %w", err)
+		return fmt.Errorf("gogpu: failed to request device with features %v (adapter supports %v): %w",
+			request.requiredFeatures, r.adapter.Features(), err)
+	}
+	return nil
+}
+
+// deviceRequest is what Config asks of the adapter and its device.
+type deviceRequest struct {
+	powerPreference      gputypes.PowerPreference
+	forceFallbackAdapter bool
+	requiredFeatures     gputypes.Features
+	// requiredLimits are zero when Config asked for the adapter's own.
+	requiredLimits gputypes.Limits
+}
+
+// deviceRequestFrom returns the device request config makes.
+func deviceRequestFrom(config *Config) deviceRequest {
+	request := deviceRequest{
+		powerPreference:      config.PowerPreference,
+		forceFallbackAdapter: config.ForceFallbackAdapter,
+		requiredFeatures:     config.RequiredFeatures,
+	}
+	if config.RequiredLimits != nil {
+		request.requiredLimits = *config.RequiredLimits
+	}
+	return request
+}
+
+// check returns an error naming every required feature adapter lacks and
+// every required limit it cannot supply: a maximum above its own, or an
+// alignment (a limit named Min...) below it. Zero required limits, the
+// adapter's own, are not checked.
+func (request deviceRequest) check(adapter *wgpu.Adapter) error {
+	var lacking []string
+	missing := request.requiredFeatures &^ adapter.Features()
+	for bit := gputypes.Feature(1); missing != 0; bit <<= 1 {
+		if missing&gputypes.Features(bit) != 0 {
+			lacking = append(lacking, "feature "+bit.String())
+			missing &^= gputypes.Features(bit)
+		}
+	}
+	if request.requiredLimits != (gputypes.Limits{}) {
+		required := reflect.ValueOf(request.requiredLimits)
+		supported := reflect.ValueOf(adapter.Limits())
+		for i := range required.NumField() {
+			name := required.Type().Field(i).Name
+			want := required.Field(i).Uint()
+			have := supported.Field(i).Uint()
+			alignment := strings.HasPrefix(name, "Min")
+			if (alignment && want < have) || (!alignment && want > have) {
+				lacking = append(lacking, fmt.Sprintf("limit %s %d (adapter: %d)", name, want, have))
+			}
+		}
+	}
+	if len(lacking) > 0 {
+		return fmt.Errorf("gogpu: adapter %q cannot supply %s", adapter.Info().Name, strings.Join(lacking, ", "))
 	}
 	return nil
 }
@@ -501,7 +615,7 @@ func (ws *RenderTarget) configure(device *wgpu.Device, adapter *wgpu.Adapter) er
 	presentMode := resolvePresentMode(caps, ws.vsync)
 	alphaMode := resolveAlphaMode(caps, ws.transparent)
 
-	return ws.surface.Configure(device, &wgpu.SurfaceConfiguration{
+	return configureSurfaceFn(ws.surface, device, &wgpu.SurfaceConfiguration{
 		Format:      ws.format,
 		Usage:       gputypes.TextureUsageRenderAttachment,
 		Width:       ws.width,
@@ -605,13 +719,19 @@ func (r *Renderer) Resize(width, height int) {
 	r.ResizeSurface(r.primary, width, height)
 }
 
-// ResizeSurface handles window resize for any surface.
+// ResizeSurface handles window resize for any surface. A configure that
+// fails keeps the surface's previous size, so the surface's next frame tries
+// it again and answers its error.
 func (r *Renderer) ResizeSurface(ws *RenderTarget, width, height int) {
-	ws.resize(width, height, r.device, r.adapter)
+	_ = ws.resize(width, height, r.device, r.adapter)
 }
 
-// resize handles window resize for this surface.
-func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) {
+// resize handles window resize for this surface, and answers the configure's
+// error. A configure that fails keeps the previous size, so the next frame
+// tries it again. One that fails because the surface has zero area, as a
+// minimized Vulkan window's does on Windows, answers no error: the surface
+// waits for the restore, as at a zero size.
+func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *wgpu.Adapter) error {
 	if width <= 0 || height <= 0 {
 		// Window minimized or invisible -- unconfigure surface to prevent
 		// zero-extent swapchain creation on the next frame (VK-VAL-001).
@@ -619,13 +739,13 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 			ws.surface.Unconfigure()
 			ws.state = SurfaceReady
 		}
-		return
+		return nil
 	}
 
 	// Skip no-op resize. ConfigureSurface is expensive (involves device wait idle
 	// and surface reconfiguration), so avoid calling it when dimensions are unchanged.
 	if uint32(width) == ws.width && uint32(height) == ws.height { //nolint:gosec // G115: validated positive above
-		return
+		return nil
 	}
 
 	// Save old dimensions in case Configure fails -- we must keep
@@ -651,9 +771,13 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 		// Next frame will retry with the new size.
 		ws.width = oldWidth
 		ws.height = oldHeight
-		return
+		if isZeroArea(err) {
+			return nil
+		}
+		return fmt.Errorf("gogpu: configuring the surface at %dx%d: %w", width, height, err)
 	}
 	ws.state = SurfaceConfigured
+	return nil
 }
 
 // BeginFrame prepares a new frame for rendering on the primary surface.
@@ -664,9 +788,14 @@ func (r *Renderer) BeginFrame() bool {
 	return r.beginFrameForSurface(r.primary)
 }
 
-// beginFrameForSurface acquires the next texture for any surface.
+// beginFrameForSurface acquires the next texture for any surface, logging
+// the acquire's error, which it has no caller to give.
 func (r *Renderer) beginFrameForSurface(ws *RenderTarget) bool {
-	return ws.beginFrame(ws.platWindow, r.device, r.adapter)
+	started, err := ws.beginFrame(ws.platWindow, r.device, r.adapter)
+	if err != nil {
+		logFrameError(err)
+	}
+	return started
 }
 
 // CanRender reports whether this surface is ready for draw operations.
@@ -674,12 +803,23 @@ func (ws *RenderTarget) CanRender() bool {
 	return ws.state == SurfaceConfigured && ws.surface != nil
 }
 
+// configureSurfaceFn configures a surface, and acquireSurfaceTextureFn and
+// presentSurfaceTextureFn acquire and present its texture; replaced in tests
+// to fail as a driver does.
+var (
+	configureSurfaceFn      = (*wgpu.Surface).Configure
+	acquireSurfaceTextureFn = (*wgpu.Surface).GetCurrentTexture
+	presentSurfaceTextureFn = (*wgpu.Surface).PresentWithDamage
+)
+
 // beginFrame acquires the next surface texture for rendering on this window.
-// Returns false if frame cannot be acquired (surface not configured, minimized, etc.).
+// It returns false with no error when the surface is not configured, and
+// false with the error, after recovering the surface from it, when the
+// acquire or its view fails, or the configure at a size PrepareFrame reports.
 // Recovery follows the wgpu framework.rs pattern:
 //   - ErrSurfaceOutdated → reconfigure (swapchain stale after resize/DPI change)
 //   - ErrSurfaceLost → mark SurfaceLost (caller must recreate)
-func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) bool {
+func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) (bool, error) {
 	// The app frame loop normally releases these in prepareLazyAcquire, but the
 	// exported Renderer.BeginFrame/EndFrame pair reaches beginFrame directly.
 	// Start every acquired frame with a fresh uniform arena so manual callers do
@@ -687,7 +827,7 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	ws.releaseTexQuadUniformChunks()
 
 	if !ws.CanRender() {
-		return false
+		return false, nil
 	}
 
 	// Before acquiring surface texture, let platform update surface state
@@ -698,11 +838,10 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	// blocking nextDrawable + transaction present keep pool churn bounded.
 	if platWin != nil {
 		result := platWin.PrepareFrame()
-		if result.PhysicalWidth > 0 && result.PhysicalHeight > 0 &&
-			(result.PhysicalWidth != ws.width || result.PhysicalHeight != ws.height) {
-			ws.width = result.PhysicalWidth
-			ws.height = result.PhysicalHeight
-			_ = ws.configure(device, adapter)
+		if result.PhysicalWidth > 0 && result.PhysicalHeight > 0 {
+			if err := ws.resize(int(result.PhysicalWidth), int(result.PhysicalHeight), device, adapter); err != nil {
+				return false, err
+			}
 		}
 	}
 
@@ -711,11 +850,10 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	// Lock display to prevent races with main thread's DispatchDefaultQueue
 	// (ADR-041 Phase 2).
 	lockDisplay(platWin)
-	surfaceTexture, _, err := ws.surface.GetCurrentTexture()
+	surfaceTexture, _, err := acquireSurfaceTextureFn(ws.surface)
 	unlockDisplay(platWin)
 	if err != nil {
-		ws.recoverFromAcquireError(err, device, adapter)
-		return false
+		return false, fmt.Errorf("gogpu: acquiring the surface texture: %w", ws.recoverFromAcquireError(err, device, adapter))
 	}
 
 	ws.currentSurfaceTexture = surfaceTexture
@@ -725,7 +863,7 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	if err != nil {
 		ws.surface.DiscardTexture()
 		ws.currentSurfaceTexture = nil
-		return false
+		return false, fmt.Errorf("gogpu: creating the surface texture's view: %w", err)
 	}
 	ws.currentView = view
 
@@ -737,31 +875,61 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	ws.identityPresent = nil
 	ws.surfaceExposed = false
 
-	return true
+	return true, nil
 }
 
-// recoverFromAcquireError handles surface texture acquisition failures.
-// Outdated surfaces are reconfigured (common after resize/DPI change).
-// Lost surfaces transition to SurfaceLost for caller-level recreation.
-func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, adapter *wgpu.Adapter) {
+// recoverFromAcquireError handles surface texture acquisition failures and
+// answers the error to report, logging nothing. Outdated surfaces are
+// reconfigured (common after resize/DPI change); a reconfigure that fails is
+// answered in place of the outdated error. Lost surfaces transition to
+// SurfaceLost for caller-level recreation. After any other error the surface
+// is reconfigured too, and a reconfigure that fails is answered with it,
+// unless it failed because the surface has zero area.
+func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, adapter *wgpu.Adapter) error {
 	switch {
 	case errors.Is(err, wgpu.ErrSurfaceOutdated):
-		slog.Debug("gogpu: surface outdated, reconfiguring", "width", ws.width, "height", ws.height)
 		if ws.width > 0 && ws.height > 0 {
 			if cfgErr := ws.configure(device, adapter); cfgErr != nil {
-				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
-				ws.state = SurfaceLost
+				return ws.reconfigureFailed(err, cfgErr)
 			}
 		}
 	case errors.Is(err, wgpu.ErrSurfaceLost):
-		slog.Error("gogpu: surface lost", "err", err)
 		ws.state = SurfaceLost
 	default:
-		slog.Error("gogpu: surface texture acquire failed", "err", err)
 		if ws.width > 0 && ws.height > 0 {
-			_ = ws.configure(device, adapter)
+			if cfgErr := ws.configure(device, adapter); cfgErr != nil && !isZeroArea(cfgErr) {
+				return fmt.Errorf("%w; reconfiguring the surface: %w", err, cfgErr)
+			}
 		}
 	}
+	return err
+}
+
+// reconfigureFailed records a reconfigure after an outdated surface that
+// failed, and answers the error to report. ErrZeroArea means the window was
+// minimized and the surface saw the zero extent before the pump read the
+// minimize: the surface waits unconfigured, as a minimize leaves it, the
+// next frame after the restore configures it again, and outdated is
+// answered. Any other failure loses the surface, and is answered.
+func (ws *RenderTarget) reconfigureFailed(outdated, err error) error {
+	if isZeroArea(err) {
+		slog.Debug("gogpu: surface has zero area, waiting for restore", "width", ws.width, "height", ws.height)
+		ws.state = SurfaceReady
+		return outdated
+	}
+	ws.state = SurfaceLost
+	return fmt.Errorf("reconfiguring the outdated surface: %w", err)
+}
+
+// logFrameError logs an acquire's or a present's error where no caller is
+// given it, as in Run's loop: an outdated surface, which the renderer has
+// reconfigured, at debug level, any other at error level.
+func logFrameError(err error) {
+	if errors.Is(err, wgpu.ErrSurfaceOutdated) {
+		slog.Debug("gogpu: surface outdated", "err", err)
+		return
+	}
+	slog.Error("gogpu: frame failed", "err", err)
 }
 
 // EndFrame presents the rendered frame on the primary surface.
@@ -774,15 +942,18 @@ func (r *Renderer) EndFrame() {
 	}
 	// Outdated-reconfigure recovery is left to the next BeginFrame/EndFrame —
 	// this manual path has no retained draw callback to replay.
-	r.endFrameForSurface(r.primary)
+	if _, err := r.endFrameForSurface(r.primary); err != nil {
+		logFrameError(err)
+	}
 	r.pollSubmissions()
 }
 
 // endFrameForSurface flushes, presents, and releases frame resources for a
 // specific RenderTarget. Used by the multi-window frame loop. Unlike EndFrame,
 // it does NOT poll submissions -- the caller polls once after all windows.
-// Returns true if present() reconfigured an outdated surface (see present).
-func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
+// Returns true if present() reconfigured an outdated surface, and the
+// present's error, which it does not log (see present).
+func (r *Renderer) endFrameForSurface(ws *RenderTarget) (bool, error) {
 	// A PresentTexture deferred as the whole frame (P1-PRESENT-002): present
 	// its pixels, or draw it through the pipeline if that route fails.
 	r.presentIdentityFrame(ws)
@@ -794,13 +965,13 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 		ws.hasPendingClear = false
 		ws.releaseFrame()
 		r.endFrameStats(false)
-		return false
+		return false, nil
 	}
 
 	// No swapchain frame was started (idle / lazy acquire never triggered).
 	if !ws.frameStarted {
 		r.endFrameStats(true)
-		return false
+		return false, nil
 	}
 
 	// ADR-067: when composition texture is active, content renderers already
@@ -828,11 +999,11 @@ func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
 	// Wayland spec: "The frame request will take effect on the next commit."
 	// The present's internal wl_surface.commit activates it atomically.
 	syncAttempt := syncFrameForPresent(ws)
-	reconfigured, presented := ws.present()
+	reconfigured, presented, err := ws.present()
 	finishPresentationSync(ws, syncAttempt, presented)
 	ws.releaseFrame()
 	r.endFrameStats(!presented)
-	return reconfigured
+	return reconfigured, err
 }
 
 type presentationSyncAttempt struct {
@@ -930,43 +1101,35 @@ func (r *Renderer) pollSubmissions() {
 // wl_display_flush during vkQueuePresentKHR. The display lock serializes this with
 // the main thread's DispatchDefaultQueue (ADR-041 Phase 2).
 //
-// Returns whether the surface was outdated and reconfigured and whether the
-// submitted frame was successfully presented.
-func (ws *RenderTarget) present() (reconfigured, presented bool) {
+// Returns whether the surface was outdated and reconfigured, whether the
+// submitted frame was successfully presented, and the present's error, which
+// it does not log.
+func (ws *RenderTarget) present() (reconfigured, presented bool, err error) {
 	if ws.currentSurfaceTexture == nil {
-		return false, false
+		return false, false, nil
 	}
 	finalDamage := compositor.UnionAllSources(ws.damageSources)
 	lockDisplay(ws.platWindow)
-	err := ws.surface.PresentWithDamage(ws.currentSurfaceTexture, finalDamage)
+	err = presentSurfaceTextureFn(ws.surface, ws.currentSurfaceTexture, finalDamage)
 	unlockDisplay(ws.platWindow)
 	for _, ds := range ws.damageSources {
 		ds.Reset()
 	}
 	if err == nil {
-		return false, true
+		return false, true, nil
 	}
-	// Mirror recoverFromAcquireError: outdated is expected (resize/DPI/monitor),
-	// not an error — reconfigure and signal the caller to re-render.
-	if errors.Is(err, wgpu.ErrSurfaceOutdated) {
-		slog.Debug("gogpu: surface outdated on present, reconfiguring", "width", ws.width, "height", ws.height)
-		if ws.width > 0 && ws.height > 0 {
-			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
-				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
-				ws.state = SurfaceLost
-				return false, false
-			}
-			return true, false
+	// Mirror recoverFromAcquireError: outdated is expected (resize/DPI/monitor)
+	// — reconfigure and signal the caller to re-render.
+	if errors.Is(err, wgpu.ErrSurfaceOutdated) && ws.width > 0 && ws.height > 0 {
+		if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
+			return false, false, fmt.Errorf("gogpu: presenting: %w", ws.reconfigureFailed(err, cfgErr))
 		}
-		return false, false
+		return true, false, fmt.Errorf("gogpu: presenting: %w", err)
 	}
 	if errors.Is(err, wgpu.ErrSurfaceLost) {
-		slog.Error("gogpu: surface lost on present", "err", err)
 		ws.state = SurfaceLost
-		return false, false
 	}
-	slog.Error("PRESENT ERROR", "err", err)
-	return false, false
+	return false, false, fmt.Errorf("gogpu: presenting: %w", err)
 }
 
 // setTransactionPresent toggles Core Animation transaction-based present on
@@ -993,6 +1156,7 @@ func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
 	ws.acquireFailed = false
+	ws.acquireErr = nil
 	// Release blit bind group from previous frame (GPU completed by VSync).
 	if ws.pendingBlitBindGroup != nil {
 		ws.pendingBlitBindGroup.Release()
@@ -1010,22 +1174,24 @@ func (ws *RenderTarget) ensureFrameStarted() bool {
 	if ws.frameStarted {
 		return ws.currentView != nil
 	}
-	if ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter) {
+	started, err := ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter)
+	// Surface may not be configured yet (0×0 at init). Retry once after resize,
+	// keeping the first error when the retry answers none.
+	if !started && !ws.CanRender() && ws.platWindow != nil {
+		if pw, ph := ws.platWindow.PhysicalSize(); pw > 0 && ph > 0 {
+			retryErr := ws.resize(pw, ph, ws.renderer.device, ws.renderer.adapter)
+			if retryErr == nil {
+				started, retryErr = ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter)
+			}
+			err = cmp.Or(retryErr, err)
+		}
+	}
+	if started {
 		ws.frameStarted = true
 		return true
 	}
-	// Surface may not be configured yet (0×0 at init). Retry once after resize.
-	if !ws.CanRender() && ws.platWindow != nil {
-		pw, ph := ws.platWindow.PhysicalSize()
-		if pw > 0 && ph > 0 {
-			ws.resize(pw, ph, ws.renderer.device, ws.renderer.adapter)
-			if ws.beginFrame(ws.platWindow, ws.renderer.device, ws.renderer.adapter) {
-				ws.frameStarted = true
-				return true
-			}
-		}
-	}
 	ws.acquireFailed = true
+	ws.acquireErr = err
 	return false
 }
 
@@ -1039,6 +1205,7 @@ func (ws *RenderTarget) resetLazyState() {
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
 	ws.acquireFailed = false
+	ws.acquireErr = nil
 }
 
 // tryOverlayOnlyFrame attempts to start an overlay-only frame when the
@@ -2131,6 +2298,13 @@ func (r *Renderer) readbackTexture(src *wgpu.Texture, width, height int, label s
 // Call this before destroying user-created GPU resources to prevent
 // Vulkan validation errors about resources still in use by command buffers.
 func (r *Renderer) WaitForGPU() {
+	// Only the device-less renderer that tests inject through newRendererFn
+	// gets here without a device: shutdown runs only after a renderer was
+	// created successfully. The guard keeps shutdown as safe without a device
+	// as Destroy already is.
+	if r.device == nil {
+		return
+	}
 	r.tracker.waitAll(r.device)
 }
 
