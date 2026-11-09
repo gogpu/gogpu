@@ -27,6 +27,7 @@ type PlatformWindowCloser interface {
 // is supported. Multi-window rendering will be enabled when platforms
 // implement PlatformManager.
 type Window struct {
+	app        *App
 	id         WindowID
 	platformID platform.WindowID // platform-native ID for event routing
 	config     Config
@@ -128,6 +129,14 @@ func (w *Window) Close() {
 	if w.platWindow != nil {
 		w.platWindow.Close()
 	}
+}
+
+// Destroy closes the window at once, with its surface, on every system, the
+// first window included. Unlike Close, it asks no close callback; it reports
+// the window to OnAnyWindowClosed as a close does. A destroyed window cannot
+// be shown again; a second Destroy does nothing. Call it on the main thread.
+func (w *Window) Destroy() {
+	w.app.destroyWindow(w.id)
 }
 
 // Size returns the logical window size in platform points (DIP).
@@ -397,12 +406,10 @@ func (a *App) WindowCount() int {
 	return a.windowManager.count()
 }
 
-// closeSecondaryWindow removes a secondary window and releases its GPU and
-// platform resources. The GPU surface is released on the render thread.
-// Does nothing if the window is the primary window (use Quit() instead).
-// closeWindow closes any window (primary or secondary) — destroys surface and platform window.
-// ADR-026: all windows are equal, no special "primary" treatment.
-func (a *App) closeSecondaryWindow(id WindowID) {
+// destroyWindow removes any window, the primary included, and releases its
+// GPU and platform resources. The GPU surface is released on the render
+// thread. Does nothing once the window is removed.
+func (a *App) destroyWindow(id WindowID) {
 	w := a.windowManager.get(id)
 	if w == nil {
 		return
@@ -430,6 +437,14 @@ func (a *App) closeSecondaryWindow(id WindowID) {
 	}
 
 	w.visible = false
+
+	if w == a.primaryWindow {
+		a.primaryWindow = nil
+		a.platWindow = nil
+		if a.renderer != nil {
+			a.renderer.primary = nil
+		}
+	}
 
 	if a.onAnyWindowClosed != nil {
 		a.onAnyWindowClosed(id)
@@ -501,6 +516,7 @@ func (a *App) openWindow(config Config, vsync bool) (*Window, error) {
 
 	// Create Window and register in WindowManager.
 	w := &Window{
+		app:             a,
 		id:              internalID,
 		platformID:      platWindow.ID(),
 		config:          config,

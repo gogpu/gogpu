@@ -587,7 +587,7 @@ func (m *mockRenderLoop) Stop()                                        {}
 func (m *mockRenderLoop) RequestResize(w, h uint32)                    {}
 func (m *mockRenderLoop) ConsumePendingResize() (uint32, uint32, bool) { return 0, 0, false }
 
-func TestApp_CloseSecondaryWindowRecyclesID(t *testing.T) {
+func TestApp_DestroyWindowRecyclesID(t *testing.T) {
 	app := &App{
 		windowManager: newWindowManager(),
 		primaryWindow: nil,
@@ -602,7 +602,7 @@ func TestApp_CloseSecondaryWindowRecyclesID(t *testing.T) {
 	}
 	app.windowManager.add(sec)
 
-	app.closeSecondaryWindow(secID)
+	app.destroyWindow(secID)
 
 	if app.windowManager.get(secID) != nil {
 		t.Fatal("secondary window should be removed from manager")
@@ -717,7 +717,7 @@ func TestApp_OnAnyWindowClosed_Secondary(t *testing.T) {
 	var closedID WindowID
 	app.OnAnyWindowClosed(func(id WindowID) { closedID = id })
 
-	app.closeSecondaryWindow(id)
+	app.destroyWindow(id)
 
 	if closedID != id {
 		t.Errorf("got ID %d, want %d", closedID, id)
@@ -1160,6 +1160,24 @@ func TestAppSetMinMaxSizeNilPlatform(t *testing.T) {
 	}
 	if app.config.MaxWidth != 1920 || app.config.MaxHeight != 1080 {
 		t.Errorf("config MaxSize = %dx%d, want 1920x1080", app.config.MaxWidth, app.config.MaxHeight)
+	}
+}
+
+func TestWindow_DestroyThePrimaryClearsIt(t *testing.T) {
+	mock := &mockWindow{windowID: 1, width: 800, height: 600}
+	wm := newWindowManager()
+	app := &App{windowManager: wm, platWindow: mock, renderLoop: &mockRenderLoop{}}
+	pw := &Window{id: wm.allocate(), platformID: mock.windowID, platWindow: mock, app: app}
+	wm.add(pw)
+	app.primaryWindow = pw
+
+	pw.Destroy()
+
+	if !mock.destroyed {
+		t.Error("Destroy left the primary platform window open")
+	}
+	if app.PrimaryWindow() != nil || app.platWindow != nil {
+		t.Error("Destroy left the primary window as the App's")
 	}
 }
 

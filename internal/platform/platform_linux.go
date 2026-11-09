@@ -440,12 +440,12 @@ func (p *x11Platform) WakeUp() {
 
 // ClipboardRead reads text from the system clipboard via ICCCM selection protocol.
 func (p *x11Platform) ClipboardRead() (string, error) {
-	return p.inner.ClipboardRead()
+	return p.clipboardConnection().ClipboardRead()
 }
 
 // ClipboardWrite writes text to the system clipboard via ICCCM selection protocol.
 func (p *x11Platform) ClipboardWrite(text string) error {
-	return p.inner.ClipboardWrite(text)
+	return p.clipboardConnection().ClipboardWrite(text)
 }
 
 // SubpixelLayout returns the display's subpixel arrangement for LCD text rendering.
@@ -495,6 +495,21 @@ func (p *x11Platform) Destroy() {
 		sec.platform.Destroy()
 	}
 	p.inner.Destroy()
+}
+
+// clipboardConnection is the connection of a window still open: the first
+// window's while it is, otherwise the earliest secondary's. A selection is
+// owned by a window, so the clipboard needs one.
+func (p *x11Platform) clipboardConnection() *x11.Platform {
+	if p.inner.PrimaryWindow() != 0 {
+		return p.inner
+	}
+	p.secondaryMu.RLock()
+	defer p.secondaryMu.RUnlock()
+	if len(p.secondaries) > 0 {
+		return p.secondaries[0].platform
+	}
+	return p.inner
 }
 
 // --- x11PlatformWindow implements PlatformWindow ---
@@ -609,10 +624,12 @@ func (w *x11PlatformWindow) StartDrag(paths []string, done func(DragResult)) {
 	startXDNDDrag(w.inner(), paths, done)
 }
 
-// Destroy tears down a secondary window's independent connection and
-// unregisters it. Primary destruction is handled by platform.Destroy().
+// Destroy closes the window at once. The first window's connection stays
+// open, since the clipboard, the menu and event reads use it; a secondary
+// window's own connection is closed and unregistered.
 func (w *x11PlatformWindow) Destroy() {
 	if w.secondary == nil {
+		w.platform.inner.DestroyWindow()
 		return
 	}
 	p := w.platform
@@ -982,6 +999,9 @@ func (w *waylandPlatformWindow) StartDrag(paths []string, done func(DragResult))
 	}
 }
 
+// Destroy closes the window at once with its own connection. Closing the
+// first window closes the platform's connection, and the next window opened
+// starts a new one.
 func (w *waylandPlatformWindow) Destroy() {
 	if w.secondary != nil {
 		// Remove from platform's secondary list, then close the connection.
@@ -1001,7 +1021,7 @@ func (w *waylandPlatformWindow) Destroy() {
 		w.secondary = nil
 		return
 	}
-	// Primary destruction handled by platform.Destroy()
+	w.platform.destroyFirstWindow()
 }
 
 // --- PlatformManager implementation on waylandPlatform ---
@@ -3201,6 +3221,37 @@ func (p *waylandPlatform) Destroy() {
 	if p.display != nil {
 		_ = p.display.Close()
 		p.display = nil
+	}
+}
+
+// destroyFirstWindow closes the connection the first window was opened on,
+// which owns its surface, and starts the first window's state afresh, keeping
+// its key-repeat timer, so the next CreateWindow opens a new connection. A
+// second call does nothing.
+func (p *waylandPlatform) destroyFirstWindow() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.libwl == nil {
+		return
+	}
+	w := p.primary
+	w.cancelAllKeyRepeat()
+	if w.xkb != nil {
+		w.xkb.Close()
+	}
+	p.libwl.Close()
+	p.libwl = nil
+	if p.display != nil {
+		_ = p.display.Close()
+		p.display = nil
+	}
+	p.registry = nil
+	p.primaryWindowID = 0
+	p.primary = &waylandWindow{
+		startTime: time.Now(),
+		events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
+		repeatFd:  w.repeatFd,
 	}
 }
 

@@ -11,8 +11,8 @@ import (
 // of the CLIPBOARD and PRIMARY selections via the ICCCM protocol.
 // Other applications receive the text when they request the selection.
 func (p *Platform) ClipboardWrite(text string) error {
-	if p.conn == nil || p.primary == nil {
-		return fmt.Errorf("x11: clipboard write before init")
+	if p.conn == nil || p.primary == nil || p.primary.window == 0 {
+		return fmt.Errorf("x11: clipboard write with no window open")
 	}
 
 	window := p.primary.window
@@ -53,8 +53,8 @@ func (p *Platform) ClipboardWrite(text string) error {
 // returns our stored text immediately. Otherwise, requests conversion from the
 // current owner via the ICCCM selection protocol with a 1-second timeout.
 func (p *Platform) ClipboardRead() (string, error) {
-	if p.conn == nil || p.primary == nil {
-		return "", fmt.Errorf("x11: clipboard read before init")
+	if p.conn == nil || p.primary == nil || p.primary.window == 0 {
+		return "", fmt.Errorf("x11: clipboard read with no window open")
 	}
 
 	// Fast path: if we own the clipboard, return our stored text directly.

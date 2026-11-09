@@ -267,6 +267,42 @@ func TestHostLoop_StopClosesOpenWindows(t *testing.T) {
 	}
 }
 
+func TestWindow_DestroyClosesAtOnceWithoutAskingOnClose(t *testing.T) {
+	first := &mockWindow{windowID: 1, width: 800, height: 600}
+	second := &mockWindow{windowID: 2, width: 800, height: 600}
+	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{first, second})
+	defer loop.Stop()
+	var closedWindows []WindowID
+	app.OnAnyWindowClosed(func(window WindowID) { closedWindows = append(closedWindows, window) })
+	window, err := loop.NewWindow(DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	if _, err := loop.NewWindow(DefaultConfig()); err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	window.SetOnClose(func() bool {
+		t.Error("Destroy asked OnClose")
+		return false
+	})
+
+	window.Destroy()
+
+	if !first.destroyed {
+		t.Error("Destroy left the platform window open")
+	}
+	if window.surface.surface != nil {
+		t.Error("Destroy left the window's surface unreleased")
+	}
+	if second.destroyed || app.WindowCount() != 1 {
+		t.Errorf("after Destroy: other window destroyed %v, WindowCount %d, want false and 1", second.destroyed, app.WindowCount())
+	}
+	window.Destroy()
+	if len(closedWindows) != 1 || closedWindows[0] != window.ID() {
+		t.Errorf("windows reported closed after two Destroys: got %v, want [%d]", closedWindows, window.ID())
+	}
+}
+
 func TestHostLoop_RunningAfterStart(t *testing.T) {
 	_, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
 	defer loop.Stop()

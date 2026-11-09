@@ -23,6 +23,7 @@ type mockWindow struct {
 	maximized       bool
 	minimized       bool
 	closed          bool
+	destroyed       bool
 	visible         bool
 	posX, posY      int
 	hitTestCallback func(float64, float64) gpucontext.HitTestResult
@@ -52,7 +53,7 @@ func (m *mockWindow) SetMinSize(w, h int)           { m.minWidth = w; m.minHeigh
 func (m *mockWindow) SetMaxSize(w, h int)           { m.maxWidth = w; m.maxHeight = h }
 func (m *mockWindow) RequestSize(w, h int)          { m.width = w; m.height = h }
 func (m *mockWindow) SetModalFrameCallback(func())  {}
-func (m *mockWindow) Destroy()                      {}
+func (m *mockWindow) Destroy()                      { m.destroyed = true }
 func (m *mockWindow) StartDrag(_ []string, done func(platform.DragResult)) {
 	if done != nil {
 		done(platform.DragCancelled)

@@ -218,7 +218,7 @@ func (loop *HostLoop) Stop() {
 	windows := slices.Clone(a.windowManager.order)
 	a.windowManager.mu.RUnlock()
 	for _, window := range windows {
-		a.closeSecondaryWindow(window)
+		a.destroyWindow(window)
 	}
 	loop.stop()
 }

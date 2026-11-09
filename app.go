@@ -981,18 +981,7 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 		return
 	}
 
-	isPrimary := a.primaryWindow != nil && w.id == a.primaryWindow.id
-
-	// Close the window (destroy surface + platform window)
-	a.closeSecondaryWindow(w.id)
-
-	if isPrimary {
-		a.primaryWindow = nil
-		a.platWindow = nil
-		if a.renderer != nil {
-			a.renderer.primary = nil
-		}
-	}
+	a.destroyWindow(w.id)
 
 	// Check if app should quit (ADR-026: QuitOnLastWindowClosed)
 	if a.quitOnLastWindowClosed && a.windowManager.count() == 0 {
@@ -1014,6 +1003,7 @@ func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow) {
 	a.windowManager = newWindowManager()
 	internalID := a.windowManager.allocate()
 	a.primaryWindow = &Window{
+		app:             a,
 		id:              internalID,
 		platformID:      platWindow.ID(),
 		config:          a.config,

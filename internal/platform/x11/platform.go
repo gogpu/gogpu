@@ -1703,12 +1703,24 @@ func (p *Platform) SetPosition(x, y int) {
 	_ = p.conn.Flush()
 }
 
+// DestroyWindow destroys the window and frees its resources, keeping the
+// connection open: the clipboard and event reads stay on it. A second call
+// does nothing.
+func (p *Platform) DestroyWindow() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn == nil {
+		return
+	}
+	p.destroyWindow()
+	_ = p.conn.Flush()
+}
+
 // Destroy closes the window and releases resources.
 func (p *Platform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	w := p.primary
 
 	// Close xkbcommon handle
 	if p.xkbState != nil {
@@ -1723,13 +1735,7 @@ func (p *Platform) Destroy() {
 	}
 
 	if p.conn != nil {
-		// Free per-window resources
-		if w != nil {
-			if w.blitGC != 0 {
-				_ = p.conn.FreeGC(w.blitGC)
-				w.blitGC = 0
-			}
-		}
+		p.destroyWindow()
 
 		// Free process-level cursor resources
 		for _, cursor := range p.cursorCache {
@@ -1745,20 +1751,6 @@ func (p *Platform) Destroy() {
 			p.blankCursorID = 0
 		}
 
-		// Destroy window and unregister
-		if w != nil && w.window != 0 {
-			p.windowMu.Lock()
-			delete(p.windows, w.window)
-			p.windowMu.Unlock()
-
-			_ = p.conn.DestroyWindow(w.window)
-			w.window = 0
-		}
-		// Free the ARGB colormap created for transparent windows.
-		if w != nil && w.colormap != 0 {
-			_ = p.conn.FreeColormap(w.colormap)
-			w.colormap = 0
-		}
 		_ = p.conn.Close()
 		p.conn = nil
 	}
@@ -2731,4 +2723,29 @@ func (p *Platform) BlitPixels(pixels []byte, width, height int) error {
 	}
 
 	return nil
+}
+
+// destroyWindow frees the window's graphics context, unregisters and destroys
+// it, then frees its colormap. The caller holds p.mu and an open connection.
+func (p *Platform) destroyWindow() {
+	w := p.primary
+	if w == nil {
+		return
+	}
+	if w.blitGC != 0 {
+		_ = p.conn.FreeGC(w.blitGC)
+		w.blitGC = 0
+	}
+	if w.window != 0 {
+		p.windowMu.Lock()
+		delete(p.windows, w.window)
+		p.windowMu.Unlock()
+		_ = p.conn.DestroyWindow(w.window)
+		w.window = 0
+	}
+	// Free the ARGB colormap created for transparent windows.
+	if w.colormap != 0 {
+		_ = p.conn.FreeColormap(w.colormap)
+		w.colormap = 0
+	}
 }
