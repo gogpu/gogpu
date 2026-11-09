@@ -5,11 +5,13 @@ package platform
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
+	"github.com/gogpu/gogpu/internal/platform/cursorposition"
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gpucontext"
 	"golang.org/x/sys/windows"
@@ -602,6 +604,10 @@ type win32Window struct {
 	cursorCenterX int32 // window center in screen coords (for warp-back)
 	cursorCenterY int32
 	cursorHidden  bool // tracks ShowCursor balance
+
+	// pendingPositions are the SetCursorPosition moves, in client pixels,
+	// whose WM_MOUSEMOVE has not arrived yet.
+	pendingPositions cursorposition.Pending
 
 	// Window size constraints in logical pixels (0 = unconstrained)
 	minWidth  int
@@ -1279,6 +1285,36 @@ func (w *win32Window) CursorMode() int {
 	return w.cursorMode
 }
 
+// SetCursorPosition moves the cursor to a point in the client area
+// (SetCursorPos). Windows reports the move as a WM_MOUSEMOVE, which is dropped. While Locked
+// the cursor stays parked and the point is where releasing the lock puts it;
+// while Confined, ClipCursor keeps the cursor in the client area.
+func (w *win32Window) SetCursorPosition(x, y float64) error {
+	scale := w.scaleFactor()
+	target := point{x: int32(math.Round(x * scale)), y: int32(math.Round(y * scale))}
+	procClientToScreen.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&target)))
+	if w.cursorMode == 1 {
+		w.savedCursorX = target.x
+		w.savedCursorY = target.y
+		return nil
+	}
+
+	var from point
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&from)))
+	if ok, _, err := procSetCursorPos.Call(uintptr(target.x), uintptr(target.y)); ok == 0 {
+		return fmt.Errorf("gogpu: SetCursorPos failed: %w", err)
+	}
+	// Read the position back: ClipCursor may have stopped the cursor short of
+	// the target. A cursor that did not move gets no WM_MOUSEMOVE.
+	var to point
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&to)))
+	if to != from {
+		procScreenToClient.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&to)))
+		w.pendingPositions.Add(to.x, to.y)
+	}
+	return nil
+}
+
 func (w *win32Window) SetModalFrameCallback(fn func()) {
 	w.setModalFrameCallback(fn)
 }
@@ -1823,6 +1859,7 @@ func (w *win32Window) setCursorMode(mode int) {
 
 	oldMode := w.cursorMode
 	w.cursorMode = mode
+	w.pendingPositions.Clear()
 
 	switch mode {
 	case 1: // Locked
@@ -3401,6 +3438,20 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			ev.DeltaX = deltaX
 			ev.DeltaY = deltaY
 			w.dispatchPointerEvent(ev)
+			return 0
+		}
+
+		// A SetCursorPosition move is not the user's: take its position,
+		// report nothing. Windows makes each WM_MOUSEMOVE from where the cursor
+		// is now, so set positions whose move did not come were merged into
+		// this one.
+		positionSet := w.pendingPositions.Arrived(int32(x), int32(y))
+		w.pendingPositions.Clear()
+		if positionSet {
+			w.mouseMu.Lock()
+			w.mouseX = x
+			w.mouseY = y
+			w.mouseMu.Unlock()
 			return 0
 		}
 

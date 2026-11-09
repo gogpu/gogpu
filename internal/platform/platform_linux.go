@@ -544,6 +544,10 @@ func (w *x11PlatformWindow) CursorMode() int                { return w.inner().G
 func (w *x11PlatformWindow) SyncFrame()                     {}
 func (w *x11PlatformWindow) SetModalFrameCallback(_ func()) {}
 
+func (w *x11PlatformWindow) SetCursorPosition(x, y float64) error {
+	return w.inner().SetCursorPosition(x, y)
+}
+
 func (w *x11PlatformWindow) PrepareFrame() PrepareFrameResult {
 	pw, ph := w.inner().GetSize()
 	scale := w.inner().ScaleFactor()
@@ -828,6 +832,10 @@ func (w *waylandPlatformWindow) SetCursorMode(mode int) {
 
 func (w *waylandPlatformWindow) CursorMode() int {
 	return w.platform.CursorMode()
+}
+
+func (w *waylandPlatformWindow) SetCursorPosition(x, y float64) error {
+	return w.platform.SetCursorPosition(x, y)
 }
 
 // SyncFrame on Wayland requests the next frame callback from the compositor.
@@ -3438,6 +3446,25 @@ func (p *waylandPlatform) SetCursorMode(mode int) {
 	if err := p.libwl.Flush(); err != nil {
 		logger().Warn("wayland: flush failed after SetCursorMode", "err", err)
 	}
+}
+
+// SetCursorPosition on Wayland can only hint where a locked cursor is: no
+// client may move the cursor. While Locked it sets the locked pointer's
+// position hint, which the compositor may use to put the cursor there when
+// the lock is released; otherwise it returns ErrCursorPositionUnsupported.
+func (p *waylandPlatform) SetCursorPosition(x, y float64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	w := p.primary
+	w.pointerMu.RLock()
+	mode := w.cursorMode
+	w.pointerMu.RUnlock()
+
+	if mode != 1 || p.libwl == nil || !p.libwl.HasLockedPointer() {
+		return ErrCursorPositionUnsupported
+	}
+	return p.libwl.SetCursorPositionHint(x, y)
 }
 
 // releasePointerConstraints destroys all active pointer constraints and relative pointer.

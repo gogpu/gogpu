@@ -162,6 +162,7 @@ var selectors struct {
 	hasPreciseScrollingDeltas   SEL
 	deltaX                      SEL
 	deltaY                      SEL
+	mouseLocation               SEL // NSEvent class method: cursor position on screen
 
 	// NSEvent - scroll gesture phases (macOS trackpad)
 	phase         SEL // NSEventPhase bitmask for active gesture
@@ -414,6 +415,7 @@ func initSelectors() {
 		selectors.hasPreciseScrollingDeltas = RegisterSelector("hasPreciseScrollingDeltas")
 		selectors.deltaX = RegisterSelector("deltaX")
 		selectors.deltaY = RegisterSelector("deltaY")
+		selectors.mouseLocation = RegisterSelector("mouseLocation")
 
 		// NSEvent - scroll gesture phases (macOS trackpad)
 		selectors.phase = RegisterSelector("phase")

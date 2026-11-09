@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -366,6 +367,27 @@ func TestApp_SetCursorMode_CursorMode(t *testing.T) {
 	app.platWindow = &mockWindow{}
 	app.SetCursorMode(gpucontext.CursorModeLocked)
 	_ = app.CursorMode()
+}
+
+func TestApp_SetCursorPosition(t *testing.T) {
+	app := &App{}
+	if err := app.SetCursorPosition(1, 2); !errors.Is(err, ErrNotInitialized) {
+		t.Errorf("SetCursorPosition without a window = %v, want ErrNotInitialized", err)
+	}
+
+	window := &mockWindow{}
+	app.platWindow = window
+	if err := app.SetCursorPosition(12.5, 34); err != nil {
+		t.Fatalf("SetCursorPosition = %v", err)
+	}
+	if window.positionX != 12.5 || window.positionY != 34 {
+		t.Errorf("window cursor set to (%v, %v), want (12.5, 34)", window.positionX, window.positionY)
+	}
+
+	window.positionErr = platform.ErrCursorPositionUnsupported
+	if err := app.SetCursorPosition(1, 2); !errors.Is(err, ErrCursorPositionUnsupported) {
+		t.Errorf("SetCursorPosition where unsupported = %v, want ErrCursorPositionUnsupported", err)
+	}
 }
 
 // =============================================================================

@@ -16,6 +16,7 @@ package wayland
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"unsafe"
 
@@ -411,6 +412,28 @@ func (h *LibwaylandHandle) GetRelativePointer(pointer uintptr) error {
 	}
 
 	return nil
+}
+
+// HasLockedPointer reports whether the pointer is locked to the surface, so
+// that SetCursorPositionHint can be used.
+func (h *LibwaylandHandle) HasLockedPointer() bool {
+	return h.lockedPointer != 0
+}
+
+// SetCursorPositionHint tells the compositor where the locked cursor is, in
+// surface-local logical coordinates; it may put the cursor there when the
+// lock is released (zwp_locked_pointer_v1.set_cursor_position_hint). The hint
+// is double-buffered, so the surface is committed to apply it.
+func (h *LibwaylandHandle) SetCursorPositionHint(x, y float64) error {
+	if h.lockedPointer == 0 {
+		return fmt.Errorf("wayland: set_cursor_position_hint without a locked pointer")
+	}
+	// set_cursor_position_hint: opcode 1, signature "ff" (wl_fixed_t, 24.8).
+	fixedX := int32(math.Round(x * 256))
+	fixedY := int32(math.Round(y * 256))
+	h.marshalVoid(h.lockedPointer, 1, uintptr(uint32(fixedX)), uintptr(uint32(fixedY)))
+	h.marshalVoid(h.surface, 6) // wl_surface::commit
+	return h.flush()
 }
 
 // DestroyLockedPointer destroys the current locked pointer constraint.

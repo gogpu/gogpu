@@ -505,6 +505,9 @@ func (w *browserWindow) SetCursorMode(_ int) {}
 // CursorMode returns 0 (normal mode).
 func (w *browserWindow) CursorMode() int { return 0 }
 
+// SetCursorPosition is unsupported: a page cannot move the cursor.
+func (w *browserWindow) SetCursorPosition(_, _ float64) error { return ErrCursorPositionUnsupported }
+
 // SetModalFrameCallback is a no-op — browser has no modal resize loops.
 func (w *browserWindow) SetModalFrameCallback(_ func()) {}
 
