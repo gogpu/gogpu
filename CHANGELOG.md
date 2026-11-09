@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slices, so a platform dialog cannot mutate them. Dead event-source dispatch helpers are gone,
   `mapTextureFormat` becomes `allowedSurfaceFormat`, and `doc.go`, the README and ARCHITECTURE.md now describe the
   current platform support and DIP dimensions.
+- **Dependencies:** wgpu v0.34.9 → v0.34.12, naga v0.21.4 → v0.21.9. wgpu now accepts command buffers whose resources
+  were released after recording, the same way Rust wgpu handles a dropped handle; Vulkan descriptor pools always
+  include the dynamic buffer types; and with demote-to-helper support, a discard demotes the invocation instead of
+  emitting `OpKill`. naga adds `spirv.CapabilitySet`.
 
 ### Removed
 
@@ -49,9 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `app.DeviceProvider().SurfaceFormat()` → `app.GPUContextProvider().SurfaceFormat()`;
   - `WithBackend`/`Backend*` → nothing: the implementation is chosen by wgpu build tags (ADR-038);
   - `GraphicsAPI` or `GOGPU_GRAPHICS_API` selects the graphics API; `gputypes.Backends` describes the backend masks.
-- **Dependencies:** wgpu v0.34.10, naga v0.21.5. wgpu now accepts command buffers whose resources were released
-  after recording, the same way Rust wgpu handles a dropped handle, and Vulkan descriptor pools always include the
-  dynamic buffer types.
 
 ### Fixed
 
