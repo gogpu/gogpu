@@ -241,6 +241,70 @@ func TestHostLoop_StartDestroysPlatformWhenWindowFails(t *testing.T) {
 	}
 }
 
+// rendererCheckingManager opens window and records, when it is destroyed,
+// whether renderer still held its adapter and its instance.
+type rendererCheckingManager struct {
+	mockManagerWithWindow
+	renderer               *Renderer
+	adapterAliveAtDestroy  bool
+	instanceAliveAtDestroy bool
+	destroyCount           int
+}
+
+func (m *rendererCheckingManager) Destroy() {
+	m.destroyCount++
+	m.adapterAliveAtDestroy = m.renderer.adapter != nil
+	m.instanceAliveAtDestroy = m.renderer.instance != nil
+}
+
+var errNoDevice = errors.New("no device")
+
+func TestHostLoop_StartReleasesFailedRendererAroundPlatform(t *testing.T) {
+	runtime.LockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	renderer := &Renderer{}
+	manager := &rendererCheckingManager{
+		mockManagerWithWindow: mockManagerWithWindow{win: &mockWindow{width: 800, height: 600}},
+		renderer:              renderer,
+	}
+	oldManager := newPlatformManagerFn
+	newPlatformManagerFn = func() platform.PlatformManager { return manager }
+	oldRenderer := newRendererFn
+	// The renderer got as far as an instance and an adapter, then failed.
+	newRendererFn = func(platform.PlatformWindow, types.GraphicsAPI, bool, gputypes.PowerPreference, bool) (*Renderer, error) {
+		if err := renderer.initInstance(types.GraphicsAPISoftware); err != nil {
+			t.Fatalf("software instance: %v", err)
+		}
+		var err error
+		renderer.adapter, err = renderer.instance.RequestAdapter(nil)
+		if err != nil {
+			t.Fatalf("software adapter: %v", err)
+		}
+		return renderer, errNoDevice
+	}
+	t.Cleanup(func() {
+		newPlatformManagerFn = oldManager
+		newRendererFn = oldRenderer
+	})
+
+	loop := NewHostLoop(NewApp(DefaultConfig()))
+	if err := loop.Start(); !errors.Is(err, errNoDevice) {
+		t.Fatalf("Start with a failing renderer: got %v, want %v", err, errNoDevice)
+	}
+	if manager.destroyCount != 1 {
+		t.Fatalf("platform after a Start whose renderer failed: destroyed %d times, want 1", manager.destroyCount)
+	}
+	if manager.adapterAliveAtDestroy {
+		t.Error("adapter when the platform was destroyed: held, want released before it")
+	}
+	if !manager.instanceAliveAtDestroy {
+		t.Error("instance when the platform was destroyed: released, want released after it, so X11's display closes while the driver is loaded")
+	}
+	if renderer.instance != nil {
+		t.Error("instance after a Start whose renderer failed: held, want released")
+	}
+}
+
 // liveResizeWindow records the live-resize hooks installed on it.
 type liveResizeWindow struct {
 	mockWindow
