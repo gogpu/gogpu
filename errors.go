@@ -1,6 +1,10 @@
 package gogpu
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/gogpu/gogpu/internal/platform"
+)
 
 // Common errors
 var (
@@ -27,4 +31,9 @@ var (
 	// ErrHostLoopStarted is returned by Run while a HostLoop owns the loop,
 	// and by HostLoop.Start when it already does.
 	ErrHostLoopStarted = errors.New("gogpu: a HostLoop has started")
+
+	// ErrCursorPositionUnsupported is returned by SetCursorPosition where the
+	// platform cannot move the cursor: on Wayland while the cursor is not
+	// locked, and in the browser.
+	ErrCursorPositionUnsupported = platform.ErrCursorPositionUnsupported
 )

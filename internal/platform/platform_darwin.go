@@ -54,6 +54,9 @@ type darwinWindow struct {
 	// Focus tracking: last known key window status for change detection.
 	lastKeyWindow bool
 	focusInited   bool // true after first pollEvents call
+
+	// cursor applies the cursor mode, released while the window is not key.
+	cursor darwinCursor
 }
 
 // darwinPlatform implements Platform for macOS using Cocoa/AppKit.
@@ -140,6 +143,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		return nil, err
 	}
 	w.window = window
+	w.cursor = darwinCursor{system: windowCursorSystem{window: window}}
 
 	// Create Metal surface for GPU rendering.
 	// Note: Surface is created before window is shown, but drawable size
@@ -209,6 +213,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		platform:         p,
 		id:               id,
 		window:           w.window,
+		state:            w,
 		frameless:        config.Frameless,
 		fullscreenOnShow: config.Fullscreen,
 	}
@@ -301,8 +306,10 @@ func (p *darwinPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Clean up drag handlers for all windows before destroying them.
+	// Clean up drag handlers for all windows before destroying them, and give
+	// back a cursor a window holds.
 	for _, w := range p.windows {
+		w.cursor.setMode(cursorModeNormal)
 		if w.window != nil {
 			cv := w.window.ContentView()
 			if !cv.IsNil() {
@@ -337,6 +344,7 @@ type darwinPlatformWindow struct {
 	platform        *darwinPlatform
 	id              WindowID
 	window          *darwin.Window
+	state           *darwinWindow
 	lastScale       float64
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -475,9 +483,25 @@ func (dw *darwinPlatformWindow) SetCursor(cursorID int) {
 	dw.platform.setCursorImpl(cursorID)
 }
 
-func (dw *darwinPlatformWindow) SetCursorMode(int) {}
-func (dw *darwinPlatformWindow) CursorMode() int   { return 0 }
-func (dw *darwinPlatformWindow) SyncFrame()        {}
+// SetCursorMode requests a cursor mode: Locked hides the cursor, detaches it
+// from the mouse and reports relative motion in DeltaX/DeltaY; Confined keeps
+// it visible inside the content area. The mode is released while the window
+// is not key and taken again when it is.
+func (dw *darwinPlatformWindow) SetCursorMode(mode int) { dw.state.cursor.setMode(mode) }
+
+// CursorMode returns the cursor mode in effect: Normal while the window is not
+// key, whatever was requested.
+func (dw *darwinPlatformWindow) CursorMode() int { return dw.state.cursor.mode() }
+
+// SetCursorPosition moves the cursor to a point in the content area
+// (CGWarpMouseCursorPosition), which produces no mouse event. While Locked is
+// requested the point is where releasing the lock puts the cursor.
+func (dw *darwinPlatformWindow) SetCursorPosition(x, y float64) error {
+	dw.state.cursor.setPosition(x, y)
+	return nil
+}
+
+func (dw *darwinPlatformWindow) SyncFrame() {}
 
 func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {
 	dw.frameless = frameless
@@ -705,6 +729,8 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 				PhysicalWidth:  newPhysW,
 				PhysicalHeight: newPhysH,
 			})
+
+			w.cursor.contentChanged()
 		}
 	}
 
@@ -719,6 +745,8 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.lastKeyWindow = isKey
 			w.events.Push(Event{WindowID: w.id, Type: EventFocus, Focused: isKey})
 		}
+		// Release the cursor mode on focus loss, take it again on focus gain.
+		w.cursor.update()
 	}
 
 	// Return first queued event, or EventNone.
@@ -813,6 +841,13 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Mouse move events
 	case darwin.NSEventTypeMouseMoved:
+		motion, reported := w.cursor.move(info.LocationX, y, info.MotionDeltaX, info.MotionDeltaY)
+		if !reported {
+			break
+		}
+		info.LocationX = motion.X
+		y = motion.Y
+
 		wasInWindow := w.mouseInWindow
 		w.pointerX = info.LocationX
 		w.pointerY = y
@@ -834,15 +869,26 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 		// Always send move event
 		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
+		ev.DeltaX = motion.DeltaX
+		ev.DeltaY = motion.DeltaY
 		w.dispatchPointerEvent(ev)
 
 	// Mouse drag events (move with button pressed)
 	case darwin.NSEventTypeLeftMouseDragged,
 		darwin.NSEventTypeRightMouseDragged,
 		darwin.NSEventTypeOtherMouseDragged:
+		motion, reported := w.cursor.move(info.LocationX, y, info.MotionDeltaX, info.MotionDeltaY)
+		if !reported {
+			break
+		}
+		info.LocationX = motion.X
+		y = motion.Y
+
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
+		ev.DeltaX = motion.DeltaX
+		ev.DeltaY = motion.DeltaY
 		w.dispatchPointerEvent(ev)
 
 	// Mouse enter/exit events (for tracking areas)
