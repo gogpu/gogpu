@@ -676,31 +676,11 @@ func (w *waylandPlatformWindow) LogicalSize() (int, int) {
 // On Wayland, configure events report logical size. Physical = logical * scale.
 func (w *waylandPlatformWindow) PhysicalSize() (int, int) {
 	lw, lh := w.LogicalSize()
-	scale := w.ScaleFactor()
-	if scale <= 1.0 {
-		return lw, lh
-	}
-	return int(math.Round(float64(lw) * scale)), int(math.Round(float64(lh) * scale))
+	return physicalSize(lw, lh, w.ScaleFactor())
 }
 
 func (w *waylandPlatformWindow) ScaleFactor() float64 {
-	w.platform.mu.Lock()
-	envScale := w.platform.envScaleFactor
-	outputScale := w.platform.outputScale
-	w.platform.mu.Unlock()
-
-	if envScale > 0 {
-		return envScale
-	}
-	if libwl := w.libwayland(); libwl != nil {
-		if scale := libwl.FractionalScale(); scale > 0 {
-			return scale
-		}
-	}
-	if outputScale > 0 {
-		return outputScale
-	}
-	return 1.0
+	return w.platform.scaleFactorOf(w.libwayland())
 }
 
 func (w *waylandPlatformWindow) ShouldClose() bool {
@@ -778,38 +758,22 @@ func (w *waylandPlatformWindow) RequestSize(width, height int) {
 
 func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
 	scale := w.ScaleFactor()
+	lw, lh := w.LogicalSize()
 	if libwl := w.libwayland(); libwl != nil && scale > 1.0 {
-		lw, lh := w.LogicalSize()
 		libwl.SetViewportDestination(int32(lw), int32(lh))
 	}
 
-	// Detect scale change (ADR-059).
+	// Detect scale change (ADR-059). The pump detects it too, right after
+	// the dispatch that changes it: whichever sees it first queues it.
 	var wp *waylandWindow
 	if w.secondary != nil {
 		wp = &w.secondary.state
 	} else {
 		wp = w.platform.primary
 	}
-	wp.eventMu.Lock()
-	scaleChanged := wp.lastScale != 0 && wp.lastScale != scale
-	if scaleChanged {
-		// Read size under the same lock. Do NOT call LogicalSize() here:
-		// LogicalSize also acquires eventMu, and sync.Mutex is not reentrant —
-		// that self-deadlocks the render thread on multi-display fractional
-		// scale transitions (issue #448; confirmed via goroutine dump).
-		lw, lh := wp.width, wp.height
-		wp.events.Push(Event{
-			WindowID:    wp.winID,
-			Type:        EventScaleChanged,
-			ScaleFactor: scale,
-			Width:       lw,
-			Height:      lh,
-		})
-	}
-	wp.lastScale = scale
-	wp.eventMu.Unlock()
+	scaleChanged := wp.queueScaleChange(scale)
 
-	pw, ph := w.PhysicalSize()
+	pw, ph := physicalSize(lw, lh, scale)
 	return PrepareFrameResult{
 		ScaleChanged:   scaleChanged,
 		ScaleFactor:    scale,
@@ -2216,6 +2180,32 @@ func (w *waylandWindow) queueEvent(event Event) {
 	w.events.Push(event)
 }
 
+// queueScaleChange reports whether scale differs from the scale the window
+// last had, and if so queues EventScaleChanged and then EventResize at the
+// window's logical size and the physical size scale gives it, so the window's
+// resize callback hears of a change of scale alone. It records scale; the
+// first scale recorded is no change.
+func (w *waylandWindow) queueScaleChange(scale float64) bool {
+	w.eventMu.Lock()
+	defer w.eventMu.Unlock()
+	changed := w.lastScale != 0 && w.lastScale != scale
+	w.lastScale = scale
+	if !changed {
+		return false
+	}
+	// eventMu is held: read the size directly, not through LogicalSize (#448).
+	physicalWidth, physicalHeight := physicalSize(w.width, w.height, scale)
+	w.queueEvent(Event{Type: EventScaleChanged, ScaleFactor: scale, Width: w.width, Height: w.height})
+	w.queueEvent(Event{
+		Type:           EventResize,
+		Width:          w.width,
+		Height:         w.height,
+		PhysicalWidth:  physicalWidth,
+		PhysicalHeight: physicalHeight,
+	})
+	return true
+}
+
 // startKeyRepeat begins client-side key repeat for the given key (ADR-033).
 // BUG-INPUT-006: Arms a timerfd that is polled by WaitEvents/PollEvents.
 // All repeat events are generated on the main thread — zero goroutines,
@@ -3046,6 +3036,11 @@ func (p *waylandPlatform) PollEvents() Event {
 		}
 	}
 
+	// A move to an output of another scale changes the fractional scale
+	// during the dispatch, with no configure: report it now, not at the
+	// window's next frame.
+	w.queueScaleChange(p.scaleFactorOf(p.libwl))
+
 	// Return first queued event, or EventNone if empty.
 	if e, ok := w.events.Pop(); ok {
 		return e
@@ -3071,6 +3066,7 @@ func (p *waylandPlatform) PollEvents() Event {
 				logger().Error("secondary CSD dispatch error", "id", sec.winID, "error", err)
 			}
 		}
+		sec.state.queueScaleChange(p.scaleFactorOf(sec.libwl))
 		if e, ok := sec.state.events.Pop(); ok {
 			return e
 		}
@@ -3287,6 +3283,16 @@ func drainPipe(fd int) {
 	}
 }
 
+// physicalSize returns the physical pixel size of a Wayland window of the
+// given logical size at scale: configure events report the logical size, and
+// the physical size is the logical size times the scale.
+func physicalSize(logicalWidth, logicalHeight int, scale float64) (int, int) {
+	if scale <= 1.0 {
+		return logicalWidth, logicalHeight
+	}
+	return int(math.Round(float64(logicalWidth) * scale)), int(math.Round(float64(logicalHeight) * scale))
+}
+
 // detectEnvScaleFactor reads scale factor from environment variables.
 // Checks GDK_SCALE (GNOME/GTK) and QT_SCALE_FACTOR (KDE/Qt).
 // Returns 0 if no env var is set.
@@ -3308,18 +3314,15 @@ func detectEnvScaleFactor() float64 {
 	return 0
 }
 
-// ScaleFactor returns the Wayland DPI scale factor.
-// Uses explicit environment overrides first, then compositor-provided fractional
-// scale, wl_output integer scale, and finally 1.0.
-func (p *waylandPlatform) ScaleFactor() float64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
+// scaleFactorOf returns the scale factor ScaleFactor describes, for the
+// window libwl connects. It takes no lock: Init sets the environment's and
+// wl_output's scales once, before any window opens.
+func (p *waylandPlatform) scaleFactorOf(libwl *wayland.LibwaylandHandle) float64 {
 	if p.envScaleFactor > 0 {
 		return p.envScaleFactor
 	}
-	if p.libwl != nil {
-		if scale := p.libwl.FractionalScale(); scale > 0 {
+	if libwl != nil {
+		if scale := libwl.FractionalScale(); scale > 0 {
 			return scale
 		}
 	}
@@ -3327,6 +3330,15 @@ func (p *waylandPlatform) ScaleFactor() float64 {
 		return p.outputScale
 	}
 	return 1.0
+}
+
+// ScaleFactor returns the Wayland DPI scale factor.
+// Uses explicit environment overrides first, then compositor-provided fractional
+// scale, wl_output integer scale, and finally 1.0.
+func (p *waylandPlatform) ScaleFactor() float64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.scaleFactorOf(p.libwl)
 }
 
 // SetCursor changes the mouse cursor shape using wp_cursor_shape_manager_v1.

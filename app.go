@@ -836,9 +836,12 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		a.RequestRedraw()
 	case platform.EventFocus:
 		a.focused = event.Focused
-		if event.Focused {
-			if w := a.windowManager.getByPlatformID(event.WindowID); w != nil {
+		if w := a.windowManager.getByPlatformID(event.WindowID); w != nil {
+			if event.Focused {
 				a.windowManager.setFocus(w.id)
+			}
+			if w.onFocus != nil {
+				w.onFocus(event.Focused)
 			}
 		}
 		if a.eventSource != nil {

@@ -45,6 +45,7 @@ type Window struct {
 	onTextInput  func(string)
 	onPointer    func(gpucontext.PointerEvent)
 	onScroll     func(gpucontext.ScrollEvent)
+	onFocus      func(bool)
 	visible      bool
 
 	// frameContext is reused by BeginFrame, so a frame allocates no Context.
@@ -121,6 +122,12 @@ func (w *Window) SetOnPointer(fn func(gpucontext.PointerEvent)) {
 // SetOnScroll sets the per-window scroll event callback.
 func (w *Window) SetOnScroll(fn func(gpucontext.ScrollEvent)) {
 	w.onScroll = fn
+}
+
+// SetOnFocus sets the per-window focus callback: it receives true when this
+// window gains keyboard focus and false when it loses it.
+func (w *Window) SetOnFocus(fn func(focused bool)) {
+	w.onFocus = fn
 }
 
 // Close requests this window to close.

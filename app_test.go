@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"image"
+	"slices"
 	"testing"
 
 	gpu_types "github.com/gogpu/gogpu/gpu/types"
@@ -863,6 +864,28 @@ func TestApp_FocusEvent_SetsFocusedWindow(t *testing.T) {
 
 	if app.windowManager.focused != internalID {
 		t.Errorf("focused = %d, want %d", app.windowManager.focused, internalID)
+	}
+}
+
+func TestApp_FocusEvent_ReachesItsWindowAlone(t *testing.T) {
+	app := newTestApp()
+	firstID := platform.NewWindowID()
+	secondID := platform.NewWindowID()
+	first := addTestWindow(app, firstID)
+	second := addTestWindow(app, secondID)
+	var firstReports, secondReports []bool
+	first.SetOnFocus(func(focused bool) { firstReports = append(firstReports, focused) })
+	second.SetOnFocus(func(focused bool) { secondReports = append(secondReports, focused) })
+
+	app.classifyEvent(&platform.Event{Type: platform.EventFocus, WindowID: secondID, Focused: true}, nil, nil)
+	app.classifyEvent(&platform.Event{Type: platform.EventFocus, WindowID: secondID, Focused: false}, nil, nil)
+	app.classifyEvent(&platform.Event{Type: platform.EventFocus, WindowID: firstID, Focused: true}, nil, nil)
+
+	if !slices.Equal(firstReports, []bool{true}) {
+		t.Errorf("first window's focus reports = %v, want [true]", firstReports)
+	}
+	if !slices.Equal(secondReports, []bool{true, false}) {
+		t.Errorf("second window's focus reports = %v, want [true false]", secondReports)
 	}
 }
 
