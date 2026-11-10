@@ -55,9 +55,10 @@ import (
 // macOS: each frame runs inside an autorelease pool that BeginFrame pushes and
 // EndFrame pops.
 type HostLoop struct {
-	app       *App
-	started   bool    // Start succeeded and Stop has not torn the app down yet
-	framePool uintptr // macOS autorelease pool open between BeginFrame and EndFrame
+	app             *App
+	started         bool    // Start succeeded and Stop has not torn the app down yet
+	deviceRequested bool    // RequestDevice succeeded, so ReplaceDevice may run
+	framePool       uintptr // macOS autorelease pool open between BeginFrame and EndFrame
 }
 
 // NewHostLoop returns a loop over app. Callbacks and windows stay on app.
@@ -110,7 +111,7 @@ func (loop *HostLoop) RequestDevice(features gputypes.Features, limits *gputypes
 	if !a.hostLoopStarted {
 		return fmt.Errorf("gogpu: HostLoop.RequestDevice called before Start")
 	}
-	if a.renderer.device != nil {
+	if loop.deviceRequested {
 		return fmt.Errorf("gogpu: HostLoop.RequestDevice called twice")
 	}
 	a.renderer.deviceRequest.requiredFeatures = features
@@ -118,7 +119,37 @@ func (loop *HostLoop) RequestDevice(features gputypes.Features, limits *gputypes
 	if limits != nil {
 		a.renderer.deviceRequest.requiredLimits = *limits
 	}
-	return a.renderer.requestDevice()
+	if err := a.renderer.requestDevice(); err != nil {
+		return err
+	}
+	loop.deviceRequested = true
+	return nil
+}
+
+// ReplaceDevice replaces the device, keeping every window and its surface,
+// as a host does once a frame or a submit answered wgpu.ErrDeviceLost. The
+// new device has RequestDevice's features and limits, from the same adapter
+// or, when it refuses, from a fresh one, and GPUContextProvider answers it.
+// The host creates its own objects again on the new device. A replacement
+// that fails returns the error and leaves no device: BeginFrame answers an
+// error until a later ReplaceDevice succeeds.
+//
+// It must be called after RequestDevice, outside a frame, on Start's thread.
+func (loop *HostLoop) ReplaceDevice() error {
+	a := loop.app
+	if !loop.deviceRequested {
+		return fmt.Errorf("gogpu: HostLoop.ReplaceDevice called before RequestDevice")
+	}
+	if a.renderer.currentSurface != nil {
+		return fmt.Errorf("gogpu: HostLoop.ReplaceDevice called between BeginFrame and EndFrame")
+	}
+	a.windowManager.mu.RLock()
+	targets := make([]*RenderTarget, 0, len(a.windowManager.order))
+	for _, id := range a.windowManager.order {
+		targets = append(targets, a.windowManager.windows[id].surface)
+	}
+	a.windowManager.mu.RUnlock()
+	return a.renderer.replaceDevice(targets)
 }
 
 // NewWindow opens a window with its surface, from config's title, size,
@@ -139,7 +170,7 @@ func (loop *HostLoop) NewWindow(config Config) (*Window, error) {
 		return nil, fmt.Errorf("gogpu: HostLoop.NewWindow called before Start")
 	}
 	if loop.app.renderer.device == nil {
-		return nil, fmt.Errorf("gogpu: HostLoop.NewWindow called before RequestDevice")
+		return nil, fmt.Errorf("gogpu: HostLoop.NewWindow called with no device")
 	}
 	return loop.app.openWindow(config, config.VSync)
 }

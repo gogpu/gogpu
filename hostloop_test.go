@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/input"
+	"github.com/gogpu/gogpu/internal/compositor"
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
@@ -312,6 +314,192 @@ func TestHostLoop_RequestDeviceFailsNamingWhatTheAdapterLacks(t *testing.T) {
 				t.Error("a refused RequestDevice brought up a device")
 			}
 		})
+	}
+}
+
+// drawFilledFrame draws window's frame with a texture of red, green and blue
+// covering it, made on the device the renderer now has, and checks every
+// pixel its surface presented is that color.
+func drawFilledFrame(t *testing.T, loop *HostLoop, window *Window, red, green, blue byte) {
+	t.Helper()
+	width, height := window.PhysicalSize()
+	pixels := bytes.Repeat([]byte{red, green, blue, 255}, width*height)
+	texture, err := loop.app.renderer.NewTextureFromRGBA(width, height, pixels)
+	if err != nil {
+		t.Fatalf("NewTextureFromRGBA: %v", err)
+	}
+	defer texture.Destroy()
+	context, ok, err := loop.BeginFrame(window)
+	if !ok {
+		t.Fatalf("BeginFrame: got ok=false, error %v", err)
+	}
+	if err := context.DrawTexture(texture, 0, 0); err != nil {
+		t.Errorf("DrawTexture: %v", err)
+	}
+	if err := loop.EndFrame(context); err != nil {
+		t.Errorf("EndFrame: %v", err)
+	}
+	if presented := readSurface(t, window.surface); !bytes.Equal(presented, pixels) {
+		t.Errorf("window %d presented %v, want %v in every pixel", window.platWindow.ID(), presented[:4], pixels[:4])
+	}
+}
+
+func TestHostLoop_ReplaceDeviceKeepsEveryWindowDrawing(t *testing.T) {
+	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{
+		&mockWindow{windowID: 1, width: 4, height: 2},
+		&mockWindow{windowID: 2, width: 3, height: 3},
+	})
+	defer loop.Stop()
+	windows := make([]*Window, 0, 2)
+	surfaces := make([]*wgpu.Surface, 0, 2)
+	for range 2 {
+		window, err := loop.NewWindow(DefaultConfig())
+		if err != nil {
+			t.Fatalf("NewWindow: %v", err)
+		}
+		window.Show()
+		windows = append(windows, window)
+		surfaces = append(surfaces, window.surface.surface)
+		drawFilledFrame(t, loop, window, 255, 0, 0)
+	}
+	lost := app.renderer.device
+
+	if err := loop.ReplaceDevice(); err != nil {
+		t.Fatalf("ReplaceDevice: %v", err)
+	}
+
+	device := app.renderer.device
+	if device == nil || device == lost {
+		t.Fatal("ReplaceDevice left the old device, or none")
+	}
+	if _, err := lost.CreateBuffer(&wgpu.BufferDescriptor{Size: 4, Usage: gputypes.BufferUsageUniform}); !errors.Is(err, wgpu.ErrReleased) {
+		t.Errorf("the old device after ReplaceDevice: CreateBuffer answered %v, want wgpu.ErrReleased", err)
+	}
+	if got := app.GPUContextProvider().Device(); got != wgpu.DeviceToHandle(device) {
+		t.Error("GPUContextProvider answers the old device after ReplaceDevice")
+	}
+	for i, window := range windows {
+		if window.surface.surface != surfaces[i] {
+			t.Errorf("window %d's surface was replaced, want it kept", i)
+		}
+		drawFilledFrame(t, loop, window, 0, 0, 255)
+	}
+}
+
+func TestHostLoop_ReplaceDeviceKeepsTheRequestedFeaturesAndLimits(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	limits.MaxTextureDimension2D = 1024
+	app, loop, _ := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), nil)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer loop.Stop()
+	features := app.renderer.adapter.Features()
+	if err := loop.RequestDevice(features, &limits); err != nil {
+		t.Fatalf("RequestDevice: %v", err)
+	}
+
+	if err := loop.ReplaceDevice(); err != nil {
+		t.Fatalf("ReplaceDevice: %v", err)
+	}
+
+	device := app.renderer.device
+	if got := device.Features(); got&features != features {
+		t.Errorf("features after ReplaceDevice: got %v, want %v among them", got, features)
+	}
+	if got := device.Limits(); got != limits {
+		t.Errorf("limits after ReplaceDevice: got %+v, want %+v", got, limits)
+	}
+}
+
+func TestHostLoop_ReplaceDeviceRequestsAFreshAdapterWhenItsOwnRefuses(t *testing.T) {
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 2, height: 2})
+	defer loop.Stop()
+	refusing := app.renderer.adapter
+	refusing.Release() // a released adapter refuses every device request
+
+	if err := loop.ReplaceDevice(); err != nil {
+		t.Fatalf("ReplaceDevice: %v", err)
+	}
+
+	if app.renderer.adapter == refusing {
+		t.Error("ReplaceDevice kept the adapter that refused")
+	}
+	if got := app.GPUContextProvider().Adapter(); got != wgpu.AdapterToHandle(app.renderer.adapter) {
+		t.Error("GPUContextProvider answers the old adapter after ReplaceDevice")
+	}
+	drawFilledFrame(t, loop, window, 0, 255, 0)
+}
+
+func TestHostLoop_ReplaceDeviceThatFailedIsTriedAgain(t *testing.T) {
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 2, height: 2})
+	defer loop.Stop()
+	requested := app.renderer.deviceRequest
+	app.renderer.deviceRequest.requiredFeatures = gputypes.Features(gputypes.FeatureTimestampQuery)
+
+	err := loop.ReplaceDevice()
+	if err == nil || !strings.Contains(err.Error(), "TimestampQuery") {
+		t.Errorf("ReplaceDevice with a feature no adapter has: got %v, want an error naming it", err)
+	}
+	if _, ok, err := loop.BeginFrame(window); ok || err == nil {
+		t.Errorf("BeginFrame with no device: got ok=%v, error %v; want false and an error", ok, err)
+	}
+
+	app.renderer.deviceRequest = requested
+	if err := loop.ReplaceDevice(); err != nil {
+		t.Fatalf("ReplaceDevice tried again: %v", err)
+	}
+	drawFilledFrame(t, loop, window, 0, 255, 0)
+}
+
+func TestHostLoop_ReplaceDeviceHasGogpusDebugOverlaysDrawOnTheNewDevice(t *testing.T) {
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 2, height: 2})
+	defer loop.Stop()
+	fps := &compositor.FPSDebugOverlay{Device: app.renderer.device, OverlayPipeline: &compositor.OverlayPipeline{}}
+	damage := &compositor.DamageDebugOverlay{Device: app.renderer.device, OverlayPipeline: &compositor.OverlayPipeline{}}
+	window.surface.debugOverlays = append(window.surface.debugOverlays, fps, damage)
+
+	if err := loop.ReplaceDevice(); err != nil {
+		t.Fatalf("ReplaceDevice: %v", err)
+	}
+
+	if fps.Device != app.renderer.device || fps.OverlayPipeline != nil {
+		t.Error("the FPS overlay keeps the old device or its pipeline")
+	}
+	if damage.Device != app.renderer.device || damage.OverlayPipeline != nil {
+		t.Error("the damage overlay keeps the old device or its pipeline")
+	}
+}
+
+func TestHostLoop_ReplaceDeviceBeforeRequestDeviceFails(t *testing.T) {
+	_, loop, _ := hostLoopOver(t, DefaultConfig().WithGraphicsAPI(types.GraphicsAPISoftware), nil)
+	if err := loop.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer loop.Stop()
+
+	if err := loop.ReplaceDevice(); err == nil {
+		t.Error("ReplaceDevice before RequestDevice: got nil error")
+	}
+}
+
+func TestHostLoop_ReplaceDeviceInsideAFrameFails(t *testing.T) {
+	app, loop, window := startedHostLoop(t, &mockWindow{width: 2, height: 2})
+	defer loop.Stop()
+	device := app.renderer.device
+	context, ok, err := loop.BeginFrame(window)
+	if !ok {
+		t.Fatalf("BeginFrame: got ok=false, error %v", err)
+	}
+
+	if err := loop.ReplaceDevice(); err == nil {
+		t.Error("ReplaceDevice between BeginFrame and EndFrame: got nil error")
+	}
+	if app.renderer.device != device {
+		t.Error("ReplaceDevice inside a frame replaced the device")
+	}
+	if err := loop.EndFrame(context); err != nil {
+		t.Errorf("EndFrame: %v", err)
 	}
 }
 

@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`HostLoop.RequestDevice`** (@dvoyni). Requests the device after `Start`, with the required features and limits the
   host chose once it read the adapter through `GPUContextProvider`. Nil limits are the adapter's own; a feature or limit
   the adapter lacks fails the request by name, and no device is created.
+- **`HostLoop.ReplaceDevice`** (@dvoyni). Replaces the device after a `wgpu.ErrDeviceLost`, keeping every window and
+  its surface. The new device has `RequestDevice`'s features and limits, from the same adapter or a fresh one; the host
+  creates its own objects again on it.
 
 ### Performance
 

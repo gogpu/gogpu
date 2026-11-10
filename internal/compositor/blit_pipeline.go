@@ -30,6 +30,16 @@ func (cs *CompositeState) Release() {
 	}
 }
 
+// Destroy releases the persistent bind group as well as the pending one, and
+// clears the state. Called when the surface leaves its device.
+func (cs *CompositeState) Destroy() {
+	cs.Release()
+	if cs.BindGroup != nil {
+		cs.BindGroup.Release()
+	}
+	*cs = CompositeState{}
+}
+
 // BlitPipeline owns the dedicated composition blit pipeline resources (ADR-067).
 // This pipeline blits the composition texture to the swapchain image.
 // It uses the SAME shader as texQuadPipeline (positionedQuadShaderSource)

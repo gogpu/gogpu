@@ -1158,11 +1158,7 @@ func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.acquireFailed = false
 	ws.acquireErr = nil
 	// Release blit bind group from previous frame (GPU completed by VSync).
-	if ws.pendingBlitBindGroup != nil {
-		ws.pendingBlitBindGroup.Release()
-		ws.pendingBlitBindGroup = nil
-	}
-	ws.compositeState.Release()
+	ws.releasePendingBindGroups()
 	if ws.renderer != nil {
 		ws.renderer.beginFrameStats()
 	}
@@ -1478,6 +1474,16 @@ func (ws *RenderTarget) discardFrameEncoder() {
 	}
 	ws.frameEncoder.DiscardEncoding()
 	ws.frameEncoder = nil
+}
+
+// releasePendingBindGroups releases the previous frame's blit bind group and
+// the composite bind group waiting for release.
+func (ws *RenderTarget) releasePendingBindGroups() {
+	if ws.pendingBlitBindGroup != nil {
+		ws.pendingBlitBindGroup.Release()
+		ws.pendingBlitBindGroup = nil
+	}
+	ws.compositeState.Release()
 }
 
 // releaseFrame releases per-frame resources after presentation.
@@ -2354,6 +2360,49 @@ func (r *Renderer) Destroy() {
 		r.primary.destroy()
 	}
 
+	r.releaseDevice()
+	if r.adapter != nil {
+		r.adapter.Release()
+		r.adapter = nil
+	}
+	// NOTE: the Vulkan instance is released separately via ReleaseInstance so
+	// the X11 Display* can be closed while the driver (ICD) is still loaded.
+	// On X11/NVIDIA, releasing the instance unloads the ICD; XCloseDisplay then
+	// jumps into the driver's freed XESetCloseDisplay hook and SIGSEGVs.
+}
+
+// replaceDevice releases the device and what targets and the renderer hold
+// on it, keeping targets' surfaces, and requests a device with deviceRequest
+// from the same adapter or, when it refuses, from a fresh one. On failure it
+// answers the error and leaves no device.
+func (r *Renderer) replaceDevice(targets []*RenderTarget) error {
+	r.WaitForGPU()
+	r.DrainDeferredDestroys()
+	for _, ws := range targets {
+		ws.releaseDeviceObjects()
+	}
+	r.releaseDevice()
+	var refusal error
+	if r.adapter != nil {
+		if refusal = r.requestDevice(); refusal != nil {
+			r.adapter.Release()
+			r.adapter = nil
+		}
+	}
+	if r.device == nil {
+		if err := r.initAdapterDevice(nil); err != nil {
+			return errors.Join(refusal, err)
+		}
+	}
+	for _, ws := range targets {
+		ws.pointDebugOverlaysAt(r.device)
+	}
+	return nil
+}
+
+// releaseDevice releases the objects the renderer shares between windows on
+// the device, then the device. Each pipeline is made again at its first use.
+func (r *Renderer) releaseDevice() {
 	// Release cached texture bind groups (device-level, shared)
 	for view, bg := range r.texBindGroupCache {
 		bg.Release()
@@ -2376,6 +2425,7 @@ func (r *Renderer) Destroy() {
 		r.texQuadUniformLayout = nil
 	}
 	r.texQuadUniformData = nil
+	r.texQuadPipelineInited = false
 	if r.texQuadShader != nil {
 		r.texQuadShader.Release()
 		r.texQuadShader = nil
@@ -2402,14 +2452,6 @@ func (r *Renderer) Destroy() {
 		r.device.Release()
 		r.device = nil
 	}
-	if r.adapter != nil {
-		r.adapter.Release()
-		r.adapter = nil
-	}
-	// NOTE: the Vulkan instance is released separately via ReleaseInstance so
-	// the X11 Display* can be closed while the driver (ICD) is still loaded.
-	// On X11/NVIDIA, releasing the instance unloads the ICD; XCloseDisplay then
-	// jumps into the driver's freed XESetCloseDisplay hook and SIGSEGVs.
 }
 
 // ReleaseInstance releases the Vulkan instance. Split from Destroy so callers
@@ -2428,17 +2470,38 @@ func (r *Renderer) destroyBlitPipeline() {
 	r.blitPipeline.Destroy()
 }
 
-// destroy releases all resources owned by this window surface.
-func (ws *RenderTarget) destroy() {
-	ws.discardFrameEncoder()
+// releaseDeviceObjects releases what this window surface holds on the
+// device, keeping the surface itself, unconfigured.
+func (ws *RenderTarget) releaseDeviceObjects() {
+	ws.releaseFrame()
 	ws.releaseTexQuadUniformChunks()
 	ws.releaseCompositionTexture()
-	if ws.currentView != nil {
-		ws.currentView.Release()
-		ws.currentView = nil
+	ws.releasePendingBindGroups()
+	ws.compositeState.Destroy()
+	if ws.state == SurfaceConfigured {
+		ws.state = SurfaceReady
 	}
-	ws.currentSurfaceTexture = nil
+}
 
+// pointDebugOverlaysAt has gogpu's own debug overlays make their pipelines
+// again on device, at their next draw. An overlay the app registered is the
+// app's to rebuild.
+func (ws *RenderTarget) pointDebugOverlaysAt(device *wgpu.Device) {
+	for _, overlay := range ws.debugOverlays {
+		switch overlay := overlay.(type) {
+		case *compositor.DamageDebugOverlay:
+			overlay.Device = device
+			overlay.OverlayPipeline = nil
+		case *compositor.FPSDebugOverlay:
+			overlay.Device = device
+			overlay.OverlayPipeline = nil
+		}
+	}
+}
+
+// destroy releases all resources owned by this window surface.
+func (ws *RenderTarget) destroy() {
+	ws.releaseDeviceObjects()
 	if ws.surface != nil {
 		ws.surface.Release()
 		ws.surface = nil
