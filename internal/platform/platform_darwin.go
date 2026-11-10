@@ -1118,6 +1118,7 @@ func mapNSEventPhase(phase darwin.NSEventPhase) gpucontext.ScrollPhase {
 }
 
 // extractModifiers converts NSEventModifierFlags to gpucontext.Modifiers.
+// macOS has no Num Lock, so ModNumLock is never set.
 func extractModifiers(flags darwin.NSEventModifierFlags) gpucontext.Modifiers {
 	var mods gpucontext.Modifiers
 	if flags&darwin.NSEventModifierFlagShift != 0 {
@@ -1131,6 +1132,9 @@ func extractModifiers(flags darwin.NSEventModifierFlags) gpucontext.Modifiers {
 	}
 	if flags&darwin.NSEventModifierFlagCommand != 0 {
 		mods |= gpucontext.ModSuper
+	}
+	if flags&darwin.NSEventModifierFlagCapsLock != 0 {
+		mods |= gpucontext.ModCapsLock
 	}
 	return mods
 }
