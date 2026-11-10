@@ -47,6 +47,10 @@ type InputCallbacks struct {
 	OnLockedPointerLocked   func()
 	OnLockedPointerUnlocked func()
 
+	// Pointer constraint events (zwp_confined_pointer_v1)
+	OnConfinedPointerConfined   func()
+	OnConfinedPointerUnconfined func()
+
 	// Relative pointer motion (zwp_relative_pointer_v1)
 	// timeUs is a 64-bit microsecond timestamp. dx/dy are accelerated deltas.
 	// dxUnaccel/dyUnaccel are raw (unaccelerated) deltas from the device.

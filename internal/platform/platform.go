@@ -301,7 +301,8 @@ type PlatformWindow interface {
 	// SetCursorMode sets the cursor confinement/lock mode.
 	SetCursorMode(mode int)
 
-	// CursorMode returns the current cursor mode.
+	// CursorMode returns the cursor mode in force: Normal while the window
+	// lacks the focus or the system lacks the requested mode.
 	CursorMode() int
 
 	// SetCursorPosition moves the cursor to (x, y), in logical points from the

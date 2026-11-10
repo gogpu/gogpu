@@ -540,12 +540,18 @@ type win32Window struct {
 	startTime time.Time
 
 	// Cursor mode state (0=normal, 1=locked, 2=confined)
-	cursorMode    int
+	cursorMode    int   // the mode requested
 	savedCursorX  int32 // saved cursor position before locking
 	savedCursorY  int32
 	cursorCenterX int32 // window center in screen coords (for warp-back)
 	cursorCenterY int32
 	cursorHidden  bool // tracks ShowCursor balance
+	// cursorModeInForce is the mode applied: the requested one while the
+	// window is active, Normal otherwise.
+	cursorModeInForce int
+	// active is whether the window is the active window, as the last
+	// WM_ACTIVATE said.
+	active bool
 
 	// cursor is the cursor WM_SETCURSOR shows over the client area: the
 	// shape SetCursor set, 0 when it hid the cursor.
@@ -1186,8 +1192,10 @@ func (w *win32Window) SetCursorMode(mode int) {
 	w.setCursorMode(mode)
 }
 
+// CursorMode returns the cursor mode in force: Normal while the window is not
+// active, whatever was requested.
 func (w *win32Window) CursorMode() int {
-	return w.cursorMode
+	return w.cursorModeInForce
 }
 
 // SetCursorPosition moves the cursor to a point in the client area
@@ -1692,18 +1700,39 @@ func (w *win32Window) setCursorMode(mode int) {
 		return
 	}
 
-	oldMode := w.cursorMode
-	w.cursorMode = mode
-	w.pendingPositions.Clear()
-
-	switch mode {
-	case 1: // Locked
+	if mode == 1 {
 		// Save current cursor position for restoration
 		var pt point
 		syscall.SyscallN(procGetCursorPos.Addr(), uintptr(unsafe.Pointer(&pt)))
 		w.savedCursorX = pt.x
 		w.savedCursorY = pt.y
+	}
+	wasLocked := w.cursorModeInForce == 1
+	w.cursorMode = mode
+	w.pendingPositions.Clear()
+	w.applyCursorMode()
 
+	// Restore cursor position when the application lets a lock in force go
+	if wasLocked {
+		syscall.SyscallN(procSetCursorPos.Addr(), uintptr(w.savedCursorX), uintptr(w.savedCursorY))
+	}
+}
+
+// applyCursorMode puts the requested cursor mode in force while the window is
+// active, and Normal while it is not: the clip and the hidden cursor are the
+// active window's alone.
+func (w *win32Window) applyCursorMode() {
+	mode := 0
+	if w.active {
+		mode = w.cursorMode
+	}
+	if mode == 0 && w.cursorModeInForce == 0 {
+		return
+	}
+	w.cursorModeInForce = mode
+
+	switch mode {
+	case 1: // Locked
 		// Compute window center in screen coordinates
 		w.updateCursorClipRect()
 
@@ -1749,11 +1778,6 @@ func (w *win32Window) setCursorMode(mode int) {
 			w.cursorHidden = false
 		}
 
-		// Restore cursor position if coming from locked mode
-		if oldMode == 1 {
-			syscall.SyscallN(procSetCursorPos.Addr(), uintptr(w.savedCursorX), uintptr(w.savedCursorY))
-		}
-
 	default: // Normal (0)
 		// Release clip
 		syscall.SyscallN(procClipCursor.Addr(), 0)
@@ -1763,16 +1787,11 @@ func (w *win32Window) setCursorMode(mode int) {
 			syscall.SyscallN(procShowCursorW.Addr(), 1) // TRUE = show
 			w.cursorHidden = false
 		}
-
-		// Restore cursor position if coming from locked mode
-		if oldMode == 1 {
-			syscall.SyscallN(procSetCursorPos.Addr(), uintptr(w.savedCursorX), uintptr(w.savedCursorY))
-		}
 	}
 }
 
 func (p *windowsPlatform) CursorMode() int {
-	return p.primary.cursorMode
+	return p.primary.CursorMode()
 }
 
 func (w *win32Window) updateCursorClipRect() {
@@ -2743,17 +2762,8 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmActivate:
 		// Release cursor grab on focus loss, re-grab on focus gain.
-		activationState := wParam & 0xFFFF
-		if activationState == waInactive && w.cursorMode != 0 {
-			syscall.SyscallN(procClipCursor.Addr(), 0)
-			if w.cursorHidden {
-				syscall.SyscallN(procShowCursorW.Addr(), 1)
-				w.cursorHidden = false
-			}
-		}
-		if activationState != waInactive && w.cursorMode != 0 {
-			w.setCursorMode(w.cursorMode)
-		}
+		w.active = wParam&0xFFFF != waInactive
+		w.applyCursorMode()
 
 	case wmDropFiles:
 		p.handleDropFiles(w, wParam)
@@ -3098,7 +3108,7 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		x, y := extractMousePos(lParam)
 
 		// In locked mode, compute delta from center and warp back
-		if w.cursorMode == 1 {
+		if w.cursorModeInForce == 1 {
 			// Convert client coords to screen coords to compare with center
 			var screenPt point
 			screenPt.x = int32(x)

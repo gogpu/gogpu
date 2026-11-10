@@ -207,13 +207,29 @@ func lockedPointerUnlockedCb(data, lockedPointer uintptr) {
 }
 
 // confinedPointerConfinedCb: void(data, zwp_confined_pointer_v1)
+// Fired when the compositor activates the pointer confinement.
 func confinedPointerConfinedCb(data, confinedPointer uintptr) {
+	h := inputCallbackHandle
+	if h == nil || h.inputCallbacks == nil {
+		return
+	}
 	slog.Debug("wayland: pointer confined")
+	if h.inputCallbacks.OnConfinedPointerConfined != nil {
+		h.inputCallbacks.OnConfinedPointerConfined()
+	}
 }
 
 // confinedPointerUnconfinedCb: void(data, zwp_confined_pointer_v1)
+// Fired when the compositor deactivates the pointer confinement (e.g., alt-tab).
 func confinedPointerUnconfinedCb(data, confinedPointer uintptr) {
+	h := inputCallbackHandle
+	if h == nil || h.inputCallbacks == nil {
+		return
+	}
 	slog.Debug("wayland: pointer unconfined")
+	if h.inputCallbacks.OnConfinedPointerUnconfined != nil {
+		h.inputCallbacks.OnConfinedPointerUnconfined()
+	}
 }
 
 // relativePointerMotionCb: void(data, zwp_relative_pointer_v1, uhi, ulo, dx, dy, dx_unaccel, dy_unaccel)

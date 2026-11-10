@@ -81,6 +81,10 @@ type waylandWindow struct {
 
 	// Cursor mode (0=normal, 1=locked, 2=confined)
 	cursorMode int
+	// cursorModeInForce is the cursor mode the compositor put in force:
+	// Locked from the locked pointer's locked event to its unlocked one,
+	// Confined likewise for the confined pointer, Normal otherwise.
+	cursorModeInForce int
 
 	// Keyboard focus tracking
 	keyboardFocused bool
@@ -1217,7 +1221,7 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	}
 
 	// Register input callbacks BEFORE setting up input
-	p.setupInputCallbacks()
+	p.libwl.SetInputCallbacks(p.newInputCallbacks())
 	libwl.SetAsInputHandler()
 
 	// Set up xdg_toplevel listeners (configure, close)
@@ -1665,14 +1669,14 @@ func (p *waylandPlatform) initCSD(config Config) error {
 	return nil
 }
 
-// setupInputCallbacks creates Go-side input callbacks and wires them to
-// the LibwaylandHandle. These callbacks are invoked by goffi from C context.
+// newInputCallbacks creates the Go-side input callbacks the LibwaylandHandle
+// is wired to. These callbacks are invoked by goffi from C context.
 // All per-window state access goes through p.primary.
 //
 //nolint:gocognit,maintidx // callback setup is inherently complex but well-structured per event type
-func (p *waylandPlatform) setupInputCallbacks() {
+func (p *waylandPlatform) newInputCallbacks() *wayland.InputCallbacks {
 	w := p.primary
-	cb := &wayland.InputCallbacks{
+	return &wayland.InputCallbacks{
 		// Pointer events
 		OnPointerEnter: func(serial uint32, x, y float64) {
 			w.pointerMu.Lock()
@@ -1980,20 +1984,25 @@ func (p *waylandPlatform) setupInputCallbacks() {
 
 		// Pointer constraint events
 		OnLockedPointerLocked: func() {
-			logger().Debug("wayland: pointer lock activated by compositor")
+			w.setCursorModeInForce(1)
 		},
 		OnLockedPointerUnlocked: func() {
-			logger().Debug("wayland: pointer lock deactivated by compositor")
+			w.setCursorModeInForce(0)
+		},
+		OnConfinedPointerConfined: func() {
+			w.setCursorModeInForce(2)
+		},
+		OnConfinedPointerUnconfined: func() {
+			w.setCursorModeInForce(0)
 		},
 		OnRelativePointerMotion: func(timeUs uint64, dx, dy, dxUnaccel, dyUnaccel float64) {
-			// Read cursor mode under pointerMu (SetCursorMode writes under p.mu).
 			w.pointerMu.RLock()
-			mode := w.cursorMode
+			mode := w.cursorModeInForce
 			buttons := w.buttons
 			w.pointerMu.RUnlock()
 
-			// Only dispatch relative motion when in locked mode.
-			// In normal/confined mode, absolute motion events are used.
+			// Only dispatch relative motion while the lock is in force.
+			// Otherwise absolute motion events are used.
 			if mode != 1 {
 				return
 			}
@@ -2099,8 +2108,6 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			}
 		},
 	}
-
-	p.libwl.SetInputCallbacks(cb)
 }
 
 // mapWaylandButton maps a Linux evdev button code to gpucontext.Button.
@@ -3477,14 +3484,27 @@ func (p *waylandPlatform) releasePointerConstraints() {
 	p.libwl.DestroyLockedPointer()
 	p.libwl.DestroyConfinedPointer()
 	p.libwl.DestroyRelativePointer()
+	// The compositor sends no unlocked or unconfined event for a constraint
+	// its client destroys.
+	p.primary.setCursorModeInForce(0)
 }
 
-// CursorMode returns the current cursor mode.
+// CursorMode returns the cursor mode in force: Normal until the compositor
+// activates the requested lock or confinement, and while it deactivates it,
+// as it does while the window lacks the focus.
 func (p *waylandPlatform) CursorMode() int {
 	w := p.primary
 	w.pointerMu.RLock()
 	defer w.pointerMu.RUnlock()
-	return w.cursorMode
+	return w.cursorModeInForce
+}
+
+// setCursorModeInForce keeps mode as the cursor mode the compositor put in
+// force.
+func (w *waylandWindow) setCursorModeInForce(mode int) {
+	w.pointerMu.Lock()
+	w.cursorModeInForce = mode
+	w.pointerMu.Unlock()
 }
 
 // Frameless window support — waylandPlatform

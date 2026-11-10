@@ -1477,7 +1477,8 @@ func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 //   - CursorModeConfined (2): Cursor is visible but confined to the window bounds.
 //     Equivalent to SDL_SetWindowMouseGrab(SDL_TRUE).
 //
-// On focus loss, the cursor grab is temporarily released and re-applied on focus gain.
+// On focus loss, the cursor grab is temporarily released and re-applied on focus gain;
+// CursorMode reports CursorModeNormal in between.
 // On window resize while locked/confined, the clip rect is updated automatically.
 //
 // Platform support:
@@ -1487,15 +1488,16 @@ func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 //   - macOS: Full support. Both modes detach the cursor from the mouse
 //     (CGAssociateMouseAndMouseCursorPosition); Locked hides it (NSCursor),
 //     Confined keeps it visible and moves it by each move's delta, clamped to
-//     the content area (CGWarpMouseCursorPosition). While the window is not
-//     key the mode is released and CursorMode reports CursorModeNormal.
+//     the content area (CGWarpMouseCursorPosition).
 func (a *App) SetCursorMode(mode gpucontext.CursorMode) {
 	if a.platWindow != nil {
 		a.platWindow.SetCursorMode(int(mode))
 	}
 }
 
-// CursorMode returns the current cursor confinement mode.
+// CursorMode returns the cursor mode in force: CursorModeNormal while the
+// window lacks the focus or the platform could not apply the mode requested,
+// whatever SetCursorMode requested.
 func (a *App) CursorMode() gpucontext.CursorMode {
 	if a.platWindow != nil {
 		return gpucontext.CursorMode(a.platWindow.CursorMode())

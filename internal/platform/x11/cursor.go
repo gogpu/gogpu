@@ -253,6 +253,32 @@ func (c *Connection) WarpPointer(srcWindow, dstWindow ResourceID,
 	return nil
 }
 
+// QueryPointer returns the root window of the screen the pointer is on, and
+// where the pointer is on it.
+// X11 opcode 38: QueryPointer(window).
+func (c *Connection) QueryPointer(window ResourceID) (root ResourceID, x, y int16, err error) {
+	e := NewEncoder(c.byteOrder)
+	e.PutUint8(OpcodeQueryPointer)
+	e.PutUint8(0)  // unused
+	e.PutUint16(2) // length = 2 4-byte units
+	e.PutUint32(uint32(window))
+
+	reply, err := c.sendRequestWithReply(e.Bytes())
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("x11: QueryPointer failed: %w", err)
+	}
+	if len(reply) < 20 {
+		return 0, 0, 0, fmt.Errorf("x11: QueryPointer reply too short")
+	}
+	// Reply bytes 8-11 are the root, 16-19 the pointer's root x and y.
+	d := NewDecoder(c.byteOrder, reply[8:12])
+	rootID, _ := d.Uint32()
+	d = NewDecoder(c.byteOrder, reply[16:20])
+	x, _ = d.Int16()
+	y, _ = d.Int16()
+	return ResourceID(rootID), x, y, nil
+}
+
 // ChangeWindowCursor changes the cursor attribute of a window.
 // X11 opcode 2: ChangeWindowAttributes with CWCursor value mask.
 // Pass cursorID=0 to revert to parent window's cursor.

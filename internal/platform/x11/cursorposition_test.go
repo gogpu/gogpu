@@ -11,21 +11,38 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
+// recorderRoot is the root window of requestRecorder's screen.
+const recorderRoot ResourceID = 1
+
 // requestRecorder is the X server end of a Connection: it keeps each request
-// written to it, and grants each GrabPointer.
+// written to it, answers each GrabPointer with grabStatus, Success unless a
+// test sets it, and each QueryPointer with the pointer at (pointerX,
+// pointerY) of the root window.
 type requestRecorder struct {
 	net.Conn
 	connection *Connection
 	requests   [][]byte
+	grabStatus byte
+	pointerX   int16
+	pointerY   int16
 }
 
 func (r *requestRecorder) Write(data []byte) (int, error) {
 	r.requests = append(r.requests, append([]byte(nil), data...))
-	if data[0] == OpcodeGrabPointer {
-		reply := make([]byte, 32)
-		reply[0] = 1 // a reply; byte 1, the status, is Success
-		r.connection.dispatchReply(uint16(r.connection.nextSeq.Load()), reply)
+	reply := make([]byte, 32)
+	reply[0] = 1 // a reply
+	switch data[0] {
+	case OpcodeGrabPointer:
+		reply[1] = r.grabStatus
+	case OpcodeQueryPointer:
+		reply[1] = 1 // the pointer is on the window's screen
+		binary.LittleEndian.PutUint32(reply[8:12], uint32(recorderRoot))
+		binary.LittleEndian.PutUint16(reply[16:18], uint16(r.pointerX))
+		binary.LittleEndian.PutUint16(reply[18:20], uint16(r.pointerY))
+	default:
+		return len(data), nil
 	}
+	r.connection.dispatchReply(uint16(r.connection.nextSeq.Load()), reply)
 	return len(data), nil
 }
 
@@ -43,8 +60,31 @@ func (r *requestRecorder) lastWarpPointer() (x, y int16, found bool) {
 	return 0, 0, false
 }
 
+// lastWarpPointerWindow returns the window the last WarpPointer request's
+// destination is relative to, 0 when there was none.
+func (r *requestRecorder) lastWarpPointerWindow() ResourceID {
+	for i := len(r.requests) - 1; i >= 0; i-- {
+		request := r.requests[i]
+		if request[0] == OpcodeWarpPointer {
+			return ResourceID(binary.LittleEndian.Uint32(request[8:12]))
+		}
+	}
+	return 0
+}
+
+// countRequests returns how many requests of opcode the recorder kept.
+func (r *requestRecorder) countRequests(opcode uint8) int {
+	count := 0
+	for _, request := range r.requests {
+		if request[0] == opcode {
+			count++
+		}
+	}
+	return count
+}
+
 // newCursorTestPlatform is an 800x600 point window at scale 2: 1600x1200
-// physical pixels.
+// physical pixels, which has the focus.
 func newCursorTestPlatform() (*Platform, *requestRecorder) {
 	recorder := &requestRecorder{}
 	recorder.connection = &Connection{
@@ -56,10 +96,11 @@ func newCursorTestPlatform() (*Platform, *requestRecorder) {
 		conn:        recorder.connection,
 		scaleFactor: 2,
 		primary: &x11Window{
-			window: 7,
-			width:  1600,
-			height: 1200,
-			events: eventqueue.New[PlatformEvent](16),
+			window:  7,
+			width:   1600,
+			height:  1200,
+			focused: true,
+			events:  eventqueue.New[PlatformEvent](16),
 		},
 	}
 	return platform, recorder
@@ -152,6 +193,7 @@ func TestSetCursorPositionConfinedClampsToWindow(t *testing.T) {
 func TestSetCursorPositionLockedSetsWhereUnlockPutsPointer(t *testing.T) {
 	platform, recorder := newCursorTestPlatform()
 	platform.primary.cursorMode = 1
+	platform.primary.cursorModeInForce = 1
 
 	if err := platform.SetCursorPosition(10, 20); err != nil {
 		t.Fatalf("SetCursorPosition = %v", err)
@@ -166,11 +208,17 @@ func TestSetCursorPositionLockedSetsWhereUnlockPutsPointer(t *testing.T) {
 	if !found || x != 20 || y != 40 {
 		t.Errorf("unlock warped to (%d, %d), want the set position, physical (20, 40)", x, y)
 	}
+	if window := recorder.lastWarpPointerWindow(); window != platform.primary.window {
+		t.Errorf("unlock warped relative to window %d, want the window's own %d", window, platform.primary.window)
+	}
 }
 
 func TestLockSavesPhysicalPointerPosition(t *testing.T) {
 	platform, recorder := newCursorTestPlatform()
-	motion(platform, 300, 500) // the pointer at logical (150, 250)
+	// The server's pointer on the screen, which the window has seen no
+	// motion of: it has not entered the window yet.
+	recorder.pointerX = 300
+	recorder.pointerY = 500
 	platform.blankCursorID = 1
 
 	platform.SetCursorMode(1)
@@ -179,6 +227,10 @@ func TestLockSavesPhysicalPointerPosition(t *testing.T) {
 	x, y, _ := recorder.lastWarpPointer()
 	if x != 300 || y != 500 {
 		t.Errorf("unlock warped to (%d, %d), want the pointer back at physical (300, 500)", x, y)
+	}
+	// On the screen, not in the window: the window may move while locked.
+	if window := recorder.lastWarpPointerWindow(); window != recorderRoot {
+		t.Errorf("unlock warped relative to window %d, want the root %d", window, recorderRoot)
 	}
 }
 
@@ -215,10 +267,10 @@ func TestLockedSetPositionSurvivesFocusLoss(t *testing.T) {
 		t.Fatalf("SetCursorPosition = %v", err)
 	}
 
-	platform.handleFocusOut(platform.primary)
+	platform.handleFocus(platform.primary, false)
 	platform.primary.mouseX = 150 // the user left with the pointer elsewhere
 	platform.primary.mouseY = 250
-	platform.handleFocusIn(platform.primary)
+	platform.handleFocus(platform.primary, true)
 	platform.SetCursorMode(0)
 
 	if x, y, _ := recorder.lastWarpPointer(); x != 20 || y != 40 {

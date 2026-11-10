@@ -208,7 +208,7 @@ func (w *Window) SetCursorMode(mode gpucontext.CursorMode) {
 	}
 }
 
-// CursorMode returns the cursor mode, as App.CursorMode does.
+// CursorMode returns the cursor mode in force, as App.CursorMode does.
 func (w *Window) CursorMode() gpucontext.CursorMode {
 	if w.platWindow != nil {
 		return gpucontext.CursorMode(w.platWindow.CursorMode())

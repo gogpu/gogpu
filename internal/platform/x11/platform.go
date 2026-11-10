@@ -151,12 +151,21 @@ type x11Window struct {
 	startTime time.Time
 
 	// Cursor mode state (0=normal, 1=locked, 2=confined)
-	cursorMode    int
+	cursorMode    int     // the mode requested
 	savedMouseX   float64 // saved position before locking, in physical pixels
 	savedMouseY   float64
 	cursorCenterX int16 // window center for warp-back in locked mode
 	cursorCenterY int16
-	cursorGrabbed bool // whether XGrabPointer is active
+	// savedMouseWindow is the window savedMouseX and savedMouseY are relative
+	// to: the root, or this window once SetCursorPosition set them.
+	savedMouseWindow ResourceID
+	// cursorModeInForce is the mode the pointer grab puts in force: the
+	// requested one while the window has the focus and the server granted
+	// the grab, Normal otherwise. Guarded by eventMu.
+	cursorModeInForce int
+	// focused is whether the window has the input focus, as the last
+	// FocusIn or FocusOut said. Guarded by eventMu.
+	focused bool
 
 	// pendingPositions are the SetCursorPosition moves, in physical pixels,
 	// whose MotionNotify has not arrived yet. Guarded by eventMu.
@@ -1068,7 +1077,7 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 	case *FocusInEvent:
 		// Re-grab pointer if cursor mode requires it
-		p.handleFocusIn(w)
+		p.handleFocus(w, true)
 
 		// Emit focus event only for meaningful focus changes.
 		// Filter out NotifyPointer (5) and NotifyPointerRoot (6) which are noise,
@@ -1079,7 +1088,7 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 
 	case *FocusOutEvent:
 		// Release pointer grab on focus loss
-		p.handleFocusOut(w)
+		p.handleFocus(w, false)
 
 		// Emit focus event with same filtering as FocusIn.
 		if e.Detail != 5 && e.Detail != 6 && e.Mode == 0 {
@@ -1112,7 +1121,7 @@ func (p *Platform) handleMotionNotify(w *x11Window, e *MotionNotifyEvent) {
 	x, y := p.physicalToLogical(float64(e.EventX), float64(e.EventY))
 
 	w.eventMu.Lock()
-	cursorMode := w.cursorMode
+	cursorMode := w.cursorModeInForce
 	centerX := float64(w.cursorCenterX)
 	centerY := float64(w.cursorCenterY)
 	w.mouseX = x
@@ -2571,6 +2580,7 @@ func cursorShapeToGlyph(cursorID int) uint16 {
 
 // SetCursorMode sets cursor confinement/lock mode.
 // 0=normal, 1=locked (hidden, confined, relative deltas), 2=confined (visible, confined).
+// The mode is in force only while the window has the focus.
 func (p *Platform) SetCursorMode(mode int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -2584,65 +2594,38 @@ func (p *Platform) SetCursorMode(mode int) {
 		return
 	}
 
-	oldMode := w.cursorMode
-	w.cursorMode = mode
+	// Save current mouse position on the screen, the server's own: the window
+	// sees none until the pointer first enters it, and may move while locked
+	if mode == 1 && w.cursorMode == 0 {
+		root, x, y, err := p.conn.QueryPointer(w.window)
+		w.eventMu.Lock()
+		if err == nil {
+			w.savedMouseWindow = root
+			w.savedMouseX = float64(x)
+			w.savedMouseY = float64(y)
+		} else {
+			w.savedMouseWindow = w.window
+			w.savedMouseX, w.savedMouseY = p.logicalToPhysical(w.mouseX, w.mouseY)
+		}
+		w.eventMu.Unlock()
+	}
+
 	w.eventMu.Lock()
+	wasLocked := w.cursorModeInForce == 1
+	w.cursorMode = mode
 	w.pendingPositions.Clear()
 	w.eventMu.Unlock()
 
-	switch mode {
-	case 1: // Locked
-		// Save current mouse position
-		if oldMode == 0 {
-			w.savedMouseX, w.savedMouseY = p.logicalToPhysical(w.mouseX, w.mouseY)
-		}
+	p.applyCursorMode(w)
 
-		// Compute window center
-		w.cursorCenterX = int16(w.width / 2)
-		w.cursorCenterY = int16(w.height / 2)
-
-		// Create invisible cursor if not already created (process-level resource)
-		if p.blankCursorID == 0 {
-			p.createBlankCursor(w)
-		}
-
-		// Grab pointer with invisible cursor, confined to our window
-		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
-		_, _ = p.conn.GrabPointer(true, w.window, grabMask,
-			GrabModeAsync, GrabModeAsync, w.window, p.blankCursorID, 0)
-		w.cursorGrabbed = true
-
-		// Warp to center
-		_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0, w.cursorCenterX, w.cursorCenterY)
-
-	case 2: // Confined
-		// Grab pointer with normal cursor, confined to window
-		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
-		_, _ = p.conn.GrabPointer(true, w.window, grabMask,
-			GrabModeAsync, GrabModeAsync, w.window, 0, 0)
-		w.cursorGrabbed = true
-
-		// Restore cursor position if coming from locked mode
-		if oldMode == 1 {
-			_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0,
-				int16(w.savedMouseX), int16(w.savedMouseY))
-		}
-
-	default: // Normal (0)
-		// Release pointer grab
-		if w.cursorGrabbed {
-			_ = p.conn.UngrabPointer(0)
-			w.cursorGrabbed = false
-		}
-
+	if mode == 0 {
 		// Restore cursor (revert to normal)
 		_ = p.conn.ChangeWindowCursor(w.window, 0)
-
-		// Restore mouse position if coming from locked mode
-		if oldMode == 1 {
-			_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0,
-				int16(w.savedMouseX), int16(w.savedMouseY))
-		}
+	}
+	// Restore mouse position when the application lets a lock in force go
+	if wasLocked {
+		_ = p.conn.WarpPointer(0, w.savedMouseWindow, 0, 0, 0, 0,
+			int16(w.savedMouseX), int16(w.savedMouseY))
 	}
 }
 
@@ -2669,6 +2652,7 @@ func (p *Platform) SetCursorPosition(x, y float64) error {
 
 	switch w.cursorMode {
 	case 1: // Locked
+		w.savedMouseWindow = w.window
 		w.savedMouseX = float64(targetX)
 		w.savedMouseY = float64(targetY)
 		return nil
@@ -2686,49 +2670,79 @@ func (p *Platform) SetCursorPosition(x, y float64) error {
 	return nil
 }
 
-// GetCursorMode returns the current cursor mode.
+// GetCursorMode returns the cursor mode in force: Normal while the window
+// lacks the focus or the server refused the grab, whatever was requested.
 func (p *Platform) GetCursorMode() int {
 	w := p.primary
 	w.eventMu.Lock()
 	defer w.eventMu.Unlock()
-	return w.cursorMode
+	return w.cursorModeInForce
 }
 
-// handleFocusIn re-applies cursor grab when window regains focus.
-func (p *Platform) handleFocusIn(w *x11Window) {
-	w.eventMu.Lock()
-	mode := w.cursorMode
-	// Reset cursorMode temporarily so SetCursorMode doesn't early-return
-	if mode != 0 {
-		w.cursorMode = 0
-	}
-	// Taking the lock again is not a new request: releasing it still puts
-	// the pointer where it was when the lock was asked for, or where
-	// SetCursorPosition since then said.
-	savedMouseX := w.savedMouseX
-	savedMouseY := w.savedMouseY
-	w.eventMu.Unlock()
-
-	if mode != 0 {
-		p.SetCursorMode(mode)
-	}
-	if mode == 1 {
-		w.eventMu.Lock()
-		w.savedMouseX = savedMouseX
-		w.savedMouseY = savedMouseY
-		w.eventMu.Unlock()
-	}
-}
-
-// handleFocusOut releases cursor grab when window loses focus.
-func (p *Platform) handleFocusOut(w *x11Window) {
+// handleFocus keeps whether w has the focus, and releases the cursor grab
+// when it loses it and grabs again when it regains it.
+func (p *Platform) handleFocus(w *x11Window, focused bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if w.cursorGrabbed && p.conn != nil {
-		_ = p.conn.UngrabPointer(0)
-		w.cursorGrabbed = false
+	w.eventMu.Lock()
+	w.focused = focused
+	w.eventMu.Unlock()
+	if p.conn != nil {
+		p.applyCursorMode(w)
 	}
+}
+
+// applyCursorMode grabs the pointer for w's requested cursor mode while w has
+// the focus, and releases the grab while it does not. A mode is in force
+// only once the server grants its grab; a Locked one parks the pointer at the
+// window's center first. Must be called with p.mu held.
+func (p *Platform) applyCursorMode(w *x11Window) {
+	w.eventMu.Lock()
+	mode := 0
+	if w.focused {
+		mode = w.cursorMode
+	}
+	previousInForce := w.cursorModeInForce
+	if mode == 1 {
+		// Compute window center
+		w.cursorCenterX = int16(w.width / 2)
+		w.cursorCenterY = int16(w.height / 2)
+	}
+	w.eventMu.Unlock()
+	if mode == previousInForce {
+		return
+	}
+
+	inForce := 0
+	if mode != 0 {
+		// Locked hides the cursor; Confined keeps the window's own
+		var cursor ResourceID
+		if mode == 1 {
+			// Create invisible cursor if not already created (process-level resource)
+			if p.blankCursorID == 0 {
+				p.createBlankCursor(w)
+			}
+			cursor = p.blankCursorID
+			// Warp to center first: the grab confines a pointer outside the
+			// window to its edge, whose motion would read as a locked move
+			_ = p.conn.WarpPointer(0, w.window, 0, 0, 0, 0, w.cursorCenterX, w.cursorCenterY)
+		}
+		// Grab pointer, confined to our window
+		grabMask := uint16(EventMaskPointerMotion | EventMaskButtonPress | EventMaskButtonRelease)
+		status, err := p.conn.GrabPointer(true, w.window, grabMask,
+			GrabModeAsync, GrabModeAsync, w.window, cursor, 0)
+		if err == nil && status == 0 {
+			inForce = mode
+		}
+	}
+	if inForce == 0 && previousInForce != 0 {
+		_ = p.conn.UngrabPointer(0)
+	}
+
+	w.eventMu.Lock()
+	w.cursorModeInForce = inForce
+	w.eventMu.Unlock()
 }
 
 // createBlankCursor creates a 1x1 transparent cursor for hiding the pointer.
