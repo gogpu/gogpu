@@ -547,6 +547,10 @@ type win32Window struct {
 	cursorCenterY int32
 	cursorHidden  bool // tracks ShowCursor balance
 
+	// cursor is the cursor WM_SETCURSOR shows over the client area: the
+	// shape SetCursor set, 0 when it hid the cursor.
+	cursor uintptr
+
 	// pendingPositions are the SetCursorPosition moves, in client pixels,
 	// whose WM_MOUSEMOVE has not arrived yet.
 	pendingPositions cursorposition.Pending
@@ -567,7 +571,6 @@ type windowsPlatform struct {
 	// stack, so passing its address to the API does not move it to the heap
 	// on every poll.
 	polledMessage msg
-	cursor        uintptr // Default arrow cursor for WM_SETCURSOR
 
 	// Window registry keyed by HWND for WndProc routing.
 	windowMu sync.RWMutex
@@ -647,9 +650,7 @@ func (p *windowsPlatform) initProcess() error {
 	blackBrush, _, _ := procGetStockObject.Call(4) // BLACK_BRUSH = 4
 	wndClass.hbrBackground = windows.Handle(blackBrush)
 
-	cursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
-	wndClass.hCursor = windows.Handle(cursor)
-	p.cursor = cursor
+	wndClass.hCursor = windows.Handle(shapeCursor(0))
 
 	ret, _, _ = procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass)))
 	if ret == 0 {
@@ -832,6 +833,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		height:    config.Height,
 		frameless: config.Frameless,
 		startTime: time.Now(),
+		cursor:    shapeCursor(0),
 
 		fullscreenOnShow: config.Fullscreen,
 	}
@@ -965,9 +967,15 @@ func (w *win32Window) SetMaxSize(width, height int) {
 	w.sizeMu.Unlock()
 }
 
+// SetCursor sets the cursor shown over this window's client area: at once
+// when the cursor is there, and at each WM_SETCURSOR after.
 func (w *win32Window) SetCursor(cursorID int) {
-	if w.platform != nil {
-		w.platform.SetCursor(cursorID)
+	w.cursor = shapeCursor(cursorID)
+	w.mouseMu.RLock()
+	inside := w.mouseInWindow
+	w.mouseMu.RUnlock()
+	if inside {
+		procSetCursor.Call(w.cursor)
 	}
 }
 
@@ -1489,45 +1497,6 @@ func (p *windowsPlatform) ClipboardWrite(text string) error {
 	}
 	// After SetClipboardData succeeds, the system owns the handle
 	return nil
-}
-
-func (p *windowsPlatform) SetCursor(cursorID int) {
-	var idc uintptr
-	switch cursorID {
-	case 0:
-		idc = idcArrow // Default
-	case 1:
-		idc = idcHand // Pointer
-	case 2:
-		idc = idcIBeam // Text
-	case 3:
-		idc = idcCross // Crosshair
-	case 4:
-		idc = idcSizeAll // Move
-	case 5:
-		idc = idcSizeNS // ResizeNS
-	case 6:
-		idc = idcSizeWE // ResizeEW
-	case 7:
-		idc = idcSizeNWSE // ResizeNWSE
-	case 8:
-		idc = idcSizeNESW // ResizeNESW
-	case 9:
-		idc = idcNo // NotAllowed
-	case 10:
-		idc = idcWait // Wait
-	case 11: // None -- hide cursor
-		p.cursor = 0
-		procSetCursor.Call(0)
-		return
-	default:
-		idc = idcArrow
-	}
-	cursor, _, _ := procLoadCursorW.Call(0, idc)
-	if cursor != 0 {
-		p.cursor = cursor
-		procSetCursor.Call(cursor)
-	}
 }
 
 // DarkMode returns true if the system dark mode is active.
@@ -3085,11 +3054,11 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 0
 
 	case wmSetCursor:
-		// Restore cursor to arrow when in client area.
-		// This fixes resize cursor staying after resize ends.
+		// Show the window's own cursor in the client area. This also
+		// replaces a resize cursor left over once a resize ends.
 		hitTest := lParam & 0xFFFF
 		if hitTest == htClient {
-			_, _, _ = syscall.SyscallN(procSetCursor.Addr(), p.cursor)
+			_, _, _ = syscall.SyscallN(procSetCursor.Addr(), w.cursor)
 			return 1 // Cursor was set
 		}
 		// Let Windows handle non-client area cursors
@@ -3418,4 +3387,40 @@ func (p *windowsPlatform) ShowSaveFileDialog(opts FileDialogOptions) (string, er
 		hwnd = uintptr(p.primary.hwnd)
 	}
 	return showSaveFileDialog(hwnd, opts)
+}
+
+// shapeCursor loads the system cursor of a gpucontext.CursorShape value, 0
+// for CursorNone, which hides the cursor.
+func shapeCursor(cursorID int) uintptr {
+	var idc uintptr
+	switch cursorID {
+	case 0:
+		idc = idcArrow // Default
+	case 1:
+		idc = idcHand // Pointer
+	case 2:
+		idc = idcIBeam // Text
+	case 3:
+		idc = idcCross // Crosshair
+	case 4:
+		idc = idcSizeAll // Move
+	case 5:
+		idc = idcSizeNS // ResizeNS
+	case 6:
+		idc = idcSizeWE // ResizeEW
+	case 7:
+		idc = idcSizeNWSE // ResizeNWSE
+	case 8:
+		idc = idcSizeNESW // ResizeNESW
+	case 9:
+		idc = idcNo // NotAllowed
+	case 10:
+		idc = idcWait // Wait
+	case 11: // None
+		return 0
+	default:
+		idc = idcArrow
+	}
+	cursor, _, _ := procLoadCursorW.Call(0, idc)
+	return cursor
 }

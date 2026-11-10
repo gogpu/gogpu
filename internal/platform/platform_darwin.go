@@ -170,6 +170,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	// by Windows (WM_DROPFILES) and X11 (XDND).
 	contentView := window.ContentView()
 	if !contentView.IsNil() {
+		window.SetContentCursor(darwin.ShapeCursor(0))
 		darwin.SetViewDragHandler(contentView, func(de darwin.DragEvent) {
 			// Y-flip: macOS uses bottom-left origin, we use top-left.
 			// w.config.Height is in logical points, matching macOS coordinates.
@@ -314,6 +315,7 @@ func (p *darwinPlatform) Destroy() {
 			cv := w.window.ContentView()
 			if !cv.IsNil() {
 				darwin.ClearViewDragHandler(cv)
+				darwin.ClearViewCursor(cv)
 			}
 		}
 	}
@@ -479,8 +481,12 @@ func (dw *darwinPlatformWindow) PrepareFrame() PrepareFrameResult {
 	}
 }
 
+// SetCursor sets the cursor shown while the mouse is over this window's
+// content view and the window is key; each window keeps its own.
 func (dw *darwinPlatformWindow) SetCursor(cursorID int) {
-	dw.platform.setCursorImpl(cursorID)
+	if dw.window != nil {
+		dw.window.SetContentCursor(darwin.ShapeCursor(cursorID))
+	}
 }
 
 // SetCursorMode requests a cursor mode: Locked hides the cursor, detaches it
@@ -1051,50 +1057,6 @@ func (w *darwinWindow) dispatchCharFromEvent(event darwin.ID) {
 			w.events.Push(Event{WindowID: w.id, Type: EventChar, Char: r})
 		}
 		i += size
-	}
-}
-
-// setCursorImpl changes the mouse cursor shape using NSCursor.
-// cursorID maps to gpucontext.CursorShape values (0-11).
-func (p *darwinPlatform) setCursorImpl(cursorID int) {
-	cursorClass := darwin.GetClass("NSCursor")
-	if cursorClass == 0 {
-		return
-	}
-
-	var cursor darwin.ID
-	switch cursorID {
-	case 0: // CursorDefault
-		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
-	case 1: // CursorPointer
-		cursor = cursorClass.Send(darwin.RegisterSelector("pointingHandCursor"))
-	case 2: // CursorText
-		cursor = cursorClass.Send(darwin.RegisterSelector("IBeamCursor"))
-	case 3: // CursorCrosshair
-		cursor = cursorClass.Send(darwin.RegisterSelector("crosshairCursor"))
-	case 4: // CursorMove
-		cursor = cursorClass.Send(darwin.RegisterSelector("openHandCursor"))
-	case 5: // CursorResizeNS
-		cursor = cursorClass.Send(darwin.RegisterSelector("resizeUpDownCursor"))
-	case 6: // CursorResizeEW
-		cursor = cursorClass.Send(darwin.RegisterSelector("resizeLeftRightCursor"))
-	case 7: // CursorResizeNWSE
-		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
-	case 8: // CursorResizeNESW
-		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
-	case 9: // CursorNotAllowed
-		cursor = cursorClass.Send(darwin.RegisterSelector("operationNotAllowedCursor"))
-	case 10: // CursorWait
-		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
-	case 11: // CursorNone
-		cursorClass.Send(darwin.RegisterSelector("hide"))
-		return
-	default:
-		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
-	}
-
-	if !cursor.IsNil() {
-		cursor.Send(darwin.RegisterSelector("set"))
 	}
 }
 

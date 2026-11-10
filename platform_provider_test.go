@@ -16,6 +16,7 @@ type mockWindow struct {
 	height      int
 	scaleFactor float64
 	cursorID    int
+	cursorMode  int
 
 	// Frameless window state
 	frameless       bool
@@ -73,13 +74,13 @@ func (m *mockWindow) PrepareFrame() platform.PrepareFrameResult {
 	}
 }
 func (m *mockWindow) SetCursor(cursorID int) { m.cursorID = cursorID }
-func (m *mockWindow) SetCursorMode(int)      {}
+func (m *mockWindow) SetCursorMode(mode int) { m.cursorMode = mode }
 func (m *mockWindow) SetCursorPosition(x, y float64) error {
 	m.positionX = x
 	m.positionY = y
 	return m.positionErr
 }
-func (m *mockWindow) CursorMode() int     { return 0 }
+func (m *mockWindow) CursorMode() int     { return m.cursorMode }
 func (m *mockWindow) SyncFrame()          {}
 func (m *mockWindow) SetFrameless(v bool) { m.frameless = v }
 func (m *mockWindow) IsFrameless() bool   { return m.frameless }

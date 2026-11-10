@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -366,15 +367,83 @@ func TestWindow_SetSizeDelegates(t *testing.T) {
 	}
 }
 
+func TestWindow_SettingsReachItsPlatformWindow(t *testing.T) {
+	tests := []struct {
+		name    string
+		set     func(*Window)
+		applied func(*mockWindow) bool
+	}{
+		{
+			name:    "SetFullscreen",
+			set:     func(w *Window) { w.SetFullscreen(true) },
+			applied: func(m *mockWindow) bool { return m.fullscreen },
+		},
+		{
+			name:    "SetCursor",
+			set:     func(w *Window) { w.SetCursor(gpucontext.CursorCrosshair) },
+			applied: func(m *mockWindow) bool { return m.cursorID == int(gpucontext.CursorCrosshair) },
+		},
+		{
+			name:    "SetCursorMode",
+			set:     func(w *Window) { w.SetCursorMode(gpucontext.CursorModeConfined) },
+			applied: func(m *mockWindow) bool { return m.cursorMode == int(gpucontext.CursorModeConfined) },
+		},
+		{
+			name:    "SetCursorPosition",
+			set:     func(w *Window) { _ = w.SetCursorPosition(30, 40) },
+			applied: func(m *mockWindow) bool { return m.positionX == 30 && m.positionY == 40 },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mw := &mockWindow{}
+			tt.set(&Window{platWindow: mw})
+			if !tt.applied(mw) {
+				t.Errorf("%s did not reach the window's platform window", tt.name)
+			}
+		})
+	}
+}
+
+func TestWindow_CursorModeAndScaleFactorAnswerItsPlatformWindow(t *testing.T) {
+	w := &Window{platWindow: &mockWindow{scaleFactor: 2, cursorMode: int(gpucontext.CursorModeLocked)}}
+
+	if got := w.CursorMode(); got != gpucontext.CursorModeLocked {
+		t.Errorf("CursorMode() = %v, want CursorModeLocked", got)
+	}
+	if got := w.ScaleFactor(); got != 2 {
+		t.Errorf("ScaleFactor() = %v, want 2", got)
+	}
+}
+
+func TestWindow_SetCursorPositionAnswersThePlatformsRefusal(t *testing.T) {
+	w := &Window{platWindow: &mockWindow{positionErr: platform.ErrCursorPositionUnsupported}}
+	if err := w.SetCursorPosition(1, 2); !errors.Is(err, ErrCursorPositionUnsupported) {
+		t.Errorf("SetCursorPosition = %v, want ErrCursorPositionUnsupported", err)
+	}
+}
+
 func TestWindow_ControlsNilPlatformNoPanic(t *testing.T) {
 	w := &Window{}
 	w.Show()
 	w.Hide()
 	w.SetPosition(1, 2)
 	w.SetSize(3, 4)
+	w.SetFullscreen(true)
+	w.SetCursor(gpucontext.CursorCrosshair)
+	w.SetCursorMode(gpucontext.CursorModeLocked)
 
 	if w.Visible() {
 		t.Error("Hide() with nil platform should leave visible=false")
+	}
+	if got := w.CursorMode(); got != gpucontext.CursorModeNormal {
+		t.Errorf("CursorMode() with nil platform = %v, want CursorModeNormal", got)
+	}
+	if got := w.ScaleFactor(); got != 1 {
+		t.Errorf("ScaleFactor() with nil platform = %v, want 1", got)
+	}
+	if err := w.SetCursorPosition(1, 2); !errors.Is(err, ErrNotInitialized) {
+		t.Errorf("SetCursorPosition with nil platform = %v, want ErrNotInitialized", err)
 	}
 }
 

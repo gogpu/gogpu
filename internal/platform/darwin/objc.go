@@ -752,11 +752,11 @@ func (id ID) SendRect(sel SEL, rect NSRect) ID {
 	return ret
 }
 
-// SendRectPtr sends a message with an NSRect and a pointer argument.
-// Used for -[NSDraggingItem setDraggingFrame:contents:], which returns void.
-// The ID return is the objc_msgSend register result and must be ignored for
-// void selectors.
-func (id ID) SendRectPtr(sel SEL, rect NSRect, arg uintptr) ID {
+// SendRectPtrs sends a message with an NSRect followed by pointer-sized
+// arguments: -[NSDraggingItem setDraggingFrame:contents:], which returns void,
+// and -[NSTrackingArea initWithRect:options:owner:userInfo:]. The ID return is
+// the objc_msgSend register result and must be ignored for void selectors.
+func (id ID) SendRectPtrs(sel SEL, rect NSRect, args ...uintptr) ID {
 	if id == 0 || sel == 0 {
 		return 0
 	}
@@ -769,7 +769,9 @@ func (id ID) SendRectPtr(sel SEL, rect NSRect, arg uintptr) ID {
 		types.PointerTypeDescriptor, // self
 		types.PointerTypeDescriptor, // _cmd
 		nsRectType,                  // rect
-		types.PointerTypeDescriptor, // arg
+	}
+	for range args {
+		argTypes = append(argTypes, types.PointerTypeDescriptor)
 	}
 
 	cif := &types.CallInterface{}
@@ -787,19 +789,81 @@ func (id ID) SendRectPtr(sel SEL, rect NSRect, arg uintptr) ID {
 		self uintptr
 		sel  uintptr
 		rect NSRect
-		arg  uintptr
 	}{
 		self: uintptr(id),
 		sel:  uintptr(sel),
 		rect: rect,
-		arg:  arg,
 	}
 
 	argPtrs := []unsafe.Pointer{
 		unsafe.Pointer(&argBox.self),
 		unsafe.Pointer(&argBox.sel),
 		unsafe.Pointer(&argBox.rect),
+	}
+	for i := range args {
+		argPtrs = append(argPtrs, unsafe.Pointer(&args[i]))
+	}
+
+	var result uintptr
+	_, err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return ID(result)
+}
+
+// SendPtrPoint sends a message with a pointer and an NSPoint argument:
+// -[NSCursor initWithImage:hotSpot:].
+func (id ID) SendPtrPoint(sel SEL, arg uintptr, point NSPoint) ID {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		types.PointerTypeDescriptor, // arg
+		nsPointType,                 // point
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self  uintptr
+		sel   uintptr
+		arg   uintptr
+		point NSPoint
+	}{
+		self:  uintptr(id),
+		sel:   uintptr(sel),
+		arg:   arg,
+		point: point,
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
 		unsafe.Pointer(&argBox.arg),
+		unsafe.Pointer(&argBox.point),
 	}
 
 	var result uintptr

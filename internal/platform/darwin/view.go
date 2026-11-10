@@ -104,6 +104,28 @@ func ClearViewDragHandler(view ID) {
 	SetViewDragHandler(view, nil)
 }
 
+// viewCursors maps each GoGPUView to the cursor it shows while the mouse is
+// over it. Protected by viewCursorMu.
+var (
+	viewCursors  = make(map[uintptr]ID)
+	viewCursorMu sync.RWMutex
+)
+
+// setViewCursor records the cursor a GoGPUView shows each time the mouse
+// enters it in the key window, which its cursor-update tracking area reports.
+func setViewCursor(view, cursor ID) {
+	viewCursorMu.Lock()
+	viewCursors[view.Ptr()] = cursor
+	viewCursorMu.Unlock()
+}
+
+// ClearViewCursor forgets a view's cursor. Call it when the view is destroyed.
+func ClearViewCursor(view ID) {
+	viewCursorMu.Lock()
+	delete(viewCursors, view.Ptr())
+	viewCursorMu.Unlock()
+}
+
 // GoGPUViewClass returns the registered GoGPUView ObjC class.
 // The class is created once and reused for all windows.
 func GoGPUViewClass() (Class, error) {
@@ -156,6 +178,19 @@ func registerGoGPUViewClass() (Class, error) {
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("doCommandBySelector:"), doCommandIMP, "v@::")
+
+	// cursorUpdate: — the mouse entered the view's cursor-update tracking
+	// area: show the cursor the view's window gave it, as GLFW does.
+	cursorUpdateIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
+		viewCursorMu.RLock()
+		cursor := viewCursors[self]
+		viewCursorMu.RUnlock()
+		if !cursor.IsNil() {
+			cursor.Send(selectors.setCursor)
+		}
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("cursorUpdate:"), cursorUpdateIMP, "v@:@")
 
 	// acceptsFirstResponder — return YES so the view receives key events.
 	acceptsIMP := ffi.NewCallback(func(self, sel uintptr) uintptr {
@@ -429,7 +464,8 @@ func nsStringToGoString(nsStr ID) string {
 
 // CreateGoGPUView creates an instance of GoGPUView with the given frame rect.
 // The returned ID is an allocated, initialized NSView subclass instance.
-// The view is automatically registered to accept file drag-and-drop.
+// The view is automatically registered to accept file drag-and-drop, and
+// tracks the mouse for the cursor its window gives it.
 func CreateGoGPUView(frame NSRect) (ID, error) {
 	cls, err := GoGPUViewClass()
 	if err != nil {
@@ -450,5 +486,33 @@ func CreateGoGPUView(frame NSRect) (ID, error) {
 	// Register the view to accept file drag-and-drop.
 	RegisterForDraggedTypes(view)
 
+	addCursorTrackingArea(view)
+
 	return view, nil
+}
+
+// NSTrackingAreaOptions from AppKit/NSTrackingArea.h.
+const (
+	nsTrackingCursorUpdate      uintptr = 0x04
+	nsTrackingActiveInKeyWindow uintptr = 0x20
+	nsTrackingInVisibleRect     uintptr = 0x200
+)
+
+// addCursorTrackingArea makes AppKit send the view cursorUpdate: each time the
+// mouse enters it while its window is key: AppKit updates the cursor in the
+// key window only.
+func addCursorTrackingArea(view ID) {
+	initSelectors()
+	area := GetClass("NSTrackingArea").Send(selectors.alloc).SendRectPtrs(
+		RegisterSelector("initWithRect:options:owner:userInfo:"),
+		NSRect{}, // ignored: NSTrackingInVisibleRect follows the visible rect
+		nsTrackingCursorUpdate|nsTrackingActiveInKeyWindow|nsTrackingInVisibleRect,
+		view.Ptr(),
+		0,
+	)
+	if area.IsNil() {
+		return
+	}
+	view.SendPtr(RegisterSelector("addTrackingArea:"), area.Ptr())
+	area.Send(selectors.release) // the view retains it
 }

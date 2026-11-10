@@ -295,7 +295,7 @@ func (w *Window) StartDrag(paths []string, done func(DragOperation)) {
 			// REQUIRED: non-zero draggingFrame. Zero size → NSRangeException + process abort.
 			frame := draggingFrameAt(viewLoc, defaultDragIconPoints, itemIndex)
 			icon, owned := fileDragIcon(path, defaultDragIconPoints)
-			item.SendRectPtr(dragSourceSelectors.setDraggingFrameContents, frame, uintptr(icon))
+			item.SendRectPtrs(dragSourceSelectors.setDraggingFrameContents, frame, uintptr(icon))
 			if owned {
 				msgSend(icon, selectors.release)
 			}

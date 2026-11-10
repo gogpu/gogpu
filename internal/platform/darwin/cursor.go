@@ -39,6 +39,47 @@ func UnhideCursor() {
 	ID(classes.NSCursor).Send(selectors.unhideCursor)
 }
 
+// ShapeCursor returns the NSCursor of a gpucontext.CursorShape value (0-11),
+// the arrow for one it does not know. CursorNone's has no visible pixel, so a
+// view showing it hides the cursor over that view alone, where HideCursor
+// hides it everywhere.
+func ShapeCursor(shape int) ID {
+	initClasses()
+	initSelectors()
+	cursorClass := ID(classes.NSCursor)
+	switch shape {
+	case 1: // CursorPointer
+		return cursorClass.Send(selectors.pointingHandCursor)
+	case 2: // CursorText
+		return cursorClass.Send(selectors.IBeamCursor)
+	case 3: // CursorCrosshair
+		return cursorClass.Send(selectors.crosshairCursor)
+	case 4: // CursorMove
+		return cursorClass.Send(selectors.openHandCursor)
+	case 5: // CursorResizeNS
+		return cursorClass.Send(selectors.resizeUpDownCursor)
+	case 6: // CursorResizeEW
+		return cursorClass.Send(selectors.resizeLeftRightCursor)
+	case 9: // CursorNotAllowed
+		return cursorClass.Send(selectors.operationNotAllowedCursor)
+	case 11: // CursorNone
+		return invisibleCursor()
+	default: // CursorDefault, and the shapes AppKit has no cursor for
+		return cursorClass.Send(selectors.arrowCursor)
+	}
+}
+
+// invisibleCursor is an NSCursor whose 16x16 image holds no pixel, made once.
+var invisibleCursor = sync.OnceValue(func() ID {
+	image := GetClass("NSImage").Send(selectors.alloc).SendSize(RegisterSelector("initWithSize:"), NSSize{Width: 16, Height: 16})
+	if image.IsNil() {
+		return 0
+	}
+	cursor := ID(classes.NSCursor).Send(selectors.alloc).SendPtrPoint(RegisterSelector("initWithImage:hotSpot:"), image.Ptr(), NSPoint{})
+	image.Send(selectors.release) // the cursor retains it
+	return cursor
+})
+
 // CursorLocation returns the cursor's position in Cocoa screen coordinates:
 // origin at the bottom-left of the primary display, y up.
 func CursorLocation() NSPoint {

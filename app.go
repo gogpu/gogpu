@@ -1458,7 +1458,8 @@ func (a *App) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
 	return "", nil
 }
 
-// SetCursor changes the mouse cursor shape.
+// SetCursor changes the cursor shape shown over the primary window, as
+// Window.SetCursor does for its window.
 // Implements gpucontext.PlatformProvider.
 func (a *App) SetCursor(cursor gpucontext.CursorShape) {
 	if a.platWindow != nil {

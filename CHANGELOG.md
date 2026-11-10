@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-window fullscreen, cursor and scale** (@dvoyni). `Window` gains `SetFullscreen`, `SetCursor`, `SetCursorMode`,
+  `CursorMode`, `SetCursorPosition` and `ScaleFactor`, beside its `SetTitle`, each acting on the window it is called on,
+  as the `App` versions act on the primary window. On Windows and macOS the cursor shape was process-wide: each window
+  now keeps its own, shown while the pointer is over its content area, on macOS while the window is key, and
+  `CursorNone` hides the cursor over that window alone.
+
 ### Fixed
 
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.

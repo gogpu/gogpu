@@ -904,6 +904,28 @@ func (w *Window) IsKeyWindow() bool {
 	return result != 0
 }
 
+// SetContentCursor sets the cursor shown while the mouse is over the content
+// view and the window is key: at once when that holds, and each time the
+// mouse enters the view after. Each window keeps its own cursor. Call it on
+// the main thread.
+func (w *Window) SetContentCursor(cursor ID) {
+	view := w.ContentView()
+	if view.IsNil() {
+		return
+	}
+	setViewCursor(view, cursor)
+
+	if !w.IsKeyWindow() {
+		return
+	}
+	content := w.ContentScreenRect()
+	mouse := CursorLocation()
+	if mouse.X >= content.Origin.X && mouse.X < content.Origin.X+content.Size.Width &&
+		mouse.Y >= content.Origin.Y && mouse.Y < content.Origin.Y+content.Size.Height {
+		cursor.Send(selectors.setCursor)
+	}
+}
+
 // SetCollectionBehavior sets the window's collection behavior flags.
 // Used to enable fullscreen support via NSWindowCollectionBehaviorFullScreenPrimary.
 func (w *Window) SetCollectionBehavior(behavior NSWindowCollectionBehavior) {

@@ -182,6 +182,60 @@ func (w *Window) SetSize(width, height int) {
 	}
 }
 
+// The methods below act on this window, as their App versions act on the
+// primary window. On Wayland they act on the first window, the only one
+// Wayland supports.
+
+// SetFullscreen enters or exits fullscreen, as App.SetFullscreen describes.
+func (w *Window) SetFullscreen(fullscreen bool) {
+	if w.platWindow != nil {
+		w.platWindow.SetFullscreen(fullscreen)
+	}
+}
+
+// SetCursor sets the cursor shape shown while the cursor is over this
+// window's content area. Each window keeps its own shape.
+func (w *Window) SetCursor(cursor gpucontext.CursorShape) {
+	if w.platWindow != nil {
+		w.platWindow.SetCursor(int(cursor))
+	}
+}
+
+// SetCursorMode sets the cursor mode, as App.SetCursorMode describes.
+func (w *Window) SetCursorMode(mode gpucontext.CursorMode) {
+	if w.platWindow != nil {
+		w.platWindow.SetCursorMode(int(mode))
+	}
+}
+
+// CursorMode returns the cursor mode, as App.CursorMode does.
+func (w *Window) CursorMode() gpucontext.CursorMode {
+	if w.platWindow != nil {
+		return gpucontext.CursorMode(w.platWindow.CursorMode())
+	}
+	return gpucontext.CursorModeNormal
+}
+
+// SetCursorPosition moves the cursor to (x, y) in this window, as
+// App.SetCursorPosition describes. It returns ErrNotInitialized when the
+// window has no platform window.
+func (w *Window) SetCursorPosition(x, y float64) error {
+	if w.platWindow == nil {
+		return ErrNotInitialized
+	}
+	return w.platWindow.SetCursorPosition(x, y)
+}
+
+// ScaleFactor returns the DPI scale factor of the screen the window is on:
+// 1.0 is standard, 2.0 Retina/HiDPI. It is 1.0 when the window has no
+// platform window.
+func (w *Window) ScaleFactor() float64 {
+	if w.platWindow != nil {
+		return w.platWindow.ScaleFactor()
+	}
+	return 1.0
+}
+
 // WindowManager tracks all open windows in the application.
 // Thread-safe: all methods are protected by a read-write mutex.
 type WindowManager struct {
