@@ -1580,9 +1580,9 @@ func (a *App) FontSmoothing() gpucontext.FontSmoothing {
 // KeyLabel answers the character the current keyboard layout prints on key,
 // a physical key named by its US QWERTY position, unshifted: 'a' for KeyQ on
 // a French layout. It answers 0 for a key that prints none, such as Enter,
-// before the layout is known, and on platforms that cannot tell: macOS and
-// the browser. OnKeyboardLayoutChanged tells when the answers change. Call it
-// on the main thread.
+// before the layout is known, and in the browser, which cannot tell.
+// OnKeyboardLayoutChanged tells when the answers change. Call it on the main
+// thread.
 func (a *App) KeyLabel(key gpucontext.Key) rune {
 	labeler, ok := a.manager.(platform.KeyLabeler)
 	if !ok {

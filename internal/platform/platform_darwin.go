@@ -70,6 +70,15 @@ type darwinPlatform struct {
 	// pending menu set before Init() was called
 	pendingMenu []MenuItem
 	hasPending  bool
+
+	// keyboardLayout is the layout KeyLabel reads: the one in use at Init,
+	// then the one each input source change brings. Main thread only, as is
+	// keyboardLayoutChanged.
+	keyboardLayout darwin.KeyboardLayout
+	// keyboardLayoutChanged holds a layout change until PollEvents reports it.
+	keyboardLayoutChanged bool
+	// inputSourceObserver reports input source changes from Init to Destroy.
+	inputSourceObserver darwin.InputSourceObserver
 }
 
 // newPlatformManager returns a PlatformManager for macOS.
@@ -108,6 +117,15 @@ func (p *darwinPlatform) Init() error {
 		p.applyMenu(p.pendingMenu)
 		p.hasPending = false
 	}
+
+	// The layout is known from the start, so none is reported for it.
+	// Without these KeyLabel answers 0, as on platforms that can't tell.
+	p.keyboardLayout, _ = darwin.CurrentKeyboardLayout()
+	p.inputSourceObserver, _ = darwin.ObserveInputSourceChanges(func() {
+		if layout, err := darwin.CurrentKeyboardLayout(); err == nil {
+			p.updateKeyboardLayout(layout)
+		}
+	})
 
 	return nil
 }
@@ -240,6 +258,11 @@ func (p *darwinPlatform) PollEvents() Event {
 		p.app.PollEventsWithHandler(makeEventRouter(p.windows, p.keyWindow()))
 	}
 
+	if p.keyboardLayoutChanged {
+		p.keyboardLayoutChanged = false
+		return Event{Type: EventKeyboardLayoutChanged}
+	}
+
 	for _, w := range p.windows {
 		e := w.pollEvents()
 		if e.Type != EventNone {
@@ -310,10 +333,23 @@ func (p *darwinPlatform) Destroy() {
 		}
 	}
 
+	p.inputSourceObserver.Stop()
+
 	if p.app != nil {
 		p.app.Destroy()
 		p.app = nil
 	}
+}
+
+// KeyLabel answers the character the layout in use prints on key, unshifted:
+// what UCKeyTranslate displays for its virtual key code, with no modifier
+// down. A dead key answers its own character.
+func (p *darwinPlatform) KeyLabel(key gpucontext.Key) rune {
+	keyCode, ok := macKeyCodeOfKey(key)
+	if !ok {
+		return 0
+	}
+	return p.keyboardLayout.Label(keyCode)
 }
 
 // --- darwinPlatformWindow implements PlatformWindow ---
@@ -630,6 +666,17 @@ func (p *darwinPlatform) keyWindow() *darwinWindow {
 		}
 	}
 	return p.primary
+}
+
+// updateKeyboardLayout holds layout for KeyLabel, and reports it unless it
+// prints as the one held: an input method selected keeps typing with it.
+func (p *darwinPlatform) updateKeyboardLayout(layout darwin.KeyboardLayout) {
+	if layout.Equal(p.keyboardLayout) {
+		return
+	}
+	p.keyboardLayout = layout
+	p.keyboardLayoutChanged = true
+	darwin.WakeEventLoop()
 }
 
 // makeEventRouter returns an event handler that routes each NSEvent to the
@@ -1451,6 +1498,20 @@ func macKeyCodeToKey(keyCode uint16) gpucontext.Key { //nolint:maintidx // key m
 	default:
 		return gpucontext.KeyUnknown
 	}
+}
+
+// macKeyCodeOfKey answers the macOS virtual key code of key, the lowest when
+// several map to it.
+func macKeyCodeOfKey(key gpucontext.Key) (uint16, bool) {
+	if key == gpucontext.KeyUnknown {
+		return 0, false
+	}
+	for keyCode := range uint16(128) {
+		if macKeyCodeToKey(keyCode) == key {
+			return keyCode, true
+		}
+	}
+	return 0, false
 }
 
 // ClipboardRead reads text from the system clipboard using NSPasteboard.

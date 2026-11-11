@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Key labels and layout changes** (@dvoyni). `App.KeyLabel` answers the character the current keyboard layout
   prints on a physical key, unshifted: 'a' for `KeyQ` on a French layout. `App.OnKeyboardLayoutChanged` reports
-  each layout change, and the layout becoming known. On Windows, X11 and Wayland; macOS and the browser answer 0.
+  each layout change, and the layout becoming known. On Windows, macOS, X11 and Wayland; the browser answers 0.
 
 ### Fixed
 
