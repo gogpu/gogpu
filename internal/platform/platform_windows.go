@@ -2907,10 +2907,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 				PhysicalHeight: newHeight,
 			})
 
-			// Update cursor clip rect if locked or confined
-			if w.cursorMode != 0 {
-				w.setCursorMode(w.cursorMode)
-			}
+			// A locked or confined cursor's clip and center follow the new
+			// client area.
+			w.applyCursorMode()
 		}
 		return 0
 
@@ -2965,6 +2964,9 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 			PhysicalWidth:  physW,
 			PhysicalHeight: physH,
 		})
+		// The loop's resizes and moves left the clip and center where they
+		// were.
+		w.applyCursorMode()
 		return 0
 
 	case wmTimer:

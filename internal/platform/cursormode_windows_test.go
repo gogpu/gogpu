@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"fmt"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -69,6 +70,78 @@ func TestCursorModeIsNormalWhileTheWindowIsInactive(t *testing.T) {
 	wndProc(window.hwnd, wmActivate, waActive, 0)
 	if mode := window.CursorMode(); mode != 1 || cursorClip() == unclipped {
 		t.Errorf("a locked window made active again answers %d, clip %+v, want Locked and the cursor clipped", mode, cursorClip())
+	}
+}
+
+// clientArea returns the window's client area in screen coordinates.
+func clientArea(window *win32Window) rect {
+	var client rect
+	procGetClientRect.Call(uintptr(window.hwnd), uintptr(unsafe.Pointer(&client)))
+	var origin point
+	procClientToScreen.Call(uintptr(window.hwnd), uintptr(unsafe.Pointer(&origin)))
+	return rect{left: origin.x, top: origin.y, right: origin.x + client.right, bottom: origin.y + client.bottom}
+}
+
+// windowResizes are the ways a window's client area changes size: a size
+// request and a fullscreen toggle each resize it at once, while a resize
+// inside the modal size loop takes effect when the loop ends.
+var windowResizes = []struct {
+	name   string
+	resize func(window *win32Window)
+}{
+	{"size request", func(window *win32Window) { window.RequestSize(400, 300) }},
+	{"fullscreen toggle", func(window *win32Window) { window.SetFullscreen(true) }},
+	{"modal size loop", func(window *win32Window) {
+		wndProc(window.hwnd, wmEnterSizeMove, 0, 0)
+		window.RequestSize(400, 300)
+		wndProc(window.hwnd, wmExitSizeMove, 0, 0)
+	}},
+}
+
+func TestAResizeClipsTheCursorToTheNewClientArea(t *testing.T) {
+	for _, mode := range []int{1, 2} {
+		for _, resize := range windowResizes {
+			t.Run(fmt.Sprintf("mode %d, %s", mode, resize.name), func(t *testing.T) {
+				window := newCursorModeTestWindow(t)
+				window.SetCursorMode(mode)
+				wndProc(window.hwnd, wmActivate, waActive, 0)
+				before := clientArea(window)
+
+				resize.resize(window)
+
+				after := clientArea(window)
+				if after == before {
+					t.Fatalf("the client area stayed %+v", after)
+				}
+				if clip := cursorClip(); clip != after {
+					t.Errorf("the cursor is clipped to %+v, want the new client area %+v", clip, after)
+				}
+			})
+		}
+	}
+}
+
+func TestALockedWindowMeasuresItsDeltasFromTheNewCenterAfterAResize(t *testing.T) {
+	for _, resize := range windowResizes {
+		t.Run(resize.name, func(t *testing.T) {
+			window := newCursorModeTestWindow(t)
+			window.SetCursorMode(1)
+			wndProc(window.hwnd, wmActivate, waActive, 0)
+			resize.resize(window)
+			for window.platform.events.Len() > 0 {
+				window.platform.dequeueEvent()
+			}
+
+			width, height := window.PhysicalSize()
+			x := width/2 + 3
+			y := height/2 + 4
+			wndProc(window.hwnd, wmMouseMove, 0, uintptr(x|y<<16))
+
+			event := window.platform.dequeueEvent()
+			if event.Type != EventPointerMove || event.Pointer.DeltaX != 3 || event.Pointer.DeltaY != 4 {
+				t.Errorf("a move 3, 4 from the new center reported %+v, want a move by 3, 4", event)
+			}
+		})
 	}
 }
 
