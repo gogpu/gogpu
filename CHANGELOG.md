@@ -36,10 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slices, so a platform dialog cannot mutate them. Dead event-source dispatch helpers are gone,
   `mapTextureFormat` becomes `allowedSurfaceFormat`, and `doc.go`, the README and ARCHITECTURE.md now describe the
   current platform support and DIP dimensions.
-- **Dependencies:** wgpu v0.34.9 → v0.34.12, naga v0.21.4 → v0.21.9. wgpu now accepts command buffers whose resources
-  were released after recording, the same way Rust wgpu handles a dropped handle; Vulkan descriptor pools always
-  include the dynamic buffer types; and with demote-to-helper support, a discard demotes the invocation instead of
-  emitting `OpKill`. naga adds `spirv.CapabilitySet`.
+- **Dependencies:** wgpu v0.34.9 → v0.34.13, naga v0.21.4 → v0.21.10. wgpu now accepts command buffers whose
+  resources were released after recording, the same way Rust wgpu handles a dropped handle; Vulkan descriptor pools
+  always include the dynamic buffer types; and with demote-to-helper support, a discard demotes the invocation
+  instead of emitting `OpKill`. naga adds `spirv.CapabilitySet` and fixes MSL code generation — multiple returns,
+  packed `vec3` bitcasts, atomic workgroup loads, threadgroup vector stores and the writer error paths — which
+  reaches Metal through wgpu v0.34.13; that release carries no wgpu code or API change.
 
 ### Removed
 
