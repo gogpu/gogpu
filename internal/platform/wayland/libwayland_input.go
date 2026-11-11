@@ -28,6 +28,11 @@ type InputCallbacks struct {
 	OnPointerMotion func(timeMs uint32, x, y float64)
 	OnPointerButton func(serial, timeMs, button, state uint32)
 	OnPointerAxis   func(timeMs, axis uint32, value float64)
+	// OnPointerAxisNotches reports the wheel notches turned on axis, from
+	// axis_discrete (v5-v7) or axis_value120 (v8+), fractional for a
+	// high-resolution wheel. The compositor sends it before the axis event of
+	// the same axis and frame.
+	OnPointerAxisNotches func(axis uint32, notches float64)
 
 	// Keyboard events
 	OnKeyboardKeymap    func(format uint32, fd int, size uint32)
@@ -77,9 +82,12 @@ func (h *LibwaylandHandle) SetupInput(seatName, seatVersion uint32) error {
 		return nil
 	}
 
-	version := seatVersion
-	if version > 7 {
-		version = 7
+	// v8 replaces wl_pointer.axis_discrete with axis_value120. The pointer takes
+	// the seat's version, which the client library's wl_pointer must know, or it
+	// fails the display on the first event it has no entry for.
+	version := min(seatVersion, 8)
+	if h.pointerInterface != nil {
+		version = min(version, uint32((*cWlInterface)(h.pointerInterface).Version))
 	}
 
 	// Bind wl_seat on C display (default queue — same queue as main surface events)
@@ -290,10 +298,10 @@ func inputSeatNameCb(data, seat, name uintptr) {
 	// No-op
 }
 
-// --- Pointer callbacks (main surface, 9 events) ---
+// --- Pointer callbacks (main surface, 10 events) ---
 
 var (
-	inputPointerListener [9]uintptr
+	inputPointerListener [10]uintptr
 	inputPointerOnce     sync.Once
 )
 
@@ -308,6 +316,7 @@ func initInputPointerListeners() {
 		inputPointerListener[6] = ffi.NewCallback(inputPointerAxisSourceCb)
 		inputPointerListener[7] = ffi.NewCallback(inputPointerAxisStopCb)
 		inputPointerListener[8] = ffi.NewCallback(inputPointerAxisDiscreteCb)
+		inputPointerListener[9] = ffi.NewCallback(inputPointerAxisValue120Cb)
 	})
 }
 
@@ -380,10 +389,30 @@ func inputPointerAxisCb(data, pointer, time, axis, valueFixed uintptr) {
 	}
 }
 
-func inputPointerFrameCb(data, pointer uintptr)                        {}
-func inputPointerAxisSourceCb(data, pointer, source uintptr)           {}
-func inputPointerAxisStopCb(data, pointer, time, axis uintptr)         {}
-func inputPointerAxisDiscreteCb(data, pointer, axis, discrete uintptr) {}
+// inputPointerAxisDiscreteCb: void(data, wl_pointer, axis, discrete), v5-v7
+func inputPointerAxisDiscreteCb(data, pointer, axis, discrete uintptr) {
+	reportPointerAxisNotches(axis, float64(int32(discrete)))
+}
+
+// inputPointerAxisValue120Cb: void(data, wl_pointer, axis, value120), v8+;
+// 120 is one notch.
+func inputPointerAxisValue120Cb(data, pointer, axis, value120 uintptr) {
+	reportPointerAxisNotches(axis, float64(int32(value120))/120)
+}
+
+// reportPointerAxisNotches hands the notches turned on axis to the input
+// handler's OnPointerAxisNotches.
+func reportPointerAxisNotches(axis uintptr, notches float64) {
+	h := inputCallbackHandle
+	if h == nil || h.inputCallbacks == nil || h.inputCallbacks.OnPointerAxisNotches == nil {
+		return
+	}
+	h.inputCallbacks.OnPointerAxisNotches(uint32(axis), notches)
+}
+
+func inputPointerFrameCb(data, pointer uintptr)                {}
+func inputPointerAxisSourceCb(data, pointer, source uintptr)   {}
+func inputPointerAxisStopCb(data, pointer, time, axis uintptr) {}
 
 // --- Keyboard callbacks (6 events) ---
 
