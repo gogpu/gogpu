@@ -1858,6 +1858,8 @@ func (w *x11Window) dispatchKeyEvent(key gpucontext.Key, mods gpucontext.Modifie
 //
 // Text input uses xkbcommon when available (handles AltGr/Level3 correctly).
 // Falls back to manual KeycodeToKeysymGroup (no AltGr support) if xkbcommon is unavailable.
+// With xkbcommon, a dead key or the Compose key types nothing, and the key
+// completing its sequence types the sequence's text.
 func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pressed bool) {
 	mods := extractModifiers(state)
 
@@ -1886,6 +1888,19 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 	p.mu.Unlock()
 
 	if pressed {
+		// Dead keys and the Compose key: the key goes through xkbcommon's
+		// compose table first, with the keysym of the mapping its text comes from.
+		var keysym Keysym
+		if preferServerKeymap && keymap != nil {
+			keysym = keymap.KeycodeToKeysymGroup(keycode, mods&gpucontext.ModShift != 0, mods&gpucontext.ModCapsLock != 0, group)
+		}
+		if keysym == 0 || keysym == KeysymVoidSymbol {
+			keysym = Keysym(xkbState.KeyGetOneSym(evdevKey))
+		}
+		if dispatchComposedText(w, xkbState, keysym) {
+			return
+		}
+
 		dispatched := false
 
 		// Remote and compatibility X servers own the effective keymap. Consulting
@@ -1917,6 +1932,19 @@ func (p *Platform) handleKeyEvent(w *x11Window, keycode uint8, state uint16, pre
 			dispatchServerKeymapText(w, keymap, keycode, mods, group)
 		}
 	}
+}
+
+// dispatchComposedText feeds a pressed key's keysym to xkbcommon's compose
+// table, queues the text of a sequence it completes, and answers whether the
+// table took the key, which then types nothing of its own.
+func dispatchComposedText(w *x11Window, xkbState *xkbcommon.Handle, keysym Keysym) bool {
+	composed, taken := xkbState.FeedCompose(uint32(keysym))
+	for _, r := range composed {
+		if r >= 32 {
+			w.queueEvent(PlatformEvent{Type: EventTypeChar, Char: r})
+		}
+	}
+	return taken
 }
 
 func dispatchServerKeymapText(

@@ -24,7 +24,7 @@ import (
 // The production implementation is *xkb.Handle (via wayland.XKBHandle alias); tests use a mock.
 type xkbKeyHandler interface {
 	Ready() bool
-	KeyGetUtf8(keycode uint32) string
+	KeyGetComposedUtf8(keycode uint32) string
 	KeyRepeats(keycode uint32) bool
 	UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32)
 	SetKeymapFromFD(fd int, size uint32) error
@@ -2147,9 +2147,12 @@ func (w *waylandWindow) getModifiers() gpucontext.Modifiers {
 
 // keycodeToRune converts an evdev keycode to a printable rune.
 // Uses xkbcommon (multi-layout aware) when available, falls back to evdevKeycodeToRune (US QWERTY).
+// Through xkbcommon, the key goes through the compose table first: a dead key
+// or the Compose key types nothing, and the key completing its sequence types
+// the sequence's text.
 func (w *waylandWindow) keycodeToRune(keycode uint32) rune {
 	if w.xkb != nil && w.xkb.Ready() {
-		s := w.xkb.KeyGetUtf8(keycode)
+		s := w.xkb.KeyGetComposedUtf8(keycode)
 		if s != "" {
 			runes := []rune(s)
 			if len(runes) > 0 {
