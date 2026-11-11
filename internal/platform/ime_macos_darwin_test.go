@@ -4,13 +4,50 @@ package platform
 
 import (
 	"math"
+	"os"
+	"runtime"
 	"testing"
 	"unsafe"
 
+	"github.com/go-webgpu/goffi/ffi"
+	"github.com/go-webgpu/goffi/types"
 	platformdarwin "github.com/gogpu/gogpu/internal/platform/darwin"
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gpucontext"
 )
+
+var macPlatformMainThreadTasks chan func()
+
+func TestMain(m *testing.M) {
+	macPlatformMainThreadTasks = make(chan func())
+	done := make(chan int, 1)
+	runtime.LockOSThread()
+	go func() {
+		done <- m.Run()
+		close(macPlatformMainThreadTasks)
+	}()
+	for task := range macPlatformMainThreadTasks {
+		task()
+	}
+	os.Exit(<-done)
+}
+
+func runOnMacPlatformMainThread(t *testing.T, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	var panicValue any
+	macPlatformMainThreadTasks <- func() {
+		defer func() {
+			panicValue = recover()
+			close(done)
+		}()
+		fn()
+	}
+	<-done
+	if panicValue != nil {
+		panic(panicValue)
+	}
+}
 
 func newMacIMEWindow() *darwinWindow {
 	return &darwinWindow{id: 7, events: eventqueue.New[Event](16), ime: macIMEState{enabled: true}}
@@ -207,4 +244,128 @@ func TestMacIMECursorAreaAndCancelController(t *testing.T) {
 	if w.ime.nativeNeedsUnmark {
 		t.Fatal("flushNativeIMEReset did not consume pending reset")
 	}
+}
+
+func TestMacIMEAppKitCallbackToPlatformEventsE2E(t *testing.T) {
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("native AppKit text-input integration test requires an interactive macOS session")
+	}
+
+	var libobjc unsafe.Pointer
+	var objcMsgSend unsafe.Pointer
+	runOnMacPlatformMainThread(t, func() {
+		var err error
+		libobjc, err = ffi.LoadLibrary("/usr/lib/libobjc.A.dylib")
+		if err != nil {
+			t.Fatalf("LoadLibrary(libobjc): %v", err)
+		}
+		objcMsgSend, err = ffi.GetSymbol(libobjc, "objc_msgSend")
+		if err != nil {
+			t.Fatalf("GetSymbol(objc_msgSend): %v", err)
+		}
+
+		poolClass := platformdarwin.GetClass("NSAutoreleasePool")
+		pool := poolClass.Send(platformdarwin.RegisterSelector("new"))
+		if pool.IsNil() {
+			t.Fatal("failed to create autorelease pool")
+		}
+		defer pool.Send(platformdarwin.RegisterSelector("drain"))
+
+		view, err := platformdarwin.CreateGoGPUView(platformdarwin.MakeRect(0, 0, 320, 200))
+		if err != nil {
+			t.Fatalf("CreateGoGPUView(): %v", err)
+		}
+		defer view.Send(platformdarwin.RegisterSelector("release"))
+		if !platformdarwin.ViewSupportsTextInput(view) {
+			t.Fatal("GoGPUView does not inherit NSTextInputClient")
+		}
+
+		w := newMacIMEWindow()
+		platformdarwin.SetViewTextInputHandler(view, platformdarwin.TextInputHandler{
+			SetMarkedText: func(text platformdarwin.ID, selectedLocation, selectedLength,
+				_, _ uintptr) {
+				w.handleMacSetMarkedText(text, selectedLocation, selectedLength, 0, 0)
+			},
+			InsertText: func(text platformdarwin.ID, _, _ uintptr) {
+				w.handleMacInsertText(text, 0, 0)
+			},
+			UnmarkText: w.handleMacUnmarkText,
+		})
+		defer platformdarwin.ClearViewTextInputHandler(view)
+
+		preedit := platformdarwin.NewNSString("かな")
+		if preedit == nil || preedit.ID().IsNil() {
+			t.Fatal("NewNSString(preedit) failed")
+		}
+		callMacIMETextRangeSelector(t, objcMsgSend, view, "setMarkedText:selectedRange:replacementRange:",
+			preedit.ID(), [2]uintptr{2, 0}, [2]uintptr{^uintptr(0), ^uintptr(0)})
+		preedit.Release()
+		got := popMacIMEEvents(w)
+		if len(got) != 2 || got[0].Type != EventIMECompositionStart ||
+			got[1].Type != EventIMECompositionUpdate || got[1].IME == nil ||
+			got[1].IME.State.CompositionText != "かな" ||
+			got[1].IME.State.Cursor != (gpucontext.IMETextRange{Start: 6, End: 6}) {
+			t.Fatalf("native preedit events = %#v, want start and UTF-8 update", got)
+		}
+
+		commit := platformdarwin.NewNSString("仮名")
+		if commit == nil || commit.ID().IsNil() {
+			t.Fatal("NewNSString(commit) failed")
+		}
+		callMacIMETextRangeSelector(t, objcMsgSend, view, "insertText:replacementRange:",
+			commit.ID(), [2]uintptr{^uintptr(0), ^uintptr(0)})
+		commit.Release()
+		got = popMacIMEEvents(w)
+		if len(got) != 1 || got[0].Type != EventIMECompositionEnd || got[0].IME == nil ||
+			got[0].IME.Committed != "仮名" {
+			t.Fatalf("native commit events = %#v, want exactly one committed IME event", got)
+		}
+
+		preedit = platformdarwin.NewNSString("に")
+		callMacIMETextRangeSelector(t, objcMsgSend, view, "setMarkedText:selectedRange:replacementRange:",
+			preedit.ID(), [2]uintptr{1, 0}, [2]uintptr{^uintptr(0), ^uintptr(0)})
+		preedit.Release()
+		_ = popMacIMEEvents(w)
+		view.Send(platformdarwin.RegisterSelector("unmarkText"))
+		got = popMacIMEEvents(w)
+		if len(got) != 1 || got[0].Type != EventIMECanceled {
+			t.Fatalf("native cancel events = %#v, want one cancellation", got)
+		}
+	})
+}
+
+func callMacIMETextRangeSelector(t *testing.T, objcMsgSend unsafe.Pointer, view platformdarwin.ID, selectorName string, text platformdarwin.ID, ranges ...[2]uintptr) {
+	t.Helper()
+	rangeType := &types.TypeDescriptor{
+		Size:      16,
+		Alignment: 8,
+		Kind:      types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
+		},
+	}
+	argTypes := make([]*types.TypeDescriptor, 3+len(ranges))
+	argTypes[0] = types.PointerTypeDescriptor
+	argTypes[1] = types.PointerTypeDescriptor
+	argTypes[2] = types.PointerTypeDescriptor
+	for i := range ranges {
+		argTypes[3+i] = rangeType
+	}
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall, types.VoidTypeDescriptor, argTypes); err != nil {
+		t.Fatalf("PrepareCallInterface(): %v", err)
+	}
+	selector := uintptr(platformdarwin.RegisterSelector(selectorName))
+	self := view.Ptr()
+	object := text.Ptr()
+	values := make([]unsafe.Pointer, 0, 3+len(ranges))
+	values = append(values, unsafe.Pointer(&self), unsafe.Pointer(&selector), unsafe.Pointer(&object))
+	for i := range ranges {
+		values = append(values, unsafe.Pointer(&ranges[i]))
+	}
+	if _, err := ffi.CallFunction(cif, objcMsgSend, nil, values); err != nil {
+		t.Fatalf("objc_msgSend(%s): %v", selectorName, err)
+	}
+	runtime.KeepAlive(ranges)
 }
