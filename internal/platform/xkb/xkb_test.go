@@ -342,3 +342,51 @@ func TestSetKeymapFromRMLVO_NoFunction(t *testing.T) {
 		t.Error("Handle.SetKeymapFromRMLVO() with nil symbol = nil, want error")
 	}
 }
+
+func TestUpdateMaskAnswersWhetherTheEffectiveLayoutChanged(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Skipf("libxkbcommon: %v", err)
+	}
+	defer h.Close()
+	if err := h.SetKeymapFromRMLVO("evdev", "pc105", "us,fr", "", ""); err != nil {
+		t.Skipf("no us,fr keymap: %v", err)
+	}
+
+	steps := []struct {
+		name                string
+		modsDepressed, lock uint32
+		want                LayoutChange
+	}{
+		{"Shift", 1, 0, LayoutUnchanged},
+		{"the second layout", 0, 1, LayoutChanged},
+		{"Shift within it", 1, 1, LayoutUnchanged},
+		{"group 2, which wraps to the first layout", 0, 2, LayoutChanged},
+		{"group 0, the layout already in force", 0, 0, LayoutUnchanged},
+	}
+	for _, step := range steps {
+		if got := h.UpdateMask(step.modsDepressed, 0, 0, 0, 0, step.lock); got != step.want {
+			t.Errorf("%s answered %v, want %v", step.name, got, step.want)
+		}
+	}
+}
+
+func TestKeyWithoutModifiersAnswersTheFirstLevelOfTheActiveLayout(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Skipf("libxkbcommon: %v", err)
+	}
+	defer h.Close()
+	if err := h.SetKeymapFromRMLVO("evdev", "pc105", "us,fr", "", ""); err != nil {
+		t.Skipf("no us,fr keymap: %v", err)
+	}
+	const keyQ = 16 // evdev KEY_Q
+
+	if got := h.KeyWithoutModifiers(keyQ); got != 'q' {
+		t.Errorf("on US, KeyWithoutModifiers(KEY_Q) = %#x, want 'q'", got)
+	}
+	h.UpdateMask(1, 0, 0, 0, 0, 1) // Shift down, on French
+	if got := h.KeyWithoutModifiers(keyQ); got != 'a' {
+		t.Errorf("on French with Shift down, KeyWithoutModifiers(KEY_Q) = %#x, want 'a'", got)
+	}
+}

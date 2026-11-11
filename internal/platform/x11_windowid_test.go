@@ -36,6 +36,7 @@ func TestTranslateX11Event_StampsWindowID(t *testing.T) {
 		{"pointerleave", x11.PlatformEvent{Type: x11.EventTypePointerLeave}, EventPointerLeave},
 		{"scroll", x11.PlatformEvent{Type: x11.EventTypeScroll}, EventScroll},
 		{"expose", x11.PlatformEvent{Type: x11.EventTypeExpose}, EventExpose},
+		{"keyboard layout changed", x11.PlatformEvent{Type: x11.EventTypeKeyboardLayoutChanged}, EventKeyboardLayoutChanged},
 	}
 
 	for _, tc := range cases {

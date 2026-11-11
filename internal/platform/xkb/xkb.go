@@ -121,10 +121,24 @@ const (
 	// Value: XKB_STATE_MODS_DEPRESSED(0x08) | XKB_STATE_MODS_LATCHED(0x10) | XKB_STATE_MODS_LOCKED(0x20)
 	XKBStateModsEffective uint32 = 0x38
 
+	// xkbStateLayoutEffective is XKB_STATE_LAYOUT_EFFECTIVE, the bit of
+	// enum xkb_state_component for the effective layout.
+	xkbStateLayoutEffective uint32 = 1 << 7
+
 	// xkbModInvalid is the sentinel for "modifier not found".
 	// xkbcommon uses XKB_MOD_INVALID = 0xFFFFFFFF (uint32 max).
 	// We use int32 -1 since Go doesn't have unsigned enum values.
 	xkbModInvalid int32 = -1
+)
+
+// LayoutChange tells whether a keyboard event changed the effective layout,
+// and with it what the keys print.
+type LayoutChange bool
+
+// The two LayoutChange values.
+const (
+	LayoutUnchanged LayoutChange = false
+	LayoutChanged   LayoutChange = true
 )
 
 // New loads libxkbcommon.so.0 and creates an xkb_context.
@@ -389,15 +403,17 @@ func (h *Handle) KeyGetOneSym(keycode uint32) uint32 {
 	return result
 }
 
-// UpdateMask updates the xkb state with modifier and layout group changes.
+// UpdateMask updates the xkb state with modifier and layout group changes,
+// and answers whether the effective layout changed.
 // All 6 parameters match xkb_state_update_mask exactly.
 // On Wayland: called from wl_keyboard.modifiers (layoutDepressed/layoutLatched = 0).
 // On X11: called from XkbStateNotify with full baseMods/latchedMods/lockedMods + group fields.
-func (h *Handle) UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) {
+func (h *Handle) UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) LayoutChange {
 	if h == nil || h.state == 0 {
-		return
+		return LayoutUnchanged
 	}
-	h.stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked)
+	changed := h.stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked)
+	return changed&xkbStateLayoutEffective != 0
 }
 
 // UpdateKey updates the xkb state for a key press or release.
@@ -787,8 +803,9 @@ func (h *Handle) stateKeyGetUtf8(key uint32, buf []byte, bufSize uint32) int32 {
 	return result
 }
 
-// stateUpdateMask calls xkb_state_update_mask.
-func (h *Handle) stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) {
+// stateUpdateMask calls xkb_state_update_mask, and answers the state
+// components it changed.
+func (h *Handle) stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) uint32 {
 	var result uint32
 	args := [7]unsafe.Pointer{
 		unsafe.Pointer(&h.state),
@@ -800,6 +817,7 @@ func (h *Handle) stateUpdateMask(modsDepressed, modsLatched, modsLocked, layoutD
 		unsafe.Pointer(&layoutLocked),
 	}
 	_, _ = ffi.CallFunction(&h.cifStateUpdateMask, h.fnStateUpdateMask, unsafe.Pointer(&result), args[:])
+	return result
 }
 
 func (h *Handle) destroyState() {
@@ -881,13 +899,16 @@ func (h *Handle) stateKeyGetLayout(key uint32) uint32 {
 // key is the xkbcommon keycode (evdev + 8).
 func (h *Handle) keymapKeyGetSymsByLevel(key, layout, level uint32) (uint32, int32) {
 	var symsPtr unsafe.Pointer
+	// goffi reads each argument's value from the address it is given:
+	// syms_out's value is symsPtr's address, so it needs an address of its own.
+	symsOut := unsafe.Pointer(&symsPtr)
 	var count int32
 	args := [5]unsafe.Pointer{
 		unsafe.Pointer(&h.keymap),
 		unsafe.Pointer(&key),
 		unsafe.Pointer(&layout),
 		unsafe.Pointer(&level),
-		unsafe.Pointer(&symsPtr),
+		unsafe.Pointer(&symsOut),
 	}
 	_, _ = ffi.CallFunction(&h.cifKeymapKeyGetSymsByLevel, h.fnKeymapKeyGetSymsByLevel, unsafe.Pointer(&count), args[:])
 

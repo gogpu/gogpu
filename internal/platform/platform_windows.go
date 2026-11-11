@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
@@ -237,6 +238,13 @@ const (
 	waActive      = 1      // WA_ACTIVE
 	waClickActive = 2      // WA_CLICKACTIVE
 
+	// Keyboard layouts
+	wmInputLangChange = 0x0051 // WM_INPUTLANGCHANGE: lParam is the new layout
+	mapvkVscToVkEx    = 3      // MAPVK_VSC_TO_VK_EX
+	// toUnicodeKeepKeyboardState has ToUnicodeEx leave the keyboard state,
+	// a pending dead key included, as it is (Windows 10 1607 and later).
+	toUnicodeKeepKeyboardState = 1 << 2
+
 	// WaitEvents / WakeUp constants
 	wmWakeUp       = 0x0401     // WM_USER + 1 (custom wakeup message)
 	qsAllinput     = 0x04FF     // QS_ALLINPUT
@@ -294,6 +302,9 @@ var (
 	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
 	procMonitorFromWindow  = user32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW    = user32.NewProc("GetMonitorInfoW")
+	procGetKeyboardLayout  = user32.NewProc("GetKeyboardLayout")
+	procMapVirtualKeyExW   = user32.NewProc("MapVirtualKeyExW")
+	procToUnicodeEx        = user32.NewProc("ToUnicodeEx")
 
 	// DWM (Desktop Window Manager) for frameless window shadow
 	dwmapi                        = windows.NewLazyDLL("dwmapi.dll")
@@ -576,6 +587,10 @@ type windowsPlatform struct {
 	// Qt6/GTK4/SDL3/winit all use this pattern.
 	// Ring buffer (ADR-031): fixed capacity, zero allocs, drops oldest on overflow.
 	events *eventqueue.Queue[Event]
+
+	// keyboardLayout is the layout KeyLabel reads: the thread's at Init, then
+	// each one WM_INPUTLANGCHANGE reports.
+	keyboardLayout uintptr
 
 	// Menu state — implementation in menu_windows.go.
 	// menuMu guards pendingMenu; applyMenu reads on the OS message thread.
@@ -1211,7 +1226,42 @@ var _ PlatformManager = (*windowsPlatform)(nil)
 
 // Init implements PlatformManager.Init — process-level initialization only.
 func (p *windowsPlatform) Init() error {
+	p.keyboardLayout, _, _ = procGetKeyboardLayout.Call(0)
 	return p.initProcess()
+}
+
+// KeyLabel answers the character the current layout prints on key,
+// unshifted: what ToUnicodeEx types for the virtual key the layout puts at
+// key's scancode, with no modifier down. A dead key answers its spacing
+// character, and leaves no dead key pending.
+func (p *windowsPlatform) KeyLabel(key gpucontext.Key) rune {
+	scancode, ok := scancodeOfKey(key)
+	if !ok {
+		return 0
+	}
+	// MapVirtualKeyEx takes an extended scancode with its 0xE0 prefix.
+	prefixed := scancode
+	if scancode&kfExtended != 0 {
+		prefixed = 0xE000 | scancode&0xFF
+	}
+	virtualKey, _, _ := syscall.SyscallN(procMapVirtualKeyExW.Addr(), prefixed, mapvkVscToVkEx, p.keyboardLayout)
+	if virtualKey == 0 {
+		return 0
+	}
+	var keyState [256]byte
+	var text [8]uint16
+	result, _, _ := syscall.SyscallN(procToUnicodeEx.Addr(), virtualKey, scancode&0xFF,
+		uintptr(unsafe.Pointer(&keyState[0])), uintptr(unsafe.Pointer(&text[0])), uintptr(len(text)),
+		toUnicodeKeepKeyboardState, p.keyboardLayout)
+	count := int32(result)
+	switch {
+	case count == 0:
+		return 0
+	case count < 0:
+		// A dead key, its spacing character in text.
+		count = 1
+	}
+	return utf16.Decode(text[:count])[0]
 }
 
 func (w *win32Window) updateSize() {
@@ -2196,6 +2246,18 @@ var keyByScancode = map[uintptr]gpucontext.Key{
 	scRightSuper:   gpucontext.KeyRightSuper,
 }
 
+// scancodeOfKey answers the scancode keyByScancode names key at, the lowest
+// when it names several, and false when it names none.
+func scancodeOfKey(key gpucontext.Key) (uintptr, bool) {
+	var found uintptr
+	for scancode, named := range keyByScancode {
+		if named == key && (found == 0 || scancode < found) {
+			found = scancode
+		}
+	}
+	return found, found != 0
+}
+
 // getKeyState calls GetKeyState to check if a key is pressed.
 var procGetKeyState = user32.NewProc("GetKeyState")
 
@@ -2715,6 +2777,13 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		w.shouldClose = true
 		p.queueEvent(Event{Type: EventClose, WindowID: w.id})
 		return 0
+
+	case wmInputLangChange:
+		// Each window of the thread may hear the one change: report it once.
+		if lParam != p.keyboardLayout {
+			p.keyboardLayout = lParam
+			p.queueEvent(Event{Type: EventKeyboardLayoutChanged, WindowID: w.id})
+		}
 
 	case wmGetMinMaxInfo:
 		mmi := (*minMaxInfo)(unsafe.Pointer(lParam)) //nolint:govet // lParam is MINMAXINFO*

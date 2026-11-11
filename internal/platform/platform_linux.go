@@ -17,6 +17,7 @@ import (
 	"github.com/gogpu/gogpu/internal/platform/eventqueue"
 	"github.com/gogpu/gogpu/internal/platform/wayland"
 	"github.com/gogpu/gogpu/internal/platform/x11"
+	"github.com/gogpu/gogpu/internal/platform/xkb"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -25,8 +26,9 @@ import (
 type xkbKeyHandler interface {
 	Ready() bool
 	KeyGetUtf8(keycode uint32) string
+	KeyWithoutModifiers(keycode uint32) uint32
 	KeyRepeats(keycode uint32) bool
-	UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32)
+	UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) xkb.LayoutChange
 	SetKeymapFromFD(fd int, size uint32) error
 	Close()
 }
@@ -345,6 +347,8 @@ func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID Wi
 		return Event{Type: EventDragDrop, DragPaths: event.DragPaths, DragX: event.DragX, DragY: event.DragY, WindowID: windowID}
 	case x11.EventTypeDragLeave:
 		return Event{Type: EventDragLeave, WindowID: windowID}
+	case x11.EventTypeKeyboardLayoutChanged:
+		return Event{Type: EventKeyboardLayoutChanged, WindowID: windowID}
 	default:
 		return Event{Type: EventNone}
 	}
@@ -363,12 +367,23 @@ func (p *x11Platform) PollEvents() Event {
 	copy(secs, p.secondaries)
 	p.secondaryMu.RUnlock()
 	for _, sec := range secs {
-		if e := translateX11Event(sec.platform.PollEvents(), sec.platform, sec.winID); e.Type != EventNone {
+		if e := pollSecondaryX11(sec); e.Type != EventNone {
 			return e
 		}
 	}
 
 	return Event{Type: EventNone}
+}
+
+// pollSecondaryX11 answers sec's next event, past its layout changes: every
+// connection hears a layout change, and the primary's reports it once.
+func pollSecondaryX11(sec *secondaryX11Conn) Event {
+	for {
+		e := translateX11Event(sec.platform.PollEvents(), sec.platform, sec.winID)
+		if e.Type != EventKeyboardLayoutChanged {
+			return e
+		}
+	}
 }
 
 // waitEventsBudget is the total per-loop-turn time WaitEvents spends polling
@@ -468,6 +483,16 @@ func (p *x11Platform) FontSmoothing() gpucontext.FontSmoothing {
 		return p.inner.FontSmoothing()
 	}
 	return gpucontext.FontSmoothingGrayscale
+}
+
+// KeyLabel answers the character the active layout prints on key, unshifted,
+// from the primary connection, which reports the layout changes; 0 before
+// the first window opens it.
+func (p *x11Platform) KeyLabel(key gpucontext.Key) rune {
+	if p.inner == nil {
+		return 0
+	}
+	return p.inner.KeyLabel(key)
 }
 
 // DarkMode returns true if the system dark mode is active.
@@ -1837,16 +1862,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 		},
 
 		// Keyboard events
-		OnKeyboardKeymap: func(format uint32, fd int, size uint32) {
-			if format != wayland.KeyboardKeymapFormatXKBV1 {
-				return
-			}
-			if w.xkb != nil {
-				if err := w.xkb.SetKeymapFromFD(fd, size); err != nil {
-					logger().Warn("xkbcommon: failed to load keymap from compositor", "err", err)
-				}
-			}
-		},
+		OnKeyboardKeymap: w.handleKeyboardKeymap,
 		OnKeyboardEnter: func(serial uint32, keys []uint32) {
 			w.pointerMu.Lock()
 			w.keyboardFocused = true
@@ -1893,15 +1909,7 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			}
 		},
 		OnKeyboardModifiers: func(serial, modsDepressed, modsLatched, modsLocked, group uint32) {
-			w.pointerMu.Lock()
-			w.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
-			w.pointerMu.Unlock()
-
-			// Update xkbcommon state (modifier + layout group tracking).
-			// This enables proper multi-layout keyboard support.
-			if w.xkb != nil {
-				w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, 0, 0, group)
-			}
+			w.handleKeyboardModifiers(modsDepressed, modsLatched, modsLocked, group)
 		},
 		OnKeyboardRepeat: func(rate, delay int32) {
 			w.repeatMu.Lock()
@@ -2143,6 +2151,33 @@ func (w *waylandWindow) getModifiers() gpucontext.Modifiers {
 	w.pointerMu.RLock()
 	defer w.pointerMu.RUnlock()
 	return w.modifiers
+}
+
+// handleKeyboardKeymap loads the compositor's keymap, an XKB one only, and
+// reports the layout change.
+func (w *waylandWindow) handleKeyboardKeymap(format uint32, fd int, size uint32) {
+	if format != wayland.KeyboardKeymapFormatXKBV1 || w.xkb == nil {
+		return
+	}
+	if err := w.xkb.SetKeymapFromFD(fd, size); err != nil {
+		logger().Warn("xkbcommon: failed to load keymap from compositor", "err", err)
+		return
+	}
+	w.queueEvent(Event{Type: EventKeyboardLayoutChanged})
+}
+
+// handleKeyboardModifiers records the modifiers and the layout group, and
+// reports a layout change when xkb's effective layout changed.
+func (w *waylandWindow) handleKeyboardModifiers(modsDepressed, modsLatched, modsLocked, group uint32) {
+	w.pointerMu.Lock()
+	w.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
+	w.pointerMu.Unlock()
+
+	// Update xkbcommon state (modifier + layout group tracking).
+	// This enables proper multi-layout keyboard support.
+	if w.xkb != nil && w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, 0, 0, group) == xkb.LayoutChanged {
+		w.queueEvent(Event{Type: EventKeyboardLayoutChanged})
+	}
 }
 
 // keycodeToRune converts an evdev keycode to a printable rune.
@@ -3146,6 +3181,22 @@ func wlOutputSubpixelToLayout(subpixel int32) (gpucontext.SubpixelLayout, bool) 
 	default: // 0 = unknown
 		return gpucontext.SubpixelNone, false
 	}
+}
+
+// KeyLabel answers the character the active layout of the compositor's
+// keymap prints on key, unshifted, or 0 before the keymap arrives.
+func (p *waylandPlatform) KeyLabel(key gpucontext.Key) rune {
+	w := p.primary
+	if w.xkb == nil || !w.xkb.Ready() || key == gpucontext.KeyUnknown {
+		return 0
+	}
+	for keycode := uint32(0); keycode <= 255; keycode++ {
+		if evdevToKey(keycode) == key {
+			label, _ := x11.KeysymToRune(x11.Keysym(w.xkb.KeyWithoutModifiers(keycode)))
+			return label
+		}
+	}
+	return 0
 }
 
 // DarkMode returns true if the system dark mode is active.

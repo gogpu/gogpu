@@ -272,6 +272,13 @@ type SelectionNotifyEvent struct {
 
 func (*SelectionNotifyEvent) eventMarker() {}
 
+// MappingNotifyEvent.Request values: what the mapping change was to.
+const (
+	MappingModifier = 0
+	MappingKeyboard = 1
+	MappingPointer  = 2
+)
+
 // MappingNotifyEvent is generated when keyboard mapping changes.
 type MappingNotifyEvent struct {
 	Sequence     uint16 // Sequence number

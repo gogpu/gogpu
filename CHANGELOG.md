@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Key labels and layout changes** (@dvoyni). `App.KeyLabel` answers the character the current keyboard layout
+  prints on a physical key, unshifted: 'a' for `KeyQ` on a French layout. `App.OnKeyboardLayoutChanged` reports
+  each layout change, and the layout becoming known. On Windows, X11 and Wayland; macOS and the browser answer 0.
+
 ### Fixed
 
 - **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.

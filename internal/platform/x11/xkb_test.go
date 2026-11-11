@@ -617,7 +617,7 @@ func TestIntegration_HandleKeyEventReadsXkbGroup(t *testing.T) {
 
 func TestHandleEvent_RoutesUnknownEventToXkbHandler(t *testing.T) {
 	// Verify that the handleEvent switch case for *UnknownEvent calls
-	// handleUnknownEvent, which updates xkbGroup.
+	// handleUnknownEvent, which updates xkbGroup and reports the layout change.
 
 	km := buildDualLayoutMapping()
 	const eventBase = uint8(85)
@@ -644,10 +644,9 @@ func TestHandleEvent_RoutesUnknownEventToXkbHandler(t *testing.T) {
 	// Call handleEvent (the main event dispatcher) with the UnknownEvent.
 	result := p.handleEvent(unknownEvent)
 
-	// handleUnknownEvent returns nothing visible in the PlatformEvent
-	// (it updates internal state only), so result should be EventTypeNone.
-	if result.Type != EventTypeNone {
-		t.Errorf("handleEvent returned Type=%d for XKB event, want EventTypeNone", result.Type)
+	// A switch to another group changes the layout, which handleEvent reports.
+	if result.Type != EventTypeKeyboardLayoutChanged {
+		t.Errorf("handleEvent returned Type=%d for XKB event, want EventTypeKeyboardLayoutChanged", result.Type)
 	}
 
 	// But xkbGroup should have been updated.

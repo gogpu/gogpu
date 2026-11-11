@@ -92,6 +92,11 @@ const (
 	EventDragDrop     // Files dropped on window
 	EventDragLeave    // Files left window area
 	EventScaleChanged // DPI scale factor changed (ADR-059)
+
+	// EventKeyboardLayoutChanged reports that the keyboard layout changed, or
+	// became known: KeyLabeler's labels may differ. It names no window, since
+	// the keyboard is shared.
+	EventKeyboardLayoutChanged
 )
 
 // PrepareFrameResult contains per-frame surface state from the platform layer.
@@ -445,6 +450,19 @@ type LiveResizePhaser interface {
 // which is available before NSApplication initialization (Flutter/GLFW pattern).
 type PlatScaleProvider interface {
 	ScaleFactor() float64
+}
+
+// KeyLabeler is an optional interface for platforms that can tell what the
+// current keyboard layout prints on a key. Platforms that can't simply don't
+// implement it; callers use a type assertion.
+type KeyLabeler interface {
+	// KeyLabel answers the character the current layout types on key, a
+	// physical key named by its US QWERTY position, unshifted: 'a' for KeyQ
+	// on a French layout. It answers 0 when the key types none or the layout
+	// isn't known yet. A key that types a control character, such as Enter,
+	// may answer it: App drops those. EventKeyboardLayoutChanged tells when
+	// the answers may change. Call it on the thread that pumps events.
+	KeyLabel(key gpucontext.Key) rune
 }
 
 // PlatMenuManager is an optional interface for platforms that support

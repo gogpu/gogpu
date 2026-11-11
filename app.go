@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/gogpu/gogpu/gpu/types"
 	"github.com/gogpu/gogpu/input"
@@ -65,6 +66,9 @@ type App struct {
 	onMemoryWarning    func()                             // free caches or be killed (ADR-026)
 	onFileDrop         func(paths []string, x, y float64) // OS file drag-and-drop
 	hitTestCallback    gpucontext.HitTestCallback
+
+	// onKeyboardLayoutChanged is called at each keyboard layout change.
+	onKeyboardLayoutChanged func()
 
 	// State
 	running                atomic.Bool
@@ -259,6 +263,15 @@ func (a *App) Title() string {
 func (a *App) OnFocus(fn func(focused bool)) *App {
 	a.EventSource() // ensure eventSource is initialized
 	a.eventSource.OnFocus(fn)
+	return a
+}
+
+// OnKeyboardLayoutChanged registers a callback invoked when the keyboard
+// layout changes, after which KeyLabel answers the new layout's labels. It is
+// also invoked when the layout first becomes known: on Linux, the keymap
+// arrives with the first window.
+func (a *App) OnKeyboardLayoutChanged(fn func()) *App {
+	a.onKeyboardLayoutChanged = fn
 	return a
 }
 
@@ -874,6 +887,10 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 			Height:      event.Height,
 		})
 		a.RequestRedraw()
+	case platform.EventKeyboardLayoutChanged:
+		if a.onKeyboardLayoutChanged != nil {
+			a.onKeyboardLayoutChanged()
+		}
 	case platform.EventDragDrop:
 		if a.onFileDrop != nil {
 			a.onFileDrop(event.DragPaths, event.DragX, event.DragY)
@@ -1552,6 +1569,24 @@ func (a *App) FontSmoothing() gpucontext.FontSmoothing {
 		return a.manager.FontSmoothing()
 	}
 	return gpucontext.FontSmoothingGrayscale
+}
+
+// KeyLabel answers the character the current keyboard layout prints on key,
+// a physical key named by its US QWERTY position, unshifted: 'a' for KeyQ on
+// a French layout. It answers 0 for a key that prints none, such as Enter,
+// before the layout is known, and on platforms that cannot tell: macOS and
+// the browser. OnKeyboardLayoutChanged tells when the answers change. Call it
+// on the main thread.
+func (a *App) KeyLabel(key gpucontext.Key) rune {
+	labeler, ok := a.manager.(platform.KeyLabeler)
+	if !ok {
+		return 0
+	}
+	label := labeler.KeyLabel(key)
+	if unicode.IsControl(label) {
+		return 0
+	}
+	return label
 }
 
 // PollInputEvent returns the next pending input event, or (nil, false) if the

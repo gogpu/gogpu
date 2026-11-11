@@ -175,7 +175,7 @@ func TestWaylandXKBGroupSwitch(t *testing.T) {
 	w.xkb = xkbMock
 
 	// Simulate wl_keyboard.modifiers with group=1 (second layout)
-	waylandModifiersCallback(w, 0, 0, 0, 1)
+	w.handleKeyboardModifiers(0, 0, 0, 1)
 
 	if xkbMock.lastGroup != 1 {
 		t.Errorf("xkbMock.lastGroup = %d, want 1", xkbMock.lastGroup)
@@ -200,7 +200,7 @@ func TestWaylandXKBGroupSwitchAffectsKeyOutput(t *testing.T) {
 	}
 
 	// Switch to group 1 (Russian layout)
-	waylandModifiersCallback(w, 0, 0, 0, 1)
+	w.handleKeyboardModifiers(0, 0, 0, 1)
 	xkbMock.result = "\u0439" // Cyrillic й
 
 	events = dispatchKeyWithXKB(w, 16, 0, true)
@@ -216,7 +216,7 @@ func TestWaylandXKBKeymapCallback(t *testing.T) {
 	w.xkb = xkbMock
 
 	// Simulate keymap callback with XKB_KEYMAP_FORMAT_TEXT_V1 = 1
-	waylandKeymapCallback(w, 1, 42, 4096)
+	w.handleKeyboardKeymap(1, 42, 4096)
 
 	if xkbMock.setKeymapFD != 42 {
 		t.Errorf("xkbMock.setKeymapFD = %d, want 42", xkbMock.setKeymapFD)
@@ -233,7 +233,7 @@ func TestWaylandXKBKeymapCallbackIgnoresNonXKB(t *testing.T) {
 	w.xkb = xkbMock
 
 	// Format 0 = XKB_KEYMAP_FORMAT_NO_KEYMAP → should be ignored
-	waylandKeymapCallback(w, 0, 42, 4096)
+	w.handleKeyboardKeymap(0, 42, 4096)
 
 	if xkbMock.setKeymapFD != 0 {
 		t.Errorf("xkbMock.setKeymapFD = %d, want 0 (not called)", xkbMock.setKeymapFD)
@@ -252,7 +252,7 @@ func TestWaylandXKBThreadSafety(t *testing.T) {
 		wg.Add(2)
 		go func(group uint32) {
 			defer wg.Done()
-			waylandModifiersCallback(w, 0, 0, 0, group)
+			w.handleKeyboardModifiers(0, 0, 0, group)
 		}(uint32(i % 4))
 		go func() {
 			defer wg.Done()
@@ -274,6 +274,8 @@ type mockXKBHandle struct {
 	updateMaskCalled int
 	setKeymapFD      int
 	setKeymapSize    uint32
+	// keysyms holds each evdev keycode's keysym at the first level.
+	keysyms map[uint32]uint32
 }
 
 func (m *mockXKBHandle) Ready() bool {
@@ -288,11 +290,13 @@ func (m *mockXKBHandle) KeyGetUtf8(keycode uint32) string {
 	return m.result
 }
 
-func (m *mockXKBHandle) UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) {
+func (m *mockXKBHandle) UpdateMask(modsDepressed, modsLatched, modsLocked, layoutDepressed, layoutLatched, layoutLocked uint32) xkb.LayoutChange {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	layoutChange := xkb.LayoutChange(m.lastGroup != layoutLocked)
 	m.lastGroup = layoutLocked
 	m.updateMaskCalled++
+	return layoutChange
 }
 
 func (m *mockXKBHandle) SetKeymapFromFD(fd int, size uint32) error {
@@ -300,7 +304,14 @@ func (m *mockXKBHandle) SetKeymapFromFD(fd int, size uint32) error {
 	defer m.mu.Unlock()
 	m.setKeymapFD = fd
 	m.setKeymapSize = size
+	m.lastGroup = 0 // a new keymap's state starts in the first layout
 	return nil
+}
+
+func (m *mockXKBHandle) KeyWithoutModifiers(keycode uint32) uint32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.keysyms[keycode]
 }
 
 func (m *mockXKBHandle) KeyRepeats(_ uint32) bool {
@@ -354,25 +365,69 @@ func dispatchKeyWithXKB(w *waylandWindow, keycode uint32, mods gpucontext.Modifi
 	return result
 }
 
-// waylandModifiersCallback simulates the OnKeyboardModifiers callback.
-// Mirrors the production callback: updates modifiers + xkb state.
-func waylandModifiersCallback(w *waylandWindow, modsDepressed, modsLatched, modsLocked, group uint32) {
-	w.pointerMu.Lock()
-	w.modifiers = evdevModsToModifiers(modsDepressed, modsLocked)
-	w.pointerMu.Unlock()
-
-	if w.xkb != nil {
-		w.xkb.UpdateMask(modsDepressed, modsLatched, modsLocked, 0, 0, group)
+// layoutChanges drains w's events and answers how many were layout changes.
+func layoutChanges(w *waylandWindow) int {
+	count := 0
+	for {
+		event, ok := w.events.Pop()
+		if !ok {
+			return count
+		}
+		if event.Type == EventKeyboardLayoutChanged {
+			count++
+		}
 	}
 }
 
-// waylandKeymapCallback simulates the OnKeyboardKeymap callback.
-// Mirrors the production callback: loads keymap from fd when format is XKB_V1.
-func waylandKeymapCallback(w *waylandWindow, format uint32, fd int, size uint32) {
-	if format != 1 { // XKB_KEYMAP_FORMAT_TEXT_V1
-		return
+func TestWaylandReportsALayoutChangeAtEachKeymapAndGroupSwitch(t *testing.T) {
+	w := &waylandWindow{startTime: time.Now(), events: eventqueue.New[Event](eventqueue.DefaultCapacity)}
+	w.xkb = &mockXKBHandle{ready: true}
+
+	steps := []struct {
+		name string
+		run  func()
+		want int
+	}{
+		{"a keymap", func() { w.handleKeyboardKeymap(1, 42, 4096) }, 1},
+		{"the first group", func() { w.handleKeyboardModifiers(0, 0, 0, 0) }, 0},
+		{"a switch to the second group", func() { w.handleKeyboardModifiers(0, 0, 0, 1) }, 1},
+		{"Shift within the second group", func() { w.handleKeyboardModifiers(1, 0, 0, 1) }, 0},
+		{"a new keymap", func() { w.handleKeyboardKeymap(1, 43, 4096) }, 1},
+		{"the second group on the new keymap", func() { w.handleKeyboardModifiers(0, 0, 0, 1) }, 1},
+		{"a keymap in another format", func() { w.handleKeyboardKeymap(0, 44, 4096) }, 0},
 	}
-	if w.xkb != nil {
-		_ = w.xkb.SetKeymapFromFD(fd, size)
+	for _, step := range steps {
+		step.run()
+		if got := layoutChanges(w); got != step.want {
+			t.Errorf("%s reported %d layout changes, want %d", step.name, got, step.want)
+		}
+	}
+}
+
+func TestWaylandKeyLabelIsTheFirstLevelOfTheActiveLayout(t *testing.T) {
+	xkbMock := &mockXKBHandle{keysyms: map[uint32]uint32{
+		16: 'a',        // KEY_Q on French
+		3:  0xe9,       // KEY_2 on French: eacute
+		26: 0xfe52,     // KEY_LEFTBRACE on French: dead_circumflex
+		28: 0xff0d,     // KEY_ENTER: Return
+		30: 0x01000430, // KEY_A on Russian: Cyrillic a, as a Unicode keysym
+	}}
+	p := &waylandPlatform{primary: &waylandWindow{xkb: xkbMock}}
+
+	if got := p.KeyLabel(gpucontext.KeyQ); got != 0 {
+		t.Errorf("before the keymap, KeyLabel(KeyQ) = %q, want 0", got)
+	}
+	xkbMock.ready = true
+	for key, want := range map[gpucontext.Key]rune{
+		gpucontext.KeyQ:           'a',
+		gpucontext.Key2:           'é',
+		gpucontext.KeyLeftBracket: '^',
+		gpucontext.KeyEnter:       0,
+		gpucontext.KeyA:           'а',
+		gpucontext.KeyF1:          0,
+	} {
+		if got := p.KeyLabel(key); got != want {
+			t.Errorf("KeyLabel(%v) = %q, want %q", key, got, want)
+		}
 	}
 }

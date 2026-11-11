@@ -55,10 +55,11 @@ const (
 	EventTypePointerLeave
 	EventTypeScroll
 	EventTypeExpose
-	EventTypeDragEnter // Files entered window area (XDND)
-	EventTypeDragMove  // Files moving over window
-	EventTypeDragDrop  // Files dropped on window
-	EventTypeDragLeave // Files left window area
+	EventTypeDragEnter             // Files entered window area (XDND)
+	EventTypeDragMove              // Files moving over window
+	EventTypeDragDrop              // Files dropped on window
+	EventTypeDragLeave             // Files left window area
+	EventTypeKeyboardLayoutChanged // Keyboard layout changed or became known: KeyLabel may answer differently
 )
 
 // PlatformEvent represents a platform event.
@@ -441,6 +442,9 @@ func (p *Platform) Init(config Config) error {
 	p.windows[window] = w
 	p.windowMu.Unlock()
 	p.primary = w
+
+	// The keyboard mapping is known from here on.
+	w.queueEvent(PlatformEvent{Type: EventTypeKeyboardLayoutChanged})
 
 	// Flush to ensure all requests are sent
 	_ = conn.Flush()
@@ -1081,10 +1085,14 @@ func (p *Platform) handleEvent(event Event) PlatformEvent {
 		p.handleGenericEvent(w, e)
 
 	case *UnknownEvent:
-		p.handleUnknownEvent(e)
+		if p.handleUnknownEvent(e) == xkbcommon.LayoutChanged {
+			return PlatformEvent{Type: EventTypeKeyboardLayoutChanged}
+		}
 
 	case *MappingNotifyEvent:
-		p.handleMappingNotify()
+		if p.handleMappingNotify(e) == xkbcommon.LayoutChanged {
+			return PlatformEvent{Type: EventTypeKeyboardLayoutChanged}
+		}
 	}
 
 	return PlatformEvent{Type: EventTypeNone}
@@ -1337,9 +1345,10 @@ func (p *Platform) handleGenericEvent(w *x11Window, ge *GenericEvent) {
 // handleUnknownEvent checks if an unrecognized X11 event is an XKB extension event.
 // XKB events arrive with a dynamic event type code (EventBase assigned by the server),
 // which parseEvent cannot recognize statically — they land in UnknownEvent.
-func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
+// It answers whether the layout changed: the keymap or the group.
+func (p *Platform) handleUnknownEvent(e *UnknownEvent) xkbcommon.LayoutChange {
 	if p.xkb == nil || e.Type != p.xkb.EventBase {
-		return
+		return xkbcommon.LayoutUnchanged
 	}
 
 	// XKB events share a single event type code (EventBase).
@@ -1352,13 +1361,13 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 		// Reload the keymap and re-sync state.
 		logger().Debug("XKB keymap changed, reloading", "type", xkbType)
 		p.reloadXkbKeymap()
-		return
+		return xkbcommon.LayoutChanged
 
 	case XkbStateNotify: // = 2
 		// Fall through to state handling below.
 
 	default:
-		return
+		return xkbcommon.LayoutUnchanged
 	}
 
 	// XCB wire format for xcb_xkb_state_notify_event_t (32 bytes):
@@ -1386,6 +1395,7 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 		lockedMods := uint32(e.Data[11])
 
 		p.mu.Lock()
+		layoutChange := xkbcommon.LayoutChange(p.xkbGroup != newGroup)
 		p.xkbGroup = newGroup
 		xkbState := p.xkbState
 		p.mu.Unlock()
@@ -1403,21 +1413,25 @@ func (p *Platform) handleUnknownEvent(e *UnknownEvent) {
 		}
 
 		logger().Debug("XKB state changed", "group", newGroup)
+		return layoutChange
 	}
+	return xkbcommon.LayoutUnchanged
 }
 
 // handleMappingNotify re-reads XKB full state when keyboard mapping changes.
 // Some X servers send MappingNotify instead of XkbStateNotify on layout switch.
 // SDL3 uses the same fallback pattern.
 // BUG-INPUT-005: Now uses full state sync (modifiers + group) instead of group-only.
-func (p *Platform) handleMappingNotify() {
+// It answers whether the layout changed: the keyboard mapping or the group.
+func (p *Platform) handleMappingNotify(e *MappingNotifyEvent) xkbcommon.LayoutChange {
+	mappingChange := xkbcommon.LayoutChange(e.Request == MappingKeyboard)
 	p.reloadServerKeymap()
 	if p.xkb == nil {
-		return
+		return mappingChange
 	}
 	fullState, err := p.conn.xkbGetFullState(p.xkb.MajorOpcode)
 	if err != nil {
-		return
+		return mappingChange
 	}
 
 	p.mu.Lock()
@@ -1437,6 +1451,7 @@ func (p *Platform) handleMappingNotify() {
 	if changed {
 		logger().Debug("XKB group changed via MappingNotify", "group", fullState.Group)
 	}
+	return mappingChange || xkbcommon.LayoutChange(changed)
 }
 
 // reloadXkbKeymap re-reads the keymap and re-syncs xkbcommon state.
@@ -1497,6 +1512,48 @@ func (p *Platform) reloadServerKeymap() {
 	p.mu.Lock()
 	p.keymap = keymap
 	p.mu.Unlock()
+}
+
+// KeyLabel answers the character the active layout prints on key, unshifted,
+// read as typed text is: from xkbcommon's state, or from the server's
+// mapping at the XKB group when xkbcommon is not used. It answers 0 for a
+// key that prints none, and before Init.
+func (p *Platform) KeyLabel(key gpucontext.Key) rune {
+	keycode, ok := keycodeOfKey(key)
+	if !ok {
+		return 0
+	}
+
+	p.mu.Lock()
+	xkbState := p.xkbState
+	keymap := p.keymap
+	group := p.xkbGroup
+	p.mu.Unlock()
+
+	var keysym Keysym
+	switch {
+	case xkbState.Ready():
+		// Evdev keycode for xkbcommon: X11 keycode - 8
+		keysym = Keysym(xkbState.KeyWithoutModifiers(uint32(keycode) - 8))
+	case keymap != nil:
+		keysym = keymap.KeycodeToKeysymGroup(keycode, false, false, group)
+	}
+	label, _ := KeysymToRune(keysym)
+	return label
+}
+
+// keycodeOfKey answers the X11 keycode x11KeycodeToKey names key, and false
+// when none does.
+func keycodeOfKey(key gpucontext.Key) (uint8, bool) {
+	if key == gpucontext.KeyUnknown {
+		return 0, false
+	}
+	for keycode := 8; keycode <= 255; keycode++ {
+		if x11KeycodeToKey(uint8(keycode)) == key {
+			return uint8(keycode), true
+		}
+	}
+	return 0, false
 }
 
 // handleXITouchEvent processes an XI2 touch event and dispatches it as a PointerEvent.
