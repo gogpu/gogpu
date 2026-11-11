@@ -297,6 +297,7 @@ var (
 	user32                 = windows.NewLazyDLL("user32.dll")
 	kernel32               = windows.NewLazyDLL("kernel32.dll")
 	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
+	procUnregisterClassW   = user32.NewProc("UnregisterClassW")
 	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
 	procShowWindow         = user32.NewProc("ShowWindow")
 	procUpdateWindow       = user32.NewProc("UpdateWindow")
@@ -655,6 +656,15 @@ type windowsPlatform struct {
 // Global instance for window procedure callback
 var globalPlatform *windowsPlatform
 
+// windowClassName names, in UTF-16, the window class initProcess registers
+// and Destroy unregisters. A constant without a NUL never fails to convert.
+var windowClassName, _ = windows.UTF16PtrFromString("GoGPUWindow")
+
+// wndProcCallback is wndProc as the callback the window class holds. It is
+// made once per process: syscall.NewCallback never frees a callback, and a
+// process can make only a limited number of them.
+var wndProcCallback = syscall.NewCallback(wndProc)
+
 // newPlatformManager returns a real PlatformManager for Win32.
 // windowsPlatform implements PlatformManager natively: process-level Init()
 // sets up DPI awareness, HINSTANCE, and registers the window class; then
@@ -694,17 +704,12 @@ func (p *windowsPlatform) initProcess() error {
 	p.hinstance = windows.Handle(ret)
 
 	// Register window class
-	className, err := windows.UTF16PtrFromString("GoGPUWindow")
-	if err != nil {
-		return fmt.Errorf("utf16 class name: %w", err)
-	}
-
 	wndClass := wndClassExW{
 		cbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 		style:         0,
-		lpfnWndProc:   syscall.NewCallback(wndProc),
+		lpfnWndProc:   wndProcCallback,
 		hInstance:     p.hinstance,
-		lpszClassName: className,
+		lpszClassName: windowClassName,
 	}
 
 	blackBrush, _, _ := procGetStockObject.Call(4) // BLACK_BRUSH = 4
@@ -851,11 +856,6 @@ func enableDwmBlurBehind(hwnd windows.HWND) {
 // createWindowWin32 creates a new Win32 HWND window from the given config.
 // Shared between PlatformManager.CreateWindow and the legacy Init(config).
 func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error) {
-	className, err := windows.UTF16PtrFromString("GoGPUWindow")
-	if err != nil {
-		return nil, fmt.Errorf("utf16 class name: %w", err)
-	}
-
 	titlePtr, err := windows.UTF16PtrFromString(config.Title)
 	if err != nil {
 		return nil, fmt.Errorf("utf16 title: %w", err)
@@ -892,7 +892,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	// Create window with pre-scaled outer dimensions.
 	hwnd, _, _ := procCreateWindowExW.Call(
 		dwExStyle,
-		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(windowClassName)),
 		uintptr(unsafe.Pointer(titlePtr)),
 		style,
 		uintptr(cwUseDefault),
@@ -1448,7 +1448,9 @@ func (w *win32Window) setModalFrameCallback(fn func()) {
 }
 
 // Destroy implements PlatformManager.Destroy.
-// Destroys all remaining windows and releases process-level resources.
+// Destroys all remaining windows and releases process-level resources,
+// the window class included, so a platform initialized later in the same
+// process registers it again.
 // Pattern: collect + remove under lock, then DestroyWindow outside lock.
 // DestroyWindow sends WM_DESTROY synchronously to wndProc, which needs
 // windowMu.RLock — holding the write lock would deadlock.
@@ -1474,6 +1476,7 @@ func (p *windowsPlatform) Destroy() {
 			procDestroyWindow.Call(hwnd)
 		}
 	}
+	procUnregisterClassW.Call(uintptr(unsafe.Pointer(windowClassName)), uintptr(p.hinstance))
 	p.hMenu = 0
 	p.primary = nil
 	globalPlatform = nil

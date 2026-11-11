@@ -20,11 +20,6 @@ func TestWindowsFullscreenStartup(t *testing.T) {
 	}
 	defer func() {
 		p.Destroy()
-		name, err := windows.UTF16PtrFromString("GoGPUWindow")
-		if err != nil {
-			t.Fatal(err)
-		}
-		user32.NewProc("UnregisterClassW").Call(uintptr(unsafe.Pointer(name)), uintptr(p.hinstance))
 		windows.NewLazySystemDLL("ole32.dll").NewProc("OleUninitialize").Call()
 	}()
 
