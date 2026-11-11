@@ -562,15 +562,17 @@ func (w *Window) Deminiaturize() {
 }
 
 // Zoom toggles the window zoom state.
+//
+// mu is not held across the send, as in ToggleFullScreen: AppKit delivers
+// windowWillStartLiveResize: synchronously inside zoom:, and the delegate
+// callback takes mu.
 func (w *Window) Zoom() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.nsWindow.IsNil() {
+	nsWindow := w.NSWindow()
+	if nsWindow.IsNil() {
 		return
 	}
 
-	w.nsWindow.SendPtr(selectors.zoom, 0)
+	nsWindow.SendPtr(selectors.zoom, 0)
 }
 
 // InLiveResize returns true while the user is dragging a resize handle.
@@ -974,16 +976,17 @@ func (w *Window) SetOnClose(fn func() bool) {
 // RequestSize sets the window content size to the given logical dimensions.
 // Skips if fullscreen or zoomed (maximized). Uses setContentSize: which
 // correctly handles the title bar (inner size, not outer frame).
+//
+// mu is held only to record the size, not across the sends, for the reason
+// Zoom gives.
 func (w *Window) RequestSize(width, height int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.nsWindow.IsNil() {
+	nsWindow := w.NSWindow()
+	if nsWindow.IsNil() {
 		return
 	}
 
 	// Skip if fullscreen — the compositor owns the size.
-	mask := uintptr(w.nsWindow.Send(selectors.styleMask))
+	mask := uintptr(nsWindow.Send(selectors.styleMask))
 	if mask&uintptr(NSWindowStyleMaskFullScreen) != 0 {
 		return
 	}
@@ -991,14 +994,16 @@ func (w *Window) RequestSize(width, height int) {
 	// Restore from zoomed state before resizing (winit pattern).
 	// macOS "zoom" is analogous to Windows maximize — the caller asked for a
 	// specific size, so zoomed state should yield.
-	if w.nsWindow.Send(selectors.isZoomed) != 0 {
-		w.nsWindow.SendPtr(selectors.zoom, 0)
+	if nsWindow.Send(selectors.isZoomed) != 0 {
+		nsWindow.SendPtr(selectors.zoom, 0)
 	}
 
+	w.mu.Lock()
 	w.width = width
 	w.height = height
+	w.mu.Unlock()
 
-	w.nsWindow.SendSize(selectors.setContentSize, MakeSize(CGFloat(width), CGFloat(height)))
+	nsWindow.SendSize(selectors.setContentSize, MakeSize(CGFloat(width), CGFloat(height)))
 }
 
 // ScreenChangedCh returns a receive-only channel that is signaled when the
