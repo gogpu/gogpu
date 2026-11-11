@@ -282,7 +282,7 @@ func (m *mockXKBHandle) Ready() bool {
 	return m.ready
 }
 
-func (m *mockXKBHandle) KeyGetUtf8(keycode uint32) string {
+func (m *mockXKBHandle) KeyGetComposedUtf8(keycode uint32) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.result
