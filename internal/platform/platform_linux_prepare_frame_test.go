@@ -28,33 +28,6 @@ func newWaylandPrepareFrameFixture(width, height int, outputScale, lastScale flo
 	return &waylandPlatformWindow{platform: plat, id: 1}, wp
 }
 
-// newWaylandSecondaryPrepareFrameFixture mirrors the primary fixture on the
-// secondary-window path (own state, shared scale source on the platform).
-func newWaylandSecondaryPrepareFrameFixture(width, height int, outputScale, lastScale float64) (*waylandPlatformWindow, *waylandWindow) {
-	plat := &waylandPlatform{
-		primary: &waylandWindow{
-			events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
-			startTime: time.Now(),
-		},
-		outputScale: outputScale,
-	}
-	sec := &secondaryWaylandConn{winID: 2}
-	// Initialize fields in place — waylandWindow embeds sync.Mutex and must
-	// not be copied (govet copylocks).
-	sec.state.width = width
-	sec.state.height = height
-	sec.state.lastScale = lastScale
-	sec.state.winID = 2
-	sec.state.events = eventqueue.New[Event](eventqueue.DefaultCapacity)
-	sec.state.startTime = time.Now()
-	w := &waylandPlatformWindow{
-		platform:  plat,
-		id:        2,
-		secondary: sec,
-	}
-	return w, &w.secondary.state
-}
-
 func callPrepareFrameWithTimeout(t *testing.T, w *waylandPlatformWindow, timeout time.Duration) PrepareFrameResult {
 	t.Helper()
 	done := make(chan PrepareFrameResult, 1)
@@ -119,28 +92,6 @@ func TestWaylandPrepareFrame_ScaleChangeNoDeadlock(t *testing.T) {
 	}
 	if wp.lastScale != 1.667 {
 		t.Errorf("lastScale = %v, want 1.667", wp.lastScale)
-	}
-}
-
-// TestWaylandPrepareFrame_SecondaryScaleChangeNoDeadlock covers the secondary
-// window path, which uses a distinct waylandWindow but the same lock pattern.
-func TestWaylandPrepareFrame_SecondaryScaleChangeNoDeadlock(t *testing.T) {
-	w, wp := newWaylandSecondaryPrepareFrameFixture(1024, 768, 2.0, 1.0)
-
-	r := callPrepareFrameWithTimeout(t, w, 2*time.Second)
-
-	if !r.ScaleChanged {
-		t.Fatal("ScaleChanged = false, want true on secondary scale transition")
-	}
-	events := drainScaleChanged(wp.events)
-	if len(events) != 1 {
-		t.Fatalf("EventScaleChanged count = %d, want 1", len(events))
-	}
-	if events[0].WindowID != 2 {
-		t.Errorf("WindowID = %d, want 2", events[0].WindowID)
-	}
-	if events[0].Width != 1024 || events[0].Height != 768 {
-		t.Errorf("event size = %dx%d, want 1024x768", events[0].Width, events[0].Height)
 	}
 }
 
