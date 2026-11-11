@@ -210,149 +210,7 @@ func registerGoGPUViewClass() (Class, error) {
 	goGPUViewSuper = superClass
 	goGPUViewTextInput = textInput
 
-	// keyDown: — handle keyboard event, prevent default NSBeep chain.
-	// ObjC signature: -(void)keyDown:(NSEvent*)event → "v@:@"
-	keyDownIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
-		if handler, ok := getViewTextInputHandler(self); ok && handler.KeyDown != nil {
-			handler.KeyDown(ID(event))
-		}
-		// Event dispatch is intentionally not forwarded to NSTextView's
-		// keyDown:. The bridge calls interpretKeyEvents: explicitly when IME
-		// input is enabled; disabled input follows the existing platform event
-		// path and cannot produce duplicate committed text.
-		return 0
-	})
-	ClassAddMethod(cls, RegisterSelector("keyDown:"), keyDownIMP, "v@:@")
-
-	// keyUp: — same pattern, prevent super from running.
-	keyUpIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
-		return 0
-	})
-	ClassAddMethod(cls, RegisterSelector("keyUp:"), keyUpIMP, "v@:@")
-
-	// flagsChanged: — modifier key events (Shift, Cmd, etc.)
-	flagsChangedIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
-		return 0
-	})
-	ClassAddMethod(cls, RegisterSelector("flagsChanged:"), flagsChangedIMP, "v@:@")
-
-	// doCommandBySelector: — no-op. This is the method that calls NSBeep()
-	// when no responder handles the command. GLFW uses empty {}, SDL3 same.
-	doCommandIMP := ffi.NewCallback(func(self, sel, aSelector uintptr) uintptr {
-		return 0
-	})
-	ClassAddMethod(cls, RegisterSelector("doCommandBySelector:"), doCommandIMP, "v@::")
-
-	// acceptsFirstResponder — return YES so the view receives key events.
-	acceptsIMP := ffi.NewCallback(func(self, sel uintptr) uintptr {
-		return 1 // YES
-	})
-	ClassAddMethod(cls, RegisterSelector("acceptsFirstResponder"), acceptsIMP, "B@:")
-
-	if textInput {
-		// NSTextInputClient mutators. NSRange is two NSUInteger values in the
-		// Cocoa ABI, so the callback receives location/length pairs rather than
-		// a Go struct (goffi callbacks intentionally restrict struct arguments
-		// on arm64).
-		setMarkedTextIMP := ffi.NewCallback(func(self, sel, text, selectedLocation,
-			selectedLength, replacementLocation, replacementLength uintptr) uintptr {
-			textID := ID(text)
-			if !isViewTextInputForwarding(self) {
-				if handler, ok := getViewTextInputHandler(self); ok && handler.SetMarkedText != nil {
-					handler.SetMarkedText(textID, selectedLocation, selectedLength,
-						replacementLocation, replacementLength)
-				}
-			}
-			callGoGPUViewSuperVoid(
-				ID(self),
-				"setMarkedText:selectedRange:replacementRange:",
-				&textID,
-				[2]uintptr{selectedLocation, selectedLength},
-				[2]uintptr{replacementLocation, replacementLength},
-			)
-			return 0
-		})
-		ClassAddMethod(cls, RegisterSelector("setMarkedText:selectedRange:replacementRange:"),
-			setMarkedTextIMP, "v@:@{_NSRange=QQ}{_NSRange=QQ}")
-
-		// Older input methods still send the two-argument spelling. Keep it as
-		// a compatibility shim and forward it to NSTextView's implementation.
-		setMarkedTextLegacyIMP := ffi.NewCallback(func(self, sel, text,
-			selectedLocation, selectedLength uintptr) uintptr {
-			textID := ID(text)
-			if !isViewTextInputForwarding(self) {
-				if handler, ok := getViewTextInputHandler(self); ok && handler.SetMarkedText != nil {
-					handler.SetMarkedText(textID, selectedLocation, selectedLength,
-						^uintptr(0), ^uintptr(0))
-				}
-			}
-			callGoGPUViewSuperVoid(
-				ID(self),
-				"setMarkedText:selectedRange:",
-				&textID,
-				[2]uintptr{selectedLocation, selectedLength},
-			)
-			return 0
-		})
-		ClassAddMethod(cls, RegisterSelector("setMarkedText:selectedRange:"),
-			setMarkedTextLegacyIMP, "v@:@{_NSRange=QQ}")
-
-		insertTextIMP := ffi.NewCallback(func(self, sel, text,
-			replacementLocation, replacementLength uintptr) uintptr {
-			textID := ID(text)
-			if !isViewTextInputForwarding(self) {
-				if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
-					handler.InsertText(textID, replacementLocation, replacementLength)
-				}
-			}
-			callGoGPUViewSuperVoid(
-				ID(self),
-				"insertText:replacementRange:",
-				&textID,
-				[2]uintptr{replacementLocation, replacementLength},
-			)
-			return 0
-		})
-		ClassAddMethod(cls, RegisterSelector("insertText:replacementRange:"),
-			insertTextIMP, "v@:@{_NSRange=QQ}")
-
-		// Compatibility with the pre-10.6 insertText: spelling.
-		insertTextLegacyIMP := ffi.NewCallback(func(self, sel, text uintptr) uintptr {
-			textID := ID(text)
-			if !isViewTextInputForwarding(self) {
-				if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
-					handler.InsertText(textID, ^uintptr(0), ^uintptr(0))
-				}
-			}
-			callGoGPUViewSuperVoid(ID(self), "insertText:", &textID)
-			return 0
-		})
-		ClassAddMethod(cls, RegisterSelector("insertText:"), insertTextLegacyIMP, "v@:@")
-
-		unmarkTextIMP := ffi.NewCallback(func(self, sel uintptr) uintptr {
-			if !isViewTextInputForwarding(self) {
-				if handler, ok := getViewTextInputHandler(self); ok && handler.UnmarkText != nil {
-					handler.UnmarkText()
-				}
-			}
-			callGoGPUViewSuperVoid(ID(self), "unmarkText", nil)
-			return 0
-		})
-		ClassAddMethod(cls, RegisterSelector("unmarkText"), unmarkTextIMP, "v@:")
-
-		// Surrounding text is supplied by the focused widget rather than by
-		// NSTextView's internal text storage. This callback returns an
-		// autoreleased NSString, which is a valid NSAttributedString result.
-		attributedSubstringIMP := ffi.NewCallback(func(self, sel, location,
-			length, actualRange uintptr) uintptr {
-			if handler, ok := getViewTextInputHandler(self); ok && handler.AttributedSubstring != nil {
-				return uintptr(handler.AttributedSubstring(location, length, actualRange))
-			}
-			return 0
-		})
-		ClassAddMethod(cls, RegisterSelector("attributedSubstringForProposedRange:actualRange:"),
-			attributedSubstringIMP, "@@:{_NSRange=QQ}^{_NSRange=QQ}")
-	}
+	registerGoGPUViewKeyboardAndTextMethods(cls, textInput)
 
 	// --- NSDraggingDestination protocol methods ---
 	// These handle OS file drag-and-drop onto the view.
@@ -476,6 +334,166 @@ func registerGoGPUViewClass() (Class, error) {
 
 	RegisterClassPair(cls)
 	return cls, nil
+}
+
+func registerGoGPUViewKeyboardAndTextMethods(cls Class, textInput bool) {
+	// keyDown: — handle keyboard event, prevent default NSBeep chain.
+	// ObjC signature: -(void)keyDown:(NSEvent*)event → "v@:@"
+	keyDownIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
+		if handler, ok := getViewTextInputHandler(self); ok && handler.KeyDown != nil {
+			handler.KeyDown(ID(event))
+		}
+		// Event dispatch is intentionally not forwarded to NSTextView's
+		// keyDown:. The bridge calls interpretKeyEvents: explicitly when IME
+		// input is enabled; disabled input follows the existing platform event
+		// path and cannot produce duplicate committed text.
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("keyDown:"), keyDownIMP, "v@:@")
+
+	// keyUp: — same pattern, prevent super from running.
+	keyUpIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("keyUp:"), keyUpIMP, "v@:@")
+
+	// flagsChanged: — modifier key events (Shift, Cmd, etc.)
+	flagsChangedIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr {
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("flagsChanged:"), flagsChangedIMP, "v@:@")
+
+	// doCommandBySelector: — no-op. This is the method that calls NSBeep()
+	// when no responder handles the command. GLFW uses empty {}, SDL3 same.
+	doCommandIMP := ffi.NewCallback(func(self, sel, aSelector uintptr) uintptr {
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("doCommandBySelector:"), doCommandIMP, "v@::")
+
+	// acceptsFirstResponder — return YES so the view receives key events.
+	acceptsIMP := ffi.NewCallback(func(self, sel uintptr) uintptr {
+		return 1 // YES
+	})
+	ClassAddMethod(cls, RegisterSelector("acceptsFirstResponder"), acceptsIMP, "B@:")
+
+	if textInput {
+		registerGoGPUViewTextInputMethods(cls)
+	}
+}
+
+func registerGoGPUViewTextInputMethods(cls Class) {
+	registerGoGPUViewMarkedTextMethods(cls)
+	registerGoGPUViewInsertTextMethods(cls)
+	registerGoGPUViewUnmarkAndSubstringMethods(cls)
+}
+
+func registerGoGPUViewMarkedTextMethods(cls Class) {
+	// NSTextInputClient mutators. NSRange is two NSUInteger values in the
+	// Cocoa ABI, so the callback receives location/length pairs rather than
+	// a Go struct (goffi callbacks intentionally restrict struct arguments
+	// on arm64).
+	setMarkedTextIMP := ffi.NewCallback(func(self, sel, text, selectedLocation,
+		selectedLength, replacementLocation, replacementLength uintptr) uintptr {
+		textID := ID(text)
+		if !isViewTextInputForwarding(self) {
+			if handler, ok := getViewTextInputHandler(self); ok && handler.SetMarkedText != nil {
+				handler.SetMarkedText(textID, selectedLocation, selectedLength,
+					replacementLocation, replacementLength)
+			}
+		}
+		callGoGPUViewSuperVoid(
+			ID(self),
+			"setMarkedText:selectedRange:replacementRange:",
+			&textID,
+			[2]uintptr{selectedLocation, selectedLength},
+			[2]uintptr{replacementLocation, replacementLength},
+		)
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("setMarkedText:selectedRange:replacementRange:"),
+		setMarkedTextIMP, "v@:@{_NSRange=QQ}{_NSRange=QQ}")
+
+	// Older input methods still send the two-argument spelling. Keep it as
+	// a compatibility shim and forward it to NSTextView's implementation.
+	setMarkedTextLegacyIMP := ffi.NewCallback(func(self, sel, text,
+		selectedLocation, selectedLength uintptr) uintptr {
+		textID := ID(text)
+		if !isViewTextInputForwarding(self) {
+			if handler, ok := getViewTextInputHandler(self); ok && handler.SetMarkedText != nil {
+				handler.SetMarkedText(textID, selectedLocation, selectedLength,
+					^uintptr(0), ^uintptr(0))
+			}
+		}
+		callGoGPUViewSuperVoid(
+			ID(self),
+			"setMarkedText:selectedRange:",
+			&textID,
+			[2]uintptr{selectedLocation, selectedLength},
+		)
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("setMarkedText:selectedRange:"),
+		setMarkedTextLegacyIMP, "v@:@{_NSRange=QQ}")
+}
+
+func registerGoGPUViewInsertTextMethods(cls Class) {
+	insertTextIMP := ffi.NewCallback(func(self, sel, text,
+		replacementLocation, replacementLength uintptr) uintptr {
+		textID := ID(text)
+		if !isViewTextInputForwarding(self) {
+			if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
+				handler.InsertText(textID, replacementLocation, replacementLength)
+			}
+		}
+		callGoGPUViewSuperVoid(
+			ID(self),
+			"insertText:replacementRange:",
+			&textID,
+			[2]uintptr{replacementLocation, replacementLength},
+		)
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("insertText:replacementRange:"),
+		insertTextIMP, "v@:@{_NSRange=QQ}")
+
+	// Compatibility with the pre-10.6 insertText: spelling.
+	insertTextLegacyIMP := ffi.NewCallback(func(self, sel, text uintptr) uintptr {
+		textID := ID(text)
+		if !isViewTextInputForwarding(self) {
+			if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
+				handler.InsertText(textID, ^uintptr(0), ^uintptr(0))
+			}
+		}
+		callGoGPUViewSuperVoid(ID(self), "insertText:", &textID)
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("insertText:"), insertTextLegacyIMP, "v@:@")
+}
+
+func registerGoGPUViewUnmarkAndSubstringMethods(cls Class) {
+	unmarkTextIMP := ffi.NewCallback(func(self, sel uintptr) uintptr {
+		if !isViewTextInputForwarding(self) {
+			if handler, ok := getViewTextInputHandler(self); ok && handler.UnmarkText != nil {
+				handler.UnmarkText()
+			}
+		}
+		callGoGPUViewSuperVoid(ID(self), "unmarkText", nil)
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("unmarkText"), unmarkTextIMP, "v@:")
+
+	// Surrounding text is supplied by the focused widget rather than by
+	// NSTextView's internal text storage. This callback returns an
+	// autoreleased NSString, which is a valid NSAttributedString result.
+	attributedSubstringIMP := ffi.NewCallback(func(self, sel, location,
+		length, actualRange uintptr) uintptr {
+		if handler, ok := getViewTextInputHandler(self); ok && handler.AttributedSubstring != nil {
+			return uintptr(handler.AttributedSubstring(location, length, actualRange))
+		}
+		return 0
+	})
+	ClassAddMethod(cls, RegisterSelector("attributedSubstringForProposedRange:actualRange:"),
+		attributedSubstringIMP, "@@:{_NSRange=QQ}^{_NSRange=QQ}")
 }
 
 // RegisterForDraggedTypes registers file drop types on a view.

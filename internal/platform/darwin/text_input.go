@@ -233,10 +233,14 @@ func ObjectString(object ID) string {
 	if units == 0 || units > 1<<20 {
 		return ""
 	}
+	// NSStringUTF8Ptr returns an address owned by AppKit. Reinterpret the
+	// uintptr bits without pointer arithmetic on a Go allocation so checkptr
+	// accepts reads from this foreign C string.
+	nativePointer := *(*unsafe.Pointer)(unsafe.Pointer(&ptr))
 	byteCount := 0
-	for max := int(units) * 4; byteCount <= max; byteCount++ {
-		if *(*byte)(unsafe.Add(unsafe.Pointer(ptr), byteCount)) == 0 {
-			return string(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), byteCount))
+	for maxUTF8Bytes := int(units) * 4; byteCount <= maxUTF8Bytes; byteCount++ {
+		if *(*byte)(unsafe.Add(nativePointer, byteCount)) == 0 {
+			return string(unsafe.Slice((*byte)(nativePointer), byteCount))
 		}
 	}
 	return ""

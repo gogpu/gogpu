@@ -294,6 +294,10 @@ func writeNSRange(pointer, location, length uintptr) {
 	if pointer == 0 {
 		return
 	}
+	// The pointer originates from AppKit's NSRange* callback argument, not a
+	// Go uintptr. Reinterpret its bits through an unsafe.Pointer value so the
+	// race/checkptr build recognizes the foreign pointer lifetime.
+	nativePointer := *(*unsafe.Pointer)(unsafe.Pointer(&pointer))
 	rangeValue := struct {
 		location uintptr
 		length   uintptr
@@ -301,7 +305,7 @@ func writeNSRange(pointer, location, length uintptr) {
 	*(*struct {
 		location uintptr
 		length   uintptr
-	})(unsafe.Pointer(pointer)) = rangeValue
+	})(nativePointer) = rangeValue
 }
 
 func validIMECursorArea(area gpucontext.IMECursorArea) bool {
