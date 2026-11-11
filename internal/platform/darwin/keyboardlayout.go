@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"unicode/utf16"
 	"unsafe"
@@ -208,7 +209,12 @@ func keyboardLayoutOfSource(source ID) (KeyboardLayout, error) {
 		return KeyboardLayout{}, errors.New("darwin: the input source's key layout is empty")
 	}
 	keyMap := make([]byte, length)
+	// SendPtrs is a Go wrapper around msgSend: pin the bytes it passes as a
+	// uintptr for the call (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&keyMap[0])
 	data.SendPtrs(RegisterSelector("getBytes:length:"), uintptr(unsafe.Pointer(&keyMap[0])), uintptr(length))
+	pinner.Unpin()
 	return KeyboardLayout{keyMap: keyMap}, nil
 }
 
