@@ -339,7 +339,7 @@ func (h *LibwaylandHandle) setupCSDPointer(seatName, seatVersion uint32) error {
 
 	// Add pointer listener (9 events). Pass h as data so each callback can
 	// identify which LibwaylandHandle to update — this avoids the single global
-	// and allows multiple concurrent CSD instances (primary + secondary windows).
+	// and allows multiple concurrent CSD instances.
 	initCSDPointerListeners()
 	if err := h.addListenerWithData(pointer, uintptr(unsafe.Pointer(&csdPointerListener[0])), uintptr(unsafe.Pointer(h))); err != nil {
 		return fmt.Errorf("add pointer listener: %w", err)

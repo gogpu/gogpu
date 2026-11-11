@@ -122,14 +122,6 @@ func (p *waylandPlatform) printParentWindow(id WindowID) (string, error) {
 		}
 		return "", nil
 	}
-
-	p.secondaryMu.RLock()
-	defer p.secondaryMu.RUnlock()
-	for _, sec := range p.secondaries {
-		if sec.winID == id && sec.libwl != nil && sec.libwl.Surface() != 0 {
-			return "", nil
-		}
-	}
 	return "", fmt.Errorf("wayland: parent window %d is unknown", id)
 }
 

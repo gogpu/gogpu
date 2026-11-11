@@ -4,6 +4,7 @@ package platform
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -55,7 +56,7 @@ type waylandWindow struct {
 	// Event queue — ring buffer (ADR-031: fixed capacity, zero allocs, drops oldest).
 	events *eventqueue.Queue[Event]
 
-	// winID identifies this window (primary or secondary) so queueEvent can
+	// winID identifies this window so queueEvent can
 	// stamp every event with the right WindowID — without it, App's
 	// getByPlatformID lookup in dispatchKeyEvent/dispatchPointerEvent/
 	// dispatchScrollEvent/dispatchCharEvent always resolves to nil for
@@ -106,15 +107,9 @@ type waylandWindow struct {
 	callbackMu sync.RWMutex
 }
 
-// secondaryWaylandConn holds state for a secondary window on Wayland.
-// Each secondary window opens its own wl_display connection and wl_surface
-// so it gets an independent compositor-side window with its own title bar.
-type secondaryWaylandConn struct {
-	libwl  *wayland.LibwaylandHandle
-	goDisp *wayland.Display
-	winID  WindowID
-	state  waylandWindow // event queue, shouldClose, width, height
-}
+// errWaylandSecondWindow is returned by waylandPlatform.CreateWindow while
+// its one window is open.
+var errWaylandSecondWindow = errors.New("wayland: one window is supported, and it is open")
 
 // waylandPlatform implements the Platform interface using Wayland.
 // Uses a single libwayland-client C connection for everything:
@@ -149,10 +144,6 @@ type waylandPlatform struct {
 	primary         *waylandWindow
 	primaryWindowID WindowID
 
-	// Secondary windows — each with its own Wayland connection and surface.
-	secondaries []*secondaryWaylandConn
-	secondaryMu sync.RWMutex
-
 	// menu manages the D-Bus AppMenu server (com.canonical.dbusmenu).
 	// Nil-safe; all methods no-op when DBUS_SESSION_BUS_ADDRESS is absent.
 	menu *linuxMenuState
@@ -164,7 +155,7 @@ type waylandPlatform struct {
 // single-connection/single-window abstraction (its own atoms, XKB state,
 // cursor cache, event queue) — so a secondary window is just another
 // *x11.Platform instance with its own Init() call, no protocol-level code
-// duplication needed. Mirrors secondaryWaylandConn's role for Wayland.
+// duplication needed.
 type secondaryX11Conn struct {
 	platform *x11.Platform
 	winID    WindowID
@@ -254,8 +245,7 @@ func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
 
 	if p.primaryWindowID != 0 {
 		// Secondary window: open an independent X11 connection rather than
-		// reinitializing the primary's — mirrors waylandPlatform.CreateWindow's
-		// secondary branch.
+		// reinitializing the primary's.
 		inner := x11.NewPlatform()
 		if err := inner.Init(x11Config); err != nil {
 			return nil, fmt.Errorf("x11: secondary window: %w", err)
@@ -352,7 +342,7 @@ func translateX11Event(event x11.PlatformEvent, inner *x11.Platform, windowID Wi
 
 // PollEvents processes pending X11 events from the primary connection first,
 // then — non-blocking, one at a time — each secondary window's independent
-// connection (mirrors waylandPlatform.PollEvents' secondary drain loop).
+// connection.
 func (p *x11Platform) PollEvents() Event {
 	if e := translateX11Event(p.inner.PollEvents(), p.inner, p.primaryWindowID); e.Type != EventNone {
 		return e
@@ -631,17 +621,11 @@ func (w *x11PlatformWindow) Destroy() {
 // --- waylandPlatformWindow implements PlatformWindow ---
 
 // waylandPlatformWindow wraps waylandPlatform to implement PlatformWindow.
-//
-// Known gap: Minimize/Maximize/IsMaximized/SetFullscreen/IsFullscreen/
-// SetCursor/SetCursorMode/CursorMode/SetFrameless/IsFrameless/
-// SetHitTestCallback all delegate unconditionally to w.platform (the
-// primary connection) rather than branching on w.secondary — calling any
-// of them on a secondary window silently affects window 1 instead. Close(),
-// input dispatch, and Destroy() are secondary-aware (fixed); these are not.
+// Wayland opens one window, so every operation goes to the platform's own
+// connection and window state.
 type waylandPlatformWindow struct {
-	platform  *waylandPlatform
-	id        WindowID
-	secondary *secondaryWaylandConn // non-nil for secondary windows
+	platform *waylandPlatform
+	id       WindowID
 }
 
 func (w *waylandPlatformWindow) ID() WindowID { return w.id }
@@ -654,18 +638,10 @@ func (w *waylandPlatformWindow) GetHandle() (uintptr, uintptr) {
 }
 
 func (w *waylandPlatformWindow) libwayland() *wayland.LibwaylandHandle {
-	if w.secondary != nil && w.secondary.libwl != nil {
-		return w.secondary.libwl
-	}
 	return w.platform.libwl
 }
 
 func (w *waylandPlatformWindow) LogicalSize() (int, int) {
-	if w.secondary != nil {
-		w.secondary.state.eventMu.Lock()
-		defer w.secondary.state.eventMu.Unlock()
-		return w.secondary.state.width, w.secondary.state.height
-	}
 	wp := w.platform.primary
 	wp.eventMu.Lock()
 	defer wp.eventMu.Unlock()
@@ -704,11 +680,6 @@ func (w *waylandPlatformWindow) ScaleFactor() float64 {
 }
 
 func (w *waylandPlatformWindow) ShouldClose() bool {
-	if w.secondary != nil {
-		w.secondary.state.eventMu.Lock()
-		defer w.secondary.state.eventMu.Unlock()
-		return w.secondary.state.shouldClose
-	}
 	wp := w.platform.primary
 	wp.eventMu.Lock()
 	defer wp.eventMu.Unlock()
@@ -742,13 +713,7 @@ func (w *waylandPlatformWindow) SetMaxSize(width, height int) {
 // or tiled windows. On Wayland the client cannot force a window size; only
 // the compositor decides the final geometry via xdg_toplevel.configure.
 func (w *waylandPlatformWindow) RequestSize(width, height int) {
-	var wp *waylandWindow
-	if w.secondary != nil {
-		wp = &w.secondary.state
-	} else {
-		wp = w.platform.primary
-	}
-
+	wp := w.platform.primary
 	wp.eventMu.Lock()
 	isMax := wp.maximized
 	isFS := wp.fullscreen
@@ -784,12 +749,7 @@ func (w *waylandPlatformWindow) PrepareFrame() PrepareFrameResult {
 	}
 
 	// Detect scale change (ADR-059).
-	var wp *waylandWindow
-	if w.secondary != nil {
-		wp = &w.secondary.state
-	} else {
-		wp = w.platform.primary
-	}
+	wp := w.platform.primary
 	wp.eventMu.Lock()
 	scaleChanged := wp.lastScale != 0 && wp.lastScale != scale
 	if scaleChanged {
@@ -882,18 +842,8 @@ func (w *waylandPlatformWindow) IsFullscreen() bool {
 	return w.platform.IsFullscreen()
 }
 
-// Close requests this window close. For a secondary window this must not
-// go through platform.CloseWindow(), which only ever targets the primary
-// connection — a secondary Close() would otherwise silently close window 1
-// instead of itself.
+// Close requests this window close.
 func (w *waylandPlatformWindow) Close() {
-	if w.secondary != nil {
-		w.secondary.state.eventMu.Lock()
-		w.secondary.state.shouldClose = true
-		w.secondary.state.eventMu.Unlock()
-		w.secondary.state.queueEvent(Event{Type: EventClose})
-		return
-	}
 	w.platform.CloseWindow()
 }
 
@@ -942,12 +892,6 @@ func (w *waylandPlatformWindow) FrameCallbackReady() bool {
 }
 
 func (w *waylandPlatformWindow) SetHeaderAlignment(alignment int) {
-	if w.secondary != nil {
-		if w.secondary.libwl != nil {
-			w.secondary.libwl.SetCSDTitleAlignment(alignment)
-		}
-		return
-	}
 	if w.platform.libwl != nil {
 		w.platform.libwl.SetCSDTitleAlignment(alignment)
 	}
@@ -983,25 +927,7 @@ func (w *waylandPlatformWindow) StartDrag(paths []string, done func(DragResult))
 }
 
 func (w *waylandPlatformWindow) Destroy() {
-	if w.secondary != nil {
-		// Remove from platform's secondary list, then close the connection.
-		p := w.platform
-		p.secondaryMu.Lock()
-		for i, s := range p.secondaries {
-			if s == w.secondary {
-				p.secondaries = append(p.secondaries[:i], p.secondaries[i+1:]...)
-				break
-			}
-		}
-		p.secondaryMu.Unlock()
-		w.secondary.libwl.Close()
-		if w.secondary.goDisp != nil {
-			_ = w.secondary.goDisp.Close()
-		}
-		w.secondary = nil
-		return
-	}
-	// Primary destruction handled by platform.Destroy()
+	// Destruction handled by platform.Destroy()
 }
 
 // --- PlatformManager implementation on waylandPlatform ---
@@ -1036,23 +962,16 @@ func (p *waylandPlatform) Init() error {
 }
 
 // CreateWindow creates a Wayland window with the given configuration.
-// The first call initializes the primary connection. Subsequent calls create
-// secondary windows each with their own independent Wayland connection and surface.
+// The first call initializes the connection. Wayland opens one window: a
+// later call returns errWaylandSecondWindow and opens nothing, since a
+// window on a connection of its own would receive no input from the seat.
 func (p *waylandPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	// TODO(#361, ADR-060): Wayland transparency — explicitly call
 	// wl_surface_set_opaque_region(NULL) when config.Transparent is set.
 	// For now Config.Transparent is silently ignored: Wayland surfaces have
 	// no opaque region by default, so surface alpha already composites.
 	if p.libwl != nil {
-		// Secondary window: open a new independent Wayland connection.
-		sec, err := p.createSecondaryConn(config)
-		if err != nil {
-			return nil, fmt.Errorf("wayland: secondary window: %w", err)
-		}
-		p.secondaryMu.Lock()
-		p.secondaries = append(p.secondaries, sec)
-		p.secondaryMu.Unlock()
-		return &waylandPlatformWindow{platform: p, id: sec.winID, secondary: sec}, nil
+		return nil, errWaylandSecondWindow
 	}
 
 	if err := p.initSingleConnection(config); err != nil {
@@ -1360,251 +1279,6 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 		"surface", fmt.Sprintf("%#x", libwl.Surface()))
 
 	return nil
-}
-
-// createSecondaryConn opens an independent Wayland connection for a secondary window.
-// Each secondary gets its own wl_display, wl_surface, and xdg_toplevel so the
-// compositor presents it as a separate window. Input (keyboard/pointer) is NOT
-// set up on secondary connections — it flows through the primary connection's seat.
-func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandConn, error) { //nolint:gocognit,maintidx // configure callback has unavoidable branching for maximize/fullscreen/CSD resize
-	// Discover Wayland globals via a short-lived pure-Go connection.
-	display, err := wayland.Connect()
-	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
-	}
-	registry, err := display.GetRegistry()
-	if err != nil {
-		_ = display.Close()
-		return nil, fmt.Errorf("registry: %w", err)
-	}
-	required := []string{
-		wayland.InterfaceWlCompositor,
-		wayland.InterfaceXdgWmBase,
-	}
-	if err := registry.WaitForGlobals(required, 5); err != nil {
-		_ = display.Close()
-		return nil, err
-	}
-	if err := display.Roundtrip(); err != nil {
-		_ = display.Close()
-		return nil, fmt.Errorf("roundtrip: %w", err)
-	}
-
-	compGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlCompositor)
-	xdgGlobal := registry.GetGlobalByInterface(wayland.InterfaceXdgWmBase)
-	if compGlobal == nil || xdgGlobal == nil {
-		_ = display.Close()
-		return nil, fmt.Errorf("wl_compositor or xdg_wm_base not found")
-	}
-
-	var decorName, decorVersion uint32
-	if dg := registry.GetGlobalByInterface(wayland.InterfaceZxdgDecorationManagerV1); dg != nil {
-		decorName = dg.Name
-		decorVersion = dg.Version
-	}
-	var fractionalName, fractionalVersion uint32
-	if fractionalGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpFractionalScaleManagerV1); fractionalGlobal != nil {
-		fractionalName = fractionalGlobal.Name
-		fractionalVersion = fractionalGlobal.Version
-	}
-	var viewporterName, viewporterVersion uint32
-	if viewporterGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpViewporter); viewporterGlobal != nil {
-		viewporterName = viewporterGlobal.Name
-		viewporterVersion = viewporterGlobal.Version
-	}
-	// decorName/decorVersion enable SSD on the secondary window.
-	// CSD is attempted below when SSD is unavailable.
-
-	libwl, err := wayland.OpenLibwayland(
-		compGlobal.Name, compGlobal.Version,
-		xdgGlobal.Name, xdgGlobal.Version,
-		decorName, decorVersion,
-	)
-	if err != nil {
-		_ = display.Close()
-		return nil, fmt.Errorf("OpenLibwayland: %w", err)
-	}
-	if err := libwl.SetupFractionalScale(fractionalName, fractionalVersion, viewporterName, viewporterVersion); err != nil {
-		logger().Warn("secondary fractional scale setup failed", "err", err)
-	}
-
-	libwl.SetTitle(config.Title)
-	if !config.Resizable {
-		libwl.SetMinSize(int32(config.Width), int32(config.Height))
-		libwl.SetMaxSize(int32(config.Width), int32(config.Height))
-	} else {
-		if config.MinWidth > 0 || config.MinHeight > 0 {
-			libwl.SetMinSize(int32(config.MinWidth), int32(config.MinHeight))
-		}
-		if config.MaxWidth > 0 || config.MaxHeight > 0 {
-			libwl.SetMaxSize(int32(config.MaxWidth), int32(config.MaxHeight))
-		}
-	}
-	if config.Fullscreen {
-		libwl.SetFullscreen()
-	}
-
-	id := NewWindowID()
-	sec := &secondaryWaylandConn{
-		libwl:  libwl,
-		goDisp: display,
-		winID:  id,
-		state: waylandWindow{
-			startTime: time.Now(),
-			events:    eventqueue.New[Event](eventqueue.DefaultCapacity),
-			repeatFd:  -1,
-			width:     config.Width,
-			height:    config.Height,
-			winID:     id,
-		},
-	}
-
-	// Wire configure and close callbacks for the secondary window.
-	libwl.SetToplevelCallbacks(
-		func(width, height int32, _ bool) {
-			w := &sec.state
-			w.eventMu.Lock()
-			defer w.eventMu.Unlock()
-
-			hasCSD := sec.libwl != nil && sec.libwl.CSDActive()
-			isMaximized := hasCSD && sec.libwl.IsMaximized()
-			isFullscreen := hasCSD && sec.libwl.IsFullscreen()
-
-			// Save pre-maximize size when transitioning to maximized.
-			if isMaximized && w.savedWidth == 0 && w.width > 0 {
-				w.savedWidth = w.width
-				w.savedHeight = w.height
-			}
-			if !isMaximized && w.savedWidth > 0 && width > 0 {
-				w.savedWidth = 0
-				w.savedHeight = 0
-			}
-
-			// width==0, height==0: compositor lets the client choose — restore saved size.
-			if width == 0 && height == 0 && w.savedWidth > 0 {
-				width = int32(w.savedWidth)
-				height = int32(w.savedHeight)
-				w.savedWidth = 0
-				w.savedHeight = 0
-			}
-
-			if width > 0 && height > 0 {
-				vulkanW := int(width)
-				vulkanH := int(height)
-
-				// When CSD is active and maximized, the compositor sends total geometry
-				// (content + title bar); subtract the title bar so the GPU surface
-				// covers only the content area. xdgSurfaceConfigureCb then calls
-				// ResizeCSD with these matching content dimensions.
-				if hasCSD && !isFullscreen && isMaximized {
-					tbH, _ := sec.libwl.CSDBorders()
-					vulkanH = int(height) - tbH
-					if vulkanH < 1 {
-						vulkanH = 1
-					}
-				}
-
-				if vulkanW != w.width || vulkanH != w.height {
-					if hasCSD {
-						sec.libwl.SetPendingCSDResize(vulkanW, vulkanH)
-					}
-					w.width = vulkanW
-					w.height = vulkanH
-					w.events.Push(Event{
-						Type:           EventResize,
-						WindowID:       sec.winID,
-						Width:          vulkanW,
-						Height:         vulkanH,
-						PhysicalWidth:  vulkanW,
-						PhysicalHeight: vulkanH,
-					})
-				}
-			}
-		},
-		func() {
-			logger().Info("secondary window close event", "id", sec.winID)
-			w := &sec.state
-			w.eventMu.Lock()
-			w.shouldClose = true
-			w.eventMu.Unlock()
-			w.events.Push(Event{Type: EventClose, WindowID: sec.winID})
-			p.WakeUp()
-		},
-	)
-
-	if err := libwl.SetupToplevelListeners(); err != nil {
-		logger().Warn("secondary: xdg_toplevel listener setup failed", "err", err)
-	}
-
-	// Attempt CSD if SSD was not negotiated and the required globals are present.
-	const decorModeServerSide = 2
-	needCSD := decorName == 0 || libwl.DecorationMode() != decorModeServerSide
-	if needCSD && !config.Frameless {
-		p.setupSecondaryCSD(registry, sec, config)
-	}
-
-	if err := libwl.Flush(); err != nil {
-		libwl.Close()
-		_ = display.Close()
-		return nil, fmt.Errorf("flush: %w", err)
-	}
-	if err := libwl.Roundtrip(); err != nil {
-		libwl.Close()
-		_ = display.Close()
-		return nil, fmt.Errorf("roundtrip: %w", err)
-	}
-
-	sec.state.configured = libwl.InitialConfigureReceived()
-	if !sec.state.configured {
-		logger().Warn("wayland secondary: surface not configured after init")
-	}
-
-	logger().Info("Wayland secondary window created",
-		"id", id,
-		"display", fmt.Sprintf("%#x", libwl.Display()),
-		"surface", fmt.Sprintf("%#x", libwl.Surface()))
-
-	return sec, nil
-}
-
-// setupSecondaryCSD attempts client-side decoration on a secondary window.
-// Called when SSD was not negotiated. Errors are logged as warnings — a
-// secondary window without CSD still renders; it just lacks a title bar.
-func (p *waylandPlatform) setupSecondaryCSD(registry *wayland.Registry, sec *secondaryWaylandConn, config Config) {
-	subcompGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlSubcompositor)
-	shmGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlShm)
-	if subcompGlobal == nil || shmGlobal == nil {
-		return
-	}
-	if csGlobal := registry.GetGlobalByInterface(wayland.InterfaceWpCursorShapeManagerV1); csGlobal != nil {
-		if err := sec.libwl.SetupCursorShape(csGlobal.Name, csGlobal.Version); err != nil {
-			logger().Warn("secondary CSD cursor shape setup failed", "err", err)
-		}
-	}
-	var seatName, seatVersion uint32
-	if sg := registry.GetGlobalByInterface(wayland.InterfaceWlSeat); sg != nil {
-		seatName = sg.Name
-		seatVersion = sg.Version
-	}
-	if err := sec.libwl.SetupCSD(
-		subcompGlobal.Name, subcompGlobal.Version,
-		shmGlobal.Name, shmGlobal.Version,
-		seatName, seatVersion,
-		config.Width, config.Height,
-		config.Title,
-		nil, // DefaultCSDPainter
-		func() {
-			logger().Info("secondary CSD close button pressed", "id", sec.winID)
-			w := &sec.state
-			w.eventMu.Lock()
-			w.shouldClose = true
-			w.eventMu.Unlock()
-			w.events.Push(Event{Type: EventClose, WindowID: sec.winID})
-			p.WakeUp()
-		},
-	); err != nil {
-		logger().Warn("secondary window CSD initialization failed", "err", err)
-	}
 }
 
 // initCSD initializes Client-Side Decorations when SSD is unavailable.
@@ -3051,31 +2725,6 @@ func (p *waylandPlatform) PollEvents() Event {
 		return e
 	}
 
-	// Dispatch and drain events from secondary connections.
-	// Deep-copy the slice so a concurrent Destroy() (which nils libwl) cannot
-	// race with DispatchDefaultQueue below.
-	p.secondaryMu.RLock()
-	secs := make([]*secondaryWaylandConn, len(p.secondaries))
-	copy(secs, p.secondaries)
-	p.secondaryMu.RUnlock()
-	for _, sec := range secs {
-		if sec.libwl == nil {
-			continue
-		}
-		if err := sec.libwl.DispatchDefaultQueue(); err != nil {
-			logger().Error("wayland secondary dispatch error", "id", sec.winID, "error", err)
-		}
-		// Process CSD pointer events (separate queue from xdg_toplevel events).
-		if sec.libwl.CSDActive() {
-			if err := sec.libwl.DispatchCSDEvents(); err != nil {
-				logger().Error("secondary CSD dispatch error", "id", sec.winID, "error", err)
-			}
-		}
-		if e, ok := sec.state.events.Pop(); ok {
-			return e
-		}
-	}
-
 	return Event{Type: EventNone}
 }
 
@@ -3231,23 +2880,6 @@ func (p *waylandPlatform) WaitEvents() {
 		return
 	}
 
-	// Secondary connections take their own read intent: each has its own display.
-	// Safety: secs copies the slice header (pointer+len) under RLock. Iteration
-	// happens after RUnlock, which is safe because WaitEvents and all secondary
-	// creation/destruction run on the same main thread — no concurrent mutation
-	// can occur while we iterate.
-	p.secondaryMu.RLock()
-	secs := p.secondaries
-	p.secondaryMu.RUnlock()
-
-	conns := make([]wayland.EventConn, 0, 1+len(secs))
-	conns = append(conns, p.libwl)
-	for _, sec := range secs {
-		if sec.libwl != nil && sec.libwl.GetDisplayFD() >= 0 {
-			conns = append(conns, sec.libwl)
-		}
-	}
-
 	// BUG-INPUT-006: the repeat timerfd joins the wait so a due key repeat
 	// unblocks the wait without a goroutine and a WakeUp call.
 	w := p.primary
@@ -3261,7 +2893,7 @@ func (p *waylandPlatform) WaitEvents() {
 		extra = append(extra, unix.PollFd{Fd: int32(repeatFd), Events: unix.POLLIN})
 	}
 
-	wayland.WaitForReadable(conns, extra)
+	wayland.WaitForReadable([]wayland.EventConn{p.libwl}, extra)
 
 	// Drain the wakeup pipe so it is ready for the next WakeUp call.
 	drainPipe(p.wakePipe[0])
@@ -3556,23 +3188,12 @@ func (p *waylandPlatform) CloseWindow() {
 func (p *waylandPlatform) SetAppName(name string) {}
 
 // findWaylandWindowBySurface maps a wl_surface* proxy to the waylandWindow
-// that owns it. For DnD, the enter event carries the target surface which may
-// be a secondary window's surface. Returns nil if no match is found.
+// that owns it. For DnD, the enter event carries the target surface. Returns
+// nil if no match is found.
 func (p *waylandPlatform) findWaylandWindowBySurface(surface uintptr) *waylandWindow {
-	// Check primary window's surface.
 	if p.libwl != nil && p.libwl.Surface() == surface {
 		return p.primary
 	}
-
-	// Check secondary windows.
-	p.secondaryMu.RLock()
-	defer p.secondaryMu.RUnlock()
-	for _, sec := range p.secondaries {
-		if sec.libwl != nil && sec.libwl.Surface() == surface {
-			return &sec.state
-		}
-	}
-
 	return nil
 }
 

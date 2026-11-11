@@ -232,29 +232,19 @@ func (h *LibwaylandHandle) GetDisplayFD() int {
 var inputCallbackHandle *LibwaylandHandle
 
 // SetAsInputHandler sets this handle as the active input callback target.
-// Only call for the primary window; secondary windows share the primary's seat.
+// Call for the one window's handle: Wayland opens one window.
 func (h *LibwaylandHandle) SetAsInputHandler() {
 	inputCallbackHandle = h
 }
 
 // --- Per-toplevel handle map for configure/close callbacks ---
 // Keyed by xdg_toplevel proxy pointer (unique per LibwaylandHandle) so that
-// both primary and secondary windows can have independent configure/close routing.
+// configure and close reach the handle that owns the toplevel.
 
 var (
 	toplevelHandlesMu sync.Mutex
 	toplevelHandles   = make(map[uintptr]*LibwaylandHandle)
 )
-
-// SetToplevelCallbacks sets configure and close callbacks for this handle
-// via the per-toplevel map instead of the global inputCallbackHandle.
-// Use for secondary windows so they do not override primary pointer/keyboard routing.
-func (h *LibwaylandHandle) SetToplevelCallbacks(onConfigure func(int32, int32, bool), onClose func()) {
-	h.inputCallbacks = &InputCallbacks{
-		OnConfigure: onConfigure,
-		OnClose:     onClose,
-	}
-}
 
 // UnregisterToplevel removes this handle from the per-toplevel callback map.
 // Call before Close() to prevent stale entries.

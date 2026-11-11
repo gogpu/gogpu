@@ -328,6 +328,9 @@ func (wm *WindowManager) getByPlatformID(pid platform.WindowID) *Window {
 // to VSync off (Immediate present mode) following ADR-010 strategy.
 //
 // The primary window (created by Run) is always available via PrimaryWindow().
+//
+// Wayland opens one window: there NewWindow returns an error and opens
+// nothing while the primary window is open.
 func (a *App) NewWindow(config Config) (*Window, error) {
 	if a.manager == nil || a.renderer == nil {
 		return nil, fmt.Errorf("gogpu: NewWindow called before Run()")
