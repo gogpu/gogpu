@@ -1470,12 +1470,12 @@ func (p *windowsPlatform) ClipboardWrite(text string) error {
 
 	procEmptyClipboard.Call()
 
-	utf16, err := windows.UTF16FromString(text)
+	utf16Text, err := windows.UTF16FromString(text)
 	if err != nil {
 		return err
 	}
 
-	size := len(utf16) * 2 // UTF-16 = 2 bytes per char
+	size := len(utf16Text) * 2 // UTF-16 = 2 bytes per char
 	h, _, _ := procGlobalAlloc.Call(gmemMoveable, uintptr(size))
 	if h == 0 {
 		return fmt.Errorf("GlobalAlloc failed")
@@ -1491,8 +1491,8 @@ func (p *windowsPlatform) ClipboardWrite(text string) error {
 	// ptr is a valid address from GlobalLock; uintptr -> Pointer conversion
 	// is the standard pattern for Win32 memory APIs.
 	dst := unsafe.Pointer(ptr) //nolint:govet // syscall return value from GlobalLock
-	for i := 0; i < len(utf16); i++ {
-		*(*uint16)(unsafe.Add(dst, uintptr(i)*2)) = utf16[i]
+	for i := 0; i < len(utf16Text); i++ {
+		*(*uint16)(unsafe.Add(dst, uintptr(i)*2)) = utf16Text[i]
 	}
 
 	procGlobalUnlock.Call(h)

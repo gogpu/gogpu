@@ -888,9 +888,7 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		})
 		a.RequestRedraw()
 	case platform.EventKeyboardLayoutChanged:
-		if a.onKeyboardLayoutChanged != nil {
-			a.onKeyboardLayoutChanged()
-		}
+		a.dispatchKeyboardLayoutChanged()
 	case platform.EventDragDrop:
 		if a.onFileDrop != nil {
 			a.onFileDrop(event.DragPaths, event.DragX, event.DragY)
@@ -984,6 +982,14 @@ func (a *App) dispatchScrollEvent(event *platform.Event) {
 	}
 	if a.inputState != nil {
 		a.inputState.Mouse().SetScroll(float32(event.Scroll.DeltaX), float32(event.Scroll.DeltaY))
+	}
+}
+
+// dispatchKeyboardLayoutChanged handles EventKeyboardLayoutChanged from the
+// platform.
+func (a *App) dispatchKeyboardLayoutChanged() {
+	if a.onKeyboardLayoutChanged != nil {
+		a.onKeyboardLayoutChanged()
 	}
 }
 
