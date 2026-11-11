@@ -76,6 +76,10 @@ type waylandWindow struct {
 	pointerIn bool // True when pointer is inside our surface
 	startTime time.Time
 
+	// The wheel notches the compositor reported on each axis (vertical,
+	// horizontal) for the axis event that follows them; 0 for none.
+	pendingScrollNotches [2]float64
+
 	// Cursor shape cache — avoids redundant set_shape protocol messages.
 	currentCursor int // last cursorID set via SetCursor (-1 = unset)
 
@@ -1807,34 +1811,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				Timestamp:   w.eventTimestamp(),
 			})
 		},
-		OnPointerAxis: func(timeMs, axis uint32, value float64) {
-			w.pointerMu.Lock()
-			if !w.pointerIn {
-				w.pointerMu.Unlock()
-				return
-			}
-			x := w.pointerX
-			y := w.pointerY
-			w.pointerMu.Unlock()
-
-			var deltaX, deltaY float64
-			switch axis {
-			case wayland.PointerAxisVerticalScroll:
-				deltaY = value
-			case wayland.PointerAxisHorizontalScroll:
-				deltaX = value
-			}
-
-			w.dispatchScrollEvent(gpucontext.ScrollEvent{
-				X:         x,
-				Y:         y,
-				DeltaX:    deltaX,
-				DeltaY:    deltaY,
-				DeltaMode: gpucontext.ScrollDeltaPixel,
-				Modifiers: w.getModifiers(),
-				Timestamp: w.eventTimestamp(),
-			})
-		},
+		OnPointerAxisNotches: w.holdScrollNotches,
+		OnPointerAxis:        w.dispatchPointerAxis,
 
 		// Keyboard events
 		OnKeyboardKeymap: func(format uint32, fd int, size uint32) {
@@ -2191,6 +2169,55 @@ func (w *waylandWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 		evType = EventPointerMove
 	}
 	w.queueEvent(Event{Type: evType, Pointer: ev})
+}
+
+// holdScrollNotches holds the wheel notches the compositor reported on axis
+// for the axis event that follows them.
+func (w *waylandWindow) holdScrollNotches(axis uint32, notches float64) {
+	if axis >= uint32(len(w.pendingScrollNotches)) {
+		return
+	}
+	w.pointerMu.Lock()
+	w.pendingScrollNotches[axis] = notches
+	w.pointerMu.Unlock()
+}
+
+// dispatchPointerAxis queues the scroll of an axis event: a wheel scrolls in
+// the notches held for it, one line each; a touchpad, which reports none, in
+// points.
+func (w *waylandWindow) dispatchPointerAxis(timeMs, axis uint32, value float64) {
+	deltaMode := gpucontext.ScrollDeltaPixel
+	w.pointerMu.Lock()
+	if axis < uint32(len(w.pendingScrollNotches)) && w.pendingScrollNotches[axis] != 0 {
+		value = w.pendingScrollNotches[axis]
+		deltaMode = gpucontext.ScrollDeltaLine
+		w.pendingScrollNotches[axis] = 0
+	}
+	pointerIn := w.pointerIn
+	x := w.pointerX
+	y := w.pointerY
+	w.pointerMu.Unlock()
+	if !pointerIn {
+		return
+	}
+
+	var deltaX, deltaY float64
+	switch axis {
+	case wayland.PointerAxisVerticalScroll:
+		deltaY = value
+	case wayland.PointerAxisHorizontalScroll:
+		deltaX = value
+	}
+
+	w.dispatchScrollEvent(gpucontext.ScrollEvent{
+		X:         x,
+		Y:         y,
+		DeltaX:    deltaX,
+		DeltaY:    deltaY,
+		DeltaMode: deltaMode,
+		Modifiers: w.getModifiers(),
+		Timestamp: w.eventTimestamp(),
+	})
 }
 
 // dispatchScrollEvent pushes a scroll event to the event queue.
