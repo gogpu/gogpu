@@ -223,13 +223,25 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 	return dw, nil
 }
 
-// PollEvents processes pending macOS events.
+// PollEvents processes pending macOS events. Each NSEvent is routed to the
+// darwinWindow that owns it, as WaitEvents routes them.
 func (p *darwinPlatform) PollEvents() Event {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	// Return queued events first (from previous processing).
 	for _, w := range p.windows {
-		e := w.pollEvents(p.app)
+		if e, ok := w.events.Pop(); ok {
+			return e
+		}
+	}
+
+	if p.app != nil && len(p.windows) > 0 {
+		p.app.PollEventsWithHandler(makeEventRouter(p.windows, p.keyWindow()))
+	}
+
+	for _, w := range p.windows {
+		e := w.pollEvents()
 		if e.Type != EventNone {
 			return e
 		}
@@ -241,44 +253,18 @@ func (p *darwinPlatform) PollEvents() Event {
 // all pending events. Uses [NSApp nextEventMatchingMask:untilDate:inMode:dequeue:]
 // with distantFuture, which blocks at kernel level via mach_msg for 0% CPU idle.
 //
-// Each NSEvent is routed to the darwinWindow that owns it via [NSEvent window].
-// This ensures pointer coordinates and event WindowIDs are attributed to the
-// correct window even when a non-key window receives input. Events without an
-// associated NSWindow (key events, system events) fall back to the key window.
+// Each NSEvent is routed to the darwinWindow that owns it, as makeEventRouter
+// describes.
 func (p *darwinPlatform) WaitEvents() {
 	p.mu.RLock()
-	keyWin := p.primary
-	for _, w := range p.windows {
-		if w.window != nil && w != p.primary && w.window.IsKeyWindow() {
-			keyWin = w
-			break
-		}
-	}
+	keyWin := p.keyWindow()
 	// Snapshot the window list for routing — avoids holding mu during dispatch.
 	wins := make([]*darwinWindow, len(p.windows))
 	copy(wins, p.windows)
 	p.mu.RUnlock()
 
-	// Route each event to the window it came from; fall back to keyWin for
-	// events that carry no NSWindow (e.g. keyboard, mouse-exited-screen).
-	routingHandler := func(event darwin.ID, eventType darwin.NSEventType) bool {
-		target := keyWin
-		if nsWin := darwin.GetEventWindow(event); !nsWin.IsNil() {
-			for _, w := range wins {
-				if w.window != nil && w.window.NSID() == nsWin {
-					target = w
-					break
-				}
-			}
-		}
-		target.eventMu.Lock()
-		result := target.handleEvent(event, eventType)
-		target.eventMu.Unlock()
-		return result
-	}
-
 	if p.app != nil {
-		p.app.WaitEventsWithHandler(routingHandler)
+		p.app.WaitEventsWithHandler(makeEventRouter(wins, keyWin))
 	}
 
 	// Check for resize after all events have been processed.
@@ -635,19 +621,45 @@ func (dw *darwinPlatformWindow) Destroy() {
 	// Destruction handled by platform.Destroy()
 }
 
-func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
+// keyWindow returns the window with keyboard focus, or the primary window when
+// no other window has it. Called with p.mu held.
+func (p *darwinPlatform) keyWindow() *darwinWindow {
+	for _, w := range p.windows {
+		if w.window != nil && w != p.primary && w.window.IsKeyWindow() {
+			return w
+		}
+	}
+	return p.primary
+}
+
+// makeEventRouter returns an event handler that routes each NSEvent to the
+// darwinWindow that owns it via [NSEvent window]. This ensures pointer
+// coordinates and event WindowIDs are attributed to the correct window even
+// when a non-key window receives input. Events without an associated NSWindow
+// (key events, system events) fall back to keyWin.
+func makeEventRouter(windows []*darwinWindow, keyWin *darwinWindow) darwin.EventHandler {
+	return func(event darwin.ID, eventType darwin.NSEventType) bool {
+		target := keyWin
+		if nsWin := darwin.GetEventWindow(event); !nsWin.IsNil() {
+			for _, w := range windows {
+				if w.window != nil && w.window.NSID() == nsWin {
+					target = w
+					break
+				}
+			}
+		}
+		target.eventMu.Lock()
+		defer target.eventMu.Unlock()
+		return target.handleEvent(event, eventType)
+	}
+}
+
+// pollEvents checks whether the window should close, and its size and focus,
+// queuing what changed, then returns its first queued event. PollEvents has
+// already routed the OS events to it.
+func (w *darwinWindow) pollEvents() Event {
 	w.eventMu.Lock()
 	defer w.eventMu.Unlock()
-
-	// Return queued event first (from previous processing).
-	if e, ok := w.events.Pop(); ok {
-		return e
-	}
-
-	// Process OS events with our handler — queues pointer/key/scroll events.
-	if app != nil {
-		app.PollEventsWithHandler(w.handleEvent)
-	}
 
 	// Check if window should close — queue once, not every call.
 	if !w.shouldClose && w.window != nil && w.window.ShouldClose() {
