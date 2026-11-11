@@ -4,10 +4,31 @@ package darwin_test
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
+	"github.com/go-webgpu/goffi/types"
 	platformdarwin "github.com/gogpu/gogpu/internal/platform/darwin"
 )
+
+type testNSRange struct {
+	location uint64
+	length   uint64
+}
+
+var testNSRangeType = &types.TypeDescriptor{
+	Size:      16,
+	Alignment: 8,
+	Kind:      types.StructType,
+	Members: []*types.TypeDescriptor{
+		types.UInt64TypeDescriptor,
+		types.UInt64TypeDescriptor,
+	},
+}
+
+func objcArgNSRange(value testNSRange) objcArg {
+	return objcArg{typ: testNSRangeType, ptr: unsafe.Pointer(&value), keepAlive: &value}
+}
 
 // TestAllocateClassPair verifies that a custom ObjC class can be created
 // as a subclass of NSObject via the runtime API.
@@ -136,6 +157,69 @@ func TestCreateGoGPUView(t *testing.T) {
 		if view.IsNil() {
 			t.Fatal("CreateGoGPUView returned nil view")
 		}
+	})
+}
+
+// TestGoGPUViewTextInputBridge exercises the registered AppKit methods on a
+// real NSTextView subclass. It verifies that native setMarkedText, insertText
+// and unmarkText dispatch into the Go handlers while forwarding to NSTextView.
+func TestGoGPUViewTextInputBridge(t *testing.T) {
+	rt := loadObjcRuntime(t)
+	var marked, committed string
+	var unmarked bool
+	runOnMainThread(t, func() {
+		withAutoreleasePool(t, rt, func() {
+			view, err := platformdarwin.CreateGoGPUView(platformdarwin.MakeRect(0, 0, 320, 200))
+			if err != nil {
+				t.Fatalf("CreateGoGPUView() error: %v", err)
+			}
+			defer view.Send(platformdarwin.SEL(rt.sel(t, "release")))
+			if !platformdarwin.ViewSupportsTextInput(view) {
+				t.Fatal("GoGPUView did not inherit NSTextInputClient support")
+			}
+			platformdarwin.SetViewTextInputHandler(view, platformdarwin.TextInputHandler{
+				SetMarkedText: func(text platformdarwin.ID, _, _, _, _ uintptr) {
+					marked = platformdarwin.ObjectString(text)
+				},
+				InsertText: func(text platformdarwin.ID, _, _ uintptr) {
+					committed = platformdarwin.ObjectString(text)
+				},
+				UnmarkText: func() { unmarked = true },
+			})
+			defer platformdarwin.ClearViewTextInputHandler(view)
+
+			preedit := platformdarwin.NewNSString("かな")
+			if preedit == nil || preedit.ID() == 0 {
+				t.Fatal("NewNSString(preedit) returned nil")
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "setMarkedText:selectedRange:replacementRange:"),
+				objcArgPtr(preedit.ID().Ptr()),
+				objcArgNSRange(testNSRange{location: 2}),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}),
+			)
+			preedit.Release()
+			if marked != "かな" {
+				t.Fatalf("setMarkedText callback = %q, want %q", marked, "かな")
+			}
+
+			result := platformdarwin.NewNSString("仮名")
+			if result == nil || result.ID() == 0 {
+				t.Fatal("NewNSString(commit) returned nil")
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "insertText:replacementRange:"),
+				objcArgPtr(result.ID().Ptr()),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}),
+			)
+			result.Release()
+			if committed != "仮名" {
+				t.Fatalf("insertText callback = %q, want %q", committed, "仮名")
+			}
+
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "unmarkText"))
+			if !unmarked {
+				t.Fatal("unmarkText callback was not delivered")
+			}
+		})
 	})
 }
 

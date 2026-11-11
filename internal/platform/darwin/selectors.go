@@ -10,11 +10,13 @@ var selectors struct {
 	once sync.Once
 
 	// NSObject - Memory management
-	alloc   SEL
-	init    SEL
-	new     SEL
-	release SEL
-	retain  SEL
+	alloc              SEL
+	init               SEL
+	new                SEL
+	release            SEL
+	retain             SEL
+	autorelease        SEL
+	respondsToSelector SEL
 
 	// NSApplication - Application lifecycle
 	sharedApplication                           SEL
@@ -87,6 +89,13 @@ var selectors struct {
 	addSubview                     SEL
 	addSubviewPositionedRelativeTo SEL
 	removeFromSuperview            SEL
+	inputContext                   SEL
+	interpretKeyEvents             SEL
+	invalidateCharacterCoordinates SEL
+	unmarkText                     SEL
+	setTextContainerInset          SEL
+	textContainer                  SEL
+	setLineFragmentPadding         SEL
 
 	// NSWindow - button access
 	standardWindowButton SEL
@@ -125,8 +134,13 @@ var selectors struct {
 
 	// NSString
 	initWithUTF8String SEL
+	initWithString     SEL
 	UTF8String         SEL
 	length             SEL
+	string             SEL
+
+	// NSArray
+	arrayWithObject SEL
 
 	// NSAutoreleasePool
 	drain SEL
@@ -241,9 +255,12 @@ var classes struct {
 	NSApplication        Class
 	NSWindow             Class
 	NSView               Class
+	NSTextView           Class
+	NSArray              Class
 	NSScreen             Class
 	NSDate               Class
 	NSString             Class
+	NSAttributedString   Class
 	NSAutoreleasePool    Class
 	NSEvent              Class
 	NSNotificationCenter Class
@@ -267,6 +284,8 @@ func initSelectors() {
 		selectors.new = RegisterSelector("new")
 		selectors.release = RegisterSelector("release")
 		selectors.retain = RegisterSelector("retain")
+		selectors.autorelease = RegisterSelector("autorelease")
+		selectors.respondsToSelector = RegisterSelector("respondsToSelector:")
 
 		// NSApplication
 		selectors.sharedApplication = RegisterSelector("sharedApplication")
@@ -339,6 +358,13 @@ func initSelectors() {
 		selectors.addSubview = RegisterSelector("addSubview:")
 		selectors.addSubviewPositionedRelativeTo = RegisterSelector("addSubview:positioned:relativeTo:")
 		selectors.removeFromSuperview = RegisterSelector("removeFromSuperview")
+		selectors.inputContext = RegisterSelector("inputContext")
+		selectors.interpretKeyEvents = RegisterSelector("interpretKeyEvents:")
+		selectors.invalidateCharacterCoordinates = RegisterSelector("invalidateCharacterCoordinates")
+		selectors.unmarkText = RegisterSelector("unmarkText")
+		selectors.setTextContainerInset = RegisterSelector("setTextContainerInset:")
+		selectors.textContainer = RegisterSelector("textContainer")
+		selectors.setLineFragmentPadding = RegisterSelector("setLineFragmentPadding:")
 
 		// NSWindow - button access
 		selectors.standardWindowButton = RegisterSelector("standardWindowButton:")
@@ -377,8 +403,13 @@ func initSelectors() {
 
 		// NSString
 		selectors.initWithUTF8String = RegisterSelector("initWithUTF8String:")
+		selectors.initWithString = RegisterSelector("initWithString:")
 		selectors.UTF8String = RegisterSelector("UTF8String")
 		selectors.length = RegisterSelector("length")
+		selectors.string = RegisterSelector("string")
+
+		// NSArray
+		selectors.arrayWithObject = RegisterSelector("arrayWithObject:")
 
 		// NSAutoreleasePool
 		selectors.drain = RegisterSelector("drain")
@@ -497,9 +528,12 @@ func initClasses() {
 		classes.NSApplication = GetClass("NSApplication")
 		classes.NSWindow = GetClass("NSWindow")
 		classes.NSView = GetClass("NSView")
+		classes.NSTextView = GetClass("NSTextView")
+		classes.NSArray = GetClass("NSArray")
 		classes.NSScreen = GetClass("NSScreen")
 		classes.NSDate = GetClass("NSDate")
 		classes.NSString = GetClass("NSString")
+		classes.NSAttributedString = GetClass("NSAttributedString")
 		classes.NSAutoreleasePool = GetClass("NSAutoreleasePool")
 		classes.NSEvent = GetClass("NSEvent")
 		classes.NSNotificationCenter = GetClass("NSNotificationCenter")

@@ -45,6 +45,7 @@ type objcRuntime struct {
 	// Function pointers
 	objcGetClass              unsafe.Pointer
 	objcMsgSend               unsafe.Pointer
+	objcMsgSendSuper          unsafe.Pointer
 	objcMsgSendFpret          unsafe.Pointer
 	objcMsgSendStret          unsafe.Pointer
 	selRegisterName           unsafe.Pointer
@@ -99,6 +100,15 @@ var (
 		Members: []*types.TypeDescriptor{
 			types.DoubleTypeDescriptor,
 			types.DoubleTypeDescriptor,
+		},
+	}
+	nsRangeType = &types.TypeDescriptor{
+		Size:      16,
+		Alignment: 8,
+		Kind:      types.StructType,
+		Members: []*types.TypeDescriptor{
+			types.UInt64TypeDescriptor,
+			types.UInt64TypeDescriptor,
 		},
 	}
 )
@@ -157,6 +167,14 @@ func loadRuntime() error {
 
 	// Resolve objc_msgSend
 	objcRT.objcMsgSend, err = ffi.GetSymbol(objcRT.libobjc, "objc_msgSend")
+	if err != nil {
+		return errors.Join(ErrSymbolNotFound, err)
+	}
+
+	// objc_msgSendSuper is used by the custom NSTextInputClient bridge to
+	// preserve NSTextView's native marked/selected range state after observing
+	// the same callbacks in Go.
+	objcRT.objcMsgSendSuper, err = ffi.GetSymbol(objcRT.libobjc, "objc_msgSendSuper")
 	if err != nil {
 		return errors.Join(ErrSymbolNotFound, err)
 	}
