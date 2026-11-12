@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as input is disabled. Controller methods are safe from any goroutine: the native IMM32 state is applied on the window
   thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
   with the later TSF backend. X11, Wayland and macOS backends follow in their own changes.
+- **macOS: `CursorModeLocked` and `CursorModeConfined`** (#519, @dvoyni). `SetCursorMode` did nothing on macOS. Locked
+  hides the cursor, parks it at the content area's center and detaches it from the mouse; moves report the mouse's
+  motion in `PointerEvent.DeltaX`/`DeltaY`, and releasing the lock puts the cursor back where it was. Confined keeps the
+  cursor visible inside the content area, below the title bar even where the content extends under it: macOS has no
+  call that confines the cursor, so it is detached as for Locked and moved by each move's delta, clamped to that area.
+  Either mode is released while the window is not key and taken again when it is; `CursorMode` reports the requested
+  mode, as on the other platforms.
 
 ### Performance
 

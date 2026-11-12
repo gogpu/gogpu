@@ -54,6 +54,9 @@ type darwinWindow struct {
 	// Focus tracking: last known key window status for change detection.
 	lastKeyWindow bool
 	focusInited   bool // true after first pollEvents call
+
+	// cursor applies the cursor mode, released while the window is not key.
+	cursor darwinCursor
 }
 
 // darwinPlatform implements Platform for macOS using Cocoa/AppKit.
@@ -145,6 +148,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		return nil, err
 	}
 	w.window = window
+	w.cursor = darwinCursor{system: windowCursorSystem{window: window}}
 
 	// Create Metal surface for GPU rendering.
 	// Note: Surface is created before window is shown, but drawable size
@@ -214,6 +218,7 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		platform:  p,
 		id:        id,
 		window:    w.window,
+		state:     w,
 		frameless: config.Frameless,
 	}
 
@@ -305,8 +310,10 @@ func (p *darwinPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Clean up drag handlers for all windows before destroying them.
+	// Clean up drag handlers for all windows before destroying them, and give
+	// back a cursor a window holds.
 	for _, w := range p.windows {
+		w.cursor.setMode(cursorModeNormal)
 		if w.window != nil {
 			cv := w.window.ContentView()
 			if !cv.IsNil() {
@@ -341,6 +348,7 @@ type darwinPlatformWindow struct {
 	platform        *darwinPlatform
 	id              WindowID
 	window          *darwin.Window
+	state           *darwinWindow
 	lastScale       float64
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -474,9 +482,17 @@ func (dw *darwinPlatformWindow) SetCursor(cursorID int) {
 	dw.platform.setCursorImpl(cursorID)
 }
 
-func (dw *darwinPlatformWindow) SetCursorMode(int) {}
-func (dw *darwinPlatformWindow) CursorMode() int   { return 0 }
-func (dw *darwinPlatformWindow) SyncFrame()        {}
+// SetCursorMode requests a cursor mode: Locked hides the cursor, detaches it
+// from the mouse and reports relative motion in DeltaX/DeltaY; Confined keeps
+// it visible inside the content area, below the title bar. The mode is
+// released while the window is not key and taken again when it is.
+func (dw *darwinPlatformWindow) SetCursorMode(mode int) { dw.state.cursor.setMode(mode) }
+
+// CursorMode returns the requested cursor mode, also while the window is not
+// key and the mode is released.
+func (dw *darwinPlatformWindow) CursorMode() int { return dw.state.cursor.mode() }
+
+func (dw *darwinPlatformWindow) SyncFrame() {}
 
 func (dw *darwinPlatformWindow) SetFrameless(frameless bool) {
 	dw.frameless = frameless
@@ -700,6 +716,8 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 				PhysicalWidth:  newPhysW,
 				PhysicalHeight: newPhysH,
 			})
+
+			w.cursor.contentChanged()
 		}
 	}
 
@@ -714,6 +732,8 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.lastKeyWindow = isKey
 			w.events.Push(Event{WindowID: w.id, Type: EventFocus, Focused: isKey})
 		}
+		// Release the cursor mode on focus loss, take it again on focus gain.
+		w.cursor.update()
 	}
 
 	// Return first queued event, or EventNone.
@@ -808,37 +828,13 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Mouse move events
 	case darwin.NSEventTypeMouseMoved:
-		wasInWindow := w.mouseInWindow
-		w.pointerX = info.LocationX
-		w.pointerY = y
-
-		// Detect enter/leave based on position (in logical point coordinates).
-		// w.config.Width/Height are in logical points after RETINA-001.
-		inWindow := info.LocationX >= 0 && info.LocationX <= float64(w.config.Width) &&
-			y >= 0 && y <= float64(w.config.Height)
-
-		if inWindow && !wasInWindow {
-			w.mouseInWindow = true
-			ev := w.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info, y)
-			w.dispatchPointerEvent(ev)
-		} else if !inWindow && wasInWindow {
-			w.mouseInWindow = false
-			ev := w.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info, y)
-			w.dispatchPointerEvent(ev)
-		}
-
-		// Always send move event
-		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
-		w.dispatchPointerEvent(ev)
+		w.handleMouseMoved(info, y)
 
 	// Mouse drag events (move with button pressed)
 	case darwin.NSEventTypeLeftMouseDragged,
 		darwin.NSEventTypeRightMouseDragged,
 		darwin.NSEventTypeOtherMouseDragged:
-		w.pointerX = info.LocationX
-		w.pointerY = y
-		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
-		w.dispatchPointerEvent(ev)
+		w.handleMouseDragged(info, y)
 
 	// Mouse enter/exit events (for tracking areas)
 	case darwin.NSEventTypeMouseEntered:
@@ -917,6 +913,63 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Let all events be dispatched to the application
 	return true
+}
+
+// handleMouseMoved reports a move with no button held: the pointer entering or
+// leaving the content area, then the move. The cursor mode turns it first: a
+// Locked move carries the mouse's motion in its delta at the frozen position,
+// a Confined one is clamped to the content area below the title bar, and a
+// move that changes nothing is not reported.
+func (w *darwinWindow) handleMouseMoved(info darwin.EventInfo, y float64) {
+	motion, reported := w.cursor.move(info.LocationX, y, info.MotionDeltaX, info.MotionDeltaY)
+	if !reported {
+		return
+	}
+	info.LocationX = motion.X
+	y = motion.Y
+
+	wasInWindow := w.mouseInWindow
+	w.pointerX = info.LocationX
+	w.pointerY = y
+
+	// Detect enter/leave based on position (in logical point coordinates).
+	// w.config.Width/Height are in logical points after RETINA-001.
+	inWindow := info.LocationX >= 0 && info.LocationX <= float64(w.config.Width) &&
+		y >= 0 && y <= float64(w.config.Height)
+
+	if inWindow && !wasInWindow {
+		w.mouseInWindow = true
+		ev := w.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info, y)
+		w.dispatchPointerEvent(ev)
+	} else if !inWindow && wasInWindow {
+		w.mouseInWindow = false
+		ev := w.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info, y)
+		w.dispatchPointerEvent(ev)
+	}
+
+	// Always send move event
+	ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
+	ev.DeltaX = motion.DeltaX
+	ev.DeltaY = motion.DeltaY
+	w.dispatchPointerEvent(ev)
+}
+
+// handleMouseDragged reports a move with a button held, turned by the cursor
+// mode as handleMouseMoved's is.
+func (w *darwinWindow) handleMouseDragged(info darwin.EventInfo, y float64) {
+	motion, reported := w.cursor.move(info.LocationX, y, info.MotionDeltaX, info.MotionDeltaY)
+	if !reported {
+		return
+	}
+	info.LocationX = motion.X
+	y = motion.Y
+
+	w.pointerX = info.LocationX
+	w.pointerY = y
+	ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
+	ev.DeltaX = motion.DeltaX
+	ev.DeltaY = motion.DeltaY
+	w.dispatchPointerEvent(ev)
 }
 
 // dispatchPointerEvent pushes a pointer event to the event queue.
@@ -1095,6 +1148,8 @@ func (w *darwinWindow) checkResize() {
 			PhysicalWidth:  newPhysW,
 			PhysicalHeight: newPhysH,
 		})
+
+		w.cursor.contentChanged()
 	}
 }
 
