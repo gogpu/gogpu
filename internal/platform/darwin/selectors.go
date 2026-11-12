@@ -115,6 +115,7 @@ var selectors struct {
 	mainScreen   SEL
 	screens      SEL
 	visibleFrame SEL
+	screen       SEL // [NSWindow screen] → the NSScreen most of the window is on
 
 	// NSEvent
 	eventWindow SEL // [NSEvent window] → NSWindow* (nil for window-less events)
@@ -367,6 +368,7 @@ func initSelectors() {
 		selectors.mainScreen = RegisterSelector("mainScreen")
 		selectors.screens = RegisterSelector("screens")
 		selectors.visibleFrame = RegisterSelector("visibleFrame")
+		selectors.screen = RegisterSelector("screen")
 
 		// NSEvent
 		selectors.eventWindow = RegisterSelector("window")

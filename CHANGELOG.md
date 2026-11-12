@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as input is disabled. Controller methods are safe from any goroutine: the native IMM32 state is applied on the window
   thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
   with the later TSF backend. X11, Wayland and macOS backends follow in their own changes.
+- **`App.MonitorSize`** (#511, @dvoyni). The size in device pixels of the monitor the window is on, so an app can choose
+  between a window and fullscreen before going fullscreen. Windows reports the monitor nearest the window and macOS the
+  screen most of the window is on. On X11 it is the default X screen, which spans every monitor of a multi-head desktop.
+  Wayland cannot tell yet and returns `ok == false`, as every platform does before the window exists.
 
 ### Performance
 

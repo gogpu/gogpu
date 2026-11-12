@@ -589,6 +589,15 @@ func (dw *darwinPlatformWindow) IsFullscreen() bool {
 	return false
 }
 
+// MonitorSize returns the size in device pixels of the screen most of the
+// window is on.
+func (dw *darwinPlatformWindow) MonitorSize() (width, height int, ok bool) {
+	if dw.window == nil {
+		return 0, 0, false
+	}
+	return dw.window.ScreenPixelSize()
+}
+
 func (dw *darwinPlatformWindow) SetModalFrameCallback(_ func()) {}
 
 func (dw *darwinPlatformWindow) BlitPixels(pixels []byte, width, height int) error {
