@@ -10,11 +10,20 @@ import (
 // method is safe to call from any goroutine, including from a draw callback:
 // the platform marshals native IME calls to the window's own thread and never
 // blocks the caller (gpucontext.IMEController threading contract).
+//
+// The window the controller drives is a.imeTarget, published and cleared under
+// imeMu. It is deliberately not a.platWindow: that field is written by the
+// main thread without a lock, and the IME methods are called from any
+// goroutine (LEAD-023 F3).
 
 // SetIMEEnabled enables or disables the native input method for the active
-// window. IME starts disabled and is normally enabled by a focused text
-// widget. Disabling cancels an active composition first and clears the
-// surrounding text retained for the IME.
+// window. Until the first call the window keeps the platform's own IME
+// handling, where the IME draws its composition and the committed text
+// arrives as ordinary text input; the first call hands composition to the app,
+// which then receives the IME lifecycle events. A focused text widget
+// normally enables it and a non-text one disables it. Disabling cancels an
+// active composition first and clears the surrounding text retained for the
+// IME.
 func (a *App) SetIMEEnabled(enabled bool) {
 	if a == nil {
 		return
@@ -22,7 +31,7 @@ func (a *App) SetIMEEnabled(enabled bool) {
 	a.imeMu.Lock()
 	a.imeEnabled = enabled
 	a.imeConfigured = true
-	window := a.platWindow
+	window := a.imeTarget
 	surroundingSet := a.imeSurroundingSet
 	surrounding := a.imeSurrounding
 	a.imeMu.Unlock()
@@ -48,7 +57,7 @@ func (a *App) SetIMECursorArea(area gpucontext.IMECursorArea) {
 	a.imeMu.Lock()
 	a.imeCursorArea = area
 	a.imeAreaSet = true
-	window := a.platWindow
+	window := a.imeTarget
 	a.imeMu.Unlock()
 
 	if controller, ok := window.(gpucontext.IMEController); ok {
@@ -65,7 +74,7 @@ func (a *App) SetIMEContentType(purpose gpucontext.ContentPurpose, hints gpucont
 	a.imeMu.Lock()
 	a.imePurpose, a.imeHints = purpose, hints
 	a.imeContentSet = true
-	window := a.platWindow
+	window := a.imeTarget
 	a.imeMu.Unlock()
 
 	if controller, ok := window.(gpucontext.IMEController); ok {
@@ -83,7 +92,7 @@ func (a *App) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
 	a.imeMu.Lock()
 	a.imeSurrounding = text
 	a.imeSurroundingSet = true
-	window := a.platWindow
+	window := a.imeTarget
 	a.imeMu.Unlock()
 
 	if controller, ok := window.(gpucontext.IMEController); ok {
@@ -93,10 +102,7 @@ func (a *App) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
 
 // CancelIME cancels an active composition without committing its preedit.
 func (a *App) CancelIME() {
-	if a == nil {
-		return
-	}
-	if controller, ok := a.platWindow.(gpucontext.IMEController); ok {
+	if controller, ok := a.imeController(); ok {
 		controller.CancelIME()
 	}
 }
@@ -104,48 +110,67 @@ func (a *App) CancelIME() {
 // IMECapabilities reports which optional IME operations the active platform
 // performs. Before Run it returns the build target's default.
 func (a *App) IMECapabilities() gpucontext.IMECapabilities {
-	if a != nil {
-		if controller, ok := a.platWindow.(gpucontext.IMEController); ok {
-			return controller.IMECapabilities()
-		}
+	if controller, ok := a.imeController(); ok {
+		return controller.IMECapabilities()
 	}
 	return platform.DefaultIMECapabilities()
 }
 
-// applyIMEControllerState replays configuration made before Run onto the
-// freshly created native window. An untouched App is left alone: the backend
-// starts with IME disabled and must not emit a spurious disable event.
-func (a *App) applyIMEControllerState(window platform.PlatformWindow) {
+// imeController returns the current IME target's controller, read under
+// imeMu.
+func (a *App) imeController() (gpucontext.IMEController, bool) {
+	if a == nil {
+		return nil, false
+	}
+	a.imeMu.Lock()
+	window := a.imeTarget
+	a.imeMu.Unlock()
+	controller, ok := window.(gpucontext.IMEController)
+	return controller, ok
+}
+
+// attachIMEWindow makes window the IME target and replays the configuration
+// made so far onto it. Publishing the target and replaying happen under one
+// hold of imeMu, so a concurrent IME call either lands in the replayed state
+// or reaches the window itself after it, never neither. A window's controller
+// methods only post to its thread and never call back into the App, so
+// holding the App's imeMu here cannot deadlock. An untouched App is left alone: the window keeps the
+// platform's own IME handling and must not get a spurious disable.
+func (a *App) attachIMEWindow(window platform.PlatformWindow) {
 	if a == nil {
 		return
 	}
 	a.imeMu.Lock()
-	configured := a.imeConfigured
-	enabled := a.imeEnabled
-	area := a.imeCursorArea
-	areaSet := a.imeAreaSet
-	purpose, hints := a.imePurpose, a.imeHints
-	contentSet := a.imeContentSet
-	surrounding := a.imeSurrounding
-	surroundingSet := a.imeSurroundingSet
-	a.imeMu.Unlock()
+	defer a.imeMu.Unlock()
+	a.imeTarget = window
 
 	controller, ok := window.(gpucontext.IMEController)
 	if !ok {
 		return
 	}
-	if configured {
-		controller.SetIMEEnabled(enabled)
+	if a.imeConfigured {
+		controller.SetIMEEnabled(a.imeEnabled)
 	}
-	if areaSet {
-		controller.SetIMECursorArea(area)
+	if a.imeAreaSet {
+		controller.SetIMECursorArea(a.imeCursorArea)
 	}
-	if contentSet {
-		controller.SetIMEContentType(purpose, hints)
+	if a.imeContentSet {
+		controller.SetIMEContentType(a.imePurpose, a.imeHints)
 	}
-	if surroundingSet {
-		controller.SetIMESurroundingText(surrounding)
+	if a.imeSurroundingSet {
+		controller.SetIMESurroundingText(a.imeSurrounding)
 	}
+}
+
+// detachIMEWindow clears the IME target when its window closes. Calls that
+// already read the old target reach a destroyed window, which ignores them.
+func (a *App) detachIMEWindow() {
+	if a == nil {
+		return
+	}
+	a.imeMu.Lock()
+	a.imeTarget = nil
+	a.imeMu.Unlock()
 }
 
 var _ gpucontext.IMEController = (*App)(nil)

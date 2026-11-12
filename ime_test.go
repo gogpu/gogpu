@@ -2,6 +2,8 @@ package gogpu
 
 import (
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gogpu/gogpu/internal/platform"
@@ -107,7 +109,7 @@ func TestEventSourceCarriesIMEEventContract(t *testing.T) {
 func TestAppIMEControllerForwardsAndReplaysConfiguration(t *testing.T) {
 	app := NewApp(DefaultConfig())
 	active := &imeTestWindow{}
-	app.platWindow = active
+	app.attachIMEWindow(active)
 
 	app.SetIMEEnabled(true)
 	app.SetIMECursorArea(gpucontext.IMECursorArea{X: 10, Y: 20, Width: 1, Height: 16})
@@ -123,7 +125,7 @@ func TestAppIMEControllerForwardsAndReplaysConfiguration(t *testing.T) {
 
 	// A window created later receives the configuration made before Run.
 	recreated := &imeTestWindow{}
-	app.applyIMEControllerState(recreated)
+	app.attachIMEWindow(recreated)
 	wantReplay := []string{"enabled:false", "area", "content", "surrounding"}
 	if !reflect.DeepEqual(recreated.calls, wantReplay) {
 		t.Fatalf("replayed calls = %#v, want %#v", recreated.calls, wantReplay)
@@ -137,19 +139,19 @@ func TestAppIMEWithoutController(t *testing.T) {
 	nilApp.SetIMEContentType(gpucontext.ContentPurposeName, gpucontext.ContentHintNone)
 	nilApp.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "x", Cursor: 1, Anchor: 1})
 	nilApp.CancelIME()
-	nilApp.applyIMEControllerState(nil)
+	nilApp.attachIMEWindow(nil)
 	if got := nilApp.IMECapabilities(); got != platform.DefaultIMECapabilities() {
 		t.Fatalf("nil app capabilities = %v, want the platform default", got)
 	}
 
 	app := NewApp(DefaultConfig())
-	app.platWindow = &bareIMEWindow{}
+	app.attachIMEWindow(&bareIMEWindow{})
 	app.SetIMEEnabled(true)
 	app.SetIMECursorArea(gpucontext.IMECursorArea{X: 1, Y: 2})
 	app.SetIMEContentType(gpucontext.ContentPurposeName, gpucontext.ContentHintNone)
 	app.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "x", Cursor: 1, Anchor: 1})
 	app.CancelIME()
-	app.applyIMEControllerState(&bareIMEWindow{})
+	app.attachIMEWindow(&bareIMEWindow{})
 	if got := app.IMECapabilities(); got != platform.DefaultIMECapabilities() {
 		t.Fatalf("capabilities = %v, want the platform default", got)
 	}
@@ -158,7 +160,7 @@ func TestAppIMEWithoutController(t *testing.T) {
 func TestAppIMERejectsInvalidSurroundingText(t *testing.T) {
 	app := NewApp(DefaultConfig())
 	active := &imeTestWindow{}
-	app.platWindow = active
+	app.attachIMEWindow(active)
 
 	// An out-of-range cursor is rejected before it reaches the platform. An
 	// empty IMESurroundingText stays valid: it clears the surrounding text.
@@ -170,8 +172,73 @@ func TestAppIMERejectsInvalidSurroundingText(t *testing.T) {
 
 func TestAppIMECapabilitiesReportsWindowBackend(t *testing.T) {
 	app := NewApp(DefaultConfig())
-	app.platWindow = &imeTestWindow{caps: gpucontext.IMECapabilityCursorArea | gpucontext.IMECapabilityContentType}
+	app.attachIMEWindow(&imeTestWindow{caps: gpucontext.IMECapabilityCursorArea | gpucontext.IMECapabilityContentType})
 	if got, want := app.IMECapabilities(), gpucontext.IMECapabilityCursorArea|gpucontext.IMECapabilityContentType; got != want {
 		t.Fatalf("capabilities = %v, want %v", got, want)
+	}
+}
+
+// countingIMEWindow is safe for concurrent use, unlike imeTestWindow.
+type countingIMEWindow struct {
+	platform.PlatformWindow
+	calls atomic.Int64
+}
+
+func (w *countingIMEWindow) SetIMEEnabled(bool)                        { w.calls.Add(1) }
+func (w *countingIMEWindow) SetIMECursorArea(gpucontext.IMECursorArea) { w.calls.Add(1) }
+func (w *countingIMEWindow) SetIMEContentType(gpucontext.ContentPurpose, gpucontext.ContentHint) {
+	w.calls.Add(1)
+}
+func (w *countingIMEWindow) SetIMESurroundingText(gpucontext.IMESurroundingText) { w.calls.Add(1) }
+func (w *countingIMEWindow) CancelIME()                                          { w.calls.Add(1) }
+func (w *countingIMEWindow) IMECapabilities() gpucontext.IMECapabilities {
+	w.calls.Add(1)
+	return gpucontext.IMECapabilityCursorArea
+}
+
+// The IME controller is called from any goroutine while the main thread opens
+// and closes the window it drives. Run under -race (CI's race job), this
+// fails if any method reads the IME target outside imeMu (LEAD-023 F3).
+func TestAppIMEControllerConcurrentWithWindowLifecycle(t *testing.T) {
+	app := NewApp(DefaultConfig())
+	window := &countingIMEWindow{}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				app.SetIMEEnabled(true)
+				app.SetIMECursorArea(gpucontext.IMECursorArea{X: 1, Y: 2, Height: 16})
+				app.SetIMEContentType(gpucontext.ContentPurposeNormal, gpucontext.ContentHintNone)
+				app.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "a", Cursor: 1, Anchor: 1})
+				app.CancelIME()
+				_ = app.IMECapabilities()
+			}
+		}()
+	}
+	for range 200 {
+		app.attachIMEWindow(window)
+		app.detachIMEWindow()
+	}
+	close(stop)
+	wg.Wait()
+
+	// After the last detach nothing reaches the closed window.
+	before := window.calls.Load()
+	app.SetIMEEnabled(false)
+	app.CancelIME()
+	if got := app.IMECapabilities(); got != platform.DefaultIMECapabilities() {
+		t.Errorf("capabilities after detach = %v, want the platform default", got)
+	}
+	if after := window.calls.Load(); after != before {
+		t.Errorf("controller calls reached a detached window: %d -> %d", before, after)
 	}
 }
