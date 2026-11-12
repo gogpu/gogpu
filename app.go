@@ -45,6 +45,8 @@ type App struct {
 	config            Config
 	manager           platform.PlatformManager // process-level (multi-window)
 	platWindow        platform.PlatformWindow  // primary window (per-window ops)
+	startedWindow     platform.PlatformWindow  // primary window HostLoop.Start created; kept for Stop after a close clears platWindow
+	hostLoopStarted   bool                     // a HostLoop owns the loop, so Run refuses
 	renderer          *Renderer
 	primaryPlatformID platform.WindowID
 
@@ -105,6 +107,10 @@ type App struct {
 	// Lazy-initialized on first PollInputEvent call. Events are collected
 	// during classifyEvent dispatch and drained each frame.
 	inputEvents []gpucontext.InputEvent
+
+	// Reused by every pump, so draining events allocates no slices.
+	pumpedEvents     []platform.Event
+	secondaryResizes []platform.Event
 
 	// Resource tracker for automatic GPU resource cleanup on shutdown.
 	tracker *resourceTracker
@@ -382,31 +388,34 @@ var _ ResourceTracker = (*App)(nil)
 // This ensures the window never shows "Not Responding" during heavy
 // GPU operations like swapchain recreation (vkDeviceWaitIdle).
 func (a *App) Run() error {
+	if a.hostLoopStarted {
+		return ErrHostLoopStarted
+	}
 	// Lock main goroutine to OS main thread.
 	// Required for Win32/Cocoa window operations.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	platWindow, err := a.initPlatform()
-	if err != nil {
+	// Run is a HostLoop with gogpu's own render thread and loop.
+	//
+	// On Windows, DefWindowProc enters a modal message loop during window
+	// drag/resize that blocks the main loop entirely. A WM_TIMER (~60fps)
+	// fires inside the modal loop to invoke modalFrameTick, which runs the
+	// same update+render cycle as the main loop, on the main thread, so
+	// onUpdate and onDraw stay serialized. On macOS/Linux it is never called.
+	// Future: an independent render thread running on its own schedule would
+	// eliminate this callback entirely. See ROADMAP.md for details.
+	loop := HostLoop{app: a}
+	if err := loop.start(thread.NewRenderLoop(), a.modalFrameTick); err != nil {
 		return err
 	}
-	a.renderLoop = thread.NewRenderLoop()
+	defer loop.Stop()
 
-	if err := a.initRenderer(platWindow); err != nil {
-		a.renderLoop.Stop()
-		platWindow.Destroy()
-		a.manager.Destroy()
-		return err
-	}
-
-	platWindow.Show()
-	a.syncInitialSurfaceSize()
-
-	defer a.shutdown(platWindow)
-
-	a.registerPrimaryWindow(platWindow)
-	a.startRunLoop()
+	// macOS's live resize is the same kind of loop: AppKit runs the drag
+	// inside the event pump, and Run draws its frames from the live-resize
+	// hook. A HostLoop installs neither, so nothing draws inside its pump.
+	a.setupLiveResizeHook(a.platWindow)
+	a.setupLiveResizePhaseHooks(a.platWindow)
 
 	// Main loop with three rendering modes (ADR-023):
 	//   1. IDLE: No activity — block on OS events (0% CPU, <1ms response)
@@ -414,8 +423,6 @@ func (a *App) Run() error {
 	//      OnDraw ONLY when RequestRedraw() called (demand-driven, <1% GPU)
 	//   3. CONTINUOUS: ContinuousRender=true — OnDraw every VSync (game loop)
 	a.runMainLoop()
-
-	a.lifecycle = AppIdle
 	return nil
 }
 
@@ -460,14 +467,25 @@ func (a *App) shutdown(platWindow platform.PlatformWindow) {
 			a.onClose()
 		}
 	})
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer.Destroy()
-	})
+	a.destroyRendererAndPlatform(platWindow)
+}
+
+// destroyRendererAndPlatform runs steps 2 to 5 of shutdown. A start whose
+// renderer failed runs it too, so what newRenderer created is released in the
+// same order.
+func (a *App) destroyRendererAndPlatform(platWindow platform.PlatformWindow) {
+	if a.renderer != nil {
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.Destroy()
+		})
+	}
 	platWindow.Destroy()
 	a.manager.Destroy()
-	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer.ReleaseInstance()
-	})
+	if a.renderer != nil {
+		a.renderLoop.RunOnRenderThreadVoid(func() {
+			a.renderer.ReleaseInstance()
+		})
+	}
 	a.renderLoop.Stop()
 }
 
@@ -533,15 +551,6 @@ func (a *App) runFrame() {
 		a.onUpdate(deltaTime)
 	}
 
-	// Advance input state AFTER onUpdate so edge detectors (JustPressed,
-	// JustReleased, Mouse.Delta) are visible during the callback.
-	// Update() sets previous = current, clearing edges for the next frame.
-	// Order: events → onUpdate (user reads edges) → Update (clear).
-	// Matches Ebiten, Unity, Godot — all clear edges after user callback.
-	if a.inputState != nil {
-		a.inputState.Update()
-	}
-
 	// Check if onUpdate triggered RequestRedraw (UI spinner, animation tick).
 	if a.invalidator.Consume() {
 		invalidated = true
@@ -557,6 +566,9 @@ func (a *App) runFrame() {
 
 // newPlatformManagerFn creates a platform manager; replaced in tests to inject mocks.
 var newPlatformManagerFn func() platform.PlatformManager = platform.NewManager
+
+// newRendererFn creates the renderer; replaced in tests to run without a GPU.
+var newRendererFn = newRenderer
 
 // initPlatform initializes the platform manager, applies pending menu,
 // and creates the primary window. All operations must be on the main thread.
@@ -593,6 +605,8 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 		Icon:      a.config.Icon,
 	})
 	if err != nil {
+		// Nothing tears the platform down after a start that failed.
+		a.manager.Destroy()
 		return nil, err
 	}
 
@@ -612,25 +626,6 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	// register callbacks on the EventSource obtained before Run().
 	_ = a.Input()       // ensures a.inputState is initialized
 	_ = a.EventSource() // ensures a.eventSource is initialized
-
-	// Enable rendering during Win32 modal drag/resize loop.
-	//
-	// On Windows, DefWindowProc enters a modal message loop during window
-	// drag/resize that blocks our main loop entirely. A WM_TIMER (~60fps)
-	// fires inside the modal loop to invoke this callback, which runs the
-	// same update+render cycle as the normal main loop.
-	//
-	// This callback runs on the main thread (same as the normal loop),
-	// preserving serialization between onUpdate and onDraw — no data races.
-	//
-	// On macOS/Linux this is a no-op (those platforms have no modal loops).
-	//
-	// Future: An independent render thread running on its own schedule
-	// would eliminate this callback entirely. See ROADMAP.md for details.
-	a.platWindow.SetModalFrameCallback(a.modalFrameTick)
-
-	a.setupLiveResizeHook(platWindow)
-	a.setupLiveResizePhaseHooks(platWindow)
 
 	return platWindow, nil
 }
@@ -718,7 +713,7 @@ func (a *App) setupLiveResizePhaseHooks(platWindow platform.PlatformWindow) {
 }
 
 // setTransactionPresent toggles Metal transaction-based present on the
-// render thread. Called from the live-resize phase hooks (see initPlatform).
+// render thread. Called from the live-resize phase hooks (see Run).
 func (a *App) setTransactionPresent(enabled bool) {
 	if a.renderLoop == nil || a.renderer == nil {
 		return
@@ -736,7 +731,7 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 	// Initialize renderer on render thread (all GPU operations must be on same thread)
 	var initErr error
 	a.renderLoop.RunOnRenderThreadVoid(func() {
-		a.renderer, initErr = newRenderer(
+		a.renderer, initErr = newRendererFn(
 			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
 			a.config.Transparent,
 		)
@@ -755,26 +750,34 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 // This matches the winit/Flutter/Qt pattern: platform layer delivers events,
 // handlers decide whether to invalidate, render loop never guesses.
 func (a *App) processEventsMultiThread() {
+	// Clear the previous pump's input edges before applying this pump's
+	// events, so edge detectors (JustPressed, JustReleased, Mouse.Delta)
+	// hold from this pump until the next: onUpdate, which runs after the
+	// pump, sees each edge once. Update() sets previous = current.
+	if a.inputState != nil {
+		a.inputState.Update()
+	}
+
 	// Reset public input event queue (ADR-058). Reuse backing array.
 	a.inputEvents = a.inputEvents[:0]
 
 	// Collect all events first, then process.
 	// This allows us to coalesce resize events.
 	var lastResize *platform.Event
-	var events []platform.Event
+	a.pumpedEvents = a.pumpedEvents[:0]
 
 	for {
 		event := a.manager.PollEvents()
 		if event.Type == platform.EventNone {
 			break
 		}
-		events = append(events, event)
+		a.pumpedEvents = append(a.pumpedEvents, event)
 	}
 
 	// Classify events by type and window.
-	var secondaryResizes []platform.Event
-	for i := range events {
-		lastResize, secondaryResizes = a.classifyEvent(&events[i], lastResize, secondaryResizes)
+	a.secondaryResizes = a.secondaryResizes[:0]
+	for i := range a.pumpedEvents {
+		lastResize, a.secondaryResizes = a.classifyEvent(&a.pumpedEvents[i], lastResize, a.secondaryResizes)
 	}
 
 	// Queue primary window resize for render thread (deferred pattern).
@@ -803,8 +806,8 @@ func (a *App) processEventsMultiThread() {
 	}
 
 	// Handle secondary window resize events.
-	for i := range secondaryResizes {
-		a.handleSecondaryResize(secondaryResizes[i])
+	for i := range a.secondaryResizes {
+		a.handleSecondaryResize(a.secondaryResizes[i])
 	}
 
 	// Dispatch end-of-frame events (gestures computed from pointer events)
@@ -952,11 +955,20 @@ func (a *App) dispatchKeyToInputState(key gpucontext.Key, pressed bool) {
 // dispatchCharEvent handles EventChar from the platform.
 func (a *App) dispatchCharEvent(event *platform.Event) {
 	w := a.windowManager.getByPlatformID(event.WindowID)
-	if w != nil && w.onTextInput != nil {
-		w.onTextInput(string(event.Char))
+	windowListens := w != nil && w.onTextInput != nil
+	sourceListens := a.eventSource != nil && a.eventSource.onTextInput != nil
+	if !windowListens && !sourceListens {
+		return
 	}
-	if a.eventSource != nil {
-		a.eventSource.dispatchTextInput(string(event.Char))
+	text := asciiText(event.Char)
+	if text == "" {
+		text = string(event.Char)
+	}
+	if windowListens {
+		w.onTextInput(text)
+	}
+	if sourceListens {
+		a.eventSource.dispatchTextInput(text)
 	}
 }
 
@@ -2170,4 +2182,21 @@ func gpucontextButtonToInputButton(button gpucontext.Button) input.MouseButton {
 	default:
 		return input.MouseButtonLeft
 	}
+}
+
+// asciiCharacters holds every ASCII character in order, so asciiText can
+// answer each one as a substring that shares its memory.
+const asciiCharacters = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f" +
+	"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" +
+	" !\"#$%&'()*+,-./0123456789:;<=>?" +
+	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_" +
+	"`abcdefghijklmnopqrstuvwxyz{|}~\x7f"
+
+// asciiText answers the one-character string of an ASCII rune without
+// allocating, and "" for any other rune, whose string must be made.
+func asciiText(char rune) string {
+	if char < 0 || char >= 0x80 {
+		return ""
+	}
+	return asciiCharacters[char : char+1]
 }

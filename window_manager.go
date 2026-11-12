@@ -46,6 +46,9 @@ type Window struct {
 	onPointer    func(gpucontext.PointerEvent)
 	onScroll     func(gpucontext.ScrollEvent)
 	visible      bool
+
+	// frameContext is reused by BeginFrame, so a frame allocates no Context.
+	frameContext Context
 }
 
 // ID returns the unique identifier for this window.
@@ -412,8 +415,9 @@ func (a *App) NewWindow(config Config) (*Window, error) {
 
 	// Install live-resize hook for macOS so this window re-renders during drag.
 	// Without it, AppKit stretches the last frame to fill the new window size.
-	// Mirrors the primary window hook in registerPrimaryWindow.
-	if lr, ok := platWindow.(platform.LiveResizeRenderer); ok {
+	// Mirrors the primary window hook Run installs. A HostLoop installs none,
+	// so nothing draws inside its PumpEvents.
+	if lr, ok := platWindow.(platform.LiveResizeRenderer); ok && !a.hostLoopStarted {
 		capturedW := w
 		capturedWS := ws
 		lr.SetLiveResizeHook(func() {

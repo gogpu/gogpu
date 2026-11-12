@@ -23,4 +23,8 @@ var (
 	// Unlike ErrSurfaceLost (transient, surface-level), device loss requires
 	// full re-initialization of the renderer.
 	ErrDeviceLost = errors.New("gogpu: GPU device lost")
+
+	// ErrHostLoopStarted is returned by Run while a HostLoop owns the loop,
+	// and by HostLoop.Start when it already does.
+	ErrHostLoopStarted = errors.New("gogpu: a HostLoop has started")
 )
