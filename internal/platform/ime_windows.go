@@ -18,14 +18,15 @@ func (w *win32Window) IMECapabilities() gpucontext.IMECapabilities {
 	return defaultIMECapabilities()
 }
 
-// initIMEState starts the window with IME disabled: a focused text widget
-// enables it. Runs on the window thread right after HWND creation and before
-// the message pump can deliver WM_IME_* messages.
-func (w *win32Window) initIMEState() {
-	if w == nil || w.hwnd == 0 {
-		return
-	}
-	procImmAssociateContextEx.Call(uintptr(w.hwnd), 0, iacChildren)
+// imeIsManaged reports whether the app has configured IME on this window. A
+// new window is unmanaged: the system IME keeps its own composition UI and
+// delivers results as WM_CHAR, so an app that never touches the IME controller
+// still accepts CJK input. The first SetIMEEnabled call hands composition to
+// the app for the rest of the window's life.
+func (w *win32Window) imeIsManaged() bool {
+	w.imeMu.Lock()
+	defer w.imeMu.Unlock()
+	return w.imeManaged
 }
 
 // destroyIMEState severs controller/native callbacks before HWND teardown.
@@ -58,6 +59,7 @@ func (w *win32Window) SetIMEEnabled(enabled bool) {
 	if enabled && imeContentIsSensitive(w.imePurpose, w.imeHints) {
 		enabled = false
 	}
+	w.imeManaged = true
 	wasEnabled := w.ime.enabled
 	canceled := w.ime.setEnabled(enabled)
 	if !enabled {
@@ -206,8 +208,11 @@ func (w *win32Window) applyIMENativeState() {
 		return
 	}
 	w.imeApplyPosted = false
-	open := w.ime.enabled
-	openChanged := open != w.imeOpenApplied
+	// Only a managed window changes the association. The zero value of
+	// imeDetached is the native default (context attached), so the first
+	// SetIMEEnabled(false) detaches and SetIMEEnabled(true) is a no-op.
+	detach := w.imeManaged && !w.ime.enabled
+	detachChanged := detach != w.imeDetached
 	cancel := w.imeCancelPending
 	area, areaSet := w.imeArea, w.imeAreaSet
 	w.imeCancelPending = false
@@ -219,14 +224,14 @@ func (w *win32Window) applyIMENativeState() {
 			procImmReleaseContext.Call(hwnd, himc)
 		}
 	}
-	if openChanged {
-		style := uintptr(iacChildren)
-		if open {
-			style = iacDefault
+	if detachChanged {
+		style := uintptr(iacDefault)
+		if detach {
+			style = iacChildren
 		}
 		procImmAssociateContextEx.Call(uintptr(w.hwnd), 0, style)
 		w.imeMu.Lock()
-		w.imeOpenApplied = open
+		w.imeDetached = detach
 		w.imeMu.Unlock()
 	}
 	if areaSet {
@@ -247,11 +252,13 @@ func (w *win32Window) applyIMECursorAreaNative(area gpucontext.IMECursorArea) {
 	if scale <= 0 {
 		scale = 1
 	}
+	// CANDIDATEFORM and COMPOSITIONFORM take client coordinates of the window
+	// that owns the context (winit-win32 ime.rs, SDL3 SDL_windowskeyboard.c);
+	// converting to screen coordinates shifts the list by the window origin.
 	pt := point{
 		x: int32(math.Round(area.X * scale)),
 		y: int32(math.Round(area.Y * scale)),
 	}
-	procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 	form := candidateForm{
 		dwStyle:      immCFSCandidatePos,
 		ptCurrentPos: pt,
