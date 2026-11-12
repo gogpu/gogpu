@@ -736,7 +736,7 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 		// Window minimized or invisible -- unconfigure surface to prevent
 		// zero-extent swapchain creation on the next frame (VK-VAL-001).
 		if ws.state == SurfaceConfigured {
-			ws.surface.Unconfigure()
+			unconfigureSurfaceFn(ws.surface)
 			ws.state = SurfaceReady
 		}
 		return nil
@@ -803,11 +803,13 @@ func (ws *RenderTarget) CanRender() bool {
 	return ws.state == SurfaceConfigured && ws.surface != nil
 }
 
-// configureSurfaceFn configures a surface, and acquireSurfaceTextureFn and
-// presentSurfaceTextureFn acquire and present its texture; replaced in tests
-// to fail as a driver does.
+// configureSurfaceFn configures a surface and unconfigureSurfaceFn
+// unconfigures it, and acquireSurfaceTextureFn and presentSurfaceTextureFn
+// acquire and present its texture; replaced in tests to fail as a driver
+// does, or to record the call.
 var (
 	configureSurfaceFn      = (*wgpu.Surface).Configure
+	unconfigureSurfaceFn    = (*wgpu.Surface).Unconfigure
 	acquireSurfaceTextureFn = (*wgpu.Surface).GetCurrentTexture
 	presentSurfaceTextureFn = (*wgpu.Surface).PresentWithDamage
 )
@@ -2471,13 +2473,19 @@ func (r *Renderer) destroyBlitPipeline() {
 }
 
 // releaseDeviceObjects releases what this window surface holds on the
-// device, keeping the surface itself, unconfigured.
+// device, keeping the surface itself, unconfigured. Its swapchain goes with
+// the configuration, whatever state the surface is in: a lost device's
+// swapchain kept on DX12 keeps that device alive, so no new one can be made
+// on the adapter, and a Vulkan window takes no new swapchain while it lives.
 func (ws *RenderTarget) releaseDeviceObjects() {
 	ws.releaseFrame()
 	ws.releaseTexQuadUniformChunks()
 	ws.releaseCompositionTexture()
 	ws.releasePendingBindGroups()
 	ws.compositeState.Destroy()
+	if ws.surface != nil {
+		unconfigureSurfaceFn(ws.surface)
+	}
 	if ws.state == SurfaceConfigured {
 		ws.state = SurfaceReady
 	}

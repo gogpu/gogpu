@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -344,23 +345,33 @@ func drawFilledFrame(t *testing.T, loop *HostLoop, window *Window, red, green, b
 	}
 }
 
+// openRedWindows opens and shows count windows on loop, and draws a red frame
+// in each.
+func openRedWindows(t *testing.T, loop *HostLoop, count int) []*Window {
+	t.Helper()
+	windows := make([]*Window, 0, count)
+	for range count {
+		window, err := loop.NewWindow(DefaultConfig())
+		if err != nil {
+			t.Fatalf("NewWindow: %v", err)
+		}
+		window.Show()
+		drawFilledFrame(t, loop, window, 255, 0, 0)
+		windows = append(windows, window)
+	}
+	return windows
+}
+
 func TestHostLoop_ReplaceDeviceKeepsEveryWindowDrawing(t *testing.T) {
 	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{
 		&mockWindow{windowID: 1, width: 4, height: 2},
 		&mockWindow{windowID: 2, width: 3, height: 3},
 	})
 	defer loop.Stop()
-	windows := make([]*Window, 0, 2)
+	windows := openRedWindows(t, loop, 2)
 	surfaces := make([]*wgpu.Surface, 0, 2)
-	for range 2 {
-		window, err := loop.NewWindow(DefaultConfig())
-		if err != nil {
-			t.Fatalf("NewWindow: %v", err)
-		}
-		window.Show()
-		windows = append(windows, window)
+	for _, window := range windows {
 		surfaces = append(surfaces, window.surface.surface)
-		drawFilledFrame(t, loop, window, 255, 0, 0)
 	}
 	lost := app.renderer.device
 
@@ -383,6 +394,37 @@ func TestHostLoop_ReplaceDeviceKeepsEveryWindowDrawing(t *testing.T) {
 			t.Errorf("window %d's surface was replaced, want it kept", i)
 		}
 		drawFilledFrame(t, loop, window, 0, 0, 255)
+	}
+}
+
+func TestHostLoop_ReplaceDeviceUnconfiguresEverySurfaceBeforeReleasingTheDevice(t *testing.T) {
+	app, loop, _ := startedHostLoopWithNoWindow(t, []platform.PlatformWindow{
+		&mockWindow{windowID: 1, width: 4, height: 2},
+		&mockWindow{windowID: 2, width: 3, height: 3},
+	})
+	defer loop.Stop()
+	windows := openRedWindows(t, loop, 2)
+	lost := app.renderer.device
+	var unconfigured []*wgpu.Surface
+	unconfigure := unconfigureSurfaceFn
+	unconfigureSurfaceFn = func(surface *wgpu.Surface) {
+		if app.renderer.device != lost {
+			t.Error("a surface was unconfigured after the old device was released")
+		}
+		unconfigured = append(unconfigured, surface)
+		unconfigure(surface)
+	}
+	// Restored before the deferred Stop, whose closes unconfigure again.
+	defer func() { unconfigureSurfaceFn = unconfigure }()
+
+	if err := loop.ReplaceDevice(); err != nil {
+		t.Fatalf("ReplaceDevice: %v", err)
+	}
+
+	for i, window := range windows {
+		if !slices.Contains(unconfigured, window.surface.surface) {
+			t.Errorf("window %d's surface was not unconfigured, so its swapchain outlives the old device", i)
+		}
 	}
 }
 
