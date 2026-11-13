@@ -163,6 +163,16 @@ func UnmarkText(view ID) {
 	view.Send(selectors.unmarkText)
 }
 
+// Committed text belongs to the application, not the temporary layout view.
+func clearTextInputStorage(view ID) {
+	text := NewNSString("")
+	if text == nil {
+		return
+	}
+	defer text.Release()
+	view.SendPtr(RegisterSelector("setString:"), text.ID().Ptr())
+}
+
 // NewAutoreleasedAttributedString creates an NSAttributedString suitable for
 // returning from an NSTextInputClient callback. The temporary NSString and
 // attributed wrapper are released/autoreleased on the AppKit pool boundary.

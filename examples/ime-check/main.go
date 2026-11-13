@@ -104,8 +104,6 @@ func main() {
 		mu.Lock()
 		defer mu.Unlock()
 		if f && focused {
-			log.Print("[IME app] restoring IME on focus")
-			app.SetIMEEnabled(true)
 			update()
 		}
 		if strings.HasPrefix(last, "window focus:") || last == "" {

@@ -86,6 +86,7 @@ var (
 // them to gpucontext's UTF-8 byte offsets before queueing events.
 type TextInputHandler struct {
 	KeyDown func(event ID)
+	Command func()
 
 	SetMarkedText func(text ID, selectedLocation, selectedLength,
 		replacementLocation, replacementLength uintptr)
@@ -109,7 +110,7 @@ var (
 func SetViewTextInputHandler(view ID, handler TextInputHandler) {
 	viewTextInputMu.Lock()
 	defer viewTextInputMu.Unlock()
-	if handler.KeyDown == nil && handler.SetMarkedText == nil &&
+	if handler.KeyDown == nil && handler.Command == nil && handler.SetMarkedText == nil &&
 		handler.InsertText == nil && handler.UnmarkText == nil &&
 		handler.AttributedSubstring == nil {
 		delete(viewTextInputHandlers, view.Ptr())
@@ -366,6 +367,9 @@ func registerGoGPUViewKeyboardAndTextMethods(cls Class, textInput bool) {
 	// doCommandBySelector: — no-op. This is the method that calls NSBeep()
 	// when no responder handles the command. GLFW uses empty {}, SDL3 same.
 	doCommandIMP := ffi.NewCallback(func(self, sel, aSelector uintptr) uintptr {
+		if handler, ok := getViewTextInputHandler(self); ok && handler.Command != nil {
+			handler.Command()
+		}
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("doCommandBySelector:"), doCommandIMP, "v@::")
@@ -377,6 +381,16 @@ func registerGoGPUViewKeyboardAndTextMethods(cls Class, textInput bool) {
 	ClassAddMethod(cls, RegisterSelector("acceptsFirstResponder"), acceptsIMP, "B@:")
 
 	if textInput {
+		// NSTextView's mouse tracking and contextual menu must not intercept
+		// pointer events already delivered by GoGPU's event pump.
+		mouseIMP := ffi.NewCallback(func(self, sel, event uintptr) uintptr { return 0 })
+		for _, name := range []string{"mouseDown:", "mouseDragged:", "mouseUp:", "rightMouseDown:", "rightMouseDragged:", "rightMouseUp:", "otherMouseDown:", "otherMouseDragged:", "otherMouseUp:"} {
+			ClassAddMethod(cls, RegisterSelector(name), mouseIMP, "v@:@")
+		}
+		noCursorRects := ffi.NewCallback(func(self, sel uintptr) uintptr { return 0 })
+		ClassAddMethod(cls, RegisterSelector("resetCursorRects"), noCursorRects, "v@:")
+		noMenu := ffi.NewCallback(func(self, sel, event uintptr) uintptr { return 0 })
+		ClassAddMethod(cls, RegisterSelector("menuForEvent:"), noMenu, "@@:@")
 		registerGoGPUViewTextInputMethods(cls)
 	}
 }
@@ -451,6 +465,9 @@ func registerGoGPUViewInsertTextMethods(cls Class) {
 			&textID,
 			[2]uintptr{replacementLocation, replacementLength},
 		)
+		if !isViewTextInputForwarding(self) {
+			clearTextInputStorage(ID(self))
+		}
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("insertText:replacementRange:"),
@@ -465,6 +482,9 @@ func registerGoGPUViewInsertTextMethods(cls Class) {
 			}
 		}
 		callGoGPUViewSuperVoid(ID(self), "insertText:", &textID)
+		if !isViewTextInputForwarding(self) {
+			clearTextInputStorage(ID(self))
+		}
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("insertText:"), insertTextLegacyIMP, "v@:@")
@@ -478,6 +498,9 @@ func registerGoGPUViewUnmarkAndSubstringMethods(cls Class) {
 			}
 		}
 		callGoGPUViewSuperVoid(ID(self), "unmarkText", nil)
+		if !isViewTextInputForwarding(self) {
+			clearTextInputStorage(ID(self))
+		}
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("unmarkText"), unmarkTextIMP, "v@:")

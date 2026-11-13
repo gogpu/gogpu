@@ -25,9 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **macOS: input method (IME) support (NSTextInputClient)** (#331). A custom, invisible `NSTextView` receives AppKit's
   marked-text and commit callbacks while GoGPU renders the preedit. Cocoa UTF-16 ranges are converted to UTF-8 byte
   ranges for `EventSource.OnIMEComposition*`; committed text is dispatched once, cursor geometry follows
-  `SetIMECursorArea`, and `SetIMESurroundingText` is exposed only for enabled, non-sensitive input. Password, hidden,
-  and sensitive content disables IME. AppKit's pull-based surrounding-text query is supported; delete-surrounding is
-  not advertised because NSTextInputClient has no equivalent callback. Calls from workers update Go state and wake
+  `SetIMECursorArea`. Password, hidden, and sensitive content disables IME. Surrounding-text and delete-surrounding
+  capabilities are not advertised. Calls from workers update Go state and wake
   the main-thread event loop for native state changes.
 
 ### Performance

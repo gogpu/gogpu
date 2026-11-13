@@ -18,16 +18,18 @@ import (
 
 // darwinWindow holds all per-window state for a macOS window.
 type darwinWindow struct {
-	window       *darwin.Window
-	surface      *darwin.Surface
-	config       Config
-	id           WindowID
-	shouldClose  bool
-	events       *eventqueue.Queue[Event]
-	eventMu      sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
-	imeMu        sync.Mutex // guards AppKit NSTextInputClient state
-	imeDestroyed bool       // native view/window has been torn down
-	ime          macIMEState
+	window          *darwin.Window
+	surface         *darwin.Surface
+	config          Config
+	id              WindowID
+	shouldClose     bool
+	events          *eventqueue.Queue[Event]
+	eventMu         sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
+	imeMu           sync.Mutex // guards AppKit NSTextInputClient state
+	imeDestroyed    bool       // native view/window has been torn down
+	ime             macIMEState
+	imeKeyConsumed  bool            // guarded by imeMu; updated during interpretKeyEvents
+	imeConsumedKeys map[uint16]bool // accessed on the event thread
 
 	// Mouse state tracking
 	pointerX      float64
@@ -216,8 +218,10 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		// key event through NSTextInputClient. Keep the native bridge thin and
 		// convert Cocoa's UTF-16 ranges at the platform boundary.
 		darwin.SetViewTextInputHandler(contentView, darwin.TextInputHandler{
-			KeyDown: func(event darwin.ID) {
-				w.handleIMEKeyDown(contentView, event)
+			Command: func() {
+				w.imeMu.Lock()
+				w.imeKeyConsumed = false
+				w.imeMu.Unlock()
 			},
 			SetMarkedText: func(text darwin.ID, selectedLocation, selectedLength,
 				replacementLocation, replacementLength uintptr) {
@@ -229,9 +233,6 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 			},
 			UnmarkText: func() {
 				w.handleMacUnmarkText()
-			},
-			AttributedSubstring: func(location, length, actualRange uintptr) darwin.ID {
-				return w.handleMacAttributedSubstring(location, length, actualRange)
 			},
 		})
 	}
@@ -750,13 +751,13 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 			w.lastKeyWindow = isKey
 			w.focusInited = true
 			if !isKey {
-				w.SetIMEEnabled(false)
+				w.CancelIME()
 				w.flushNativeIMEReset(w.window.ContentView())
 			}
 		} else if isKey != w.lastKeyWindow {
 			w.lastKeyWindow = isKey
 			if !isKey {
-				w.SetIMEEnabled(false)
+				w.CancelIME()
 				w.flushNativeIMEReset(w.window.ContentView())
 			}
 			w.events.Push(Event{WindowID: w.id, Type: EventFocus, Focused: isKey})
@@ -939,21 +940,14 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Keyboard events
 	case darwin.NSEventTypeKeyDown:
-		keyCode := darwin.GetKeyCode(event)
-		key := macKeyCodeToKey(keyCode)
-		w.dispatchKeyEvent(key, w.modifiers, true)
-
-		// When NSTextInputClient is enabled, AppKit's keyDown callback calls
-		// interpretKeyEvents:, which delivers committed text and preedit updates
-		// through the bridge. Dispatching NSEvent.characters here as well would
-		// duplicate committed text. The disabled path retains the existing
-		// direct character dispatch for ordinary keyboard input.
-		if !w.imeEnabled() {
-			w.dispatchCharFromEvent(event)
-		}
+		w.handleMacKeyDown(event)
 
 	case darwin.NSEventTypeKeyUp:
 		keyCode := darwin.GetKeyCode(event)
+		if w.imeConsumedKeys[keyCode] {
+			delete(w.imeConsumedKeys, keyCode)
+			break
+		}
 		key := macKeyCodeToKey(keyCode)
 		w.dispatchKeyEvent(key, w.modifiers, false)
 
@@ -969,6 +963,25 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Let all events be dispatched to the application
 	return true
+}
+
+func (w *darwinWindow) handleMacKeyDown(event darwin.ID) {
+	keyCode := darwin.GetKeyCode(event)
+	enabled := w.imeEnabled()
+	consumed := enabled && w.window != nil && w.handleIMEKeyDown(w.window.ContentView(), event)
+	if consumed {
+		if w.imeConsumedKeys == nil {
+			w.imeConsumedKeys = make(map[uint16]bool)
+		}
+		w.imeConsumedKeys[keyCode] = true
+	} else {
+		delete(w.imeConsumedKeys, keyCode)
+		w.dispatchKeyEvent(macKeyCodeToKey(keyCode), w.modifiers, true)
+	}
+	// The enabled path delivers text through insertText:, not NSEvent.characters.
+	if !enabled {
+		w.dispatchCharFromEvent(event)
+	}
 }
 
 // dispatchPointerEvent pushes a pointer event to the event queue.

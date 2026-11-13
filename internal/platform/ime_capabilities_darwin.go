@@ -8,5 +8,5 @@ import "github.com/gogpu/gpucontext"
 // by the AppKit backend. AppKit has no portable delete-surrounding callback,
 // so that optional capability remains unset.
 func defaultIMECapabilities() gpucontext.IMECapabilities {
-	return gpucontext.IMECapabilityCursorArea | gpucontext.IMECapabilitySurroundingText
+	return gpucontext.IMECapabilityCursorArea
 }

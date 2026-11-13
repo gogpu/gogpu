@@ -133,30 +133,6 @@ func TestMacIMEPrivacyAndOrdinaryTextDispatch(t *testing.T) {
 	}
 }
 
-func TestMacIMESurroundingSubstringUsesUTF16RangesAndHonorsPrivacy(t *testing.T) {
-	w := newMacIMEWindow()
-	w.ime.surrounding = gpucontext.IMESurroundingText{Text: "a😀é", Cursor: 7, Anchor: 7}
-	var actual struct{ location, length uintptr }
-	result := w.handleMacAttributedSubstring(1, 2, uintptr(unsafe.Pointer(&actual)))
-	if got := platformdarwin.ObjectString(result); got != "😀" {
-		t.Fatalf("substring = %q, want emoji", got)
-	}
-	if actual != (struct{ location, length uintptr }{1, 2}) {
-		t.Fatalf("actual range = %+v, want UTF-16 range {1, 2}", actual)
-	}
-
-	result = w.handleMacAttributedSubstring(20, 1, uintptr(unsafe.Pointer(&actual)))
-	if got := platformdarwin.ObjectString(result); got != "" || actual != (struct{ location, length uintptr }{}) {
-		t.Fatalf("out-of-range result = %q, actual=%+v, want empty range", got, actual)
-	}
-
-	w.ime.purpose = gpucontext.ContentPurposePassword
-	result = w.handleMacAttributedSubstring(0, 1, uintptr(unsafe.Pointer(&actual)))
-	if got := platformdarwin.ObjectString(result); got != "" {
-		t.Fatalf("password substring = %q, want empty", got)
-	}
-}
-
 func TestMacIMEValidCursorArea(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -233,7 +209,7 @@ func TestMacIMECursorAreaAndCancelController(t *testing.T) {
 	}
 	w.ime.setMarked("preedit", 7, 0)
 	w.CancelIME()
-	if w.ime.marked || !w.ime.nativeNeedsUnmark {
+	if !w.imeEnabled() || w.ime.marked || !w.ime.nativeNeedsUnmark {
 		t.Fatalf("CancelIME did not clear state and defer native unmark: %+v", w.ime)
 	}
 	got := popMacIMEEvents(w)
@@ -243,6 +219,16 @@ func TestMacIMECursorAreaAndCancelController(t *testing.T) {
 	w.flushNativeIMEReset(0)
 	if w.ime.nativeNeedsUnmark {
 		t.Fatal("flushNativeIMEReset did not consume pending reset")
+	}
+}
+
+func TestMacIMECapabilitiesDoNotAdvertiseSurroundingText(t *testing.T) {
+	if caps := DefaultIMECapabilities(); caps&gpucontext.IMECapabilitySurroundingText != 0 {
+		t.Fatalf("surrounding text is not supported, got capabilities %v", caps)
+	}
+	var window *darwinPlatformWindow
+	if caps := window.IMECapabilities(); caps != 0 {
+		t.Fatalf("missing window reported capabilities %v", caps)
 	}
 }
 

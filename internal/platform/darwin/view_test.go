@@ -214,10 +214,24 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 			if committed != "仮名" {
 				t.Fatalf("insertText callback = %q, want %q", committed, "仮名")
 			}
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
+				t.Fatalf("native text storage after commit = %q, want empty", got)
+			}
+			preedit = platformdarwin.NewNSString("に")
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "setMarkedText:selectedRange:replacementRange:"),
+				objcArgPtr(preedit.ID().Ptr()), objcArgNSRange(testNSRange{location: 1}),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}))
+			preedit.Release()
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "に" {
+				t.Fatalf("native storage for second preedit = %q, want only the new preedit", got)
+			}
 
 			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "unmarkText"))
 			if !unmarked {
 				t.Fatal("unmarkText callback was not delivered")
+			}
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
+				t.Fatalf("native text storage after unmark = %q, want empty", got)
 			}
 		})
 	})

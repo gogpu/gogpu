@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/gogpu/gogpu/internal/platform/darwin"
 	"github.com/gogpu/gpucontext"
@@ -141,13 +140,16 @@ func (w *darwinWindow) CancelIME() {
 	darwin.WakeEventLoop()
 }
 
-func (w *darwinWindow) handleIMEKeyDown(view darwin.ID, event darwin.ID) {
+func (w *darwinWindow) handleIMEKeyDown(view darwin.ID, event darwin.ID) bool {
 	if w == nil || event == 0 {
-		return
+		return false
 	}
 	enabled := w.imeEnabled()
 	imeTracef("keyDown callback enabled=%v keycode=%d", enabled, darwin.GetKeyCode(event))
 	if enabled {
+		w.imeMu.Lock()
+		w.imeKeyConsumed = w.ime.marked
+		w.imeMu.Unlock()
 		// This callback is reached on AppKit's main thread. Deferring the
 		// input-context invalidation to this boundary keeps controller methods
 		// safe when widgets update IME state from a render/worker goroutine.
@@ -157,7 +159,12 @@ func (w *darwinWindow) handleIMEKeyDown(view darwin.ID, event darwin.ID) {
 		imeTracef("interpretKeyEvents begin")
 		darwin.InterpretKeyEvent(view, event)
 		imeTracef("interpretKeyEvents end")
+		w.imeMu.Lock()
+		consumed := w.imeKeyConsumed
+		w.imeMu.Unlock()
+		return consumed
 	}
+	return false
 }
 
 func (w *darwinWindow) flushNativeIMEReset(view darwin.ID) {
@@ -195,6 +202,7 @@ func (w *darwinWindow) handleMacSetMarkedText(text darwin.ID, selectedLocation, 
 		return
 	}
 	imeTracef("setMarkedText text=%q selection=%d:%d", value, selectedLocation, selectedLength)
+	w.imeKeyConsumed = true
 	started, composition := w.ime.setMarked(value, selectedLocation, selectedLength)
 	w.imeMu.Unlock()
 	w.applyMacIMEAreaForWindow()
@@ -230,6 +238,9 @@ func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) {
 	}
 	imeTracef("insertText text=%q", value)
 	wasMarked := w.ime.insert(value)
+	if wasMarked {
+		w.imeKeyConsumed = true
+	}
 	imeTracef("insertText previousMarked=%v", wasMarked)
 	w.imeMu.Unlock()
 
@@ -287,45 +298,6 @@ func (w *darwinWindow) handleMacUnmarkText() {
 	}
 }
 
-func (w *darwinWindow) handleMacAttributedSubstring(location, length, actualRange uintptr) darwin.ID {
-	if w == nil {
-		return darwin.NewAutoreleasedAttributedString("")
-	}
-	w.imeMu.Lock()
-	enabled := w.ime.enabled
-	sensitive := imeContentIsSensitive(w.ime.purpose, w.ime.hints)
-	surrounding := w.ime.surrounding
-	w.imeMu.Unlock()
-	if !enabled || sensitive || !surrounding.IsValid() {
-		return darwin.NewAutoreleasedAttributedString("")
-	}
-	start, end, hidden, ok := macUTF16RangeToUTF8(surrounding.Text, location, length)
-	if !ok || hidden {
-		writeNSRange(actualRange, 0, 0)
-		return darwin.NewAutoreleasedAttributedString("")
-	}
-	writeNSRange(actualRange, location, length)
-	return darwin.NewAutoreleasedAttributedString(surrounding.Text[start:end])
-}
-
-func writeNSRange(pointer, location, length uintptr) {
-	if pointer == 0 {
-		return
-	}
-	// The pointer originates from AppKit's NSRange* callback argument, not a
-	// Go uintptr. Reinterpret its bits through an unsafe.Pointer value so the
-	// race/checkptr build recognizes the foreign pointer lifetime.
-	nativePointer := *(*unsafe.Pointer)(unsafe.Pointer(&pointer))
-	rangeValue := struct {
-		location uintptr
-		length   uintptr
-	}{location: location, length: length}
-	*(*struct {
-		location uintptr
-		length   uintptr
-	})(nativePointer) = rangeValue
-}
-
 func validIMECursorArea(area gpucontext.IMECursorArea) bool {
 	return area.X >= 0 && area.Y >= 0 && area.Width >= 0 && area.Height >= 0 &&
 		!math.IsNaN(area.X) && !math.IsNaN(area.Y) &&
@@ -340,7 +312,7 @@ func (dw *darwinPlatformWindow) IMECapabilities() gpucontext.IMECapabilities {
 	if dw != nil && dw.owner != nil {
 		return dw.owner.IMECapabilities()
 	}
-	return DefaultIMECapabilities()
+	return 0
 }
 
 func (dw *darwinPlatformWindow) SetIMEEnabled(enabled bool) {
