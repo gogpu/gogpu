@@ -729,10 +729,14 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 // Returns true to let the event be dispatched to the application.
 // Called with w.eventMu held.
 func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType) bool {
+	// Get event info
+	info := darwin.GetEventInfo(event)
+
 	// Guard: ignore pointer/scroll events that arrive without an associated
 	// NSWindow. When the cursor is over the desktop or another app's window,
 	// [NSEvent window] is nil and locationInWindow returns screen-relative
 	// coordinates that would produce phantom pointer events with garbage positions.
+	// A mouse move over this window is the exception: adoptWindowlessMove takes it.
 	switch eventType {
 	case darwin.NSEventTypeLeftMouseDown, darwin.NSEventTypeLeftMouseUp,
 		darwin.NSEventTypeRightMouseDown, darwin.NSEventTypeRightMouseUp,
@@ -741,13 +745,10 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 		darwin.NSEventTypeRightMouseDragged, darwin.NSEventTypeOtherMouseDragged,
 		darwin.NSEventTypeMouseEntered, darwin.NSEventTypeMouseExited,
 		darwin.NSEventTypeScrollWheel:
-		if darwin.GetEventWindow(event).IsNil() {
+		if darwin.GetEventWindow(event).IsNil() && !w.adoptWindowlessMove(eventType, &info) {
 			return true
 		}
 	}
-
-	// Get event info
-	info := darwin.GetEventInfo(event)
 
 	// RETINA-001: Coordinates are in logical points (Cocoa points / DIP).
 	// w.config.Width/Height are now logical, matching NSEvent coordinates.
@@ -921,6 +922,31 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 // dispatchPointerEvent pushes a pointer event to the event queue.
 // Called from handleEvent with w.eventMu held.
+// adoptWindowlessMove reports whether a mouse move that came without a window
+// is this window's, and if so moves its location from screen coordinates into
+// the window's. After a window leaves native fullscreen, AppKit can go on
+// tagging every mouse move with the window that was under the cursor during
+// the animation, often another application's, until the next click: the moves
+// come without a window although the cursor is over this one (#552). A move
+// is this window's when the window is the frontmost one at its location.
+func (w *darwinWindow) adoptWindowlessMove(eventType darwin.NSEventType, info *darwin.EventInfo) bool {
+	if eventType != darwin.NSEventTypeMouseMoved || w.window == nil {
+		return false
+	}
+	frame := w.window.Frame()
+	x := info.LocationX - frame.Origin.X
+	y := info.LocationY - frame.Origin.Y
+	// The frame check spares the window server a query for each move
+	// outside the window.
+	if x < 0 || y < 0 || x >= frame.Size.Width || y >= frame.Size.Height ||
+		!w.window.IsFrontmostAt(darwin.NSPoint{X: info.LocationX, Y: info.LocationY}) {
+		return false
+	}
+	info.LocationX = x
+	info.LocationY = y
+	return true
+}
+
 func (w *darwinWindow) dispatchPointerEvent(ev gpucontext.PointerEvent) {
 	var evType EventType
 	switch ev.Type {

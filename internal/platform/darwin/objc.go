@@ -1405,6 +1405,68 @@ func (id ID) SendPoint(sel SEL, point NSPoint) ID {
 	return ID(result)
 }
 
+// SendPointInt sends a message with an NSPoint and an NSInteger argument,
+// such as +[NSWindow windowNumberAtPoint:belowWindowWithWindowNumber:].
+func (id ID) SendPointInt(sel SEL, point NSPoint, arg int64) ID {
+	if id == 0 || sel == 0 {
+		return 0
+	}
+
+	if err := initRuntime(); err != nil {
+		return 0
+	}
+
+	argTypes := []*types.TypeDescriptor{
+		types.PointerTypeDescriptor, // self
+		types.PointerTypeDescriptor, // _cmd
+		nsPointType,                 // point
+		types.SInt64TypeDescriptor,  // arg
+	}
+
+	cif := &types.CallInterface{}
+	err := ffi.PrepareCallInterface(
+		cif,
+		types.DefaultCall,
+		types.PointerTypeDescriptor,
+		argTypes,
+	)
+	if err != nil {
+		return 0
+	}
+
+	argBox := &struct {
+		self  uintptr
+		sel   uintptr
+		point NSPoint
+		arg   int64
+	}{
+		self:  uintptr(id),
+		sel:   uintptr(sel),
+		point: point,
+		arg:   arg,
+	}
+
+	argPtrs := []unsafe.Pointer{
+		unsafe.Pointer(&argBox.self),
+		unsafe.Pointer(&argBox.sel),
+		unsafe.Pointer(&argBox.point),
+		unsafe.Pointer(&argBox.arg),
+	}
+
+	var result uintptr
+	_, err = ffi.CallFunction(
+		cif,
+		objcRT.objcMsgSend,
+		unsafe.Pointer(&result),
+		argPtrs,
+	)
+	if err != nil {
+		return 0
+	}
+
+	return ID(result)
+}
+
 // AllocateClassPair creates a new ObjC class as a subclass of superclass.
 // Returns the new Class, or 0 if allocation fails.
 // Call RegisterClassPair after adding methods.
