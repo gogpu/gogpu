@@ -9,6 +9,6 @@ import (
 
 // BackendInfo returns metadata for unsupported platforms.
 // gogpu requires Windows (Vulkan/DX12), Linux (Vulkan), or macOS (Metal).
-func BackendInfo(_ types.GraphicsAPI) (name string, variant gputypes.Backend) {
+func BackendInfo(_ types.GraphicsAPI) (name string, mask gputypes.Backends) {
 	return "unsupported", 0
 }
