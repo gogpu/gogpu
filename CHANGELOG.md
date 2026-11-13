@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type keeps IME disabled, and the surrounding text is dropped as soon as input is disabled. Controller methods are safe
   from any goroutine, while the window opens and closes too: the native IMM32 state is applied on the window thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
   with the later TSF backend. X11, Wayland and macOS backends follow in their own changes.
+- **`Config.RequiredFeatures`** (#510, @dvoyni). The device is created with the optional features the app names through
+  `Config.RequiredFeatures` or `WithRequiredFeatures`. It was requested with none, even on an adapter that supports
+  them, so an app using the raw device could not use anything WebGPU puts behind a feature, such as a non-zero
+  `firstInstance` on a direct draw. The zero value requests none, as before. A failed request names the features asked
+  for and those the adapter supports.
 
 ### Performance
 
