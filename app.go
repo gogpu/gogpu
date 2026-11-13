@@ -88,6 +88,7 @@ type App struct {
 	// applies the changes on its window thread (gpucontext.IMEController
 	// threading contract), so these guards only cover the values.
 	imeMu             sync.Mutex
+	imeTarget         platform.PlatformWindow // window the controller drives; see ime.go
 	imeEnabled        bool
 	imeConfigured     bool
 	imeCursorArea     gpucontext.IMECursorArea
@@ -598,7 +599,7 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 
 	// Store the primary platform window for per-window operations.
 	a.platWindow = platWindow
-	a.applyIMEControllerState(platWindow)
+	a.attachIMEWindow(platWindow)
 
 	if a.hitTestCallback != nil {
 		a.applyHitTestCallback()
@@ -1064,6 +1065,7 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 
 	if isPrimary {
 		a.primaryWindow = nil
+		a.detachIMEWindow()
 		a.platWindow = nil
 		if a.renderer != nil {
 			a.renderer.primary = nil

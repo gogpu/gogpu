@@ -12,13 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Windows: input method (IME) support (IMM32)**, based on #462 by @besmpl. `App` implements `gpucontext.IMEController`:
   composition start, update and end reach `EventSource.OnIMEComposition*` with the preedit and UTF-8 byte-offset cursor
   and selection ranges, cancel and disable arrive through the optional `gpucontext.IMEEventSource`, and
-  `SetIMECursorArea` places the candidate window at the caret. The native composition window is hidden (the application
-  renders the preedit) and a committed result is delivered exactly once, covering Hangul IMEs that send
-  `WM_IME_COMPOSITION` after `WM_IME_ENDCOMPOSITION` and legacy providers that echo the result as `WM_CHAR`. IME starts
-  disabled, a password, hidden or sensitive content type keeps it disabled, and the surrounding text is dropped as soon
-  as input is disabled. Controller methods are safe from any goroutine: the native IMM32 state is applied on the window
-  thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
-  with the later TSF backend. X11 and Wayland follow in their own changes.
+  `SetIMECursorArea` places the candidate window at the caret. A window keeps the system IME — its own composition
+  window, committed text as ordinary text input — until the app first calls `SetIMEEnabled`, so an app that never uses
+  the controller still accepts CJK input; from that call on the app owns composition, the native composition window is
+  hidden (the application renders the preedit) and a committed result is delivered exactly once, covering Hangul IMEs
+  that send `WM_IME_COMPOSITION` after `WM_IME_ENDCOMPOSITION` and legacy providers that echo the result as `WM_CHAR`.
+  Focus loss cancels an active composition and leaves the enabled state alone. A password, hidden or sensitive content
+  type keeps IME disabled, and the surrounding text is dropped as soon as input is disabled. Controller methods are safe
+  from any goroutine, while the window opens and closes too: the native IMM32 state is applied on the window thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
+  with the later TSF backend. X11 and Wayland backends follow in their own changes.
 
 - **macOS: input method (IME) support (NSTextInputClient)** (#331). A custom, invisible `NSTextView` receives AppKit's
   marked-text and commit callbacks while GoGPU renders the preedit. Cocoa UTF-16 ranges are converted to UTF-8 byte
@@ -44,12 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slices, so a platform dialog cannot mutate them. Dead event-source dispatch helpers are gone,
   `mapTextureFormat` becomes `allowedSurfaceFormat`, and `doc.go`, the README and ARCHITECTURE.md now describe the
   current platform support and DIP dimensions.
-- **Dependencies:** wgpu v0.34.9 → v0.34.13, naga v0.21.4 → v0.21.10. wgpu now accepts command buffers whose
+- **Dependencies:** wgpu v0.34.9 → v0.34.14, naga v0.21.4 → v0.21.10. wgpu now accepts command buffers whose
   resources were released after recording, the same way Rust wgpu handles a dropped handle; Vulkan descriptor pools
   always include the dynamic buffer types; and with demote-to-helper support, a discard demotes the invocation
   instead of emitting `OpKill`. naga adds `spirv.CapabilitySet` and fixes MSL code generation — multiple returns,
-  packed `vec3` bitcasts, atomic workgroup loads, threadgroup vector stores and the writer error paths — which
-  reaches Metal through wgpu v0.34.13; that release carries no wgpu code or API change.
+  packed `vec3` bitcasts, atomic workgroup loads, threadgroup vector stores and the writer error paths. wgpu
+  v0.34.14 registers the platform hardware backends by default behind build tags (`wgpu_novulkan`, `wgpu_nodx12`,
+  `wgpu_nogles`, `wgpu_nometal` opt out), adds the `wgputest` package and `Device.CheckHealth`, and stops
+  registering `hal/noop` in `init`; the Pure Go software backend stays an explicit import until v0.35.0, which
+  gogpu keeps.
 
 ### Removed
 

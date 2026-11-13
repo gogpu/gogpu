@@ -541,7 +541,8 @@ type win32Size struct {
 }
 
 // candidateForm mirrors the Win32 CANDIDATEFORM structure used by
-// ImmSetCandidateWindow. Coordinates are screen pixels.
+// ImmSetCandidateWindow. Coordinates are client pixels of the window that owns
+// the input context.
 type candidateForm struct {
 	dwIndex      uint32
 	dwStyle      uint32
@@ -550,7 +551,8 @@ type candidateForm struct {
 }
 
 // compositionForm mirrors the Win32 COMPOSITIONFORM structure used by
-// ImmSetCompositionWindow. Coordinates are screen pixels.
+// ImmSetCompositionWindow. Coordinates are client pixels of the window that
+// owns the input context.
 type compositionForm struct {
 	dwStyle      uint32
 	ptCurrentPos point
@@ -613,10 +615,15 @@ type win32Window struct {
 	// window thread and IMEController calls from any goroutine, so imeMu
 	// guards them; the native IMM32 calls themselves run only on the window
 	// thread, through the wmIMEApply message.
-	imeMu            sync.Mutex
-	imeDestroyed     bool
-	ime              imeTracker
-	imeOpenApplied   bool // native IME context associated as the app asked
+	imeMu        sync.Mutex
+	imeDestroyed bool
+	ime          imeTracker
+	// imeManaged is set by the first SetIMEEnabled call. Until then the window
+	// leaves the system IME alone: its own composition UI and WM_CHAR results,
+	// as before the IME controller existed, so apps that never configure IME
+	// still accept CJK input (LEAD-023 F1).
+	imeManaged       bool
+	imeDetached      bool // native context detached (IACE_CHILDREN) as the app asked
 	imeApplyPosted   bool // a wmIMEApply message is already queued
 	imeCancelPending bool // NI_COMPOSITIONSTR/CPS_CANCEL not yet sent
 	imeArea          gpucontext.IMECursorArea
@@ -938,10 +945,6 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	p.windowMu.Lock()
 	p.windows[w.hwnd] = w
 	p.windowMu.Unlock()
-
-	// IME starts disabled: a focused text widget enables it. Detaching the
-	// context before the first message keeps the IME out of non-text windows.
-	w.initIMEState()
 
 	// Enable file drag-and-drop (WM_DROPFILES from shell32).
 	procDragAcceptFiles.Call(uintptr(w.hwnd), 1) // TRUE
@@ -2964,11 +2967,10 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmKillFocus:
 		p.queueEvent(Event{Type: EventFocus, WindowID: w.id, Focused: false})
-		// Losing focus cancels any preedit and detaches the native IME before
-		// the next focus target can receive composition messages. App keeps the
-		// enabled state a widget configured; that widget re-asserts
-		// SetIMEEnabled(true) when focus returns to it.
-		w.SetIMEEnabled(false)
+		// Losing focus drops an active preedit, which would otherwise wait for
+		// an end that never comes. The input context stays as the app asked
+		// (winit does not touch it on focus loss either).
+		w.CancelIME()
 		return 0
 
 	case wmActivate:
@@ -3299,25 +3301,38 @@ func wndProc(hwnd windows.HWND, message uint32, wParam, lParam uintptr) uintptr 
 		return 0
 
 	case wmIMESetContext:
-		// The application renders the preedit itself, so keep the IME from
-		// drawing its own composition window (winit, SDL3).
-		lParam &^= iscShowUICompositionWindow
+		// A managed window renders the preedit itself, so keep the IME from
+		// drawing its own composition window (winit, SDL3). An unmanaged one
+		// keeps the system composition UI.
+		if w.imeIsManaged() {
+			lParam &^= iscShowUICompositionWindow
+		}
 		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return ret
 
 	case wmIMEStartComposition:
-		w.handleIMEStart()
+		if w.imeIsManaged() {
+			w.handleIMEStart()
+		}
 		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return ret
 
 	case wmIMEComposition:
+		if !w.imeIsManaged() {
+			// DefWindowProc turns the result into WM_IME_CHAR and then WM_CHAR,
+			// the text input path apps had before the IME controller.
+			ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+			return ret
+		}
 		// Handling the message without DefWindowProc is what hides the text
 		// the IME would otherwise draw (winit).
 		w.handleIMEComposition(lParam)
 		return 0
 
 	case wmIMEEndComposition:
-		w.handleIMEEnd()
+		if w.imeIsManaged() {
+			w.handleIMEEnd()
+		}
 		ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
 		return ret
 
