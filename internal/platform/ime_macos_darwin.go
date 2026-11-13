@@ -3,13 +3,21 @@
 package platform
 
 import (
+	"log"
 	"math"
+	"os"
 	"unicode/utf8"
 	"unsafe"
 
 	"github.com/gogpu/gogpu/internal/platform/darwin"
 	"github.com/gogpu/gpucontext"
 )
+
+func imeTracef(format string, args ...any) {
+	if os.Getenv("GOGPU_IME_TRACE") == "1" {
+		log.Printf("[IME native] "+format, args...)
+	}
+}
 
 // IMECapabilities reports the operations implemented by the AppKit backend.
 func (w *darwinWindow) IMECapabilities() gpucontext.IMECapabilities {
@@ -34,6 +42,7 @@ func (w *darwinWindow) imeEnabled() bool {
 }
 
 func (w *darwinWindow) SetIMEEnabled(enabled bool) {
+	imeTracef("SetIMEEnabled requested=%v", enabled)
 	if w == nil {
 		return
 	}
@@ -44,11 +53,13 @@ func (w *darwinWindow) SetIMEEnabled(enabled bool) {
 	}
 	if enabled && (w.window == nil || !darwin.ViewSupportsTextInput(w.window.ContentView())) {
 		w.imeMu.Unlock()
+		imeTracef("enable rejected: native view does not support text input")
 		return
 	}
 	if enabled && imeContentIsSensitive(w.ime.purpose, w.ime.hints) {
 		enabled = false
 	}
+	imeTracef("SetIMEEnabled effective=%v", enabled)
 	wasEnabled := w.ime.enabled
 	canceled := w.ime.setEnabled(enabled)
 	w.imeMu.Unlock()
@@ -134,14 +145,18 @@ func (w *darwinWindow) handleIMEKeyDown(view darwin.ID, event darwin.ID) {
 	if w == nil || event == 0 {
 		return
 	}
-	if w.imeEnabled() {
+	enabled := w.imeEnabled()
+	imeTracef("keyDown callback enabled=%v keycode=%d", enabled, darwin.GetKeyCode(event))
+	if enabled {
 		// This callback is reached on AppKit's main thread. Deferring the
 		// input-context invalidation to this boundary keeps controller methods
 		// safe when widgets update IME state from a render/worker goroutine.
 		w.flushNativeIMEReset(view)
 		w.applyMacIMEArea(view)
 		darwin.InvalidateInputContext(view)
+		imeTracef("interpretKeyEvents begin")
 		darwin.InterpretKeyEvent(view, event)
+		imeTracef("interpretKeyEvents end")
 	}
 }
 
@@ -179,6 +194,7 @@ func (w *darwinWindow) handleMacSetMarkedText(text darwin.ID, selectedLocation, 
 		w.imeMu.Unlock()
 		return
 	}
+	imeTracef("setMarkedText text=%q selection=%d:%d", value, selectedLocation, selectedLength)
 	started, composition := w.ime.setMarked(value, selectedLocation, selectedLength)
 	w.imeMu.Unlock()
 	w.applyMacIMEAreaForWindow()
@@ -212,7 +228,9 @@ func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) {
 		w.imeMu.Unlock()
 		return
 	}
+	imeTracef("insertText text=%q", value)
 	wasMarked := w.ime.insert(value)
+	imeTracef("insertText previousMarked=%v", wasMarked)
 	w.imeMu.Unlock()
 
 	if wasMarked {
