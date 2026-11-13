@@ -12,6 +12,6 @@
 //
 // # Subpackages
 //
-//   - gpu/types: GraphicsAPI and power-preference constants
-//   - gpu/backend/native: Native HAL backend registration
+//   - gpu/types: the GraphicsAPI selector
+//   - gpu/backend/native: links the wgpu backends and maps GraphicsAPI to a backend mask
 package gpu
