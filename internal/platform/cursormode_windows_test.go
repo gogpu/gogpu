@@ -13,11 +13,10 @@ import (
 
 var procGetClipCursor = user32.NewProc("GetClipCursor")
 
-// newCursorModeTestWindow opens a hidden window, which is not active, on a
-// platform of its own. When the test ends it releases the window's cursor
-// mode and tears the platform down, its window class included, so a later
-// test can register the class again.
-func newCursorModeTestWindow(t *testing.T) *win32Window {
+// newCursorModeTestPlatform initializes a platform of its own on the test's
+// thread, and tears it down when the test ends, its window class included,
+// so a later test can register the class again.
+func newCursorModeTestPlatform(t *testing.T) *windowsPlatform {
 	t.Helper()
 	runtime.LockOSThread()
 	p := newPlatformManager().(*windowsPlatform)
@@ -34,13 +33,28 @@ func newCursorModeTestWindow(t *testing.T) *win32Window {
 		windows.NewLazySystemDLL("ole32.dll").NewProc("OleUninitialize").Call()
 		runtime.UnlockOSThread()
 	})
-	created, err := p.CreateWindow(Config{Title: "cursor mode", Width: 320, Height: 240})
+	return p
+}
+
+// newCursorModeTestWindow opens a hidden window, which is not active, on a
+// platform of its own. When the test ends it releases the window's cursor
+// mode and tears the platform down.
+func newCursorModeTestWindow(t *testing.T) *win32Window {
+	t.Helper()
+	window := newCursorModeTestWindowOn(t, newCursorModeTestPlatform(t))
+	t.Cleanup(func() { window.SetCursorMode(0) })
+	return window
+}
+
+// newCursorModeTestWindowOn opens a hidden window, which is not active, on
+// platform.
+func newCursorModeTestWindowOn(t *testing.T, platform *windowsPlatform) *win32Window {
+	t.Helper()
+	created, err := platform.CreateWindow(Config{Title: "cursor mode", Width: 320, Height: 240})
 	if err != nil {
 		t.Fatalf("CreateWindow = %v", err)
 	}
-	window := created.(*win32Window)
-	t.Cleanup(func() { window.SetCursorMode(0) })
-	return window
+	return created.(*win32Window)
 }
 
 // cursorClip returns the rectangle the cursor is confined to, the screen's
@@ -70,6 +84,56 @@ func TestCursorModeIsNormalWhileTheWindowIsInactive(t *testing.T) {
 	wndProc(window.hwnd, wmActivate, waActive, 0)
 	if mode := window.CursorMode(); mode != 1 || cursorClip() == unclipped {
 		t.Errorf("a locked window made active again answers %d, clip %+v, want Locked and the cursor clipped", mode, cursorClip())
+	}
+}
+
+// cursorDisplayCount returns the thread's cursor display count, which shows
+// the cursor while it is zero or more.
+func cursorDisplayCount() int32 {
+	count, _, _ := procShowCursorW.Call(1)
+	procShowCursorW.Call(0)
+	return int32(count) - 1
+}
+
+// windowDestructions are the ways a window is destroyed: on its own, or with
+// the rest of its platform's windows when the platform is torn down.
+var windowDestructions = []struct {
+	name    string
+	destroy func(window *win32Window)
+}{
+	{"window", func(window *win32Window) { window.Destroy() }},
+	{"platform", func(window *win32Window) { window.platform.Destroy() }},
+}
+
+func TestDestroyingAnActiveWindowReleasesItsCursorMode(t *testing.T) {
+	for _, mode := range []int{1, 2} {
+		for _, destruction := range windowDestructions {
+			t.Run(fmt.Sprintf("mode %d, %s", mode, destruction.name), func(t *testing.T) {
+				// The clip is the whole system's: free it even when the test
+				// fails, so the cursor is not left clipped after the run.
+				t.Cleanup(func() { procClipCursor.Call(0) })
+				platform := newCursorModeTestPlatform(t)
+				// Read once Init has made the process DPI aware, in the
+				// physical pixels the clip is read in after.
+				unclipped := cursorClip()
+				shownDisplayCount := cursorDisplayCount()
+				window := newCursorModeTestWindowOn(t, platform)
+				window.SetCursorMode(mode)
+				wndProc(window.hwnd, wmActivate, waActive, 0)
+				if cursorClip() == unclipped {
+					t.Fatalf("the active window's cursor is not clipped")
+				}
+
+				destruction.destroy(window)
+
+				if clip := cursorClip(); clip != unclipped {
+					t.Errorf("the cursor is clipped to %+v after the window is destroyed, want %+v", clip, unclipped)
+				}
+				if displayCount := cursorDisplayCount(); displayCount != shownDisplayCount {
+					t.Errorf("the cursor display count is %d after the window is destroyed, want %d", displayCount, shownDisplayCount)
+				}
+			})
+		}
 	}
 }
 
