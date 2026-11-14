@@ -165,6 +165,33 @@ func TestMacIMEUnhandledCommandCancelsPreedit(t *testing.T) {
 	}
 }
 
+func TestMacIMEKeyStateConsumedDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		beginMarked  bool
+		commit       bool
+		wantForward  bool
+		wantConsumed bool
+	}{
+		{name: "unmarked key forwards", wantForward: true},
+		{name: "marked key forwards an unhandled command", beginMarked: true, wantForward: true},
+		{name: "commit keeps the confirming key consumed", beginMarked: true, commit: true, wantConsumed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var state macIMEKeyState
+			state.begin(tc.beginMarked)
+			if tc.commit {
+				state.commit()
+			}
+			forward := state.command()
+			if forward != tc.wantForward || state.consumed != tc.wantConsumed {
+				t.Fatalf("command() = %v, consumed = %v; want %v, %v",
+					forward, state.consumed, tc.wantForward, tc.wantConsumed)
+			}
+		})
+	}
+}
+
 func TestMacIMEValidCursorArea(t *testing.T) {
 	for _, tc := range []struct {
 		name string

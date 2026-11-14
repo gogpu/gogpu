@@ -15,7 +15,6 @@ var selectors struct {
 	new                SEL
 	release            SEL
 	retain             SEL
-	autorelease        SEL
 	respondsToSelector SEL
 
 	// NSApplication - Application lifecycle
@@ -134,7 +133,6 @@ var selectors struct {
 
 	// NSString
 	initWithUTF8String SEL
-	initWithString     SEL
 	UTF8String         SEL
 	length             SEL
 	string             SEL
@@ -260,7 +258,6 @@ var classes struct {
 	NSScreen             Class
 	NSDate               Class
 	NSString             Class
-	NSAttributedString   Class
 	NSAutoreleasePool    Class
 	NSEvent              Class
 	NSNotificationCenter Class
@@ -284,7 +281,6 @@ func initSelectors() {
 		selectors.new = RegisterSelector("new")
 		selectors.release = RegisterSelector("release")
 		selectors.retain = RegisterSelector("retain")
-		selectors.autorelease = RegisterSelector("autorelease")
 		selectors.respondsToSelector = RegisterSelector("respondsToSelector:")
 
 		// NSApplication
@@ -403,7 +399,6 @@ func initSelectors() {
 
 		// NSString
 		selectors.initWithUTF8String = RegisterSelector("initWithUTF8String:")
-		selectors.initWithString = RegisterSelector("initWithString:")
 		selectors.UTF8String = RegisterSelector("UTF8String")
 		selectors.length = RegisterSelector("length")
 		selectors.string = RegisterSelector("string")
@@ -533,7 +528,6 @@ func initClasses() {
 		classes.NSScreen = GetClass("NSScreen")
 		classes.NSDate = GetClass("NSDate")
 		classes.NSString = GetClass("NSString")
-		classes.NSAttributedString = GetClass("NSAttributedString")
 		classes.NSAutoreleasePool = GetClass("NSAutoreleasePool")
 		classes.NSEvent = GetClass("NSEvent")
 		classes.NSNotificationCenter = GetClass("NSNotificationCenter")

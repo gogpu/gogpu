@@ -167,7 +167,7 @@ func TestCreateGoGPUView(t *testing.T) {
 func TestGoGPUViewTextInputBridge(t *testing.T) {
 	rt := loadObjcRuntime(t)
 	var marked, committed string
-	var unmarked bool
+	var unmarked, commandReceived, rejectInsert bool
 	runOnMainThread(t, func() {
 		withAutoreleasePool(t, rt, func() {
 			window, err := platformdarwin.NewWindow(platformdarwin.WindowConfig{Width: 320, Height: 200})
@@ -193,8 +193,9 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 				},
 				InsertText: func(text platformdarwin.ID, _, _ uintptr) bool {
 					committed = platformdarwin.ObjectString(text)
-					return true
+					return !rejectInsert
 				},
+				Command:    func() { commandReceived = true },
 				UnmarkText: func() { unmarked = true },
 			})
 			defer platformdarwin.ClearViewTextInputHandler(view)
@@ -256,6 +257,31 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 			}
 			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
 				t.Fatalf("native text storage after unmark = %q, want empty", got)
+			}
+
+			// An insertText: rejected by the Go handler must not mutate native
+			// storage, and doCommandBySelector: must reach the command handler
+			// in the same interpretation.
+			rejectInsert = true
+			control := platformdarwin.NewNSString("\r")
+			if control == nil || control.ID() == 0 {
+				t.Fatal("NewNSString(control) returned nil")
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "insertText:replacementRange:"),
+				objcArgPtr(control.ID().Ptr()),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}),
+			)
+			control.Release()
+			if committed != "\r" {
+				t.Fatalf("rejected insertText callback = %q, want control character", committed)
+			}
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
+				t.Fatalf("native text storage after rejected insert = %q, want empty", got)
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "doCommandBySelector:"),
+				objcArgPtr(rt.sel(t, "insertNewline:")))
+			if !commandReceived {
+				t.Fatal("doCommandBySelector: did not reach the command handler")
 			}
 		})
 	})
