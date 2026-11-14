@@ -1,0 +1,216 @@
+//go:build darwin
+
+package darwin
+
+import (
+	"log/slog"
+	"runtime"
+	"unsafe"
+
+	"github.com/go-webgpu/goffi/ffi"
+	"github.com/go-webgpu/goffi/types"
+)
+
+// objcSuper is the ABI shape expected by objc_msgSendSuper. The receiver is
+// the GoGPUView instance and superClass is NSTextView, not GoGPUView.
+type objcSuper struct {
+	receiver   uintptr
+	superClass uintptr
+}
+
+// callGoGPUViewSuperVoid forwards a mutating NSTextInputClient callback to
+// NSTextView after the Go handler has observed it. text is nil for selectors
+// without a text argument (currently unmarkText); each range is one NSRange.
+// The helper deliberately keeps all ABI details in the Darwin package so the
+// platform layer only deals in UTF-16 location/length pairs. objc_msgSendSuper
+// has no meaningful recovery path: libffi has already validated the prepared
+// call shape, and a dispatch failure leaves AppKit's native composition state
+// unusable. The Objective-C callback cannot return the Go error to AppKit, so
+// the helper logs the failure instead of silently substituting another call.
+func callGoGPUViewSuperVoid(self ID, selectorName string, text *ID, ranges ...[2]uintptr) {
+	if self == 0 || !goGPUViewTextInput || goGPUViewSuper == 0 {
+		return
+	}
+	if err := initRuntime(); err != nil {
+		slog.Error("darwin: failed to initialize Objective-C runtime for NSTextInputClient",
+			"error", err)
+		return
+	}
+	if objcRT.objcMsgSendSuper == nil {
+		return
+	}
+	selector := RegisterSelector(selectorName)
+	if selector == 0 {
+		return
+	}
+
+	// Keep objc_super on the heap: objc_msgSendSuper receives its address
+	// through a uintptr argument, and a Go stack address could become stale if
+	// the goroutine stack moved during the libffi call.
+	super := &objcSuper{receiver: uintptr(self), superClass: uintptr(goGPUViewSuper)}
+	superPtr := uintptr(unsafe.Pointer(super))
+	selectorPtr := uintptr(selector)
+
+	argTypes := make([]*types.TypeDescriptor, 0, 2+1+len(ranges))
+	argTypes = append(argTypes,
+		types.PointerTypeDescriptor, // struct objc_super*
+		types.PointerTypeDescriptor, // SEL
+	)
+	argPtrs := make([]unsafe.Pointer, 0, 2+1+len(ranges))
+	argPtrs = append(argPtrs, unsafe.Pointer(&superPtr), unsafe.Pointer(&selectorPtr))
+	if text != nil {
+		argTypes = append(argTypes, types.PointerTypeDescriptor)
+		argPtrs = append(argPtrs, unsafe.Pointer(text))
+	}
+
+	// Make a heap-backed copy so every pointer remains stable while libffi
+	// marshals the call. A Go [2]uintptr has the same layout as NSRange on the
+	// supported 64-bit Darwin targets.
+	rangeArgs := make([][2]uintptr, len(ranges))
+	copy(rangeArgs, ranges)
+	for i := range rangeArgs {
+		argTypes = append(argTypes, nsRangeType)
+		argPtrs = append(argPtrs, unsafe.Pointer(&rangeArgs[i]))
+	}
+
+	cif := &types.CallInterface{}
+	if err := ffi.PrepareCallInterface(cif, types.DefaultCall, types.VoidTypeDescriptor, argTypes); err != nil {
+		slog.Error("darwin: failed to prepare NSTextInputClient forwarding call",
+			"selector", selectorName, "error", err)
+		return
+	}
+	viewTextInputMu.Lock()
+	viewTextInputForward[uintptr(self)]++
+	viewTextInputMu.Unlock()
+	defer func() {
+		viewTextInputMu.Lock()
+		key := uintptr(self)
+		depth, ok := viewTextInputForward[key]
+		if !ok || depth <= 1 {
+			delete(viewTextInputForward, uintptr(self))
+		} else {
+			viewTextInputForward[key] = depth - 1
+		}
+		viewTextInputMu.Unlock()
+	}()
+	if _, err := ffi.CallFunction(cif, objcRT.objcMsgSendSuper, nil, argPtrs); err != nil {
+		slog.Error("darwin: failed to forward NSTextInputClient callback",
+			"selector", selectorName, "error", err)
+	}
+	runtime.KeepAlive(super)
+}
+
+// InterpretKeyEvent asks AppKit's input manager to translate one key event.
+// It is called only while a GoGPUView has IME enabled; the ordinary disabled
+// path dispatches NSEvent.characters directly to preserve existing behavior.
+func InterpretKeyEvent(view, event ID) {
+	if view == 0 || event == 0 || !goGPUViewTextInput {
+		return
+	}
+	initSelectors()
+	initClasses()
+	if classes.NSArray == 0 {
+		return
+	}
+	events := ID(classes.NSArray).SendPtr(selectors.arrayWithObject, event.Ptr())
+	if events == 0 {
+		return
+	}
+	view.SendPtr(selectors.interpretKeyEvents, events.Ptr())
+}
+
+// InvalidateInputContext requests AppKit to re-query the native text-input
+// geometry. NSTextView owns firstRectForCharacterRange: because goffi cannot
+// portably expose an NSRect-returning callback; the controller records its
+// logical cursor area in the platform layer and invalidates native geometry at
+// this main-thread boundary.
+func InvalidateInputContext(view ID) {
+	if view == 0 || !goGPUViewTextInput {
+		return
+	}
+	initSelectors()
+	context := view.Send(selectors.inputContext)
+	if context != 0 {
+		context.Send(selectors.invalidateCharacterCoordinates)
+	}
+}
+
+// SetTextInputCursorArea updates NSTextView's native text-container origin.
+// This lets the inherited firstRectForCharacterRange: report the logical
+// caret point without requiring an NSRect-returning Go callback. It is called
+// only from AppKit's main-thread event boundary.
+func SetTextInputCursorArea(view ID, x, y float64) {
+	if view == 0 || !goGPUViewTextInput {
+		return
+	}
+	initSelectors()
+	view.SendSize(selectors.setTextContainerInset, NSSize{Width: x, Height: y})
+	// NSTextView's default line fragment padding would otherwise shift the
+	// insertion point horizontally away from the requested caret location.
+	if container := view.Send(selectors.textContainer); container != 0 {
+		container.SendDouble(selectors.setLineFragmentPadding, 0)
+	}
+}
+
+// UnmarkText clears NSTextView's native preedit state. The caller must be on
+// AppKit's main thread; platform code uses this only from event/callback
+// boundaries after Go-side cancellation has already been recorded.
+func UnmarkText(view ID) {
+	if view == 0 || !goGPUViewTextInput {
+		return
+	}
+	initSelectors()
+	view.Send(selectors.unmarkText)
+}
+
+// Committed text belongs to the application, not the temporary layout view.
+func clearTextInputStorage(view ID) {
+	text := NewNSString("")
+	if text == nil {
+		return
+	}
+	defer text.Release()
+	view.SendPtr(RegisterSelector("setString:"), text.ID().Ptr())
+	callGoGPUViewSuperVoid(view, "setSelectedRange:", nil, [2]uintptr{0, 0})
+}
+
+// ObjectString converts NSString/NSAttributedString objects passed by AppKit
+// into a bounded Go UTF-8 string. The fallback through -string handles an
+// NSAttributedString returned by a custom input manager.
+func ObjectString(object ID) string {
+	if object == 0 {
+		return ""
+	}
+	initSelectors()
+	value := object
+	if object.SendPtr(selectors.respondsToSelector, selectors.UTF8String.SELPtr()) == 0 {
+		if object.SendPtr(selectors.respondsToSelector, selectors.string.SELPtr()) == 0 {
+			return ""
+		}
+		value = object.Send(selectors.string)
+	}
+	if value == 0 {
+		return ""
+	}
+	ptr := NSStringUTF8Ptr(value)
+	if ptr == 0 {
+		return ""
+	}
+	units := NSStringLength(value)
+	// NSStringLength is UTF-16 units; four bytes per unit is a conservative
+	// UTF-8 bound. Keep malformed or hostile objects from causing huge slices.
+	if units == 0 || units > 1<<20 {
+		return ""
+	}
+	// NSStringUTF8Ptr returns an address owned by AppKit. Reinterpret the
+	// uintptr bits without pointer arithmetic on a Go allocation so checkptr
+	// accepts reads from this foreign C string.
+	nativePointer := *(*unsafe.Pointer)(unsafe.Pointer(&ptr))
+	byteCount := 0
+	for maxUTF8Bytes := int(units) * 4; byteCount <= maxUTF8Bytes; byteCount++ {
+		if *(*byte)(unsafe.Add(nativePointer, byteCount)) == 0 {
+			return string(unsafe.Slice((*byte)(nativePointer), byteCount))
+		}
+	}
+	return ""
+}
