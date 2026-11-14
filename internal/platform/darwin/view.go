@@ -90,12 +90,9 @@ type TextInputHandler struct {
 
 	SetMarkedText func(text ID, selectedLocation, selectedLength,
 		replacementLocation, replacementLength uintptr)
-	InsertText func(text ID, replacementLocation, replacementLength uintptr)
+	// InsertText returns false when the input must not modify native storage.
+	InsertText func(text ID, replacementLocation, replacementLength uintptr) bool
 	UnmarkText func()
-
-	// AttributedSubstring returns an autoreleased NSAttributedString.
-	// actualRange is a pointer to Cocoa's NSRange storage and may be zero.
-	AttributedSubstring func(location, length, actualRange uintptr) ID
 }
 
 var (
@@ -111,8 +108,7 @@ func SetViewTextInputHandler(view ID, handler TextInputHandler) {
 	viewTextInputMu.Lock()
 	defer viewTextInputMu.Unlock()
 	if handler.KeyDown == nil && handler.Command == nil && handler.SetMarkedText == nil &&
-		handler.InsertText == nil && handler.UnmarkText == nil &&
-		handler.AttributedSubstring == nil {
+		handler.InsertText == nil && handler.UnmarkText == nil {
 		delete(viewTextInputHandlers, view.Ptr())
 		delete(viewTextInputForward, view.Ptr())
 		return
@@ -456,7 +452,9 @@ func registerGoGPUViewInsertTextMethods(cls Class) {
 		textID := ID(text)
 		if !isViewTextInputForwarding(self) {
 			if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
-				handler.InsertText(textID, replacementLocation, replacementLength)
+				if !handler.InsertText(textID, replacementLocation, replacementLength) {
+					return 0
+				}
 			}
 		}
 		callGoGPUViewSuperVoid(
@@ -478,7 +476,9 @@ func registerGoGPUViewInsertTextMethods(cls Class) {
 		textID := ID(text)
 		if !isViewTextInputForwarding(self) {
 			if handler, ok := getViewTextInputHandler(self); ok && handler.InsertText != nil {
-				handler.InsertText(textID, ^uintptr(0), ^uintptr(0))
+				if !handler.InsertText(textID, ^uintptr(0), ^uintptr(0)) {
+					return 0
+				}
 			}
 		}
 		callGoGPUViewSuperVoid(ID(self), "insertText:", &textID)
@@ -505,14 +505,9 @@ func registerGoGPUViewUnmarkAndSubstringMethods(cls Class) {
 	})
 	ClassAddMethod(cls, RegisterSelector("unmarkText"), unmarkTextIMP, "v@:")
 
-	// Surrounding text is supplied by the focused widget rather than by
-	// NSTextView's internal text storage. This callback returns an
-	// autoreleased NSString, which is a valid NSAttributedString result.
+	// AppKit must not read the temporary preedit as application context.
 	attributedSubstringIMP := ffi.NewCallback(func(self, sel, location,
 		length, actualRange uintptr) uintptr {
-		if handler, ok := getViewTextInputHandler(self); ok && handler.AttributedSubstring != nil {
-			return uintptr(handler.AttributedSubstring(location, length, actualRange))
-		}
 		return 0
 	})
 	ClassAddMethod(cls, RegisterSelector("attributedSubstringForProposedRange:actualRange:"),

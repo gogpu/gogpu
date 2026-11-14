@@ -37,7 +37,6 @@ func main() {
 		log.Fatal("No supported system font found")
 	}
 	update := func() {
-		app.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: committed, Cursor: len(committed), Anchor: len(committed)})
 		app.RequestRedraw()
 	}
 	ev := app.EventSource()

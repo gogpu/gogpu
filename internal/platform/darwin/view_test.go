@@ -3,6 +3,7 @@
 package darwin_test
 
 import (
+	"math"
 	"testing"
 	"unsafe"
 
@@ -169,11 +170,20 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 	var unmarked bool
 	runOnMainThread(t, func() {
 		withAutoreleasePool(t, rt, func() {
-			view, err := platformdarwin.CreateGoGPUView(platformdarwin.MakeRect(0, 0, 320, 200))
+			window, err := platformdarwin.NewWindow(platformdarwin.WindowConfig{Width: 320, Height: 200})
 			if err != nil {
-				t.Fatalf("CreateGoGPUView() error: %v", err)
+				t.Fatalf("NewWindow() error: %v", err)
 			}
-			defer view.Send(platformdarwin.SEL(rt.sel(t, "release")))
+			defer window.Destroy()
+			view := window.ContentView()
+			platformdarwin.SetTextInputCursorArea(view, 45, 30)
+			firstRect := func() nsRect {
+				return objcCallRet[nsRect](t, rt, view.Ptr(), rt.sel(t, "firstRectForCharacterRange:actualRange:"),
+					objcArgNSRange(testNSRange{}), objcArgPtr(0))
+			}
+			pointInWindow := objcCallRet[nsRect](t, rt, view.Ptr(), rt.sel(t, "convertRect:toView:"),
+				objcArgRect(nsRect{Origin: nsPoint{X: 45, Y: 30}}), objcArgPtr(0))
+			pointOnScreen := objcCallRet[nsRect](t, rt, window.NSID().Ptr(), rt.sel(t, "convertRectToScreen:"), objcArgRect(pointInWindow))
 			if !platformdarwin.ViewSupportsTextInput(view) {
 				t.Fatal("GoGPUView did not inherit NSTextInputClient support")
 			}
@@ -181,8 +191,9 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 				SetMarkedText: func(text platformdarwin.ID, _, _, _, _ uintptr) {
 					marked = platformdarwin.ObjectString(text)
 				},
-				InsertText: func(text platformdarwin.ID, _, _ uintptr) {
+				InsertText: func(text platformdarwin.ID, _, _ uintptr) bool {
 					committed = platformdarwin.ObjectString(text)
+					return true
 				},
 				UnmarkText: func() { unmarked = true },
 			})
@@ -201,6 +212,10 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 			if marked != "かな" {
 				t.Fatalf("setMarkedText callback = %q, want %q", marked, "かな")
 			}
+			initialRect := firstRect()
+			if math.Abs(initialRect.Origin.X-pointOnScreen.Origin.X) > 1 {
+				t.Fatalf("initial candidate x = %v, want inset x %v", initialRect.Origin.X, pointOnScreen.Origin.X)
+			}
 
 			result := platformdarwin.NewNSString("仮名")
 			if result == nil || result.ID() == 0 {
@@ -217,6 +232,11 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
 				t.Fatalf("native text storage after commit = %q, want empty", got)
 			}
+			var selection testNSRange
+			objcCall(t, rt, testNSRangeType, unsafe.Pointer(&selection), view.Ptr(), rt.sel(t, "selectedRange"))
+			if selection != (testNSRange{}) {
+				t.Fatalf("selection after commit = %+v, want {0,0}", selection)
+			}
 			preedit = platformdarwin.NewNSString("に")
 			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "setMarkedText:selectedRange:replacementRange:"),
 				objcArgPtr(preedit.ID().Ptr()), objcArgNSRange(testNSRange{location: 1}),
@@ -224,6 +244,10 @@ func TestGoGPUViewTextInputBridge(t *testing.T) {
 			preedit.Release()
 			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "に" {
 				t.Fatalf("native storage for second preedit = %q, want only the new preedit", got)
+			}
+			secondRect := firstRect()
+			if math.Abs(secondRect.Origin.X-initialRect.Origin.X) > 1 {
+				t.Fatalf("candidate x drifted after commit: %v -> %v", initialRect.Origin.X, secondRect.Origin.X)
 			}
 
 			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "unmarkText"))

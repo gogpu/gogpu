@@ -171,48 +171,7 @@ func clearTextInputStorage(view ID) {
 	}
 	defer text.Release()
 	view.SendPtr(RegisterSelector("setString:"), text.ID().Ptr())
-}
-
-// NewAutoreleasedAttributedString creates an NSAttributedString suitable for
-// returning from an NSTextInputClient callback. The temporary NSString and
-// attributed wrapper are released/autoreleased on the AppKit pool boundary.
-func NewAutoreleasedAttributedString(value string) ID {
-	initSelectors()
-	initClasses()
-	if classes.NSAttributedString == 0 {
-		return NewAutoreleasedNSString(value)
-	}
-	text := NewNSString(value)
-	if text == nil || text.ID() == 0 {
-		return 0
-	}
-	defer text.Release()
-	allocated := ID(classes.NSAttributedString).Send(selectors.alloc)
-	if allocated == 0 {
-		return 0
-	}
-	object := allocated.SendPtr(selectors.initWithString, text.ID().Ptr())
-	if object == 0 {
-		// `alloc` returned a retained object but its initializer failed; release
-		// that ownership before returning through the callback boundary.
-		allocated.Send(selectors.release)
-		return 0
-	}
-	object.Send(selectors.autorelease)
-	return object
-}
-
-// NewAutoreleasedNSString creates an NSString suitable for returning from a
-// pointer-returning Objective-C callback. NewNSString returns a retained
-// object; sending autorelease transfers ownership back to AppKit's pool.
-func NewAutoreleasedNSString(value string) ID {
-	ns := NewNSString(value)
-	if ns == nil || ns.ID() == 0 {
-		return 0
-	}
-	id := ns.ID()
-	id.Send(selectors.autorelease)
-	return id
+	callGoGPUViewSuperVoid(view, "setSelectedRange:", nil, [2]uintptr{0, 0})
 }
 
 // ObjectString converts NSString/NSAttributedString objects passed by AppKit

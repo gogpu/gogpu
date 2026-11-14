@@ -28,7 +28,7 @@ type darwinWindow struct {
 	imeMu           sync.Mutex // guards AppKit NSTextInputClient state
 	imeDestroyed    bool       // native view/window has been torn down
 	ime             macIMEState
-	imeKeyConsumed  bool            // guarded by imeMu; updated during interpretKeyEvents
+	imeKey          macIMEKeyState  // guarded by imeMu; updated during interpretKeyEvents
 	imeConsumedKeys map[uint16]bool // accessed on the event thread
 
 	// Mouse state tracking
@@ -218,18 +218,14 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 		// key event through NSTextInputClient. Keep the native bridge thin and
 		// convert Cocoa's UTF-16 ranges at the platform boundary.
 		darwin.SetViewTextInputHandler(contentView, darwin.TextInputHandler{
-			Command: func() {
-				w.imeMu.Lock()
-				w.imeKeyConsumed = false
-				w.imeMu.Unlock()
-			},
+			Command: w.handleMacIMECommand,
 			SetMarkedText: func(text darwin.ID, selectedLocation, selectedLength,
 				replacementLocation, replacementLength uintptr) {
 				w.handleMacSetMarkedText(text, selectedLocation, selectedLength,
 					replacementLocation, replacementLength)
 			},
-			InsertText: func(text darwin.ID, replacementLocation, replacementLength uintptr) {
-				w.handleMacInsertText(text, replacementLocation, replacementLength)
+			InsertText: func(text darwin.ID, replacementLocation, replacementLength uintptr) bool {
+				return w.handleMacInsertText(text, replacementLocation, replacementLength)
 			},
 			UnmarkText: func() {
 				w.handleMacUnmarkText()

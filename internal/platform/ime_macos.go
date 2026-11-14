@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -19,10 +20,34 @@ type macIMEState struct {
 	nativeNeedsUnmark bool
 
 	composition gpucontext.IMEState
-	surrounding gpucontext.IMESurroundingText
 	area        gpucontext.IMECursorArea
 	purpose     gpucontext.ContentPurpose
 	hints       gpucontext.ContentHint
+}
+
+// macIMEKeyState tracks callbacks belonging to a single interpretation.
+// A command following a commit must not let the confirming key through.
+type macIMEKeyState struct {
+	consumed  bool
+	committed bool
+}
+
+func (s *macIMEKeyState) begin(marked bool) { *s = macIMEKeyState{consumed: marked} }
+func (s *macIMEKeyState) mark()             { s.consumed = true }
+func (s *macIMEKeyState) commit()           { s.consumed, s.committed = true, true }
+func (s *macIMEKeyState) command() bool {
+	if s.committed {
+		return false
+	}
+	s.consumed = false
+	return true
+}
+
+// AppKit sometimes reports an IME command as insertText containing a control
+// character. It is not committed text and must not replace the preedit.
+func macIMEControlInsert(text string) bool {
+	r, _ := utf8.DecodeRuneInString(text)
+	return text != "" && unicode.IsControl(r)
 }
 
 // macUTF16RangeToUTF8 converts one Cocoa NSRange into a UTF-8 byte range.
@@ -104,8 +129,7 @@ func (s *macIMEState) unmark() (wasMarked bool) {
 }
 
 // setEnabled changes the native input state and reports whether disabling it
-// canceled an active composition. Sensitive surrounding text is cleared by
-// the platform caller at the same transition.
+// canceled an active composition.
 func (s *macIMEState) setEnabled(enabled bool) (canceled bool) {
 	if s == nil {
 		return false
@@ -116,7 +140,6 @@ func (s *macIMEState) setEnabled(enabled bool) (canceled bool) {
 		s.nativeNeedsUnmark = s.nativeNeedsUnmark || canceled
 		s.marked = false
 		s.composition = gpucontext.IMEState{}
-		s.surrounding = gpucontext.IMESurroundingText{}
 	}
 	return canceled
 }

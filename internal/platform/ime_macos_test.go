@@ -67,8 +67,65 @@ func TestMacIMEStateLifecycle(t *testing.T) {
 	if state.setEnabled(false) || !state.nativeNeedsUnmark {
 		t.Fatal("disabling after cancellation lost the pending native reset")
 	}
-	if state.marked || state.composition.Composing || state.surrounding != (gpucontext.IMESurroundingText{}) {
+	if state.marked || state.composition.Composing {
 		t.Fatalf("disabled state retained text input state: %+v", state)
+	}
+}
+
+func TestMacIMEKeyInterpretation(t *testing.T) {
+	tests := []struct {
+		name             string
+		marked           bool
+		callbacks        string
+		consumed, cancel bool
+	}{
+		{"ordinary key", false, "", false, false},
+		{"preedit updated", false, "m", true, false},
+		{"active preedit consumes", true, "", true, false},
+		{"commit then command", true, "ic", true, false},
+		{"commit then repeated command", true, "icc", true, false},
+		{"unhandled command while marked", true, "c", false, true},
+		{"updated preedit then command", false, "mc", false, true},
+		{"ordinary command", false, "c", false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state := macIMEState{enabled: true, marked: tc.marked}
+			var key macIMEKeyState
+			key.begin(state.marked)
+			canceled := false
+			for _, callback := range tc.callbacks {
+				switch callback {
+				case 'm':
+					state.setMarked("preedit", 7, 0)
+					key.mark()
+				case 'i':
+					if state.insert("한") {
+						key.commit()
+					}
+				case 'c':
+					if key.command() {
+						canceled = state.unmark() || canceled
+					}
+				}
+			}
+			if key.consumed != tc.consumed || canceled != tc.cancel || (tc.cancel && state.marked) {
+				t.Fatalf("consumed=%v canceled=%v marked=%v; want consumed=%v canceled=%v", key.consumed, canceled, state.marked, tc.consumed, tc.cancel)
+			}
+		})
+	}
+}
+
+func TestMacIMEControlInsert(t *testing.T) {
+	for _, tc := range []struct {
+		text    string
+		control bool
+	}{
+		{"\n", true}, {"\x7f", true}, {"\u0085", true}, {"한", false}, {"", false}, {"a\n", false},
+	} {
+		if got := macIMEControlInsert(tc.text); got != tc.control {
+			t.Errorf("macIMEControlInsert(%q) = %v, want %v", tc.text, got, tc.control)
+		}
 	}
 }
 

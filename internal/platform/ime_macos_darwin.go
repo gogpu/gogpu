@@ -111,16 +111,9 @@ func (w *darwinWindow) SetIMEContentType(purpose gpucontext.ContentPurpose, hint
 	}
 }
 
-func (w *darwinWindow) SetIMESurroundingText(text gpucontext.IMESurroundingText) {
-	if w == nil || !text.IsValid() {
-		return
-	}
-	w.imeMu.Lock()
-	if !w.imeDestroyed && w.ime.enabled && !imeContentIsSensitive(w.ime.purpose, w.ime.hints) {
-		w.ime.surrounding = text
-	}
-	w.imeMu.Unlock()
-}
+// SetIMESurroundingText is a no-op until AppKit ranges can be mapped to the
+// application's caret. The surrounding-text capability is not advertised.
+func (w *darwinWindow) SetIMESurroundingText(_ gpucontext.IMESurroundingText) {}
 
 func (w *darwinWindow) CancelIME() {
 	if w == nil {
@@ -144,27 +137,35 @@ func (w *darwinWindow) handleIMEKeyDown(view darwin.ID, event darwin.ID) bool {
 	if w == nil || event == 0 {
 		return false
 	}
-	enabled := w.imeEnabled()
-	imeTracef("keyDown callback enabled=%v keycode=%d", enabled, darwin.GetKeyCode(event))
-	if enabled {
-		w.imeMu.Lock()
-		w.imeKeyConsumed = w.ime.marked
-		w.imeMu.Unlock()
-		// This callback is reached on AppKit's main thread. Deferring the
-		// input-context invalidation to this boundary keeps controller methods
-		// safe when widgets update IME state from a render/worker goroutine.
-		w.flushNativeIMEReset(view)
-		w.applyMacIMEArea(view)
-		darwin.InvalidateInputContext(view)
-		imeTracef("interpretKeyEvents begin")
-		darwin.InterpretKeyEvent(view, event)
-		imeTracef("interpretKeyEvents end")
-		w.imeMu.Lock()
-		consumed := w.imeKeyConsumed
-		w.imeMu.Unlock()
-		return consumed
+	w.imeMu.Lock()
+	w.imeKey.begin(w.ime.marked)
+	w.imeMu.Unlock()
+	// This callback is reached on AppKit's main thread. Deferring the
+	// input-context invalidation to this boundary keeps controller methods
+	// safe when widgets update IME state from a render/worker goroutine.
+	w.flushNativeIMEReset(view)
+	w.applyMacIMEArea(view)
+	darwin.InvalidateInputContext(view)
+	imeTracef("interpretKeyEvents begin")
+	darwin.InterpretKeyEvent(view, event)
+	imeTracef("interpretKeyEvents end")
+	w.flushNativeIMEReset(view)
+	w.imeMu.Lock()
+	consumed := w.imeKey.consumed
+	w.imeMu.Unlock()
+	return consumed
+}
+
+// A command forwarded by the input method ends any uncommitted preedit. A
+// command after a commit belongs to the same key and must remain consumed.
+func (w *darwinWindow) handleMacIMECommand() {
+	w.imeMu.Lock()
+	forward := w.imeKey.command()
+	canceled := forward && w.ime.unmark()
+	w.imeMu.Unlock()
+	if canceled {
+		w.queueEvent(Event{WindowID: w.id, Type: EventIMECanceled})
 	}
-	return false
 }
 
 func (w *darwinWindow) flushNativeIMEReset(view darwin.ID) {
@@ -202,7 +203,7 @@ func (w *darwinWindow) handleMacSetMarkedText(text darwin.ID, selectedLocation, 
 		return
 	}
 	imeTracef("setMarkedText text=%q selection=%d:%d", value, selectedLocation, selectedLength)
-	w.imeKeyConsumed = true
+	w.imeKey.mark()
 	started, composition := w.ime.setMarked(value, selectedLocation, selectedLength)
 	w.imeMu.Unlock()
 	w.applyMacIMEAreaForWindow()
@@ -226,20 +227,27 @@ func (w *darwinWindow) applyMacIMEAreaForWindow() {
 	w.applyMacIMEArea(w.window.ContentView())
 }
 
-func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) {
+func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) bool {
 	if w == nil {
-		return
+		return false
 	}
 	value := darwin.ObjectString(text)
+	if macIMEControlInsert(value) {
+		return false
+	}
 	w.imeMu.Lock()
 	if w.imeDestroyed || !w.ime.enabled || imeContentIsSensitive(w.ime.purpose, w.ime.hints) {
 		w.imeMu.Unlock()
-		return
+		return false
 	}
 	imeTracef("insertText text=%q", value)
 	wasMarked := w.ime.insert(value)
 	if wasMarked {
-		w.imeKeyConsumed = true
+		if value == "" {
+			w.imeKey.mark()
+		} else {
+			w.imeKey.commit()
+		}
 	}
 	imeTracef("insertText previousMarked=%v", wasMarked)
 	w.imeMu.Unlock()
@@ -249,7 +257,7 @@ func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) {
 			// An empty native insert clears a marked range without committing
 			// text. Report cancellation so consumers discard their preedit.
 			w.queueEvent(Event{WindowID: w.id, Type: EventIMECanceled})
-			return
+			return true
 		}
 		// NSTextInputClient's insertText: is the one committed-text path. It is
 		// delivered exactly once and is never duplicated as EventChar.
@@ -258,11 +266,12 @@ func (w *darwinWindow) handleMacInsertText(text darwin.ID, _, _ uintptr) {
 			Type:     EventIMECompositionEnd,
 			IME:      &IMEEvent{Committed: value},
 		})
-		return
+		return true
 	}
 	// AppKit also uses insertText: for ordinary text while IME is enabled.
 	// Preserve the public EventChar stream for that non-composition path.
 	w.dispatchMacInsertedText(value)
+	return true
 }
 
 func (w *darwinWindow) dispatchMacInsertedText(value string) {

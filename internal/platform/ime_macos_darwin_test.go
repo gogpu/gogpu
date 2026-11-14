@@ -116,7 +116,6 @@ func TestMacIMEPrivacyAndOrdinaryTextDispatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newMacIMEWindow()
 			w.ime.purpose, w.ime.hints = tc.purpose, tc.hints
-			w.ime.surrounding = gpucontext.IMESurroundingText{Text: "secret", Cursor: 6, Anchor: 6}
 			w.handleMacSetMarkedText(macIMEString(t, "secret"), 6, 0, 0, 0)
 			w.handleMacInsertText(macIMEString(t, "secret"), 0, 0)
 			if events := popMacIMEEvents(w); len(events) != 0 {
@@ -130,6 +129,39 @@ func TestMacIMEPrivacyAndOrdinaryTextDispatch(t *testing.T) {
 	got := popMacIMEEvents(w)
 	if len(got) != 2 || got[0].Type != EventChar || got[0].Char != 'a' || got[1].Type != EventChar || got[1].Char != '😀' {
 		t.Fatalf("ordinary insert events = %#v, want printable runes only", got)
+	}
+}
+
+func TestMacIMECommitAndCommandInOneKey(t *testing.T) {
+	w := newMacIMEWindow()
+	w.handleMacSetMarkedText(macIMEString(t, "한"), 1, 0, 0, 0)
+	popMacIMEEvents(w)
+	w.imeKey.begin(true)
+	if !w.handleMacInsertText(macIMEString(t, "한"), 0, 0) {
+		t.Fatal("commit was rejected")
+	}
+	w.handleMacIMECommand()
+	got := popMacIMEEvents(w)
+	if !w.imeKey.consumed || len(got) != 1 || got[0].Type != EventIMECompositionEnd || got[0].IME.Committed != "한" {
+		t.Fatalf("commit then command: consumed=%v events=%#v", w.imeKey.consumed, got)
+	}
+}
+
+func TestMacIMEUnhandledCommandCancelsPreedit(t *testing.T) {
+	w := newMacIMEWindow()
+	w.handleMacSetMarkedText(macIMEString(t, "ni"), 2, 0, 0, 0)
+	popMacIMEEvents(w)
+	w.imeKey.begin(true)
+	if w.handleMacInsertText(macIMEString(t, "\r"), 0, 0) {
+		t.Fatal("control-character insertion must not alter native storage")
+	}
+	if !w.ime.marked || len(popMacIMEEvents(w)) != 0 {
+		t.Fatal("control character changed or committed the preedit")
+	}
+	w.handleMacIMECommand()
+	got := popMacIMEEvents(w)
+	if w.imeKey.consumed || w.ime.marked || !w.ime.nativeNeedsUnmark || len(got) != 1 || got[0].Type != EventIMECanceled {
+		t.Fatalf("unhandled command: key=%+v state=%+v events=%#v", w.imeKey, w.ime, got)
 	}
 }
 
@@ -152,27 +184,19 @@ func TestMacIMEValidCursorArea(t *testing.T) {
 	}
 }
 
-func TestMacIMEControllerEnablePrivacyAndSurroundingText(t *testing.T) {
+func TestMacIMEControllerEnablePrivacy(t *testing.T) {
 	w := newMacIMEWindow()
 	w.ime.enabled = false
 	if w.imeEnabled() {
 		t.Fatal("IME must be disabled by default")
 	}
-	w.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "ignored", Cursor: 7, Anchor: 7})
-	if w.ime.surrounding.Text != "" {
-		t.Fatal("surrounding text was retained while IME was disabled")
-	}
 
 	// Enabling requires a real NSTextInputClient view; set the state directly
 	// here to exercise controller transitions without constructing an NSWindow.
 	w.ime.enabled = true
-	w.SetIMESurroundingText(gpucontext.IMESurroundingText{Text: "hello", Cursor: 5, Anchor: 5})
-	if w.ime.surrounding.Text != "hello" {
-		t.Fatalf("surrounding text = %+v", w.ime.surrounding)
-	}
 	w.ime.setMarked("preedit", 7, 0)
 	w.SetIMEEnabled(false)
-	if w.imeEnabled() || w.ime.surrounding.Text != "" || w.ime.marked {
+	if w.imeEnabled() || w.ime.marked {
 		t.Fatalf("disable retained IME state: %+v", w.ime)
 	}
 	got := popMacIMEEvents(w)
@@ -272,8 +296,8 @@ func TestMacIMEAppKitCallbackToPlatformEventsE2E(t *testing.T) {
 				_, _ uintptr) {
 				w.handleMacSetMarkedText(text, selectedLocation, selectedLength, 0, 0)
 			},
-			InsertText: func(text platformdarwin.ID, _, _ uintptr) {
-				w.handleMacInsertText(text, 0, 0)
+			InsertText: func(text platformdarwin.ID, _, _ uintptr) bool {
+				return w.handleMacInsertText(text, 0, 0)
 			},
 			UnmarkText: w.handleMacUnmarkText,
 		})
