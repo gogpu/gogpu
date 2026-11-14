@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies:** wgpu v0.34.14 → v0.34.15, naga v0.21.10 → v0.21.12. Vulkan tracks the present barrier per
+  image and presents on every acquired surface; a surface is configured only on a queue family that can present to
+  it; `ErrDeviceLost` comes back from submit and wait-idle, and a lost device's swapchain is destroyed so its window
+  can take another device's — the Vulkan half of #548. DX12 `ClearBuffer` clears, and a second surface's
+  capabilities come from the adapter.
 - **Dependencies:** gpucontext v0.31.3 → v0.32.0. The release replaces the IME interfaces with the single
   `IMEController`/`IMEState` contract from ADR-045; gogpu needs no code change for it, the platform IME backends
   follow in their own change.
