@@ -22,6 +22,7 @@ package wayland
 import (
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -202,6 +203,10 @@ func layerSurfaceConfigureCb(data, layerSurface, serial, width, height uintptr) 
 
 	slog.Debug("zwlr_layer_surface_v1.configure",
 		"serial", uint32(serial), "width", h.layerW, "height", h.layerH)
+
+	if h.inputCallbacks != nil && h.inputCallbacks.OnConfigure != nil {
+		h.inputCallbacks.OnConfigure(int32(uint32(width)), int32(uint32(height)), false)
+	}
 }
 
 // layerSurfaceClosedCb handles zwlr_layer_surface_v1.closed(data, surface).
@@ -217,6 +222,13 @@ func layerSurfaceClosedCb(data, layerSurface uintptr) {
 	h.layerClosed = true
 	h.layerMu.Unlock()
 	slog.Info("zwlr_layer_surface_v1.closed — compositor asked the overlay to close")
+
+	h.unregisterLayerSurface()
+	_ = h.flush()
+
+	if h.inputCallbacks != nil && h.inputCallbacks.OnClose != nil {
+		h.inputCallbacks.OnClose()
+	}
 }
 
 // validateLayerSizeAnchors reports whether the requested size and anchors are a
@@ -307,6 +319,8 @@ func (h *LibwaylandHandle) setupLayerShellRole(shellName, shellVersion uint32, o
 	}
 	nsBuf := append([]byte(ns), 0)
 
+	var pinner runtime.Pinner
+	pinner.Pin(&nsBuf[0])
 	layerSurface, err := h.marshalConstructorArgs(
 		shell, uint32(layerShellGetLayerSurface), unsafe.Pointer(&layerShellIface.surface),
 		h.surface, // surface (object)
@@ -314,6 +328,7 @@ func (h *LibwaylandHandle) setupLayerShellRole(shellName, shellVersion uint32, o
 		uintptr(opts.Layer),
 		uintptr(unsafe.Pointer(&nsBuf[0])),
 	)
+	pinner.Unpin()
 	if err != nil {
 		return fmt.Errorf("wayland: failed to create zwlr_layer_surface_v1: %w", err)
 	}
@@ -332,8 +347,8 @@ func (h *LibwaylandHandle) setupLayerShellRole(shellName, shellVersion uint32, o
 
 	keyboard := opts.KeyboardInteractivity
 	if keyboard == KeyboardInteractivityOnDemand && version < 4 {
-		slog.Warn("wayland: on_demand keyboard interactivity needs zwlr_layer_shell_v1 v4; using exclusive")
-		keyboard = KeyboardInteractivityExclusive
+		slog.Warn("wayland: on_demand keyboard interactivity needs zwlr_layer_shell_v1 v4; using none")
+		keyboard = KeyboardInteractivityNone
 	}
 	h.marshalVoid(layerSurface, uint32(layerSurfaceSetKeyboardInteractivity), uintptr(keyboard))
 
@@ -402,6 +417,14 @@ func (h *LibwaylandHandle) SetKeyboardInteractivity(mode uint32) error {
 	if h.layerSurface == 0 {
 		return fmt.Errorf("wayland: not a layer surface")
 	}
+	h.displayMu.Lock()
+	defer h.displayMu.Unlock()
+
+	if mode == KeyboardInteractivityOnDemand && h.layerShellVersion < 4 {
+		slog.Warn("wayland: on_demand keyboard interactivity needs zwlr_layer_shell_v1 v4; using none")
+		mode = KeyboardInteractivityNone
+	}
+
 	h.marshalVoid(h.layerSurface, uint32(layerSurfaceSetKeyboardInteractivity), uintptr(mode))
 	h.marshalVoid(h.surface, uint32(surfaceCommit))
 	return h.flush()
@@ -418,6 +441,9 @@ func (h *LibwaylandHandle) SetInputRegion(interactive bool) error {
 	if h.surface == 0 {
 		return fmt.Errorf("wayland: no surface")
 	}
+	h.displayMu.Lock()
+	defer h.displayMu.Unlock()
+
 	var region uintptr
 	if !interactive {
 		r, err := h.marshalConstructor(h.compositor, 1 /* create_region */, h.regionInterface)
@@ -429,14 +455,12 @@ func (h *LibwaylandHandle) SetInputRegion(interactive bool) error {
 	// wl_surface.set_input_region (opcode 5) takes an object or NULL.
 	h.marshalVoid(h.surface, uint32(surfaceSetInputRegion), region)
 	h.marshalVoid(h.surface, uint32(surfaceCommit))
-	if err := h.flush(); err != nil {
-		return err
-	}
 	if region != 0 {
-		// The region's contents are copied on commit; the proxy can go.
+		// The region's contents are copied on commit; destroy the server object and proxy.
+		h.marshalVoid(region, 0 /* wl_region.destroy */)
 		h.proxyDestroy(region)
 	}
-	return nil
+	return h.flush()
 }
 
 // IsLayerShell reports whether this handle owns a layer surface rather than an

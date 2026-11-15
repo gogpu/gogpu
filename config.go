@@ -79,7 +79,7 @@ type Config struct {
 	// components (panels, overlays, wallpapers, launchers) are built.
 	//
 	// Linux/Wayland only, and the compositor must advertise
-	// zwlr_layer_shell_v1. Ignored on other platforms.
+	// zwlr_layer_shell_v1. Fails with an error on other platforms and display servers.
 	//
 	// Note that a layer surface has no title bar, no move/resize, and no
 	// server-side decorations; window-management APIs such as SetTitle,
@@ -288,7 +288,8 @@ func (c Config) WithFrameless(frameless bool) Config {
 }
 
 // WithLayerShell makes the window a wlr-layer-shell surface (Linux/Wayland
-// only) instead of a regular desktop window.
+// only) instead of a regular desktop window. Fails with an error on other platforms
+// and display servers.
 //
 // The zero LayerShellConfig is not useful on its own: a surface with neither a
 // size nor anchors is a protocol error, so set Width/Height, or leave them zero

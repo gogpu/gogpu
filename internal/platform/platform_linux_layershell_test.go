@@ -67,3 +67,16 @@ func TestLayerShellZeroValuesPassThrough(t *testing.T) {
 		t.Errorf("keyboard = %d, want none (0)", opts.KeyboardInteractivity)
 	}
 }
+
+// TestLayerShellX11Fails verifies that attempting to create an X11 window with
+// LayerShell configuration returns an error instead of silently opening a normal window.
+func TestLayerShellX11Fails(t *testing.T) {
+	p := &x11Platform{}
+	cfg := Config{
+		LayerShell: &LayerShellConfig{},
+	}
+	_, err := p.CreateWindow(cfg)
+	if err == nil {
+		t.Error("x11Platform.CreateWindow with LayerShell must return an error")
+	}
+}

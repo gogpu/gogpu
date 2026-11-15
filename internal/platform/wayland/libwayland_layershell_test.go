@@ -75,8 +75,11 @@ func TestLayerShellEventOpcodes(t *testing.T) {
 func TestLayerShellInterfaceMetadata(t *testing.T) {
 	initLayerShellInterfaces()
 
-	if layerShellIface.shell.Name == 0 || layerShellIface.surface.Name == 0 {
-		t.Fatal("interface names must be set for libwayland to match protocol messages")
+	if got := cstrToString(layerShellIface.shell.Name); got != "zwlr_layer_shell_v1" {
+		t.Errorf("shell interface name = %q, want zwlr_layer_shell_v1", got)
+	}
+	if got := cstrToString(layerShellIface.surface.Name); got != "zwlr_layer_surface_v1" {
+		t.Errorf("surface interface name = %q, want zwlr_layer_surface_v1", got)
 	}
 	if layerShellIface.shell.Version != 5 || layerShellIface.surface.Version != 5 {
 		t.Errorf("interface versions = %d/%d, want 5/5",
@@ -100,12 +103,71 @@ func TestLayerShellInterfaceMetadata(t *testing.T) {
 	}
 }
 
+// TestLayerShellNamesAndSignatures verifies the exact interface, method, and event
+// names and protocol signature strings against the zwlr_layer_shell_v1 specification.
+func TestLayerShellNamesAndSignatures(t *testing.T) {
+	initLayerShellInterfaces()
+
+	wantShellMethods := []struct {
+		name string
+		sig  string
+	}{
+		{"get_layer_surface", "no?ous"},
+		{"destroy", ""},
+	}
+	for i, want := range wantShellMethods {
+		gotName := cstrToString(layerShellIface.shellMethods[i].Name)
+		gotSig := cstrToString(layerShellIface.shellMethods[i].Signature)
+		if gotName != want.name || gotSig != want.sig {
+			t.Errorf("shell method %d = (%q, %q), want (%q, %q)",
+				i, gotName, gotSig, want.name, want.sig)
+		}
+	}
+
+	wantSurfaceMethods := []struct {
+		name string
+		sig  string
+	}{
+		{"set_size", "uu"},
+		{"set_anchor", "u"},
+		{"set_exclusive_zone", "i"},
+		{"set_margin", "iiii"},
+		{"set_keyboard_interactivity", "u"},
+		{"get_popup", "o"},
+		{"ack_configure", "u"},
+		{"destroy", ""},
+		{"set_layer", "u"},
+		{"set_exclusive_edge", "u"},
+	}
+	for i, want := range wantSurfaceMethods {
+		gotName := cstrToString(layerShellIface.surfaceMethods[i].Name)
+		gotSig := cstrToString(layerShellIface.surfaceMethods[i].Signature)
+		if gotName != want.name || gotSig != want.sig {
+			t.Errorf("surface method %d = (%q, %q), want (%q, %q)",
+				i, gotName, gotSig, want.name, want.sig)
+		}
+	}
+
+	wantSurfaceEvents := []struct {
+		name string
+		sig  string
+	}{
+		{"configure", "uuu"},
+		{"closed", ""},
+	}
+	for i, want := range wantSurfaceEvents {
+		gotName := cstrToString(layerShellIface.surfaceEvents[i].Name)
+		gotSig := cstrToString(layerShellIface.surfaceEvents[i].Signature)
+		if gotName != want.name || gotSig != want.sig {
+			t.Errorf("surface event %d = (%q, %q), want (%q, %q)",
+				i, gotName, gotSig, want.name, want.sig)
+		}
+	}
+}
+
 // TestLayerShellDescriptorDistinctness catches copy-paste errors where two
-// methods end up sharing a name pointer, which is how an opcode gets wired to
-// the wrong request. Signatures are deliberately not checked this way: several
-// requests share one signature ("u", "uu"), and identical literals may share
-// storage, so the only signature invariant worth asserting is how many requests
-// take no arguments at all.
+// methods end up sharing a name pointer. Exact names and signatures are verified
+// in TestLayerShellNamesAndSignatures.
 func TestLayerShellDescriptorDistinctness(t *testing.T) {
 	initLayerShellInterfaces()
 
@@ -160,6 +222,12 @@ func TestLayerShellNotEnabledByDefault(t *testing.T) {
 	}
 	if w, hgt := h.LayerSize(); w != 0 || hgt != 0 {
 		t.Errorf("LayerSize = %d,%d before configure, want 0,0", w, hgt)
+	}
+	if err := h.SetKeyboardInteractivity(KeyboardInteractivityExclusive); err == nil {
+		t.Error("SetKeyboardInteractivity should fail on non-layer surface")
+	}
+	if err := h.SetInputRegion(false); err == nil {
+		t.Error("SetInputRegion should fail on handle with no surface")
 	}
 }
 

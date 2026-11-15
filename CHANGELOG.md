@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linux: dead keys and the Compose key produce their composed characters** (#562, by @dvoyni). X11 and Wayland text
   input now run each key through libxkbcommon's compose table, loaded for the active locale: a dead key or the Compose
   key on its own types nothing, and the key that completes the sequence types the composed character.
-- **wlr-layer-shell surfaces** — `Config.LayerShell` (Linux/Wayland) gives the window a `zwlr_layer_shell_v1` role instead of an `xdg_toplevel`, so gogpu can build shell components: panels, overlays, wallpapers and launchers. Layer, anchors, exclusive zone, keyboard interactivity, size and namespace are all configurable, and the surface renders through the same Vulkan path as an ordinary window (verified on niri: a full-output overlay surface compiled, configured and presented). See `examples/layer_shell` for a 100x100 anchored square.
+- **wlr-layer-shell surfaces** (#507, @darkliquid) — `Config.LayerShell` (Linux/Wayland) gives the window a `zwlr_layer_shell_v1` role instead of an `xdg_toplevel`, so gogpu can build shell components: panels, overlays, wallpapers and launchers. Layer, anchors, exclusive zone, keyboard interactivity, size and namespace are all configurable, and the surface renders through the same Vulkan path as an ordinary window (verified on niri: a full-output overlay surface compiled, configured and presented). See `examples/layer_shell` for a 100x100 anchored square.
 
 ### Fixed
 
@@ -951,7 +951,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Linux clipboard** (PLAT-009, ADR-037) — `ClipboardRead` and `ClipboardWrite` now work on X11 and Wayland. Full ICCCM selection protocol on X11: SetSelectionOwner, ConvertSelection, SelectionNotify/SelectionRequest handling, TARGETS negotiation, 1s timeout with event pump. Wayland: wl_data_device_manager/source/offer/device protocol, pipe-based transfer, 5s timeout, `send`/`canceled` event handling. Self-read optimization avoids deadlock. Writes to both CLIPBOARD and PRIMARY on X11. Two MIME types offered on Wayland: `text/plain;charset=utf-8` + `text/plain`.
+- **Linux clipboard** (PLAT-009, ADR-037) — `ClipboardRead` and `ClipboardWrite` now work on X11 and Wayland. Full ICCCM selection protocol on X11: SetSelectionOwner, ConvertSelection, SelectionNotify/SelectionRequest handling, TARGETS negotiation, 1s timeout with event pump. Wayland: wl_data_device_manager/source/offer/device protocol, pipe-based transfer, 5s timeout, `send`/`cancelled` event handling. Self-read optimization avoids deadlock. Writes to both CLIPBOARD and PRIMARY on X11. Two MIME types offered on Wayland: `text/plain;charset=utf-8` + `text/plain`.
 
 ### Changed
 
