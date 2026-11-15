@@ -28,6 +28,11 @@ type eventSourceAdapter struct {
 	onIMECompositionUpdate func(gpucontext.IMEState)
 	onIMECompositionEnd    func(string)
 
+	// Optional IME lifecycle callbacks (gpucontext.IMEEventSource).
+	onIMECanceled          func()
+	onIMEDisabled          func()
+	onIMEDeleteSurrounding func(gpucontext.IMEDeleteSurroundingEvent)
+
 	// Registered callbacks for PointerEventSource
 	onPointer func(gpucontext.PointerEvent)
 
@@ -101,6 +106,25 @@ func (e *eventSourceAdapter) OnIMECompositionEnd(fn func(string)) {
 	e.onIMECompositionEnd = fn
 }
 
+// OnIMECanceled registers a callback delivered when an active composition is
+// canceled. Cancellation never commits the preedit text.
+func (e *eventSourceAdapter) OnIMECanceled(fn func()) {
+	e.onIMECanceled = fn
+}
+
+// OnIMEDisabled registers a callback delivered when the platform disables
+// text input, for example after focus is lost. It carries no text and must
+// not commit anything.
+func (e *eventSourceAdapter) OnIMEDisabled(fn func()) {
+	e.onIMEDisabled = fn
+}
+
+// OnIMEDeleteSurrounding registers a callback for an IME request to delete
+// text around the current insertion point.
+func (e *eventSourceAdapter) OnIMEDeleteSurrounding(fn func(gpucontext.IMEDeleteSurroundingEvent)) {
+	e.onIMEDeleteSurrounding = fn
+}
+
 // OnPointer registers a callback for unified pointer events.
 // This provides W3C Pointer Events Level 3 compliant input handling,
 // unifying mouse, touch, and pen input into a single event stream.
@@ -161,6 +185,10 @@ var _ gpucontext.ScrollEventSource = (*eventSourceAdapter)(nil)
 
 // Ensure eventSourceAdapter implements gpucontext.GestureEventSource.
 var _ gpucontext.GestureEventSource = (*eventSourceAdapter)(nil)
+
+// Ensure eventSourceAdapter implements the optional IME lifecycle extension,
+// so a consumer that holds only the EventSource can find it by type assertion.
+var _ gpucontext.IMEEventSource = (*eventSourceAdapter)(nil)
 
 // EventSource returns a gpucontext.EventSource for use with UI frameworks.
 // This enables UI frameworks to receive input events from the gogpu application.
@@ -242,31 +270,10 @@ func (e *eventSourceAdapter) dispatchTextInput(text string) {
 	}
 }
 
-// dispatchMouseMove dispatches a mouse move event to registered callbacks.
-func (e *eventSourceAdapter) dispatchMouseMove(x, y float64) {
-	if e.onMouseMove != nil {
-		e.onMouseMove(x, y)
-	}
-}
-
-// dispatchMousePress dispatches a mouse press event to registered callbacks.
-func (e *eventSourceAdapter) dispatchMousePress(button gpucontext.MouseButton, x, y float64) {
-	if e.onMousePress != nil {
-		e.onMousePress(button, x, y)
-	}
-}
-
-// dispatchMouseRelease dispatches a mouse release event to registered callbacks.
-func (e *eventSourceAdapter) dispatchMouseRelease(button gpucontext.MouseButton, x, y float64) {
-	if e.onMouseRelease != nil {
-		e.onMouseRelease(button, x, y)
-	}
-}
-
-// dispatchScroll dispatches a scroll event to registered callbacks.
-func (e *eventSourceAdapter) dispatchScroll(dx, dy float64) {
-	if e.onScroll != nil {
-		e.onScroll(dx, dy)
+// dispatchFocus dispatches a focus event to registered callbacks.
+func (e *eventSourceAdapter) dispatchFocus(focused bool) {
+	if e.onFocus != nil {
+		e.onFocus(focused)
 	}
 }
 
@@ -277,10 +284,45 @@ func (e *eventSourceAdapter) dispatchResize(width, height int) {
 	}
 }
 
-// dispatchFocus dispatches a focus event to registered callbacks.
-func (e *eventSourceAdapter) dispatchFocus(focused bool) {
-	if e.onFocus != nil {
-		e.onFocus(focused)
+// dispatchIMECompositionStart dispatches an IME composition start event.
+func (e *eventSourceAdapter) dispatchIMECompositionStart() {
+	if e.onIMECompositionStart != nil {
+		e.onIMECompositionStart()
+	}
+}
+
+// dispatchIMECompositionUpdate dispatches the current composition state.
+func (e *eventSourceAdapter) dispatchIMECompositionUpdate(state gpucontext.IMEState) {
+	if e.onIMECompositionUpdate != nil {
+		e.onIMECompositionUpdate(state)
+	}
+}
+
+// dispatchIMECompositionEnd dispatches the committed composition text.
+func (e *eventSourceAdapter) dispatchIMECompositionEnd(committed string) {
+	if e.onIMECompositionEnd != nil {
+		e.onIMECompositionEnd(committed)
+	}
+}
+
+// dispatchIMECanceled dispatches an IME composition cancellation.
+func (e *eventSourceAdapter) dispatchIMECanceled() {
+	if e.onIMECanceled != nil {
+		e.onIMECanceled()
+	}
+}
+
+// dispatchIMEDisabled dispatches the platform disabling text input.
+func (e *eventSourceAdapter) dispatchIMEDisabled() {
+	if e.onIMEDisabled != nil {
+		e.onIMEDisabled()
+	}
+}
+
+// dispatchIMEDeleteSurrounding dispatches a delete-surrounding request.
+func (e *eventSourceAdapter) dispatchIMEDeleteSurrounding(event gpucontext.IMEDeleteSurroundingEvent) {
+	if e.onIMEDeleteSurrounding != nil {
+		e.onIMEDeleteSurrounding(event)
 	}
 }
 

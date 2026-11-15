@@ -175,9 +175,14 @@ func NewPrintHandle(request PrintRequest, parent ID) (*PrintHandle, error) {
 		return nil, fmt.Errorf("%w: NSData unavailable", ErrPrintSetup)
 	}
 	dataSel := RegisterSelector("dataWithBytes:length:")
+	// SendPtrs is a Go wrapper around msgSend: KeepAlive alone does not stop the
+	// stack copier from moving the bytes, so pin them for the call (P1-FFI-001).
+	// dataWithBytes:length: copies them.
+	var pinner runtime.Pinner
+	pinner.Pin(&request.Data[0])
 	data := ID(dataClass).SendPtrs(dataSel,
 		uintptr(unsafe.Pointer(&request.Data[0])), uintptr(len(request.Data)))
-	runtime.KeepAlive(request.Data)
+	pinner.Unpin()
 	if data == 0 {
 		return nil, fmt.Errorf("%w: NSData creation failed", ErrPrintSetup)
 	}

@@ -362,12 +362,17 @@ func showWindowsPrintDialog(parent uintptr, request PrintRequest, calls windowsP
 	if request.Options.Copies > 0 {
 		dlg.nCopies = uint16(request.Options.Copies)
 	}
+	// PrintDlgExW reads and writes the page ranges through a uintptr field, which
+	// neither the GC nor the stack copier sees: pin the buffer for the call
+	// (P1-FFI-001).
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	if len(pageRanges) > 0 {
+		pinner.Pin(&pageRanges[0])
 		dlg.lpPageRanges = uintptr(unsafe.Pointer(&pageRanges[0]))
 	}
 
 	hresult := calls.printDlgEx(&dlg)
-	runtime.KeepAlive(pageRanges)
 	if hresult != 0 {
 		freePrintDialogResources(dlg, calls)
 		return result, fmt.Errorf("windows print: PrintDlgExW failed (HRESULT 0x%08X)", hresult)
@@ -478,13 +483,18 @@ func spoolWindowsDocument(ctx context.Context, request PrintRequest, hdc uintptr
 		if len(chunk) == 0 {
 			break
 		}
-		if calls.escape(hdc, passthroughEscape, uint32(len(chunk)), uintptr(unsafe.Pointer(&chunk[0])), 0) <= 0 {
+		// calls.escape is a func value, so the uintptr argument does not keep the
+		// chunk alive or in place (P1-FFI-001): pin it for the call.
+		var pinner runtime.Pinner
+		pinner.Pin(&chunk[0])
+		ok := calls.escape(hdc, passthroughEscape, uint32(len(chunk)), uintptr(unsafe.Pointer(&chunk[0])), 0) > 0
+		pinner.Unpin()
+		if !ok {
 			calls.abortDoc(hdc)
 			return fmt.Errorf("windows print: PASSTHROUGH failed at byte %d: %w", offset, printLastError())
 		}
 		offset = end
 	}
-	runtime.KeepAlive(data)
 
 	if calls.endPage(hdc) <= 0 {
 		calls.abortDoc(hdc)

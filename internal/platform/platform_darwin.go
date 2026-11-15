@@ -18,13 +18,18 @@ import (
 
 // darwinWindow holds all per-window state for a macOS window.
 type darwinWindow struct {
-	window      *darwin.Window
-	surface     *darwin.Surface
-	config      Config
-	id          WindowID
-	shouldClose bool
-	events      *eventqueue.Queue[Event]
-	eventMu     sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
+	window          *darwin.Window
+	surface         *darwin.Surface
+	config          Config
+	id              WindowID
+	shouldClose     bool
+	events          *eventqueue.Queue[Event]
+	eventMu         sync.Mutex // guards pollEvents/WaitEvents coordination (not the queue itself)
+	imeMu           sync.Mutex // guards AppKit NSTextInputClient state
+	imeDestroyed    bool       // native view/window has been torn down
+	ime             macIMEState
+	imeKey          macIMEKeyState  // guarded by imeMu; updated during interpretKeyEvents
+	imeConsumedKeys map[uint16]bool // accessed on the event thread
 
 	// Mouse state tracking
 	pointerX      float64
@@ -70,6 +75,11 @@ type darwinPlatform struct {
 	// pending menu set before Init() was called
 	pendingMenu []MenuItem
 	hasPending  bool
+
+	// cursorHidden is whether setCursorImpl hid the cursor for CursorNone.
+	// NSCursor counts hides, so it hides once and any other shape unhides.
+	// Touched only on the main thread.
+	cursorHidden bool
 }
 
 // newPlatformManager returns a PlatformManager for macOS.
@@ -206,12 +216,31 @@ func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
 			}
 			darwin.WakeEventLoop()
 		})
+
+		// AppKit invokes these callbacks on the main thread while routing a
+		// key event through NSTextInputClient. Keep the native bridge thin and
+		// convert Cocoa's UTF-16 ranges at the platform boundary.
+		darwin.SetViewTextInputHandler(contentView, darwin.TextInputHandler{
+			Command: w.handleMacIMECommand,
+			SetMarkedText: func(text darwin.ID, selectedLocation, selectedLength,
+				replacementLocation, replacementLength uintptr) {
+				w.handleMacSetMarkedText(text, selectedLocation, selectedLength,
+					replacementLocation, replacementLength)
+			},
+			InsertText: func(text darwin.ID, replacementLocation, replacementLength uintptr) bool {
+				return w.handleMacInsertText(text, replacementLocation, replacementLength)
+			},
+			UnmarkText: func() {
+				w.handleMacUnmarkText()
+			},
+		})
 	}
 
 	dw := &darwinPlatformWindow{
 		platform:  p,
 		id:        id,
 		window:    w.window,
+		owner:     w,
 		frameless: config.Frameless,
 	}
 
@@ -303,11 +332,16 @@ func (p *darwinPlatform) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Clean up drag handlers for all windows before destroying them.
+	// Clean up native handlers for all windows before destroying them.
 	for _, w := range p.windows {
+		w.imeMu.Lock()
+		w.imeDestroyed = true
+		w.ime.setEnabled(false)
+		w.imeMu.Unlock()
 		if w.window != nil {
 			cv := w.window.ContentView()
 			if !cv.IsNil() {
+				darwin.ClearViewTextInputHandler(cv)
 				darwin.ClearViewDragHandler(cv)
 			}
 		}
@@ -339,6 +373,7 @@ type darwinPlatformWindow struct {
 	platform        *darwinPlatform
 	id              WindowID
 	window          *darwin.Window
+	owner           *darwinWindow
 	lastScale       float64
 	frameless       bool
 	hitTestCallback func(x, y float64) gpucontext.HitTestResult
@@ -631,6 +666,12 @@ func (dw *darwinPlatformWindow) Destroy() {
 func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 	w.eventMu.Lock()
 	defer w.eventMu.Unlock()
+	if w.window != nil {
+		// Controller calls may cancel IME from a worker goroutine. Flush the
+		// corresponding native marked range only after returning to AppKit's
+		// main-thread event loop.
+		w.flushNativeIMEReset(w.window.ContentView())
+	}
 
 	// Return queued event first (from previous processing).
 	if e, ok := w.events.Pop(); ok {
@@ -708,8 +749,16 @@ func (w *darwinWindow) pollEvents(app *darwin.Application) Event {
 		if !w.focusInited {
 			w.lastKeyWindow = isKey
 			w.focusInited = true
+			if !isKey {
+				w.CancelIME()
+				w.flushNativeIMEReset(w.window.ContentView())
+			}
 		} else if isKey != w.lastKeyWindow {
 			w.lastKeyWindow = isKey
+			if !isKey {
+				w.CancelIME()
+				w.flushNativeIMEReset(w.window.ContentView())
+			}
 			w.events.Push(Event{WindowID: w.id, Type: EventFocus, Focused: isKey})
 		}
 	}
@@ -890,16 +939,14 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Keyboard events
 	case darwin.NSEventTypeKeyDown:
-		keyCode := darwin.GetKeyCode(event)
-		key := macKeyCodeToKey(keyCode)
-		w.dispatchKeyEvent(key, w.modifiers, true)
-
-		// Dispatch character input from [NSEvent characters].
-		// This handles all keyboard layouts, IME, and dead key sequences.
-		w.dispatchCharFromEvent(event)
+		w.handleMacKeyDown(event)
 
 	case darwin.NSEventTypeKeyUp:
 		keyCode := darwin.GetKeyCode(event)
+		if w.imeConsumedKeys[keyCode] {
+			delete(w.imeConsumedKeys, keyCode)
+			break
+		}
 		key := macKeyCodeToKey(keyCode)
 		w.dispatchKeyEvent(key, w.modifiers, false)
 
@@ -915,6 +962,25 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	// Let all events be dispatched to the application
 	return true
+}
+
+func (w *darwinWindow) handleMacKeyDown(event darwin.ID) {
+	keyCode := darwin.GetKeyCode(event)
+	enabled := w.imeEnabled()
+	consumed := enabled && w.window != nil && w.handleIMEKeyDown(w.window.ContentView(), event)
+	if consumed {
+		if w.imeConsumedKeys == nil {
+			w.imeConsumedKeys = make(map[uint16]bool)
+		}
+		w.imeConsumedKeys[keyCode] = true
+	} else {
+		delete(w.imeConsumedKeys, keyCode)
+		w.dispatchKeyEvent(macKeyCodeToKey(keyCode), w.modifiers, true)
+	}
+	// The enabled path delivers text through insertText:, not NSEvent.characters.
+	if !enabled {
+		w.dispatchCharFromEvent(event)
+	}
 }
 
 // dispatchPointerEvent pushes a pointer event to the event queue.
@@ -1034,10 +1100,18 @@ func (p *darwinPlatform) setCursorImpl(cursorID int) {
 	case 10: // CursorWait
 		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
 	case 11: // CursorNone
-		cursorClass.Send(darwin.RegisterSelector("hide"))
+		if !p.cursorHidden {
+			p.cursorHidden = true
+			cursorClass.Send(darwin.RegisterSelector("hide"))
+		}
 		return
 	default:
 		cursor = cursorClass.Send(darwin.RegisterSelector("arrowCursor"))
+	}
+
+	if p.cursorHidden {
+		p.cursorHidden = false
+		cursorClass.Send(darwin.RegisterSelector("unhide"))
 	}
 
 	if !cursor.IsNil() {

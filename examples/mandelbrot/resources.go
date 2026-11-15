@@ -75,7 +75,7 @@ func initUniformBuf(device *wgpu.Device) *wgpu.Buffer {
 // initBindGroupLayouts initializes the resource bindings for the GPU shader.
 func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.BindGroupLayout) {
 	bgLayout0, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{ // uniforms
 				Binding:    0,
 				Visibility: wgpu.ShaderStageCompute,
@@ -92,7 +92,7 @@ func initBindGroupLayouts(device *wgpu.Device) (*wgpu.BindGroupLayout, *wgpu.Bin
 	}
 
 	bgLayout1, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
-		Entries: []wgpu.BindGroupLayoutEntry{{ // storage texture (physical screen)
+		Entries: []gputypes.BindGroupLayoutEntry{{ // storage texture (physical screen)
 			Binding:    0,
 			Visibility: wgpu.ShaderStageCompute,
 			StorageTexture: &gputypes.StorageTextureBindingLayout{

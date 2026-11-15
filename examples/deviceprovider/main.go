@@ -1,11 +1,9 @@
-// Example: DeviceProvider Interface
+// Example: gpucontext.DeviceProvider Interface
 //
-// This example demonstrates how to use the DeviceProvider interface
+// This example demonstrates how to use the shared gpucontext.DeviceProvider interface
 // to access GPU resources for integration with external libraries.
 //
-// DeviceProvider exposes:
-// - Device() - HAL GPU device
-// - Queue() - HAL command queue
+// DeviceProvider exposes opaque device and queue handles plus:
 // - SurfaceFormat() - Preferred texture format
 package main
 
@@ -28,8 +26,8 @@ func main() {
 
 	// Set draw callback
 	app.OnDraw(func(dc *gogpu.Context) {
-		// Get DeviceProvider (available after first frame initialization)
-		provider := app.DeviceProvider()
+		// Get the shared DeviceProvider (available after first frame initialization).
+		provider := app.GPUContextProvider()
 		if provider == nil {
 			return // Not ready yet
 		}

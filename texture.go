@@ -260,6 +260,16 @@ func (r *Renderer) NewTextureFromImageWithOptions(img image.Image, opts TextureO
 	return r.NewTextureFromRGBAWithOptions(width, height, rgba.Pix, opts)
 }
 
+// textureUsage returns the usage of textures gogpu creates. CPU adapters add
+// CopySrc so an identity PresentTexture can be read back (P1-PRESENT-002).
+func textureUsage(pixelPresent bool) gputypes.TextureUsage {
+	usage := gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst
+	if pixelPresent {
+		usage |= gputypes.TextureUsageCopySrc
+	}
+	return usage
+}
+
 // NewTextureFromRGBA creates a texture from raw RGBA pixel data.
 func (r *Renderer) NewTextureFromRGBA(width, height int, data []byte) (*Texture, error) {
 	return r.NewTextureFromRGBAWithOptions(width, height, data, DefaultTextureOptions())
@@ -284,7 +294,7 @@ func (r *Renderer) NewTextureFromRGBAWithOptions(width, height int, data []byte,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
+		Usage:         textureUsage(r.pixelPresent),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gogpu: failed to create texture: %w", err)

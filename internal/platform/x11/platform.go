@@ -274,11 +274,13 @@ func openXlibDisplay() (*xlibHandle, error) {
 	// Pass DISPLAY env var to XOpenDisplay (NULL uses $DISPLAY automatically,
 	// but we pass it explicitly for clarity in error messages).
 	displayEnv := os.Getenv("DISPLAY")
-	var displayArg uintptr
+	// displayArg is an unsafe.Pointer, not a uintptr: a C string that may live on
+	// the goroutine stack has to stay visible to the GC and the stack copier for
+	// the call (P1-FFI-001).
+	var displayArg unsafe.Pointer
 	if displayEnv != "" {
-		// Convert Go string to null-terminated C string on the stack.
 		cstr := append([]byte(displayEnv), 0)
-		displayArg = uintptr(unsafe.Pointer(&cstr[0]))
+		displayArg = unsafe.Pointer(&cstr[0])
 	}
 
 	var display uintptr

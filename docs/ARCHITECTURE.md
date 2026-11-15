@@ -131,6 +131,11 @@ There are **two different** software rendering options:
 
 ## Backend Selection
 
+The wgpu implementation is chosen by build tags (§ ADR-038); the graphics API
+comes from `GraphicsAPI` or `GOGPU_GRAPHICS_API`. The legacy `Config.Backend`
+field, `WithBackend` builder and backend constants no longer exist: they were
+deprecated once backend selection moved to the build, and removed before v1.0.
+
 ### Multi-Backend Auto-Selection (v0.44.0)
 
 When `GraphicsAPIAuto` is used (the default), gogpu creates a wgpu Instance with a
@@ -152,12 +157,9 @@ selection (`GOGPU_GRAPHICS_API=dx12`) bypasses auto and uses only the requested 
 ### gogpu
 
 ```go
-// Default: Pure Go backend, auto-select graphics API
+// Default: the wgpu build selects the Pure Go backend and gogpu auto-selects
+// the graphics API.
 app := gogpu.NewApp(gogpu.DefaultConfig())
-
-// Explicit backend selection
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendGo))
-app := gogpu.NewApp(gogpu.DefaultConfig().WithBackend(gogpu.BackendRust))
 
 // Explicit graphics API selection (added in v0.18.0)
 // Options: GraphicsAPIAuto, GraphicsAPIVulkan, GraphicsAPIDX12,
@@ -169,11 +171,6 @@ app := gogpu.NewApp(gogpu.DefaultConfig().
 // On Windows: renders to screen via GDI. Linux/macOS: headless (no screen output yet).
 app := gogpu.NewApp(gogpu.DefaultConfig().
     WithGraphicsAPI(gogpu.GraphicsAPISoftware))
-
-// Combined: specific backend + specific graphics API
-app := gogpu.NewApp(gogpu.DefaultConfig().
-    WithBackend(gogpu.BackendNative).
-    WithGraphicsAPI(gogpu.GraphicsAPIDX12))
 
 // 2D render mode: CPU rasterizer vs GPU accelerator (ADR-020)
 app := gogpu.NewApp(gogpu.DefaultConfig().
@@ -563,7 +560,7 @@ Platform Layer          InputState               Game Loop
 
 | Platform | Pointer Events | Keyboard | Text Input | Scroll | Key Repeat |
 |----------|---------------|----------|------------|--------|------------|
-| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates, AltGr via isAltGrSequence) | WM_MOUSEWHEEL | OS native (WM_KEYDOWN repeat) |
+| Windows  | WM_MOUSE*     | WM_KEYDOWN/UP, key by scancode (physical position, as on the other platforms) | WM_CHAR/SYSCHAR/UNICHAR (UTF-16 surrogates, AltGr via isAltGrSequence) | WM_MOUSEWHEEL | OS native (WM_KEYDOWN repeat) |
 | Linux (Wayland) | wl_pointer (libwayland goffi) | wl_keyboard (libwayland goffi) | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts) | wl_pointer.axis | Client-side timer (ADR-033, `xkb_keymap_key_repeats`) |
 | Linux (X11) | MotionNotify, ButtonPress | KeyPress/Release | xkbcommon `xkb_state_key_get_utf8` (AltGr/Level3, all layouts), fallback: KeysymToRune | Button 4-7 | X server auto-repeat + `XkbSetDetectableAutoRepeat` |
 | macOS    | NSEvent mouse | NSEvent key | NSEvent characters (UTF-8) | NSEvent scroll (ScrollPhase + IsMomentum, ADR-032) | OS native (isARepeat) |

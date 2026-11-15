@@ -309,7 +309,7 @@ func (h *LibwaylandHandle) LockPointer(surface, pointer uintptr, lifetime uint32
 	argBuf[3] = 0       // region = NULL (lock entire surface)
 	argBuf[4] = uintptr(lifetime)
 
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(unsafe.Pointer(&ptrConstraints.lockedPointer))
 	opcode := uint32(1)
 
@@ -356,7 +356,7 @@ func (h *LibwaylandHandle) ConfinePointer(surface, pointer uintptr, lifetime uin
 	argBuf[3] = 0       // region = NULL (confine to entire surface)
 	argBuf[4] = uintptr(lifetime)
 
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(unsafe.Pointer(&ptrConstraints.confinedPointer))
 	opcode := uint32(2)
 

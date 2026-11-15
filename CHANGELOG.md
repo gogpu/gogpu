@@ -11,13 +11,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **wlr-layer-shell surfaces** (#507, @darkliquid) — `Config.LayerShell` (Linux/Wayland) gives the window a `zwlr_layer_shell_v1` role instead of an `xdg_toplevel`, so gogpu can build shell components: panels, overlays, wallpapers and launchers. Layer, anchors, exclusive zone, keyboard interactivity, size and namespace are all configurable, and the surface renders through the same Vulkan path as an ordinary window (verified on niri: a full-output overlay surface compiled, configured and presented). See `examples/layer_shell` for a 100x100 anchored square.
 
-### Fixed
+- **Windows: input method (IME) support (IMM32)**, based on #462 by @besmpl. `App` implements `gpucontext.IMEController`:
+  composition start, update and end reach `EventSource.OnIMEComposition*` with the preedit and UTF-8 byte-offset cursor
+  and selection ranges, cancel and disable arrive through the optional `gpucontext.IMEEventSource`, and
+  `SetIMECursorArea` places the candidate window at the caret. A window keeps the system IME — its own composition
+  window, committed text as ordinary text input — until the app first calls `SetIMEEnabled`, so an app that never uses
+  the controller still accepts CJK input; from that call on the app owns composition, the native composition window is
+  hidden (the application renders the preedit) and a committed result is delivered exactly once, covering Hangul IMEs
+  that send `WM_IME_COMPOSITION` after `WM_IME_ENDCOMPOSITION` and legacy providers that echo the result as `WM_CHAR`.
+  Focus loss cancels an active composition and leaves the enabled state alone. A password, hidden or sensitive content
+  type keeps IME disabled, and the surrounding text is dropped as soon as input is disabled. Controller methods are safe
+  from any goroutine, while the window opens and closes too: the native IMM32 state is applied on the window thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
+  with the later TSF backend. X11 and Wayland backends follow in their own changes.
 
-- **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
+- **macOS: input method (IME) support (NSTextInputClient)** (#331). A custom, invisible `NSTextView` receives AppKit's
+  marked-text and commit callbacks while GoGPU renders the preedit. Cocoa UTF-16 ranges are converted to UTF-8 byte
+  ranges for `EventSource.OnIMEComposition*`; committed text is dispatched once, cursor geometry follows
+  `SetIMECursorArea`. Password, hidden, and sensitive content disables IME. Surrounding-text and delete-surrounding
+  capabilities are not advertised. Calls from workers update Go state and wake
+  the main-thread event loop for native state changes.
+
+### Performance
+
+- **Textured quads share the frame encoder** (#461, @besmpl). `DrawTexture*` records into the frame's single command
+  encoder and batches consecutive quads in one render pass, with per-frame uniform chunks addressed by dynamic offsets.
+  One encoder and one submit per frame instead of one per quad. Clear and external passes keep their order.
 
 ### Changed
 
+- **Dependencies:** wgpu v0.34.14 → v0.34.15, naga v0.21.10 → v0.21.12. Vulkan tracks the present barrier per
+  image and presents on every acquired surface; a surface is configured only on a queue family that can present to
+  it; `ErrDeviceLost` comes back from submit and wait-idle, and a lost device's swapchain is destroyed so its window
+  can take another device's — the Vulkan half of #548. DX12 `ClearBuffer` clears, and a second surface's
+  capabilities come from the adapter.
+- **Dependencies:** gpucontext v0.31.3 → v0.32.0. The release replaces the IME interfaces with the single
+  `IMEController`/`IMEState` contract from ADR-045; gogpu needs no code change for it, the platform IME backends
+  follow in their own change.
+- **API cleanup** (#458, @besmpl). `FileDialogOptions` and `FileTypeFilter` are now gogpu-owned types instead of
+  aliases into the platform package: the dialog path converts them at the platform boundary and copies the caller's
+  slices, so a platform dialog cannot mutate them. Dead event-source dispatch helpers are gone,
+  `mapTextureFormat` becomes `allowedSurfaceFormat`, and `doc.go`, the README and ARCHITECTURE.md now describe the
+  current platform support and DIP dimensions.
+- **Dependencies:** wgpu v0.34.9 → v0.34.14, naga v0.21.4 → v0.21.10. wgpu now accepts command buffers whose
+  resources were released after recording, the same way Rust wgpu handles a dropped handle; Vulkan descriptor pools
+  always include the dynamic buffer types; and with demote-to-helper support, a discard demotes the invocation
+  instead of emitting `OpKill`. naga adds `spirv.CapabilitySet` and fixes MSL code generation — multiple returns,
+  packed `vec3` bitcasts, atomic workgroup loads, threadgroup vector stores and the writer error paths. wgpu
+  v0.34.14 registers the platform hardware backends by default behind build tags (`wgpu_novulkan`, `wgpu_nodx12`,
+  `wgpu_nogles`, `wgpu_nometal` opt out), adds the `wgputest` package and `Device.CheckHealth`, and stops
+  registering `hal/noop` in `init`; the Pure Go software backend stays an explicit import until v0.35.0, which
+  gogpu keeps.
+
+### Removed
+
+- **Breaking: the legacy backend and provider API is gone** (#458, deprecated in the same cycle). `App.DeviceProvider()`,
+  the `gogpu.DeviceProvider` interface, `Config.Backend`, `Config.WithBackend` and the
+  `BackendAuto`/`BackendRust`/`BackendNative`/`BackendGo` constants are removed, and `gpu/types.BackendType` with its
+  `BackendAuto`/`BackendNative`/`BackendRust`/`BackendGo` constants goes with them.
+  Migration:
+  - `app.DeviceProvider().Device()` → `wgpu.DeviceFromHandle(app.GPUContextProvider().Device())`;
+  - `app.DeviceProvider().Queue()` → the queue of that `*wgpu.Device`;
+  - `app.DeviceProvider().SurfaceFormat()` → `app.GPUContextProvider().SurfaceFormat()`;
+  - `WithBackend`/`Backend*` → nothing: the implementation is chosen by wgpu build tags (ADR-038);
+  - `GraphicsAPI` or `GOGPU_GRAPHICS_API` selects the graphics API; `gputypes.Backends` describes the backend masks.
+
+### Fixed
+
+- **Windows: startup on systems older than Windows 10 1607** (#472, @unxed). `user32!GetDpiForWindow` does not
+  exist there, and the lazy call panicked at the first window. The export is now probed once, and the screen DPI
+  (`GetDeviceCaps(LOGPIXELSX)`) is the fallback for every call site.
+- **Wayland: input stalls until the compositor sends unrelated traffic** (gogpu/ui#240). `WaitEvents` polled the
+  display socket without holding libwayland's read intent, so the render thread's Mesa Vulkan WSI could read input
+  events into our queue and leave the socket empty: the loop then slept through keyboard and mouse input until a
+  refocus or a workspace switch arrived. The wait now follows libwayland's multi-threaded protocol — `prepare_read` →
+  `flush` → `poll` → `read_events`/`cancel_read` — and returns at once when the queue already holds events (SDL3
+  `Wayland_WaitEventTimeout`, winit's wayland pump thread). No display lock is held across the poll.
+- **`EventSource.OnResize` never fired** (found in the #458 review). The callback was stored and nothing dispatched a
+  window resize to the event source, so `EventSource` subscribers never heard about one; a resize now reaches them
+  with the logical size, the same values `App.OnResize` receives.
+
+## [0.54.1] - 2026-11-08
+
+### Fixed
+
+- **Browser/WASM rendering** (#467, #469, @z46-dev) — browser app loop now uses `requestAnimationFrame`, coalesces redraws, pauses when hidden, resets frame timing on resume, removes JS callbacks on shutdown.
+- **Go memory passed to C as `uintptr`** — 39 places on macOS, Linux (Wayland, X11, xkbcommon) and in Windows printing handed a Go address to native code as a plain `uintptr` through a Go wrapper (objc `msgSend`, the Wayland marshal helpers, a goffi argument slot, a func value). Such an address is invisible to the GC and to the stack copier: if the goroutine stack grew on the way to the call, the native side read or wrote the old stack. The objects are now pinned with `runtime.Pinner` or passed as `unsafe.Pointer`. `xkb_rule_names` is built from `unsafe.Pointer` fields, and the `_ = buf` lines that were meant to keep the strings alive (and did not) are gone. `TestFFIPointersArePinned` guards the pattern (39 failures on the old code).
+- **`PresentTexture` on the software backend no longer runs a shader** (P1-PRESENT-002). A texture that fills the surface at its size as the frame's only content is read back and presented as pixels at `EndFrame`, the route `ggcanvas` already uses for CPU pixmaps. Any later draw or clear in the same frame draws it through the pipeline first, so the frame is unchanged. Since wgpu v0.34.7 the software backend runs these shaders instead of treating such draws as a plain copy; without this change a 1280×720 present would take seconds per frame. Textured draws that are positioned, scaled or translucent (`DrawTexture`, `DrawTextureEx`) stay on the pipeline: correct, but slow on the software backend until it compiles shaders (wgpu P1-SW-023). On a CPU adapter, gogpu textures now also carry `CopySrc` usage.
+
+- **Windows: `WithFullscreen()` opened a normal decorated window** (#493, #508, @kivutar). The initial fullscreen state is now applied while the window is still hidden, so the first surface is created at monitor size and toggling back restores the configured size and decorations.
+- **Wayland: about 20 "still attached" warnings at exit with client-side decorations** (#518, @dvoyni). `Close` now destroys the decoration surfaces, subsurfaces, SHM pools and buffers, the CSD pointer and seats, `wl_shm` and `wl_subcompositor`, and the resize and hide paths free the client proxies they used to leak.
+- **macOS: `SetFullscreen` on a running window froze the main thread** (#522, @dvoyni). `ToggleFullScreen` held the window mutex while AppKit delivered the live-resize callbacks synchronously, and those take the same mutex.
+- **macOS: the cursor stayed hidden after `SetCursor(CursorNone)`** (#523, @dvoyni). Any other shape now unhides it, and repeated `CursorNone` calls no longer stack hides.
+- **Panics inside `Call`/`CallVoid` lost the original stack** (#481, #494, @lkmavi). The worker's stack is captured at `recover` and printed before the re-panic on the caller.
+
+### Changed
+
+- **Windows: keys are reported by physical position (scancode), not by virtual key** (#520, @dvoyni). This matches macOS, X11, Wayland and the browser, and GLFW and winit. On non-US layouts a key now reports the US QWERTY key in its position: on AZERTY the key labelled A reports `KeyQ`. Use `OnTextInput` for the character a key types. Numpad keys report `KeyNumpad0`–`KeyNumpad9` and `KeyNumpadDecimal` with Num Lock off too.
+- **Dependencies:** wgpu v0.34.2 → v0.34.9, naga v0.19.0 → v0.21.4, goffi v0.6.3 → v0.6.8, gputypes v0.8.0 → v0.8.2. golang.org/x/sys stays at v0.47.0, the last release that supports Go 1.25. naga v0.21.4 contains the fix for GHSA-887q-cf99-367r (stack overflow in the WGSL parser on untrusted shaders), so `govulncheck` no longer flags gogpu builds.
+- **Golden tests:** the `texture` and `hidpi-lowres` goldens were regenerated. Up to wgpu v0.34.6 they recorded the software backend's old full-surface-copy shortcut instead of positioned, scaled, translucent and bilinear-filtered quads. A new hermetic test checks both against a CPU reference of WebGPU semantics, within one 8-bit step.
 - **CONTRIBUTING.md** — merge strategy (squash vs regular merge), project structure, AI-assisted contributions (Smart Coding) policy, ecosystem versions, platform support
+
+### Known issues
+
+- A module that requires the latest gogpu **and** the latest gg (v0.52.5) does not build yet, because gg v0.52.5 predates an API change in gogpu (gogpu/ui#239). gg v0.52.6 fixes it.
 
 ## [0.54.0] - 2026-08-31
 
@@ -2920,7 +3016,8 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.20.5...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.54.1...HEAD
+[0.54.1]: https://github.com/gogpu/gogpu/compare/v0.54.0...v0.54.1
 [0.20.5]: https://github.com/gogpu/gogpu/compare/v0.20.4...v0.20.5
 [0.20.4]: https://github.com/gogpu/gogpu/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/gogpu/gogpu/compare/v0.20.2...v0.20.3

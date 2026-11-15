@@ -462,6 +462,10 @@ func (h *LibwaylandHandle) Close() {
 		h.inputSeat = 0
 	}
 
+	// Destroy client-side decorations: their subsurfaces before the parent
+	// surface, their seats and pointer with the CSD queue.
+	h.destroyCSD()
+
 	// Destroy decoration objects (reverse order: decoration → manager)
 	if h.toplevelDecor != 0 {
 		h.proxyDestroy(h.toplevelDecor)
@@ -684,7 +688,7 @@ func (h *LibwaylandHandle) prepareCIFs() error {
 func (h *LibwaylandHandle) marshalConstructor(proxy uintptr, opcode uint32, iface unsafe.Pointer) (uintptr, error) {
 	// wl_argument array: one entry = NULL (new_id placeholder)
 	var argBuf [1]uintptr // wl_argument is union of 8 bytes; uintptr on 64-bit
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(iface)
 
 	var result uintptr
@@ -722,7 +726,7 @@ func (h *LibwaylandHandle) registryBind(name uint32, iface unsafe.Pointer, versi
 	argBuf[3] = 0 // new_id placeholder
 
 	opcode := uint32(0) // wl_registry::bind
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(iface)
 
 	var result uintptr

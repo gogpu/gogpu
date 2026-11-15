@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -439,9 +440,13 @@ func NewNSString(s string) *NSString {
 	// Convert Go string to C string (null-terminated)
 	cstr := append([]byte(s), 0)
 
-	// Initialize with UTF8 string
-	// Pass the address of the first byte as uintptr
-	nsstr = nsstr.SendPtr(selectors.initWithUTF8String, bytesPtr(cstr))
+	// Initialize with UTF8 string. The address travels as a uintptr through the
+	// msgSend wrapper, which neither the GC nor the stack copier sees: pin the
+	// bytes for the call (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&cstr[0])
+	nsstr = nsstr.SendPtr(selectors.initWithUTF8String, uintptr(unsafe.Pointer(&cstr[0])))
+	pinner.Unpin()
 
 	return &NSString{id: nsstr}
 }
@@ -469,13 +474,4 @@ func (s *NSString) String() string {
 	// Simplified: return empty string
 	// A full implementation would call UTF8String and read the C string
 	return ""
-}
-
-// bytesPtr returns a uintptr to the first element of the byte slice.
-// The caller must ensure the slice remains valid during use.
-func bytesPtr(b []byte) uintptr {
-	if len(b) == 0 {
-		return 0
-	}
-	return uintptr(unsafe.Pointer(&b[0]))
 }

@@ -30,6 +30,36 @@ const (
 	texQuadUniformSize = 32
 )
 
+// texQuadUniformStride is the dynamic-uniform alignment required by WebGPU's
+// minimum uniform-buffer offset limit. Keeping each draw in its own aligned
+// slot is required once textured quads share a command encoder: a queue write
+// must not overwrite the parameters recorded for an earlier pass.
+const texQuadUniformStride = 256
+
+// texQuadUniformChunkSlots bounds the initial per-frame allocation. A new
+// chunk is added only for unusually large frames; older chunks stay alive until
+// the frame boundary because already-recorded passes may still reference them.
+const texQuadUniformChunkSlots = 64
+
+type texQuadUniformChunk struct {
+	buffer   *wgpu.Buffer
+	bindGrp  *wgpu.BindGroup
+	stride   uint32
+	nextSlot uint32
+}
+
+type texQuadUniformAllocation struct {
+	buffer  *wgpu.Buffer
+	bindGrp *wgpu.BindGroup
+	offset  uint32
+}
+
+type texQuadUniformWrite struct {
+	buffer *wgpu.Buffer
+	offset uint32
+	data   [texQuadUniformSize]byte
+}
+
 // SurfaceState tracks the lifecycle state of a GPU surface.
 // Transitions follow the WebGPU spec + wgpu framework.rs recovery pattern:
 //
@@ -66,8 +96,25 @@ type RenderTarget struct {
 	frameCleared          bool // Whether the frame has been cleared (for LoadOp selection)
 	externalContent       bool // External renderer (g3d) has content on surface (MarkPreserveContent)
 	// frameEncoder is borrowed by external renderers and owned by this surface.
-	// It is finished and submitted exactly once at frame end.
+	// It is normally finished and submitted at frame end; standalone rendering
+	// paths may flush it earlier to preserve call order.
 	frameEncoder *wgpu.CommandEncoder
+	// texturedQuadPass stays open while consecutive textured quads target the
+	// same frame. Boundary operations (external passes, clears, blits, and frame
+	// submission) close it before recording their own pass so call order remains
+	// observable and arbitrary external interleaving remains valid.
+	texturedQuadPass *wgpu.RenderPassEncoder
+	// Uniform writes are deferred until texturedQuadPass closes. Queue writes
+	// recorded while a pass is still open could survive a failed pass and target
+	// an unsubmitted frame buffer; retaining one immutable payload per draw keeps
+	// the A3 failure/lifetime guarantee while allowing one pass per contiguous run.
+	pendingTexQuadUniformWrites   []texQuadUniformWrite
+	texturedQuadPassConsumedClear bool
+
+	// Textured-quad uniform chunks are owned by this surface frame. Each draw
+	// gets a distinct dynamic-uniform slot so recording N passes into the shared
+	// encoder preserves every quad's parameters on direct-write backends too.
+	texQuadUniformChunks []texQuadUniformChunk
 
 	// Deferred clear -- eliminates separate Clear render pass.
 	// ClearColor stores the color and sets hasPendingClear=true.
@@ -126,6 +173,20 @@ type RenderTarget struct {
 	// Acquire→Render→Present cycle (ADR-052). endFrameForSurface skips
 	// present and cleans up stale state instead.
 	pixelPresented bool
+
+	// identityPresent is a PresentTexture deferred to the end of the frame
+	// (P1-PRESENT-002). On a CPU adapter a full-surface, alpha-1 texture that
+	// is the frame's first content is presented through PresentPixels instead
+	// of the textured-quad shader, which the software backend interprets per
+	// pixel. Any later work on this surface in the same frame draws it through
+	// the pipeline first (materializeIdentityPresent), so frame order holds.
+	identityPresent *Texture
+
+	// surfaceExposed records that the surface view or the shared encoder was
+	// handed to code gogpu does not see (Context.SurfaceView, CommandEncoder).
+	// After that the frame may already hold content, so a PresentTexture can
+	// no longer be treated as the first content.
+	surfaceExposed bool
 
 	// frameStarted tracks whether beginFrame was called this frame cycle.
 	// With lazy acquire, beginFrame is deferred until the first draw call.
@@ -201,6 +262,12 @@ type Renderer struct {
 	// Backend metadata
 	backendName string
 
+	// pixelPresent enables the PresentPixels route for identity frames
+	// (P1-PRESENT-002). Set for CPU adapters at device creation; cleared for
+	// good the first time PresentPixels refuses (a CPU adapter whose surface
+	// is not a pixel presenter, e.g. llvmpipe on Vulkan).
+	pixelPresent bool
+
 	// Submission tracker for non-blocking resource recycling.
 	tracker submissionTracker
 
@@ -215,8 +282,6 @@ type Renderer struct {
 	texQuadUniformLayout  *wgpu.BindGroupLayout
 	texQuadTextureLayout  *wgpu.BindGroupLayout
 	texQuadPipelineLayout *wgpu.PipelineLayout
-	texQuadUniformBuffer  *wgpu.Buffer
-	texQuadUniformBindGrp *wgpu.BindGroup
 	texQuadUniformData    []byte
 	texQuadPipelineInited bool
 
@@ -387,6 +452,7 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	info := r.adapter.Info()
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
 	r.backendName = "Pure Go (" + info.Backend.String() + ")"
+	r.pixelPresent = info.DeviceType == gputypes.DeviceTypeCPU
 
 	r.device, err = r.adapter.RequestDevice(nil)
 	if err != nil {
@@ -614,6 +680,12 @@ func (ws *RenderTarget) CanRender() bool {
 //   - ErrSurfaceOutdated → reconfigure (swapchain stale after resize/DPI change)
 //   - ErrSurfaceLost → mark SurfaceLost (caller must recreate)
 func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu.Device, adapter *wgpu.Adapter) bool {
+	// The app frame loop normally releases these in prepareLazyAcquire, but the
+	// exported Renderer.BeginFrame/EndFrame pair reaches beginFrame directly.
+	// Start every acquired frame with a fresh uniform arena so manual callers do
+	// not retain one chunk per frame indefinitely.
+	ws.releaseTexQuadUniformChunks()
+
 	if !ws.CanRender() {
 		return false
 	}
@@ -662,6 +734,8 @@ func (ws *RenderTarget) beginFrame(platWin platform.PlatformWindow, device *wgpu
 	ws.externalContent = false
 	ws.hasPendingClear = false
 	ws.hasGPUWork = false
+	ws.identityPresent = nil
+	ws.surfaceExposed = false
 
 	return true
 }
@@ -709,6 +783,10 @@ func (r *Renderer) EndFrame() {
 // it does NOT poll submissions -- the caller polls once after all windows.
 // Returns true if present() reconfigured an outdated surface (see present).
 func (r *Renderer) endFrameForSurface(ws *RenderTarget) bool {
+	// A PresentTexture deferred as the whole frame (P1-PRESENT-002): present
+	// its pixels, or draw it through the pipeline if that route fails.
+	r.presentIdentityFrame(ws)
+
 	// PresentPixels already presented — skip normal present path (ADR-052).
 	if ws.pixelPresented {
 		ws.discardFrameEncoder()
@@ -910,6 +988,7 @@ func (ws *RenderTarget) setTransactionPresent(enabled bool) {
 // Uses ws.platWindow and ws.renderer.{device,adapter} — no parameters needed.
 func (ws *RenderTarget) prepareLazyAcquire() {
 	ws.discardFrameEncoder()
+	ws.releaseTexQuadUniformChunks()
 	ws.frameStarted = false
 	ws.hasGPUWork = false
 	ws.pixelPresented = false
@@ -980,6 +1059,7 @@ func (ws *RenderTarget) ensureFrameEncoder() (*wgpu.CommandEncoder, error) {
 	if !ws.ensureFrameStarted() {
 		return nil, fmt.Errorf("gogpu: surface frame not available")
 	}
+	ws.materializeIdentityPresent()
 	if ws.frameEncoder != nil {
 		return ws.frameEncoder, nil
 	}
@@ -993,8 +1073,80 @@ func (ws *RenderTarget) ensureFrameEncoder() (*wgpu.CommandEncoder, error) {
 	return encoder, nil
 }
 
+// allocateTexQuadUniform reserves one aligned uniform slot for a textured
+// quad recorded in the current frame. Chunks are frame-owned rather than
+// renderer-owned so their data cannot be overwritten while another window's
+// frame is still in flight.
+func (ws *RenderTarget) allocateTexQuadUniform(r *Renderer) (texQuadUniformAllocation, error) {
+	stride := uint32(texQuadUniformStride)
+	if limit := r.device.Limits().MinUniformBufferOffsetAlignment; limit > stride {
+		stride = limit
+	}
+	if len(ws.texQuadUniformChunks) == 0 ||
+		ws.texQuadUniformChunks[len(ws.texQuadUniformChunks)-1].nextSlot >= texQuadUniformChunkSlots {
+		buffer, err := r.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: "Textured Quad Frame Uniforms",
+			Size:  uint64(stride) * uint64(texQuadUniformChunkSlots),
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return texQuadUniformAllocation{}, fmt.Errorf("gogpu: create textured quad frame uniforms: %w", err)
+		}
+		bindGrp, err := r.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+			Label:  "Textured Quad Frame Uniform Bind Group",
+			Layout: r.texQuadUniformLayout,
+			Entries: []wgpu.BindGroupEntry{
+				{
+					Binding: 0,
+					Buffer:  buffer,
+					Size:    texQuadUniformSize,
+				},
+			},
+		})
+		if err != nil {
+			buffer.Release()
+			return texQuadUniformAllocation{}, fmt.Errorf("gogpu: create textured quad frame uniform bind group: %w", err)
+		}
+		ws.texQuadUniformChunks = append(ws.texQuadUniformChunks, texQuadUniformChunk{
+			buffer:  buffer,
+			bindGrp: bindGrp,
+			stride:  stride,
+		})
+	}
+
+	chunk := &ws.texQuadUniformChunks[len(ws.texQuadUniformChunks)-1]
+	offset := chunk.nextSlot * chunk.stride
+	chunk.nextSlot++
+	return texQuadUniformAllocation{
+		buffer:  chunk.buffer,
+		bindGrp: chunk.bindGrp,
+		offset:  offset,
+	}, nil
+}
+
+// releaseTexQuadUniformChunks releases frame uniform resources after the
+// previous frame's submission has completed (the same boundary used for
+// composition bind groups). It is also called by RenderTarget.destroy.
+func (ws *RenderTarget) releaseTexQuadUniformChunks() {
+	for _, chunk := range ws.texQuadUniformChunks {
+		if chunk.bindGrp != nil {
+			chunk.bindGrp.Release()
+		}
+		if chunk.buffer != nil {
+			chunk.buffer.Release()
+		}
+	}
+	ws.texQuadUniformChunks = nil
+	ws.pendingTexQuadUniformWrites = ws.pendingTexQuadUniformWrites[:0]
+	ws.texturedQuadPassConsumedClear = false
+}
+
 // submitFrameEncoder finishes and submits the framework-owned shared encoder.
 func (ws *RenderTarget) submitFrameEncoder(r *Renderer) {
+	if err := ws.endTexturedQuadPass(); err != nil {
+		slog.Error("finish textured quad render pass failed", "err", err)
+		return
+	}
 	encoder := ws.frameEncoder
 	ws.frameEncoder = nil
 	if encoder == nil {
@@ -1006,6 +1158,88 @@ func (ws *RenderTarget) submitFrameEncoder(r *Renderer) {
 		return
 	}
 	r.submitTracked(commands)
+}
+
+// endTexturedQuadPass closes the pass used by the current contiguous textured
+// quad run and publishes its deferred uniform writes. It is the only normal
+// path that ends this pass; callers use it before recording any external or
+// framework-owned pass so pass order remains explicit.
+func (ws *RenderTarget) endTexturedQuadPass() error {
+	pass := ws.texturedQuadPass
+	if pass == nil {
+		return nil
+	}
+	ws.texturedQuadPass = nil
+	if err := pass.End(); err != nil {
+		ws.abortTexturedQuadPassState()
+		ws.discardFrameEncoder()
+		return fmt.Errorf("gogpu: end textured quad render pass: %w", err)
+	}
+
+	writes := ws.pendingTexQuadUniformWrites
+	for _, write := range writes {
+		if err := ws.renderer.device.Queue().WriteBuffer(write.buffer, uint64(write.offset), write.data[:]); err != nil {
+			ws.pendingTexQuadUniformWrites = ws.pendingTexQuadUniformWrites[:0]
+			ws.abortTexturedQuadPassState()
+			ws.discardFrameEncoder()
+			return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
+		}
+	}
+	ws.pendingTexQuadUniformWrites = ws.pendingTexQuadUniformWrites[:0]
+	ws.texturedQuadPassConsumedClear = false
+	return nil
+}
+
+// beginTexturedQuadPass starts a pass for a contiguous textured-quad run.
+// The caller has already closed any prior run when an explicit clear is
+// pending, so this helper only handles the first pass state for the run.
+func (ws *RenderTarget) beginTexturedQuadPass(encoder *wgpu.CommandEncoder) error {
+	loadOp := gputypes.LoadOpClear
+	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 0}
+	consumePendingClear := false
+	switch {
+	case ws.hasPendingClear:
+		clearValue = ws.pendingClearColor
+		consumePendingClear = true
+	case ws.frameCleared:
+		loadOp = gputypes.LoadOpLoad
+	}
+
+	pass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:       ws.renderView(),
+			LoadOp:     loadOp,
+			StoreOp:    gputypes.StoreOpStore,
+			ClearValue: clearValue,
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("gogpu: failed to begin render pass: %w", err)
+	}
+	ws.texturedQuadPass = pass
+	ws.texturedQuadPassConsumedClear = consumePendingClear
+	if consumePendingClear {
+		ws.hasPendingClear = false
+	}
+	return nil
+}
+
+// abortTexturedQuadPassState drops the pass-local state after a failed pass or
+// an abandoned frame. The shared encoder itself is discarded by the caller.
+func (ws *RenderTarget) abortTexturedQuadPassState() {
+	if ws.texturedQuadPass != nil {
+		// The frame is being abandoned and its encoder discarded, so a failed
+		// End changes nothing here; log it so the diagnostic is not lost.
+		if err := ws.texturedQuadPass.End(); err != nil {
+			slog.Warn("gogpu: end textured quad pass during abort", "err", err)
+		}
+		ws.texturedQuadPass = nil
+	}
+	if ws.texturedQuadPassConsumedClear {
+		ws.hasPendingClear = true
+	}
+	ws.texturedQuadPassConsumedClear = false
+	ws.pendingTexQuadUniformWrites = ws.pendingTexQuadUniformWrites[:0]
 }
 
 // drawDebugOverlays iterates registered debug overlays and calls their Draw
@@ -1038,6 +1272,10 @@ func (ws *RenderTarget) drawDebugOverlays() {
 	if ws.currentView == nil {
 		return
 	}
+	if err := ws.endTexturedQuadPass(); err != nil {
+		slog.Error("gogpu: end textured quad pass before debug overlays failed", "err", err)
+		return
+	}
 
 	encoder, err := ws.ensureFrameEncoder()
 	if err != nil {
@@ -1067,6 +1305,7 @@ func (ws *RenderTarget) drawDebugOverlays() {
 
 // discardFrameEncoder abandons an unsubmitted shared encoder on cancellation.
 func (ws *RenderTarget) discardFrameEncoder() {
+	ws.abortTexturedQuadPassState()
 	if ws.frameEncoder == nil {
 		return
 	}
@@ -1076,6 +1315,7 @@ func (ws *RenderTarget) discardFrameEncoder() {
 
 // releaseFrame releases per-frame resources after presentation.
 func (ws *RenderTarget) releaseFrame() {
+	ws.identityPresent = nil
 	ws.discardFrameEncoder()
 	if ws.currentView != nil {
 		ws.currentView.Release()
@@ -1194,6 +1434,10 @@ func (r *Renderer) blitComposToSwapchain(ws *RenderTarget) {
 	if ws.composView == nil || ws.currentView == nil {
 		return
 	}
+	if err := ws.endTexturedQuadPass(); err != nil {
+		slog.Error("gogpu: end textured quad pass before composition blit failed", "err", err)
+		return
+	}
 	if !r.blitPipeline.Inited {
 		if err := r.initBlitPipeline(); err != nil {
 			slog.Error("gogpu: blit pipeline init failed", "err", err)
@@ -1232,6 +1476,8 @@ func (ws *RenderTarget) clear(red, green, blue, alpha float64) {
 	if !ws.ensureFrameStarted() {
 		return
 	}
+	// A deferred PresentTexture must not consume this later clear.
+	ws.materializeIdentityPresent()
 	ws.pendingClearColor = gputypes.Color{R: red, G: green, B: blue, A: alpha}
 	ws.hasPendingClear = true
 	ws.hasGPUWork = true
@@ -1240,6 +1486,10 @@ func (ws *RenderTarget) clear(red, green, blue, alpha float64) {
 // flushClear applies any pending clear immediately as a standalone render pass.
 // Called by EndFrame if no draw calls consumed the pending clear.
 func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) bool {
+	if err := ws.endTexturedQuadPass(); err != nil {
+		slog.Error("end textured quad pass before clear failed", "err", err)
+		return false
+	}
 	if !ws.hasPendingClear || ws.currentView == nil {
 		return true
 	}
@@ -1387,7 +1637,14 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 	if !ws.ensureFrameStarted() {
 		return nil
 	}
+	ws.materializeIdentityPresent()
 	ws.hasGPUWork = true
+	// DrawTriangle retains its standalone submission contract. Flush any
+	// shared textured-quad encoder first so a triangle interleaved with quads
+	// cannot overtake the earlier draws while the quad pass is still open.
+	if ws.frameEncoder != nil {
+		ws.submitFrameEncoder(r)
+	}
 
 	// Initialize pipeline on first use
 	if r.trianglePipeline == nil {
@@ -1437,8 +1694,6 @@ func (r *Renderer) DrawTriangle(clearR, clearG, clearB, clearA float64) error {
 
 // initTexturedQuadPipeline creates the GPU resources for textured quad rendering.
 // This is called lazily on the first DrawTexture call.
-//
-//nolint:funlen // pipeline init is inherently sequential setup code
 func (r *Renderer) initTexturedQuadPipeline() error {
 	if r.texQuadPipelineInited {
 		return nil
@@ -1463,8 +1718,9 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 				Binding:    0,
 				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
 				Buffer: &gputypes.BufferBindingLayout{
-					Type:           gputypes.BufferBindingTypeUniform,
-					MinBindingSize: texQuadUniformSize,
+					Type:             gputypes.BufferBindingTypeUniform,
+					HasDynamicOffset: true,
+					MinBindingSize:   texQuadUniformSize,
 				},
 			},
 		},
@@ -1547,38 +1803,11 @@ func (r *Renderer) initTexturedQuadPipeline() error {
 		return fmt.Errorf("gogpu: failed to create render pipeline: %w", err)
 	}
 
-	// Create uniform buffer. CopyDst required because Queue.WriteBuffer uses
-	// PendingWrites staging → CopyBufferRegion internally.
-	// MapWrite + MappedAtCreation removed: buffer is never re-mapped after
-	// creation, and initial data is written via WriteBuffer each frame.
-	r.texQuadUniformBuffer, err = r.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "Textured Quad Uniforms",
-		Size:  texQuadUniformSize,
-		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: failed to create uniform buffer: %w", err)
-	}
-
-	// Create bind group for uniforms (group 0)
-	r.texQuadUniformBindGrp, err = r.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  "Textured Quad Uniform Bind Group",
-		Layout: r.texQuadUniformLayout,
-		Entries: []wgpu.BindGroupEntry{
-			{
-				Binding: 0,
-				Buffer:  r.texQuadUniformBuffer,
-				Size:    texQuadUniformSize,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("gogpu: failed to create uniform bind group: %w", err)
-	}
-
-	// Pre-allocate uniform data buffer to avoid per-frame allocations
+	// Reuse the CPU-side payload while Queue.WriteBuffer copies it into the
+	// backend's staging/direct-write path. The GPU-visible data is still kept
+	// in per-draw dynamic slots above, so this scratch buffer is safe to reuse
+	// between calls on the render thread.
 	r.texQuadUniformData = make([]byte, texQuadUniformSize)
-
 	r.texQuadPipelineInited = true
 	return nil
 }
@@ -1620,13 +1849,14 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 	return bg, nil
 }
 
-// drawTexturedQuad draws a textured quad with the given options.
-// This is an internal method called by Context.DrawTextureEx.
-func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error {
-	ws := r.activeSurface()
+// drawTexturedQuad draws a textured quad with the given options onto ws.
+// Called by Context.DrawTextureEx, Context.PresentTexture and
+// materializeIdentityPresent.
+func (r *Renderer) drawTexturedQuad(ws *RenderTarget, tex *Texture, opts DrawTextureOptions) error {
 	if !ws.ensureFrameStarted() {
 		return fmt.Errorf("gogpu: surface frame not available")
 	}
+	ws.materializeIdentityPresent()
 	ws.hasGPUWork = true
 
 	// HiDPI diagnostic logging (first 3 frames per surface to avoid spam).
@@ -1659,15 +1889,41 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 		return fmt.Errorf("gogpu: failed to get texture bind group: %w", err)
 	}
 
-	// Create command encoder
-	encoder, err := r.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
-		Label: "DrawTexturedQuad",
-	})
+	// Record into the frame-owned encoder. Consecutive textured quads share one
+	// render pass; boundary operations close it before recording their own pass,
+	// preserving arbitrary texture ordering and external interleaving.
+	encoder, err := ws.ensureFrameEncoder()
 	if err != nil {
-		return fmt.Errorf("gogpu: failed to create command encoder: %w", err)
+		return fmt.Errorf("gogpu: shared frame encoder unavailable: %w", err)
+	}
+	if ws.texturedQuadPass != nil && ws.hasPendingClear {
+		if err := ws.endTexturedQuadPass(); err != nil {
+			return err
+		}
+	}
+	uniform, err := ws.allocateTexQuadUniform(r)
+	if err != nil {
+		return err
 	}
 
-	// Upload uniform data — screen dimensions come from per-window state
+	if ws.texturedQuadPass == nil {
+		if err := ws.beginTexturedQuadPass(encoder); err != nil {
+			return err
+		}
+	}
+
+	// Set pipeline and bind groups
+	ws.texturedQuadPass.SetPipeline(r.texQuadPipeline)
+	ws.texturedQuadPass.SetBindGroup(0, uniform.bindGrp, []uint32{uniform.offset})
+	ws.texturedQuadPass.SetBindGroup(1, texBindGroup, nil)
+
+	// Draw 6 vertices (2 triangles for quad)
+	ws.texturedQuadPass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
+
+	// Retain an immutable payload until the pass closes. Queue writes may be
+	// deferred in a staging encoder and are prepended before user command buffers
+	// at Submit, so publishing only after End avoids targeting an unreferenced
+	// frame buffer when pass validation fails.
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[0:4], math.Float32bits(opts.X))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[4:8], math.Float32bits(opts.Y))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[8:12], math.Float32bits(opts.Width))
@@ -1676,58 +1932,11 @@ func (r *Renderer) drawTexturedQuad(tex *Texture, opts DrawTextureOptions) error
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[20:24], math.Float32bits(float32(ws.height)))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[24:28], math.Float32bits(opts.Alpha))
 	binary.LittleEndian.PutUint32(r.texQuadUniformData[28:32], math.Float32bits(premulFlag))
-	if err := r.device.Queue().WriteBuffer(r.texQuadUniformBuffer, 0, r.texQuadUniformData); err != nil {
-		return fmt.Errorf("gogpu: WriteBuffer uniform failed: %w", err)
-	}
-
-	// Determine LoadOp: consume pending clear if available, otherwise preserve content.
-	// Default clear = transparent black (WebGPU spec, Rust wgpu Color::default).
-	// Opaque black (A:1) would destroy alpha for compositing (ggcanvas, DrawTexture).
-	loadOp := gputypes.LoadOpClear
-	clearValue := gputypes.Color{R: 0, G: 0, B: 0, A: 0}
-	if ws.hasPendingClear {
-		clearValue = ws.pendingClearColor
-		ws.hasPendingClear = false
-	} else if ws.frameCleared {
-		loadOp = gputypes.LoadOpLoad
-	}
-
-	// Begin render pass
-	renderPass, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		ColorAttachments: []wgpu.RenderPassColorAttachment{
-			{
-				View:       ws.renderView(),
-				LoadOp:     loadOp,
-				StoreOp:    gputypes.StoreOpStore,
-				ClearValue: clearValue,
-			},
-		},
+	ws.pendingTexQuadUniformWrites = append(ws.pendingTexQuadUniformWrites, texQuadUniformWrite{
+		buffer: uniform.buffer,
+		offset: uniform.offset,
 	})
-	if err != nil {
-		return fmt.Errorf("gogpu: failed to begin render pass: %w", err)
-	}
-
-	// Set pipeline and bind groups
-	renderPass.SetPipeline(r.texQuadPipeline)
-	renderPass.SetBindGroup(0, r.texQuadUniformBindGrp, nil)
-	renderPass.SetBindGroup(1, texBindGroup, nil)
-
-	// Draw 6 vertices (2 triangles for quad)
-	renderPass.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
-
-	// End render pass
-	if err := renderPass.End(); err != nil {
-		return fmt.Errorf("gogpu: failed to end render pass: %w", err)
-	}
-
-	// Finish and submit
-	commands, err := encoder.Finish()
-	if err != nil {
-		return fmt.Errorf("gogpu: failed to finish encoding: %w", err)
-	}
-
-	// Submit with fence tracking (command buffer released when GPU done)
-	r.submitTracked(commands)
+	copy(ws.pendingTexQuadUniformWrites[len(ws.pendingTexQuadUniformWrites)-1].data[:], r.texQuadUniformData)
 
 	// Mark frame as having content (for subsequent LoadOp)
 	ws.frameCleared = true
@@ -1794,6 +2003,7 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 		currentView:  view,
 		frameStarted: true,
 	}
+	defer synthetic.releaseTexQuadUniformChunks()
 	r.primary = synthetic
 	defer func() { r.primary = prevPrimary }()
 
@@ -1801,6 +2011,10 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 	draw(ctx)
 	// Flush Context.Clear() calls that were deferred as a pending clear.
 	synthetic.flushClear(r.device, r)
+	// Window frames submit their shared encoder in EndFrame. RenderToImage has
+	// no window lifecycle, so finish the synthetic frame before issuing the
+	// readback command buffer below.
+	synthetic.submitFrameEncoder(r)
 
 	return r.renderToImageReadback(offscreen, texFmt, width, height)
 }
@@ -1808,50 +2022,81 @@ func (r *Renderer) RenderToImage(width, height int, draw func(*Context)) (*image
 // renderToImageReadback copies an off-screen texture to CPU memory and returns
 // the pixels as *image.RGBA. Extracted from RenderToImage for funlen compliance.
 func (r *Renderer) renderToImageReadback(offscreen *wgpu.Texture, texFmt gputypes.TextureFormat, width, height int) (*image.RGBA, error) {
+	// BGRA8Unorm (default surfaceFormat) has B and R swapped vs image.RGBA.
+	isBGRA := texFmt == gputypes.TextureFormatBGRA8Unorm || texFmt == gputypes.TextureFormatBGRA8UnormSrgb
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	err := r.readbackTexture(offscreen, width, height, "RenderToImage", func(raw []byte, rowBytes int) {
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				src := y*rowBytes + x*4
+				dst := img.PixOffset(x, y)
+				if isBGRA {
+					img.Pix[dst+0] = raw[src+2] // R ← blue slot
+					img.Pix[dst+1] = raw[src+1] // G
+					img.Pix[dst+2] = raw[src+0] // B ← red slot
+					img.Pix[dst+3] = raw[src+3] // A
+				} else {
+					copy(img.Pix[dst:dst+4], raw[src:src+4])
+				}
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+// readbackTexture copies a 4-byte-per-pixel texture (which needs CopySrc) to
+// a staging buffer, waits for it, and calls visit with the mapped bytes while
+// the buffer is mapped. Rows in raw are rowBytes apart (padded to 256, as
+// wgpu requires). visit must not keep raw. label prefixes error messages and
+// resource labels.
+func (r *Renderer) readbackTexture(src *wgpu.Texture, width, height int, label string, visit func(raw []byte, rowBytes int)) error {
 	// wgpu requires BytesPerRow to be a multiple of 256.
 	const rowAlign = 256
-	rowBytes := uint32(width) * 4 //nolint:gosec // G115: validated positive in RenderToImage
+	rowBytes := uint32(width) * 4 //nolint:gosec // G115: callers pass positive sizes
 	if rem := rowBytes % rowAlign; rem != 0 {
 		rowBytes += rowAlign - rem
 	}
-	bufSize := uint64(rowBytes) * uint64(height) //nolint:gosec // G115: validated positive in RenderToImage
+	bufSize := uint64(rowBytes) * uint64(height) //nolint:gosec // G115: callers pass positive sizes
 
 	stagingBuf, err := r.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "RenderToImage-staging",
+		Label: label + "-staging",
 		Size:  bufSize,
 		Usage: wgpu.BufferUsageCopyDst | wgpu.BufferUsageMapRead,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: create staging buffer: %w", err)
+		return fmt.Errorf("gogpu: %s: create staging buffer: %w", label, err)
 	}
 	defer stagingBuf.Release()
 
 	enc, err := r.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
-		Label: "RenderToImage-copy",
+		Label: label + "-copy",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: create encoder: %w", err)
+		return fmt.Errorf("gogpu: %s: create encoder: %w", label, err)
 	}
 
-	enc.CopyTextureToBuffer(offscreen, stagingBuf, []wgpu.BufferTextureCopy{
+	enc.CopyTextureToBuffer(src, stagingBuf, []wgpu.BufferTextureCopy{
 		{
 			TextureBase: wgpu.ImageCopyTexture{
-				Texture:  offscreen,
+				Texture:  src,
 				MipLevel: 0,
 				Aspect:   gputypes.TextureAspectAll,
 			},
 			BufferLayout: wgpu.ImageDataLayout{
 				Offset:       0,
 				BytesPerRow:  rowBytes,
-				RowsPerImage: uint32(height), //nolint:gosec // G115: validated positive in RenderToImage
+				RowsPerImage: uint32(height), //nolint:gosec // G115: callers pass positive sizes
 			},
-			Size: wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1}, //nolint:gosec // G115: validated positive in RenderToImage
+			Size: wgpu.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1}, //nolint:gosec // G115: callers pass positive sizes
 		},
 	})
 
 	cmds, err := enc.Finish()
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: finish encoder: %w", err)
+		return fmt.Errorf("gogpu: %s: finish encoder: %w", label, err)
 	}
 	r.submitTracked(cmds)
 
@@ -1860,45 +2105,26 @@ func (r *Renderer) renderToImageReadback(offscreen *wgpu.Texture, texFmt gputype
 
 	pending, err := stagingBuf.MapAsync(wgpu.MapModeRead, 0, bufSize)
 	if err != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: MapAsync: %w", err)
+		return fmt.Errorf("gogpu: %s: MapAsync: %w", label, err)
 	}
 	r.device.Poll(wgpu.PollWait)
 
 	ready, statusErr := pending.Status()
 	if !ready {
-		return nil, errors.New("gogpu: RenderToImage: buffer not ready after poll")
+		return fmt.Errorf("gogpu: %s: buffer not ready after poll", label)
 	}
 	if statusErr != nil {
-		return nil, fmt.Errorf("gogpu: RenderToImage: map status: %w", statusErr)
+		return fmt.Errorf("gogpu: %s: map status: %w", label, statusErr)
 	}
 
 	mapped, err := stagingBuf.MappedRange(0, bufSize)
 	if err != nil {
 		_ = stagingBuf.Unmap()
-		return nil, fmt.Errorf("gogpu: RenderToImage: MappedRange: %w", err)
+		return fmt.Errorf("gogpu: %s: MappedRange: %w", label, err)
 	}
-	raw := mapped.Bytes()
-
-	// BGRA8Unorm (default surfaceFormat) has B and R swapped vs image.RGBA.
-	isBGRA := texFmt == gputypes.TextureFormatBGRA8Unorm || texFmt == gputypes.TextureFormatBGRA8UnormSrgb
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			src := y*int(rowBytes) + x*4
-			dst := img.PixOffset(x, y)
-			if isBGRA {
-				img.Pix[dst+0] = raw[src+2] // R ← blue slot
-				img.Pix[dst+1] = raw[src+1] // G
-				img.Pix[dst+2] = raw[src+0] // B ← red slot
-				img.Pix[dst+3] = raw[src+3] // A
-			} else {
-				copy(img.Pix[dst:dst+4], raw[src:src+4])
-			}
-		}
-	}
-
+	visit(mapped.Bytes(), int(rowBytes))
 	_ = stagingBuf.Unmap()
-	return img, nil
+	return nil
 }
 
 // WaitForGPU blocks until all submitted GPU work completes.
@@ -1963,14 +2189,6 @@ func (r *Renderer) Destroy() {
 	r.destroyBlitPipeline()
 
 	// Release textured quad pipeline resources (reverse order)
-	if r.texQuadUniformBindGrp != nil {
-		r.texQuadUniformBindGrp.Release()
-		r.texQuadUniformBindGrp = nil
-	}
-	if r.texQuadUniformBuffer != nil {
-		r.texQuadUniformBuffer.Release()
-		r.texQuadUniformBuffer = nil
-	}
 	if r.texQuadPipelineLayout != nil {
 		r.texQuadPipelineLayout.Release()
 		r.texQuadPipelineLayout = nil
@@ -1983,6 +2201,7 @@ func (r *Renderer) Destroy() {
 		r.texQuadUniformLayout.Release()
 		r.texQuadUniformLayout = nil
 	}
+	r.texQuadUniformData = nil
 	if r.texQuadShader != nil {
 		r.texQuadShader.Release()
 		r.texQuadShader = nil
@@ -2038,6 +2257,7 @@ func (r *Renderer) destroyBlitPipeline() {
 // destroy releases all resources owned by this window surface.
 func (ws *RenderTarget) destroy() {
 	ws.discardFrameEncoder()
+	ws.releaseTexQuadUniformChunks()
 	ws.releaseCompositionTexture()
 	if ws.currentView != nil {
 		ws.currentView.Release()

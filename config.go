@@ -41,10 +41,10 @@ type Config struct {
 	// Title is the window title.
 	Title string
 
-	// Width is the initial window width in pixels.
+	// Width is the initial window width in logical points (DIP).
 	Width int
 
-	// Height is the initial window height in pixels.
+	// Height is the initial window height in logical points (DIP).
 	Height int
 
 	// Resizable allows the window to be resized.
@@ -56,13 +56,9 @@ type Config struct {
 	// Fullscreen starts in fullscreen mode.
 	Fullscreen bool
 
-	// Backend specifies which WebGPU implementation to use.
-	// BackendAuto (default) selects the best available.
-	Backend types.BackendType
-
 	// GraphicsAPI specifies which graphics API to use (Vulkan, DX12, Metal).
 	// GraphicsAPIAuto (default) selects the best for the platform.
-	// This is orthogonal to Backend (Rust/Native implementation choice).
+	// The backend implementation itself is chosen by wgpu build tags (ADR-038).
 	GraphicsAPI types.GraphicsAPI
 
 	// ContinuousRender enables continuous rendering (game loop style).
@@ -243,15 +239,6 @@ func (c Config) WithTitle(title string) Config {
 func (c Config) WithSize(width, height int) Config {
 	c.Width = width
 	c.Height = height
-	return c
-}
-
-// WithBackend returns a copy with the backend set.
-// Use types.BackendRust for maximum performance (requires gpu library).
-// Use types.BackendNative for zero dependencies (pure Go, may be slower).
-// Use types.BackendAuto (default) to automatically select the best available.
-func (c Config) WithBackend(backend types.BackendType) Config {
-	c.Backend = backend
 	return c
 }
 
@@ -485,14 +472,6 @@ func (c Config) WithIcon(img image.Image) Config {
 	c.Icon = img
 	return c
 }
-
-// Re-export backend types for convenience.
-const (
-	BackendAuto   = types.BackendAuto
-	BackendRust   = types.BackendRust
-	BackendNative = types.BackendNative
-	BackendGo     = types.BackendGo // Alias for BackendNative
-)
 
 // Re-export graphics API types for convenience.
 const (

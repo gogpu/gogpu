@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -82,6 +83,22 @@ type App struct {
 
 	// Event source for gpucontext integration
 	eventSource *eventSourceAdapter
+
+	// IME controller state is kept on App so widgets may configure IME before
+	// Run creates the native window; initPlatform replays it. The platform
+	// applies the changes on its window thread (gpucontext.IMEController
+	// threading contract), so these guards only cover the values.
+	imeMu             sync.Mutex
+	imeTarget         platform.PlatformWindow // window the controller drives; see ime.go
+	imeEnabled        bool
+	imeConfigured     bool
+	imeCursorArea     gpucontext.IMECursorArea
+	imeAreaSet        bool
+	imePurpose        gpucontext.ContentPurpose
+	imeHints          gpucontext.ContentHint
+	imeContentSet     bool
+	imeSurrounding    gpucontext.IMESurroundingText
+	imeSurroundingSet bool
 
 	// Input state for Ebiten-style polling (KeyJustPressed, etc.)
 	inputState *input.State
@@ -584,6 +601,7 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 
 	// Store the primary platform window for per-window operations.
 	a.platWindow = platWindow
+	a.attachIMEWindow(platWindow)
 
 	if a.hitTestCallback != nil {
 		a.applyHitTestCallback()
@@ -777,6 +795,12 @@ func (a *App) processEventsMultiThread() {
 			a.onResize(lastResize.Width, lastResize.Height)
 		}
 
+		// The EventSource contract carries the same callback; subscribers only
+		// saw it if the adapter was dispatched here (P2-EVENT-007).
+		if a.eventSource != nil {
+			a.eventSource.dispatchResize(lastResize.Width, lastResize.Height)
+		}
+
 		// Resize requires a render to reconfigure swapchain and repaint.
 		a.RequestRedraw()
 	}
@@ -860,6 +884,10 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 	case platform.EventChar:
 		a.dispatchCharEvent(event)
 		a.inputEvents = append(a.inputEvents, gpucontext.CharEvent{Char: event.Char})
+	case platform.EventIMECompositionStart, platform.EventIMECompositionUpdate,
+		platform.EventIMECompositionEnd, platform.EventIMECanceled,
+		platform.EventIMEDisabled, platform.EventIMEDeleteSurrounding:
+		a.dispatchIMEEvent(event)
 	case platform.EventPointerDown, platform.EventPointerUp, platform.EventPointerMove,
 		platform.EventPointerEnter, platform.EventPointerLeave:
 		a.dispatchPointerEvent(event)
@@ -935,6 +963,66 @@ func (a *App) dispatchCharEvent(event *platform.Event) {
 	}
 }
 
+func (a *App) dispatchIMECompositionStart() {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECompositionStart()
+	}
+}
+
+// dispatchIMEEvent routes the IME lifecycle events to the event source.
+func (a *App) dispatchIMEEvent(event *platform.Event) {
+	switch event.Type {
+	case platform.EventIMECompositionStart:
+		a.dispatchIMECompositionStart()
+	case platform.EventIMECompositionUpdate:
+		if event.IME != nil {
+			a.dispatchIMECompositionUpdate(event.IME.State)
+		}
+	case platform.EventIMECompositionEnd:
+		if event.IME != nil {
+			a.dispatchIMECompositionEnd(event.IME.Committed)
+		}
+	case platform.EventIMECanceled:
+		a.dispatchIMECanceled()
+	case platform.EventIMEDisabled:
+		a.dispatchIMEDisabled()
+	case platform.EventIMEDeleteSurrounding:
+		if event.IME != nil {
+			a.dispatchIMEDeleteSurrounding(event.IME.Delete)
+		}
+	}
+}
+
+func (a *App) dispatchIMECompositionUpdate(state gpucontext.IMEState) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECompositionUpdate(state)
+	}
+}
+
+func (a *App) dispatchIMECompositionEnd(committed string) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECompositionEnd(committed)
+	}
+}
+
+func (a *App) dispatchIMECanceled() {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMECanceled()
+	}
+}
+
+func (a *App) dispatchIMEDisabled() {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMEDisabled()
+	}
+}
+
+func (a *App) dispatchIMEDeleteSurrounding(event gpucontext.IMEDeleteSurroundingEvent) {
+	if a.eventSource != nil {
+		a.eventSource.dispatchIMEDeleteSurrounding(event)
+	}
+}
+
 // dispatchPointerEvent handles pointer events (down/up/move/enter/leave) from the platform.
 func (a *App) dispatchPointerEvent(event *platform.Event) {
 	w := a.windowManager.getByPlatformID(event.WindowID)
@@ -979,6 +1067,7 @@ func (a *App) windowCloseEvent(event *platform.Event) {
 
 	if isPrimary {
 		a.primaryWindow = nil
+		a.detachIMEWindow()
 		a.platWindow = nil
 		if a.renderer != nil {
 			a.renderer.primary = nil
@@ -1462,16 +1551,52 @@ func (a *App) ClipboardWrite(text string) error {
 }
 
 // FileDialogOptions configures a native file open or save dialog.
-type FileDialogOptions = platform.FileDialogOptions
+//
+// The application package owns this public type. The platform package uses
+// its own internal representation and receives a converted copy at the
+// platform boundary.
+type FileDialogOptions struct {
+	Title            string
+	Filters          []FileTypeFilter
+	Directory        bool   // pick a directory instead of a file
+	Multiple         bool   // allow multi-selection (open only)
+	InitialDirectory string // starting directory (optional)
+	DefaultFilename  string // suggested filename for save dialog (optional)
+}
 
 // FileTypeFilter restricts the visible files in a dialog by extension.
-type FileTypeFilter = platform.FileTypeFilter
+type FileTypeFilter struct {
+	Name       string   // e.g. "Images"
+	Extensions []string // e.g. ["*.png", "*.jpg"] or ["png", "jpg"]
+}
+
+// platformFileDialogOptions converts the public dialog contract to the
+// platform package's private boundary type. Slices are copied so a platform
+// implementation cannot mutate caller-owned dialog options.
+func platformFileDialogOptions(opts FileDialogOptions) platform.FileDialogOptions {
+	converted := platform.FileDialogOptions{
+		Title:            opts.Title,
+		Directory:        opts.Directory,
+		Multiple:         opts.Multiple,
+		InitialDirectory: opts.InitialDirectory,
+		DefaultFilename:  opts.DefaultFilename,
+	}
+	if len(opts.Filters) == 0 {
+		return converted
+	}
+	converted.Filters = make([]platform.FileTypeFilter, len(opts.Filters))
+	for i, filter := range opts.Filters {
+		converted.Filters[i].Name = filter.Name
+		converted.Filters[i].Extensions = append([]string(nil), filter.Extensions...)
+	}
+	return converted
+}
 
 // ShowOpenFileDialog opens a native file picker dialog on the primary window.
 // Returns nil, nil if the user cancels without making a selection.
 func (a *App) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
 	if a.manager != nil {
-		return a.manager.ShowOpenFileDialog(opts)
+		return a.manager.ShowOpenFileDialog(platformFileDialogOptions(opts))
 	}
 	return nil, nil
 }
@@ -1480,7 +1605,7 @@ func (a *App) ShowOpenFileDialog(opts FileDialogOptions) ([]string, error) {
 // Returns "", nil if the user cancels.
 func (a *App) ShowSaveFileDialog(opts FileDialogOptions) (string, error) {
 	if a.manager != nil {
-		return a.manager.ShowSaveFileDialog(opts)
+		return a.manager.ShowSaveFileDialog(platformFileDialogOptions(opts))
 	}
 	return "", nil
 }
@@ -1806,28 +1931,6 @@ var _ gpucontext.WindowChrome = (*App)(nil)
 // Config returns the application configuration.
 func (a *App) Config() Config {
 	return a.config
-}
-
-// DeviceProvider returns a provider for GPU resources.
-// This enables dependency injection of GPU capabilities into external
-// libraries without circular dependencies.
-//
-// Example:
-//
-//	app := gogpu.NewApp(gogpu.Config{Title: "My App"})
-//	provider := app.DeviceProvider()
-//
-//	// Access GPU resources
-//	device := provider.Device()
-//	queue := provider.Queue()
-//
-// Note: DeviceProvider is only valid after Run() has initialized
-// the renderer. Calling before Run() returns nil.
-func (a *App) DeviceProvider() DeviceProvider {
-	if a.renderer == nil {
-		return nil
-	}
-	return &rendererDeviceProvider{renderer: a.renderer}
 }
 
 // updateMouseStateFromPointer updates input.MouseState from a pointer event.

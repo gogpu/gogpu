@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -183,8 +184,14 @@ func CreateCGImageFromRGBA(pixels []byte, width, height int) (uintptr, error) {
 	bytesPerRow := uint64(stride)
 	bitmapInfo := uint32(cgImageAlphaLast | cgBitmapByteOrderDefault)
 
-	// Create bitmap context from pixel data
-	dataPtr := uintptr(unsafe.Pointer(&pixels[0]))
+	// Create bitmap context from pixel data. dataPtr is an unsafe.Pointer, not a
+	// uintptr, so the GC keeps pixels alive and the stack copier would update it
+	// (P1-FFI-001). The context renders straight into pixels until it is released
+	// below, so pin them for the whole function as well.
+	var pinner runtime.Pinner
+	pinner.Pin(&pixels[0])
+	defer pinner.Unpin()
+	dataPtr := unsafe.Pointer(&pixels[0])
 
 	var ctxResult uintptr
 	args := [7]unsafe.Pointer{

@@ -120,20 +120,23 @@ func (h *LibwaylandHandle) SetKDEAppmenuAddress(serviceName, objectPath string) 
 	if h.kdeAppmenu == 0 {
 		return
 	}
-	// Null-terminate both strings as C strings on the stack.
-	// runtime.KeepAlive prevents the GC from collecting them before the FFI call.
+	// Null-terminate both strings as C strings. marshalVoid is a Go wrapper, so
+	// the uintptr arguments neither keep them alive nor in place: pin them for
+	// the call (P1-FFI-001).
 	sBuf := make([]byte, len(serviceName)+1)
 	copy(sBuf, serviceName)
 	oBuf := make([]byte, len(objectPath)+1)
 	copy(oBuf, objectPath)
+	var pinner runtime.Pinner
+	pinner.Pin(&sBuf[0])
+	pinner.Pin(&oBuf[0])
 
 	// set_address: opcode 0, signature "ss"
 	h.marshalVoid(h.kdeAppmenu, 0,
 		uintptr(unsafe.Pointer(&sBuf[0])),
 		uintptr(unsafe.Pointer(&oBuf[0])),
 	)
-	runtime.KeepAlive(sBuf)
-	runtime.KeepAlive(oBuf)
+	pinner.Unpin()
 }
 
 // DestroyKDEAppmenu releases org_kde_kwin_appmenu and its manager.

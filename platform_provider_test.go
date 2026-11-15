@@ -459,6 +459,13 @@ func TestFileDialogDelegation(t *testing.T) {
 		if len(mgr.lastDialogOpts.Filters) != 1 {
 			t.Errorf("delegated Filters len = %d, want 1", len(mgr.lastDialogOpts.Filters))
 		}
+		if got := mgr.lastDialogOpts.Filters[0].Extensions; len(got) != 2 || got[0] != "*.png" || got[1] != "*.jpg" {
+			t.Errorf("delegated filter extensions = %v, want [*.png *.jpg]", got)
+		}
+		openOpts.Filters[0].Extensions[0] = "*.mutated"
+		if got := mgr.lastDialogOpts.Filters[0].Extensions[0]; got != "*.png" {
+			t.Errorf("delegated filter extensions aliased caller slice: got %q, want *.png", got)
+		}
 	})
 
 	saveOpts := FileDialogOptions{

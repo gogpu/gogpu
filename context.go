@@ -158,6 +158,7 @@ func (c *Context) MarkPreserveContent() {
 	if !ws.ensureFrameStarted() {
 		return
 	}
+	ws.materializeIdentityPresent()
 	ws.frameCleared = true
 	ws.externalContent = true
 	ws.hasGPUWork = true
@@ -276,6 +277,8 @@ func (c *Context) SurfaceView() *wgpu.TextureView {
 	if !ws.ensureFrameStarted() {
 		return nil
 	}
+	ws.materializeIdentityPresent()
+	ws.surfaceExposed = true
 	ws.hasGPUWork = true
 	return ws.renderView()
 }
@@ -297,11 +300,19 @@ func (c *Context) CommandEncoder() *wgpu.CommandEncoder {
 		slog.Error("gogpu: shared frame encoder unavailable", "err", err)
 		return nil
 	}
+	// A textured-quad run may keep its render pass open for batching. Close it
+	// before lending the encoder to an external renderer so its pass can be
+	// recorded in the exact call-order position requested by the caller.
+	if err := ws.endTexturedQuadPass(); err != nil {
+		slog.Error("gogpu: shared frame encoder unavailable after textured quad pass", "err", err)
+		return nil
+	}
 	// Deferred clears must precede every externally recorded pass. Flushing
 	// here preserves call order; waiting until EndFrame would clear overlays.
 	if !ws.flushClear(ws.renderer.device, ws.renderer) {
 		return nil
 	}
+	ws.surfaceExposed = true
 	ws.hasGPUWork = true
 	return encoder
 }
@@ -328,11 +339,15 @@ func (c *Context) PresentTexture(tex any) error {
 		"surfaceW", ws.width, "surfaceH", ws.height,
 		"scale", c.scaleFactor,
 	)
-	return c.renderer.drawTexturedQuad(t, DrawTextureOptions{
-		Width:  float32(ws.width),
-		Height: float32(ws.height),
-		Alpha:  1.0,
-	})
+	// On a CPU adapter, the frame's first content covering the whole surface
+	// is presented at EndFrame without the textured-quad shader
+	// (P1-PRESENT-002).
+	if ws.ensureFrameStarted() && ws.canDeferIdentityPresent(t) {
+		ws.identityPresent = t
+		ws.hasGPUWork = true
+		return nil
+	}
+	return c.renderer.drawTexturedQuad(c.renderer.activeSurface(), t, fullSurfaceQuad(ws))
 }
 
 // RenderTarget returns an adapter that satisfies ggcanvas.RenderTarget interface.
@@ -388,6 +403,16 @@ func (r *ContextRenderTarget) WriteSurfacePixels(data []byte, width, height uint
 	if ws == nil || ws.surface == nil {
 		return fmt.Errorf("gogpu: no active surface")
 	}
+	// The pixels replace the whole surface, so a PresentTexture deferred
+	// earlier in this frame would be overwritten anyway.
+	ws.identityPresent = nil
+	return ws.presentPixels(data, width, height)
+}
+
+// presentPixels presents RGBA pixels through the surface's PresentPixels
+// extension and ends the frame's swapchain use (ADR-052). It returns the
+// surface's error unchanged when the backend is not a pixel presenter.
+func (ws *RenderTarget) presentPixels(data []byte, width, height uint32) error {
 	syncAttempt, syncedBeforePresent := syncFrameBeforePixelPresent(ws)
 	lockDisplay(ws.platWindow)
 	err := ws.surface.PresentPixels(data, width, height, compositor.UnionAllSources(ws.damageSources))

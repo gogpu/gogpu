@@ -900,15 +900,21 @@ func (w *Window) SetCollectionBehavior(behavior NSWindowCollectionBehavior) {
 
 // ToggleFullScreen toggles native macOS fullscreen mode.
 // Sends the toggleFullScreen: selector to the NSWindow.
+//
+// mu is released before the send: AppKit delivers windowWillStartLiveResize:
+// and windowDidResize: synchronously inside toggleFullScreen:, and the
+// delegate callbacks and the hooks they run take mu, so holding it across the
+// send deadlocks the main thread.
 func (w *Window) ToggleFullScreen() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
+	nsWindow := w.nsWindow
+	w.mu.Unlock()
 
-	if w.nsWindow.IsNil() {
+	if nsWindow.IsNil() {
 		return
 	}
 
-	w.nsWindow.SendPtr(selectors.toggleFullScreen, 0)
+	nsWindow.SendPtr(selectors.toggleFullScreen, 0)
 }
 
 // IsFullScreen returns true if the window is in native macOS fullscreen mode.

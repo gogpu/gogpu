@@ -25,7 +25,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.54.0
+## Current State: v0.54.1
 
 ✅ **Production-ready** with full feature set:
 - **Strided texture uploads + GPUStats** (#484) — `Texture.UpdateRegion(region, data, layout)` for zero-copy dirty bands; `Renderer.GetCounters()` + `Context.FrameStats()` behind `GOGPU_STATS=1`
@@ -94,6 +94,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.54.1** | 2026-11-08 | **Fix release**: Windows fullscreen at startup (#508), Windows keys by physical position (#520), Wayland CSD teardown (#518), macOS fullscreen deadlock (#522) and cursor unhide (#523), panic stacks across the thread boundary (#494), FFI pointer pinning, software identity present. deps wgpu v0.34.9, naga v0.21.4, goffi v0.6.8, gputypes v0.8.2. |
 | **v0.54.0** | 2026-08-31 | **Strided UpdateRegion + GPUStats** (#484). Struct params (ADR-072). deps wgpu v0.34.2, gpucontext v0.31.3, gputypes v0.8.0. |
 | **v0.53.2** | 2026-08-30 | DownlevelCapabilities (ADR-071). deps wgpu v0.33.0, gpucontext v0.30.0. |
 | **v0.50.0** | 2026-08-06 | **Outgoing drag source** (#427, ADR-061) — `StartDrag` all 5 platforms. Per-pixel alpha (#361, @shaolei). Input ordering fix (#425, @FDUTCH). deps wgpu v0.30.36. |
@@ -195,10 +196,10 @@ Windows DPI-aware window creation. Unified pre-scale + verify pattern (Qt6/SDL3/
 Enterprise API audit: unexport internals, remove dead code, fix documentation.
 
 - [ ] Unexport 7 internal types: SurfaceState, RenderTarget, WindowManager, PlatformWindowCloser, AnimationController, Invalidator, GestureRecognizer
-- [ ] Remove dead `gogpu.DeviceProvider` interface (replaced by `gpucontext.DeviceProvider`)
-- [ ] Replace type aliases `FileDialogOptions`/`FileTypeFilter` with real types
-- [ ] Rewrite `doc.go` (says "macOS: Planned" — fully supported since v0.21.0)
-- [ ] Deprecate `Config.Backend` + `WithBackend()` (obsolete per ADR-038 build tags)
+- [x] Remove dead `gogpu.DeviceProvider` interface (replaced by `gpucontext.DeviceProvider`, removed with `App.DeviceProvider()`)
+- [x] Replace type aliases `FileDialogOptions`/`FileTypeFilter` with real types
+- [x] Rewrite `doc.go` (says "macOS: Planned" — fully supported since v0.21.0)
+- [x] Remove `Config.Backend` + `WithBackend()` (deprecated first, then removed; backend selection is wgpu build tags)
 - [ ] `App.SetTitle()` — platform layer ready, expose in public API
 
 ### v0.43.x — Wayland Cursor Fallback (ADR-043)
@@ -281,15 +282,15 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.54.0 | GPU application framework, windowing, multi-window, damage-aware present |
-| **gogpu/wgpu** | v0.33.0 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
-| **gogpu/naga** | v0.17.6 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
-| **gogpu/gg** | v0.41.2 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
-| **gogpu/ui** | v0.1.13 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
-| **gogpu/gpucontext** | v0.31.1 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
-| **gogpu/gputypes** | v0.7.0 | WebGPU type definitions (zero value = spec default) |
+| **gogpu/gogpu** | v0.54.1 | GPU application framework, windowing, multi-window, damage-aware present |
+| **gogpu/wgpu** | v0.34.9 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | v0.21.4 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
+| **gogpu/gg** | v0.52.5 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
+| **gogpu/ui** | v0.1.54 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
+| **gogpu/gpucontext** | v0.31.3 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
+| **gogpu/gputypes** | v0.8.2 | WebGPU type definitions (zero value = spec default) |
 | **gogpu/compose** | design | Multi-process composition library |
-| **gogpu/g3d** | v0.1.0 | 3D rendering (scene graph, PBR Blinn-Phong, forward renderer, 5 backends) |
+| **gogpu/g3d** | v0.1.11 | 3D rendering (scene graph, PBR Blinn-Phong, forward renderer, 5 backends) |
 | **gogpu/gg-pdf** | v0.1.0 | PDF export |
 | **gogpu/gg-svg** | v0.1.0 | SVG export |
 

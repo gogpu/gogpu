@@ -1,12 +1,8 @@
-// Package gogpu provides a simple, cross-platform GPU graphics API for Go.
+// Package gogpu provides a cross-platform application and rendering framework
+// for GoGPU applications.
 //
-// GoGPU is designed to make GPU programming accessible while maintaining
-// the flexibility for advanced use cases. It wraps WebGPU (via wgpu-gpu)
-// and provides a clean, Go-idiomatic API.
-//
-// # Quick Start
-//
-// The simplest gogpu program creates a window and clears it with a color:
+// An App owns the platform event loop, window lifecycle, and wgpu device. The
+// OnDraw callback receives a Context for the current frame:
 //
 //	package main
 //
@@ -16,62 +12,37 @@
 //	)
 //
 //	func main() {
-//	    app := gogpu.NewApp(gogpu.DefaultConfig())
-//
+//	    app := gogpu.NewApp(gogpu.DefaultConfig().
+//	        WithTitle("Hello GoGPU").
+//	        WithSize(800, 600))
 //	    app.OnDraw(func(dc *gogpu.Context) {
 //	        dc.Clear(0.2, 0.3, 0.4, 1.0)
 //	    })
-//
 //	    if err := app.Run(); err != nil {
 //	        log.Fatal(err)
 //	    }
 //	}
 //
-// # Architecture
+// Context drawing methods operate on the active frame. SurfaceView exposes
+// the current render target for integrations that need zero-copy composition.
+// For shared GPU resources, use App.GPUContextProvider, which returns the
+// gpucontext.DeviceProvider contract consumed by gg, ui, and other packages.
 //
-// GoGPU uses a layered architecture:
+// GoGPU uses these related packages for shared contracts and WebGPU types:
 //
-//   - App: Application lifecycle, window management, event dispatch
-//   - Context: Drawing API available during OnDraw callback
-//   - Renderer: Internal WebGPU pipeline management
-//   - Platform: OS-specific windowing (internal)
+//   - github.com/gogpu/gpucontext — opaque device, queue, and event contracts
+//   - github.com/gogpu/gputypes — WebGPU value types
+//   - github.com/gogpu/wgpu — the pure-Go WebGPU implementation
 //
-// # Configuration
+// Backend selection is provided by wgpu build tags. The default build uses
+// the pure-Go implementation; use -tags rust for the Rust FFI variant, or
+// GOOS=js GOARCH=wasm for browser WebGPU. GraphicsAPI can select Vulkan,
+// Metal, DX12, GLES, or software within a supported build.
 //
-// Use Config to customize your application:
+// Window dimensions in Config, App, and Context are logical points (DIP).
+// Use Context.FramebufferSize for physical device-pixel dimensions on HiDPI
+// displays.
 //
-//	config := gogpu.DefaultConfig().
-//	    WithTitle("My App").
-//	    WithSize(1280, 720)
-//
-// # Callbacks
-//
-// GoGPU uses callbacks for the render loop:
-//
-//   - OnDraw(func(*Context)): Called each frame for rendering
-//   - OnUpdate(func(float64)): Called each frame with delta time for logic
-//   - OnResize(func(int, int)): Called when window is resized
-//
-// # Advanced Usage
-//
-// For advanced rendering, access the underlying WebGPU objects:
-//
-//	app.OnDraw(func(dc *gogpu.Context) {
-//	    device := dc.Device()  // *wgpu.Device
-//	    queue := dc.Queue()    // *wgpu.Queue
-//	    view := dc.TextureView() // Current render target
-//	    // Create custom pipelines, shaders, etc.
-//	})
-//
-// # Platform Support
-//
-//   - Windows: Full support (Win32)
-//   - macOS: Planned (Cocoa)
-//   - Linux: Planned (X11/Wayland)
-//
-// # Dependencies
-//
-// GoGPU depends on:
-//   - github.com/go-webgpu/webgpu - Pure Go WebGPU bindings
-//   - github.com/go-webgpu/goffi - Pure Go FFI (no CGO)
+// Supported desktop platforms are Windows, macOS, Linux (X11 and Wayland),
+// and browser/WASM. Platform-specific implementation details remain internal.
 package gogpu

@@ -424,7 +424,7 @@ func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, i
 	var argBuf [2]uintptr
 	argBuf[0] = 0   // new_id placeholder
 	argBuf[1] = obj // object argument (wl_surface proxy)
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	ifaceAddr := uintptr(iface)
 
 	var result uintptr
@@ -447,7 +447,7 @@ func (h *LibwaylandHandle) marshalConstructorObj(proxy uintptr, opcode uint32, i
 func (h *LibwaylandHandle) marshalVoid(proxy uintptr, opcode uint32, args ...uintptr) {
 	var argBuf [8]uintptr
 	copy(argBuf[:], args)
-	argPtr := uintptr(unsafe.Pointer(&argBuf[0]))
+	argPtr := unsafe.Pointer(&argBuf[0])
 	var nullIface uintptr
 	var dummyResult uintptr
 
@@ -554,8 +554,11 @@ func (h *LibwaylandHandle) SetTitle(title string) {
 	}
 	buf := make([]byte, len(title)+1)
 	copy(buf, title)
+	// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&buf[0])
 	h.marshalVoid(h.xdgToplevel, 2, uintptr(unsafe.Pointer(&buf[0])))
-	runtime.KeepAlive(buf)
+	pinner.Unpin()
 }
 
 // SetAppID sets the application ID on the C xdg_toplevel.
@@ -566,8 +569,11 @@ func (h *LibwaylandHandle) SetAppID(appID string) {
 	}
 	buf := make([]byte, len(appID)+1)
 	copy(buf, appID)
+	// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&buf[0])
 	h.marshalVoid(h.xdgToplevel, 3, uintptr(unsafe.Pointer(&buf[0])))
-	runtime.KeepAlive(buf)
+	pinner.Unpin()
 }
 
 // SetMinSize sets the minimum window size on the C xdg_toplevel.

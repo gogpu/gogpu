@@ -212,11 +212,11 @@ func TestAppPhysicalSizeWithPlatform(t *testing.T) {
 	}
 }
 
-func TestAppDeviceProviderNilBeforeRun(t *testing.T) {
+func TestAppGPUContextProviderNilBeforeRun(t *testing.T) {
 	app := NewApp(DefaultConfig())
 
-	if app.DeviceProvider() != nil {
-		t.Error("DeviceProvider should return nil before Run()")
+	if app.GPUContextProvider() != nil {
+		t.Error("GPUContextProvider should return nil before Run()")
 	}
 }
 

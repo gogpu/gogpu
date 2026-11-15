@@ -164,8 +164,11 @@ func (h *LibwaylandHandle) StartDragSource(paths []string, done func(result int)
 
 	// Offer text/uri-list MIME type.
 	mimeBuf := []byte(dndURIListMIME + "\x00")
+	// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&mimeBuf[0])
 	h.marshalVoid(source, 0, uintptr(unsafe.Pointer(&mimeBuf[0]))) // offer: opcode 0
-	runtime.KeepAlive(mimeBuf)
+	pinner.Unpin()
 
 	// Store drag state.
 	activeDragSource.mu.Lock()

@@ -13,6 +13,8 @@
 package thread
 
 import (
+	"fmt"
+	"os"
 	"runtime"
 	"sync/atomic"
 )
@@ -59,9 +61,32 @@ func New() *Thread {
 }
 
 // threadResult carries a value or a panic across a goroutine boundary.
+// stack holds the original panic stack captured at recover time so re-panic
+// on the caller does not lose the true failure site (#481).
 type threadResult struct {
 	val   any
 	panic any
+	stack []byte
+}
+
+// recoverResult captures panic value and stack from the worker goroutine.
+func recoverResult(r *threadResult) {
+	if p := recover(); p != nil {
+		buf := make([]byte, 64<<10)
+		buf = buf[:runtime.Stack(buf, false)]
+		r.panic = p
+		r.stack = buf
+	}
+}
+
+// rethrowPanic prints the original stack (from the worker) then re-panics
+// with the original value so callers still see both traces.
+func rethrowPanic(r threadResult) {
+	if r.panic == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "panic on thread: %v\n%s\n", r.panic, r.stack)
+	panic(r.panic)
 }
 
 // Call executes f on the thread and waits for completion.
@@ -75,15 +100,13 @@ func (t *Thread) Call(f func() any) any {
 	t.funcs <- func() {
 		var r threadResult
 		func() {
-			defer func() { r.panic = recover() }()
+			defer recoverResult(&r)
 			r.val = f()
 		}()
 		done <- r
 	}
 	r := <-done
-	if r.panic != nil {
-		panic(r.panic)
-	}
+	rethrowPanic(r)
 	return r.val
 }
 
@@ -98,15 +121,13 @@ func (t *Thread) CallVoid(f func()) {
 	t.funcs <- func() {
 		var r threadResult
 		func() {
-			defer func() { r.panic = recover() }()
+			defer recoverResult(&r)
 			f()
 		}()
 		done <- r
 	}
 	r := <-done
-	if r.panic != nil {
-		panic(r.panic)
-	}
+	rethrowPanic(r)
 }
 
 // CallAsync executes f on the thread without waiting.

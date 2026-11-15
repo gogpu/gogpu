@@ -1,18 +1,11 @@
-// Package types defines GPU configuration types for gogpu.
+// Package types defines graphics API and power-preference configuration types
+// for gogpu.
 //
-// This package provides:
-//   - BackendType: Enum for selecting Rust vs Pure Go backend
+// Backend implementation selection happens in wgpu build tags, and
+// gogpu.Config.GraphicsAPI or GOGPU_GRAPHICS_API choose the graphics API at
+// runtime.
 //
-// # Backend Selection
-//
-// Use BackendType constants with gogpu.Config.WithBackend():
-//
-//	config.WithBackend(types.BackendRust)   // Rust backend
-//	config.WithBackend(types.BackendNative) // Pure Go backend
-//	config.WithBackend(types.BackendAuto)   // Auto-select (default)
-//
-// # WebGPU Types
-//
-// For WebGPU resource types (textures, buffers, etc.), use the HAL interfaces
-// from github.com/gogpu/wgpu/hal or standard types from github.com/gogpu/gputypes.
+// For WebGPU resource types (textures, buffers, and pipelines), use the
+// concrete API from github.com/gogpu/wgpu or shared values from
+// github.com/gogpu/gputypes.
 package types

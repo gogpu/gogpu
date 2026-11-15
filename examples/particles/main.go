@@ -103,7 +103,7 @@ func main() {
 	var s *sim
 	startTime := time.Now()
 	app.OnDraw(func(dc *gogpu.Context) {
-		p := app.DeviceProvider()
+		p := app.GPUContextProvider()
 		if p == nil {
 			return
 		}
@@ -113,7 +113,7 @@ func main() {
 		}
 		if s == nil {
 			var err error
-			s, err = newSim(p.Device(), p.SurfaceFormat())
+			s, err = newSim(wgpu.DeviceFromHandle(p.Device()), p.SurfaceFormat())
 			if err != nil {
 				log.Fatal(err)
 			}

@@ -26,6 +26,7 @@ package darwin
 
 import (
 	"path/filepath"
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -323,6 +324,10 @@ func (w *Window) StartDrag(paths []string, done func(DragOperation)) {
 // makeDragNSString creates an NSString from a Go string. Caller must release.
 func makeDragNSString(s string) ID {
 	cstr := append([]byte(s), 0)
+	// msgSend is a Go wrapper: pin the bytes it passes as a uintptr (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&cstr[0])
+	defer pinner.Unpin()
 	nsStr := msgSend(ID(classes.NSString), selectors.alloc)
 	nsStr = msgSend(nsStr, selectors.initWithUTF8String, uintptr(unsafe.Pointer(&cstr[0])))
 	return nsStr

@@ -113,8 +113,11 @@ func dataDeviceEnterCb(data, device, serial, surface, xFixed, yFixed, id uintptr
 		// Accept the text/uri-list MIME type.
 		// wl_data_offer.accept: opcode 0, signature "u?s"
 		mimeBuf := []byte(dndURIListMIME + "\x00")
+		// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
+		var pinner runtime.Pinner
+		pinner.Pin(&mimeBuf[0])
 		h.marshalVoid(id, 0, uintptr(uint32(serial)), uintptr(unsafe.Pointer(&mimeBuf[0])))
-		runtime.KeepAlive(mimeBuf)
+		pinner.Unpin()
 
 		// Set preferred action to COPY (version 3).
 		// wl_data_offer.set_actions: opcode 4, signature "uu"
@@ -186,8 +189,11 @@ func dataDeviceDropCb(data, device uintptr) {
 	// wl_data_offer.receive: opcode 1, signature "sh"
 	// The fd is passed via SCM_RIGHTS by libwayland when it sees 'h' in signature.
 	mimeBuf := []byte(dndURIListMIME + "\x00")
+	// marshalVoid is a Go wrapper: pin what it passes as a uintptr (P1-FFI-001).
+	var pinner runtime.Pinner
+	pinner.Pin(&mimeBuf[0])
 	h.marshalVoid(offer, 1, uintptr(unsafe.Pointer(&mimeBuf[0])), uintptr(writeFD))
-	runtime.KeepAlive(mimeBuf)
+	pinner.Unpin()
 
 	// Flush to send the receive request.
 	if err := h.flushWithRetry(); err != nil {
