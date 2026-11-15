@@ -237,6 +237,9 @@ func (p *x11Platform) Init() error {
 
 // CreateWindow creates an X11 window.
 func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
+	if config.LayerShell != nil {
+		return nil, fmt.Errorf("x11: layer shell requested but only supported on Wayland")
+	}
 	x11Config := x11.Config{
 		Title:       config.Title,
 		Width:       config.Width,
@@ -651,6 +654,25 @@ func (w *waylandPlatformWindow) GetHandle() (uintptr, uintptr) {
 		return libwl.Display(), libwl.Surface()
 	}
 	return 0, 0
+}
+
+// SetInputRegion controls pointer input for a layer surface.
+func (w *waylandPlatformWindow) SetInputRegion(interactive bool) error {
+	libwl := w.libwayland()
+	if libwl == nil {
+		return fmt.Errorf("wayland: no layer surface")
+	}
+	return libwl.SetInputRegion(interactive)
+}
+
+// SetLayerKeyboardInteractivity changes the layer surface's keyboard mode at
+// runtime. It is a no-op for ordinary windows.
+func (w *waylandPlatformWindow) SetLayerKeyboardInteractivity(mode uint32) error {
+	libwl := w.libwayland()
+	if libwl == nil {
+		return fmt.Errorf("wayland: no layer surface")
+	}
+	return libwl.SetKeyboardInteractivity(mode)
 }
 
 func (w *waylandPlatformWindow) libwayland() *wayland.LibwaylandHandle {
@@ -1105,10 +1127,18 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	}
 	p.registry = registry
 
+	// Layer-shell mode gives the surface a zwlr_layer_shell_v1 role (overlay,
+	// panel, wallpaper) instead of an xdg_toplevel window. xdg_wm_base is not
+	// needed in that case; the layer-shell global is.
+	layerShellEnabled := config.LayerShell != nil
 	required := []string{
 		wayland.InterfaceWlCompositor,
-		wayland.InterfaceXdgWmBase,
 		wayland.InterfaceWlSeat,
+	}
+	if layerShellEnabled {
+		required = append(required, wayland.InterfaceZwlrLayerShellV1)
+	} else {
+		required = append(required, wayland.InterfaceXdgWmBase)
 	}
 	if err := registry.WaitForGlobals(required, 5); err != nil {
 		_ = display.Close()
@@ -1144,9 +1174,23 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	// Collect global names/versions for C-side binding
 	compGlobal := registry.GetGlobalByInterface(wayland.InterfaceWlCompositor)
 	xdgGlobal := registry.GetGlobalByInterface(wayland.InterfaceXdgWmBase)
-	if compGlobal == nil || xdgGlobal == nil {
+	if compGlobal == nil || (!layerShellEnabled && xdgGlobal == nil) {
 		_ = display.Close()
 		return fmt.Errorf("wayland: wl_compositor or xdg_wm_base not found")
+	}
+
+	var layerOpts *wayland.LayerShellOptions
+	if layerShellEnabled {
+		lsGlobal := registry.GetGlobalByInterface(wayland.InterfaceZwlrLayerShellV1)
+		if lsGlobal == nil {
+			_ = display.Close()
+			return fmt.Errorf("wayland: layer shell requested but the compositor does not advertise %s", wayland.InterfaceZwlrLayerShellV1)
+		}
+		layerOpts = layerShellOptions(config.LayerShell, lsGlobal.Name, lsGlobal.Version)
+		logger().Info("wayland: layer shell enabled",
+			"global", lsGlobal.Name, "version", lsGlobal.Version,
+			"layer", layerOpts.Layer, "namespace", layerOpts.Namespace,
+			"keyboard", layerOpts.KeyboardInteractivity)
 	}
 
 	var decorName, decorVersion uint32
@@ -1168,10 +1212,15 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 
 	// Step 2: Open C libwayland connection — this is the SINGLE connection
 	// that owns everything: surface, xdg-shell, input, Vulkan.
+	var xdgName, xdgVersion uint32
+	if xdgGlobal != nil {
+		xdgName, xdgVersion = xdgGlobal.Name, xdgGlobal.Version
+	}
 	libwl, err := wayland.OpenLibwayland(
 		compGlobal.Name, compGlobal.Version,
-		xdgGlobal.Name, xdgGlobal.Version,
+		xdgName, xdgVersion,
 		decorName, decorVersion,
+		layerOpts,
 	)
 	if err != nil {
 		_ = display.Close()
@@ -1212,9 +1261,29 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	p.setupInputCallbacks()
 	libwl.SetAsInputHandler()
 
-	// Set up xdg_toplevel listeners (configure, close)
-	if err := libwl.SetupToplevelListeners(); err != nil {
-		logger().Warn("xdg_toplevel listener setup failed", "err", err)
+	// Set up xdg_toplevel listeners (configure, close). A layer surface has
+	// its own configure/closed listener instead, installed during setup.
+	if !libwl.IsLayerShell() {
+		if err := libwl.SetupToplevelListeners(); err != nil {
+			logger().Warn("xdg_toplevel listener setup failed", "err", err)
+		}
+	} else {
+		w, h := libwl.LayerSize()
+		logger().Info("wayland: layer surface configured", "width", w, "height", h)
+		if w > 0 && h > 0 {
+			p.primary.eventMu.Lock()
+			p.primary.width = int(w)
+			p.primary.height = int(h)
+			p.primary.eventMu.Unlock()
+			p.primary.events.Push(Event{
+				Type:           EventResize,
+				WindowID:       p.primaryWindowID,
+				Width:          int(w),
+				Height:         int(h),
+				PhysicalWidth:  int(w),
+				PhysicalHeight: int(h),
+			})
+		}
 	}
 
 	// Flush + roundtrip to process initial events (toplevel listeners, input, etc.)
@@ -1232,7 +1301,7 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	// Mark configured only if the compositor actually sent xdg_surface.configure.
 	// WaitForConfigure in setupXdgRole blocks until configure arrives, so this
 	// should always be true. The check is defense-in-depth (ADR-041).
-	p.primary.configured = libwl.InitialConfigureReceived()
+	p.primary.configured = libwl.InitialConfigureReceived() || libwl.LayerConfigured()
 	if !p.primary.configured {
 		logger().Warn("wayland: surface not configured after init, Vulkan present may fail")
 	}
@@ -1349,6 +1418,11 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	//      treat as CLIENT_SIDE — falls back to CSD.
 	const decorModeServerSide = 2
 	needCSD := decorGlobal == nil || libwl.DecorationMode() != decorModeServerSide
+	// A layer surface has no xdg_toplevel, so CSD has nothing to decorate and
+	// its setup would marshal requests on a NULL xdg_surface proxy (SIGSEGV).
+	if libwl.IsLayerShell() {
+		needCSD = false
+	}
 	if needCSD && !config.Frameless {
 		if err := p.initCSD(config); err != nil {
 			logger().Warn("CSD initialization failed, running without decorations", "err", err)
@@ -1419,6 +1493,7 @@ func (p *waylandPlatform) createSecondaryConn(config Config) (*secondaryWaylandC
 		compGlobal.Name, compGlobal.Version,
 		xdgGlobal.Name, xdgGlobal.Version,
 		decorName, decorVersion,
+		nil, // secondary windows are ordinary xdg_toplevels
 	)
 	if err != nil {
 		_ = display.Close()
@@ -2013,9 +2088,9 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			})
 		},
 
-		// xdg_toplevel events
+		// toplevel and layer-surface events
 		OnClose: func() {
-			logger().Info("xdg_toplevel close event from compositor")
+			logger().Info("wayland: close event from compositor")
 			w.eventMu.Lock()
 			w.shouldClose = true
 			w.eventMu.Unlock()

@@ -411,6 +411,38 @@ func TestConfigWithIcon(t *testing.T) {
 	}
 }
 
+func TestConfigWithLayerShell(t *testing.T) {
+	ls := LayerShellConfig{
+		Namespace:     "test-panel",
+		Layer:         LayerShellTop,
+		Anchor:        LayerShellAnchorTop | LayerShellAnchorLeft | LayerShellAnchorRight,
+		Keyboard:      LayerShellKeyboardOnDemand,
+		Width:         1920,
+		Height:        32,
+		ExclusiveZone: 32,
+	}
+	cfg := DefaultConfig().WithLayerShell(ls)
+	if cfg.LayerShell == nil {
+		t.Fatal("WithLayerShell: LayerShell field is nil")
+	}
+	if cfg.LayerShell.Namespace != "test-panel" || cfg.LayerShell.Layer != LayerShellTop {
+		t.Errorf("unexpected LayerShellConfig values: %+v", *cfg.LayerShell)
+	}
+
+	// Test layerShellFromConfig mapping
+	platLS := layerShellFromConfig(cfg.LayerShell)
+	if platLS == nil {
+		t.Fatal("layerShellFromConfig returned nil for non-nil config")
+	}
+	if platLS.Namespace != "test-panel" || platLS.Layer != uint32(LayerShellTop) || platLS.ExclusiveZone != 32 {
+		t.Errorf("layerShellFromConfig output mismatch: %+v", *platLS)
+	}
+
+	if layerShellFromConfig(nil) != nil {
+		t.Error("layerShellFromConfig(nil) should return nil")
+	}
+}
+
 // TestDefaultConfig verifies default configuration.
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()

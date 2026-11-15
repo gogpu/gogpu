@@ -993,6 +993,9 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 
 // CreateWindow implements PlatformManager.CreateWindow.
 func (p *windowsPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	if config.LayerShell != nil {
+		return nil, fmt.Errorf("windows: layer shell requested but only supported on Linux/Wayland")
+	}
 	w, err := p.createWindowWin32(config)
 	if err != nil {
 		return nil, err
