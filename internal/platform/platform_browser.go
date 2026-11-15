@@ -34,6 +34,9 @@ func (p *browserPlatform) Init() error {
 // CreateWindow creates a browserWindow backed by a <canvas> element.
 // If no <canvas> exists in the DOM, one is created and appended to the body.
 func (p *browserPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	if config.LayerShell != nil {
+		return nil, fmt.Errorf("browser: layer shell requested but only supported on Linux/Wayland")
+	}
 	// TODO(#361, ADR-060): Browser transparency — CSS transparency (e.g.
 	// canvas background) is not implemented yet; Config.Transparent is
 	// silently ignored.

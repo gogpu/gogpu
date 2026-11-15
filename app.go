@@ -1297,11 +1297,6 @@ func (a *App) SetAppName(name string) {
 	}
 }
 
-// Quit requests the application to quit.
-// The main loop will exit after completing the current frame.
-// Safe to call from any goroutine. After startRunLoop, also wakes
-// WaitEvents so the idle (event-driven) loop notices running=false
-// without waiting for a device input event (GLFW/winit/SDL pattern).
 // SetLayerKeyboardInteractivity changes the keyboard interactivity of a
 // wlr-layer-shell surface at runtime. It is how a launcher takes keyboard focus
 // when summoned and gives it back when dismissed: a layer surface that stays
@@ -1338,7 +1333,11 @@ func (a *App) SetInputRegion(interactive bool) error {
 	return w.SetInputRegion(interactive)
 }
 
-// Quit requests the application to exit.
+// Quit requests the application to quit.
+// The main loop will exit after completing the current frame.
+// Safe to call from any goroutine. After startRunLoop, also wakes
+// WaitEvents so the idle (event-driven) loop notices running=false
+// without waiting for a device input event (GLFW/winit/SDL pattern).
 func (a *App) Quit() {
 	a.running.Store(false)
 	if v := a.wakeupFn.Load(); v != nil {

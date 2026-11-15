@@ -237,6 +237,9 @@ func (p *x11Platform) Init() error {
 
 // CreateWindow creates an X11 window.
 func (p *x11Platform) CreateWindow(config Config) (PlatformWindow, error) {
+	if config.LayerShell != nil {
+		return nil, fmt.Errorf("x11: layer shell requested but only supported on Wayland")
+	}
 	x11Config := x11.Config{
 		Title:       config.Title,
 		Width:       config.Width,
@@ -1267,6 +1270,20 @@ func (p *waylandPlatform) initSingleConnection(config Config) error { //nolint:g
 	} else {
 		w, h := libwl.LayerSize()
 		logger().Info("wayland: layer surface configured", "width", w, "height", h)
+		if w > 0 && h > 0 {
+			p.primary.eventMu.Lock()
+			p.primary.width = int(w)
+			p.primary.height = int(h)
+			p.primary.eventMu.Unlock()
+			p.primary.events.Push(Event{
+				Type:           EventResize,
+				WindowID:       p.primaryWindowID,
+				Width:          int(w),
+				Height:         int(h),
+				PhysicalWidth:  int(w),
+				PhysicalHeight: int(h),
+			})
+		}
 	}
 
 	// Flush + roundtrip to process initial events (toplevel listeners, input, etc.)
@@ -2071,9 +2088,9 @@ func (p *waylandPlatform) setupInputCallbacks() {
 			})
 		},
 
-		// xdg_toplevel events
+		// toplevel and layer-surface events
 		OnClose: func() {
-			logger().Info("xdg_toplevel close event from compositor")
+			logger().Info("wayland: close event from compositor")
 			w.eventMu.Lock()
 			w.shouldClose = true
 			w.eventMu.Unlock()

@@ -114,6 +114,9 @@ func (p *darwinPlatform) Init() error {
 
 // CreateWindow creates a macOS window with the given configuration.
 func (p *darwinPlatform) CreateWindow(config Config) (PlatformWindow, error) {
+	if config.LayerShell != nil {
+		return nil, fmt.Errorf("darwin: layer shell requested but only supported on Linux/Wayland")
+	}
 	id := NewWindowID()
 	w := &darwinWindow{
 		config:    config,
