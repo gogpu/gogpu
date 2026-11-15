@@ -3,11 +3,33 @@
 package darwin_test
 
 import (
+	"math"
 	"testing"
+	"unsafe"
 
 	"github.com/go-webgpu/goffi/ffi"
+	"github.com/go-webgpu/goffi/types"
 	platformdarwin "github.com/gogpu/gogpu/internal/platform/darwin"
 )
+
+type testNSRange struct {
+	location uint64
+	length   uint64
+}
+
+var testNSRangeType = &types.TypeDescriptor{
+	Size:      16,
+	Alignment: 8,
+	Kind:      types.StructType,
+	Members: []*types.TypeDescriptor{
+		types.UInt64TypeDescriptor,
+		types.UInt64TypeDescriptor,
+	},
+}
+
+func objcArgNSRange(value testNSRange) objcArg {
+	return objcArg{typ: testNSRangeType, ptr: unsafe.Pointer(&value), keepAlive: &value}
+}
 
 // TestAllocateClassPair verifies that a custom ObjC class can be created
 // as a subclass of NSObject via the runtime API.
@@ -136,6 +158,132 @@ func TestCreateGoGPUView(t *testing.T) {
 		if view.IsNil() {
 			t.Fatal("CreateGoGPUView returned nil view")
 		}
+	})
+}
+
+// TestGoGPUViewTextInputBridge exercises the registered AppKit methods on a
+// real NSTextView subclass. It verifies that native setMarkedText, insertText
+// and unmarkText dispatch into the Go handlers while forwarding to NSTextView.
+func TestGoGPUViewTextInputBridge(t *testing.T) {
+	rt := loadObjcRuntime(t)
+	var marked, committed string
+	var unmarked, commandReceived, rejectInsert bool
+	runOnMainThread(t, func() {
+		withAutoreleasePool(t, rt, func() {
+			window, err := platformdarwin.NewWindow(platformdarwin.WindowConfig{Width: 320, Height: 200})
+			if err != nil {
+				t.Fatalf("NewWindow() error: %v", err)
+			}
+			defer window.Destroy()
+			view := window.ContentView()
+			platformdarwin.SetTextInputCursorArea(view, 45, 30)
+			firstRect := func() nsRect {
+				return objcCallRet[nsRect](t, rt, view.Ptr(), rt.sel(t, "firstRectForCharacterRange:actualRange:"),
+					objcArgNSRange(testNSRange{}), objcArgPtr(0))
+			}
+			pointInWindow := objcCallRet[nsRect](t, rt, view.Ptr(), rt.sel(t, "convertRect:toView:"),
+				objcArgRect(nsRect{Origin: nsPoint{X: 45, Y: 30}}), objcArgPtr(0))
+			pointOnScreen := objcCallRet[nsRect](t, rt, window.NSID().Ptr(), rt.sel(t, "convertRectToScreen:"), objcArgRect(pointInWindow))
+			if !platformdarwin.ViewSupportsTextInput(view) {
+				t.Fatal("GoGPUView did not inherit NSTextInputClient support")
+			}
+			platformdarwin.SetViewTextInputHandler(view, platformdarwin.TextInputHandler{
+				SetMarkedText: func(text platformdarwin.ID, _, _, _, _ uintptr) {
+					marked = platformdarwin.ObjectString(text)
+				},
+				InsertText: func(text platformdarwin.ID, _, _ uintptr) bool {
+					committed = platformdarwin.ObjectString(text)
+					return !rejectInsert
+				},
+				Command:    func() { commandReceived = true },
+				UnmarkText: func() { unmarked = true },
+			})
+			defer platformdarwin.ClearViewTextInputHandler(view)
+
+			preedit := platformdarwin.NewNSString("かな")
+			if preedit == nil || preedit.ID() == 0 {
+				t.Fatal("NewNSString(preedit) returned nil")
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "setMarkedText:selectedRange:replacementRange:"),
+				objcArgPtr(preedit.ID().Ptr()),
+				objcArgNSRange(testNSRange{location: 2}),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}),
+			)
+			preedit.Release()
+			if marked != "かな" {
+				t.Fatalf("setMarkedText callback = %q, want %q", marked, "かな")
+			}
+			initialRect := firstRect()
+			if math.Abs(initialRect.Origin.X-pointOnScreen.Origin.X) > 1 {
+				t.Fatalf("initial candidate x = %v, want inset x %v", initialRect.Origin.X, pointOnScreen.Origin.X)
+			}
+
+			result := platformdarwin.NewNSString("仮名")
+			if result == nil || result.ID() == 0 {
+				t.Fatal("NewNSString(commit) returned nil")
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "insertText:replacementRange:"),
+				objcArgPtr(result.ID().Ptr()),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}),
+			)
+			result.Release()
+			if committed != "仮名" {
+				t.Fatalf("insertText callback = %q, want %q", committed, "仮名")
+			}
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
+				t.Fatalf("native text storage after commit = %q, want empty", got)
+			}
+			var selection testNSRange
+			objcCall(t, rt, testNSRangeType, unsafe.Pointer(&selection), view.Ptr(), rt.sel(t, "selectedRange"))
+			if selection != (testNSRange{}) {
+				t.Fatalf("selection after commit = %+v, want {0,0}", selection)
+			}
+			preedit = platformdarwin.NewNSString("に")
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "setMarkedText:selectedRange:replacementRange:"),
+				objcArgPtr(preedit.ID().Ptr()), objcArgNSRange(testNSRange{location: 1}),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}))
+			preedit.Release()
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "に" {
+				t.Fatalf("native storage for second preedit = %q, want only the new preedit", got)
+			}
+			secondRect := firstRect()
+			if math.Abs(secondRect.Origin.X-initialRect.Origin.X) > 1 {
+				t.Fatalf("candidate x drifted after commit: %v -> %v", initialRect.Origin.X, secondRect.Origin.X)
+			}
+
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "unmarkText"))
+			if !unmarked {
+				t.Fatal("unmarkText callback was not delivered")
+			}
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
+				t.Fatalf("native text storage after unmark = %q, want empty", got)
+			}
+
+			// An insertText: rejected by the Go handler must not mutate native
+			// storage, and doCommandBySelector: must reach the command handler
+			// in the same interpretation.
+			rejectInsert = true
+			control := platformdarwin.NewNSString("\r")
+			if control == nil || control.ID() == 0 {
+				t.Fatal("NewNSString(control) returned nil")
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "insertText:replacementRange:"),
+				objcArgPtr(control.ID().Ptr()),
+				objcArgNSRange(testNSRange{location: ^uint64(0), length: ^uint64(0)}),
+			)
+			control.Release()
+			if committed != "\r" {
+				t.Fatalf("rejected insertText callback = %q, want control character", committed)
+			}
+			if got := platformdarwin.ObjectString(view.Send(platformdarwin.RegisterSelector("string"))); got != "" {
+				t.Fatalf("native text storage after rejected insert = %q, want empty", got)
+			}
+			objcCallVoid(t, rt, view.Ptr(), rt.sel(t, "doCommandBySelector:"),
+				objcArgPtr(rt.sel(t, "insertNewline:")))
+			if !commandReceived {
+				t.Fatal("doCommandBySelector: did not reach the command handler")
+			}
+		})
 	})
 }
 

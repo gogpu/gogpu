@@ -20,7 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Focus loss cancels an active composition and leaves the enabled state alone. A password, hidden or sensitive content
   type keeps IME disabled, and the surrounding text is dropped as soon as input is disabled. Controller methods are safe
   from any goroutine, while the window opens and closes too: the native IMM32 state is applied on the window thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
-  with the later TSF backend. X11, Wayland and macOS backends follow in their own changes.
+  with the later TSF backend. X11 and Wayland backends follow in their own changes.
+
+- **macOS: input method (IME) support (NSTextInputClient)** (#331). A custom, invisible `NSTextView` receives AppKit's
+  marked-text and commit callbacks while GoGPU renders the preedit. Cocoa UTF-16 ranges are converted to UTF-8 byte
+  ranges for `EventSource.OnIMEComposition*`; committed text is dispatched once, cursor geometry follows
+  `SetIMECursorArea`. Password, hidden, and sensitive content disables IME. Surrounding-text and delete-surrounding
+  capabilities are not advertised. Calls from workers update Go state and wake
+  the main-thread event loop for native state changes.
 
 ### Performance
 
