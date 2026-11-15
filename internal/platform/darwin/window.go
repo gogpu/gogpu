@@ -885,6 +885,21 @@ func (w *Window) IsKeyWindow() bool {
 	return result != 0
 }
 
+// IsFrontmostAt reports whether the window is the frontmost one at a point
+// in screen coordinates: the window a click there would reach, whichever
+// application owns the windows around it, as the window server answers.
+func (w *Window) IsFrontmostAt(point NSPoint) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.nsWindow.IsNil() {
+		return false
+	}
+
+	frontmost := ID(classes.NSWindow).SendPointInt(selectors.windowNumberAtPoint, point, 0)
+	return frontmost != 0 && frontmost == w.nsWindow.Send(selectors.windowNumber)
+}
+
 // SetCollectionBehavior sets the window's collection behavior flags.
 // Used to enable fullscreen support via NSWindowCollectionBehaviorFullScreenPrimary.
 func (w *Window) SetCollectionBehavior(behavior NSWindowCollectionBehavior) {
