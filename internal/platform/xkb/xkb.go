@@ -96,6 +96,26 @@ type Handle struct {
 
 	// Call interfaces -- ADR-033: key repeat
 	cifKeymapKeyRepeats types.CallInterface
+
+	// Compose: the sequence being typed over the user's locale's table, which
+	// it holds, 0 when the table could not be loaded (compose.go).
+	composeState uintptr // xkb_compose_state*
+
+	fnComposeTableNewFromLocale unsafe.Pointer
+	fnComposeTableUnref         unsafe.Pointer
+	fnComposeStateNew           unsafe.Pointer
+	fnComposeStateUnref         unsafe.Pointer
+	fnComposeStateFeed          unsafe.Pointer
+	fnComposeStateGetStatus     unsafe.Pointer
+	fnComposeStateGetUtf8       unsafe.Pointer
+
+	cifComposeTableNewFromLocale types.CallInterface
+	cifComposeTableUnref         types.CallInterface
+	cifComposeStateNew           types.CallInterface
+	cifComposeStateUnref         types.CallInterface
+	cifComposeStateFeed          types.CallInterface
+	cifComposeStateGetStatus     types.CallInterface
+	cifComposeStateGetUtf8       types.CallInterface
 }
 
 // xkbcommon constants.
@@ -152,6 +172,9 @@ func New() (*Handle, error) {
 		return nil, err
 	}
 	h.context = ctx
+
+	// Compose table for dead keys and the Compose key (optional)
+	h.initCompose()
 
 	slog.Debug("xkbcommon loaded successfully")
 	return h, nil
@@ -410,6 +433,7 @@ func (h *Handle) Close() {
 	if h == nil {
 		return
 	}
+	h.destroyCompose()
 	h.destroyState()
 	h.destroyKeymap()
 	h.destroyContext()
