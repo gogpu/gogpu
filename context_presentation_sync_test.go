@@ -7,7 +7,6 @@ import (
 	"github.com/gogpu/gogpu/internal/platform"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	_ "github.com/gogpu/wgpu/hal/software"
 )
 
 type countingFrameWindow struct {
@@ -41,7 +40,10 @@ func newPixelPresentationTestContext(
 	window platform.PlatformWindow,
 ) (*Context, *RenderTarget) {
 	t.Helper()
-	instance, err := wgpu.CreateInstance(nil)
+	// The pixel-presentation path under test is the software backend's, so the
+	// instance names it explicitly: after ADR-083 a zero mask means the
+	// default hardware set and the headless target would never reach software.
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}

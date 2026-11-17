@@ -6,18 +6,18 @@ import (
 	"github.com/gogpu/gogpu/gmath"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/wgputest"
 )
 
-// newTestWgpuDevice creates a *wgpu.Device wrapping a mock HAL device for testing.
-func newTestWgpuDevice(t *testing.T, mockDev *mockFenceDevice) (*wgpu.Device, error) {
+// newTestWgpuDevice returns a *wgpu.Device backed by the noop backend.
+func newTestWgpuDevice(t *testing.T) (*wgpu.Device, error) {
 	t.Helper()
-	return wgpu.NewDeviceFromHAL(
-		mockDev,
-		&mockQueue{},
-		gputypes.Features(0),
-		gputypes.DefaultLimits(),
-		"test",
-	)
+	device, _, cleanup, err := wgputest.NewNoopDevice()
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(cleanup)
+	return device, nil
 }
 
 // newTestRenderer creates a Renderer with a primary RenderTarget for testing.
@@ -202,11 +202,9 @@ func TestContextCheckDeviceHealthNoDevice(t *testing.T) {
 	}
 }
 
-func TestContextCheckDeviceHealthNonChecker(t *testing.T) {
-	// Device that does NOT implement healthChecker interface.
-	// Create a wgpu.Device wrapping a mock HAL device (which doesn't implement healthChecker).
-	mockDev := &mockFenceDevice{}
-	wgpuDevice, err := newTestWgpuDevice(t, mockDev)
+func TestContextCheckDeviceHealthHealthyDevice(t *testing.T) {
+	// The noop backend has no health signal, so CheckDeviceHealth reports nil.
+	wgpuDevice, err := newTestWgpuDevice(t)
 	if err != nil {
 		t.Fatalf("newTestWgpuDevice() error = %v", err)
 	}

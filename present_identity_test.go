@@ -6,7 +6,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	_ "github.com/gogpu/wgpu/hal/software"
 )
 
 // newIdentityPresentTarget returns a software renderer whose primary target

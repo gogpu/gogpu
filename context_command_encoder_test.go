@@ -7,80 +7,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/wgputest"
 )
-
-type countingSubmitQueue struct {
-	noop.Queue
-	submits        int
-	writeBufferErr error
-}
-
-type commandEncoderFailDevice struct{ noop.Device }
-
-func (d *commandEncoderFailDevice) CreateCommandEncoder(
-	_ *hal.CommandEncoderDescriptor,
-) (hal.CommandEncoder, error) {
-	return nil, errors.New("injected command encoder failure")
-}
-
-func (q *countingSubmitQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
-	q.submits++
-	return uint64(q.submits), nil
-}
-
-func (q *countingSubmitQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	if q.writeBufferErr != nil {
-		return q.writeBufferErr
-	}
-	return q.Queue.WriteBuffer(buffer, offset, data)
-}
-
-// recordingCommandEncoderDevice counts frame encoder creation and records the
-// load operation for each render pass. It wraps the noop backend so the test
-// can prove both the submission boundary and clear/load ordering without a
-// real display or GPU.
-type recordingCommandEncoderDevice struct {
-	noop.Device
-	encoders []*recordingCommandEncoder
-}
-
-type recordingCommandEncoder struct {
-	*noop.CommandEncoder
-	loadOps        []gputypes.LoadOp
-	uniformOffsets [][]uint32
-}
-
-type recordingRenderPassEncoder struct {
-	hal.RenderPassEncoder
-	owner *recordingCommandEncoder
-}
-
-func (d *recordingCommandEncoderDevice) CreateCommandEncoder(
-	_ *hal.CommandEncoderDescriptor,
-) (hal.CommandEncoder, error) {
-	encoder := &recordingCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
-	d.encoders = append(d.encoders, encoder)
-	return encoder, nil
-}
-
-func (e *recordingCommandEncoder) BeginRenderPass(desc *hal.RenderPassDescriptor) hal.RenderPassEncoder {
-	if len(desc.ColorAttachments) > 0 {
-		e.loadOps = append(e.loadOps, desc.ColorAttachments[0].LoadOp)
-	}
-	return &recordingRenderPassEncoder{
-		RenderPassEncoder: e.CommandEncoder.BeginRenderPass(desc),
-		owner:             e,
-	}
-}
-
-func (p *recordingRenderPassEncoder) SetBindGroup(index uint32, group hal.BindGroup, offsets []uint32) {
-	if index == 0 {
-		p.owner.uniformOffsets = append(p.owner.uniformOffsets, append([]uint32(nil), offsets...))
-	}
-	p.RenderPassEncoder.SetBindGroup(index, group, offsets)
-}
 
 type testContextHelper interface {
 	Helper()
@@ -88,22 +16,50 @@ type testContextHelper interface {
 	Fatalf(string, ...any)
 }
 
-func newSharedEncoderTestContext(t testContextHelper) (*Context, *RenderTarget, *countingSubmitQueue) {
-	t.Helper()
-	return newSharedEncoderTestContextWithDevice(t, &noop.Device{})
+// passLoadOps returns the load operations of every color attachment of every
+// recorded render pass, in call order.
+func passLoadOps(rec *wgputest.Recorder) []gputypes.LoadOp {
+	var ops []gputypes.LoadOp
+	for _, pass := range rec.Trace().Passes {
+		if pass.Compute {
+			continue
+		}
+		ops = append(ops, pass.LoadOps...)
+	}
+	return ops
 }
 
-func newSharedEncoderTestContextWithDevice(
-	t testContextHelper,
-	halDevice hal.Device,
-) (*Context, *RenderTarget, *countingSubmitQueue) {
+// bindGroupOffsets returns the dynamic offsets of every recorded bind-group
+// set at index 0, in call order.
+func bindGroupOffsets(rec *wgputest.Recorder) [][]uint32 {
+	var offsets [][]uint32
+	for _, bind := range rec.Trace().BindGroups {
+		if bind.Index != 0 {
+			continue
+		}
+		offsets = append(offsets, bind.DynamicOffsets)
+	}
+	return offsets
+}
+
+func newSharedEncoderTestContext(t testContextHelper) (*Context, *RenderTarget, *wgputest.Recorder) {
 	t.Helper()
-	queue := &countingSubmitQueue{}
-	device, err := wgpu.NewDeviceFromHAL(
-		halDevice, queue, 0, gputypes.DefaultLimits(), "shared-encoder-test",
-	)
+	return newSharedEncoderTestContextWithOptions(t)
+}
+
+// newSharedEncoderTestContextWithOptions creates a context over a noop device
+// whose public calls are recorded, so tests can assert on encoder, submit and
+// pass counts and on the pass and bind-group data the context produced.
+func newSharedEncoderTestContextWithOptions(
+	t testContextHelper,
+	opts ...wgputest.Option,
+) (*Context, *RenderTarget, *wgputest.Recorder) {
+	t.Helper()
+	rec := wgputest.NewRecorder()
+	opts = append(opts, wgputest.WithRecorder(rec))
+	device, _, cleanup, err := wgputest.NewNoopDevice(opts...)
 	if err != nil {
-		t.Fatalf("NewDeviceFromHAL: %v", err)
+		t.Fatalf("wgputest.NewNoopDevice: %v", err)
 	}
 	renderer := &Renderer{device: device}
 	texture, err := device.CreateTexture(&wgpu.TextureDescriptor{
@@ -116,13 +72,13 @@ func newSharedEncoderTestContextWithDevice(
 		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	if err != nil {
-		device.Release()
+		cleanup()
 		t.Fatalf("CreateTexture: %v", err)
 	}
 	view, err := device.CreateTextureView(texture, nil)
 	if err != nil {
 		texture.Release()
-		device.Release()
+		cleanup()
 		t.Fatalf("CreateTextureView: %v", err)
 	}
 	target := &RenderTarget{
@@ -138,12 +94,13 @@ func newSharedEncoderTestContextWithDevice(
 		}
 		texture.Release()
 		renderer.Destroy()
+		cleanup()
 	})
-	return newContext(renderer, 1), target, queue
+	return newContext(renderer, 1), target, rec
 }
 
 func TestContextCommandEncoderReusesAndSubmitsFrameEncoderOnce(t *testing.T) {
-	ctx, target, queue := newSharedEncoderTestContext(t)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 
 	first := ctx.CommandEncoder()
 	if first == nil {
@@ -152,13 +109,13 @@ func TestContextCommandEncoderReusesAndSubmitsFrameEncoderOnce(t *testing.T) {
 	if second := ctx.CommandEncoder(); second != first {
 		t.Fatal("CommandEncoder did not reuse the active frame encoder")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("encoder submitted before frame end: %d", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("encoder submitted before frame end: %d", got)
 	}
 
 	target.submitFrameEncoder(target.renderer)
-	if queue.submits != 1 {
-		t.Fatalf("frame submissions = %d, want 1", queue.submits)
+	if got := rec.Counts().Submits; got != 1 {
+		t.Fatalf("frame submissions = %d, want 1", got)
 	}
 	if target.frameEncoder != nil {
 		t.Fatal("frame encoder retained after submission")
@@ -180,8 +137,7 @@ func TestBeginFrameReleasesPreviousTexturedQuadUniformArena(t *testing.T) {
 }
 
 func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
-	halDevice := &recordingCommandEncoderDevice{}
-	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 	target.format = gputypes.TextureFormatBGRA8Unorm
 	target.width = 1
@@ -208,23 +164,23 @@ func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
 		}
 	}
 
-	if got := len(halDevice.encoders); got != 1 {
+	if got := rec.Counts().Encoders; got != 1 {
 		t.Fatalf("frame command encoders created = %d, want 1", got)
 	}
-	if queue.submits != 0 {
-		t.Fatalf("submissions before EndFrame = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("submissions before EndFrame = %d, want 0", got)
 	}
 
-	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{gputypes.LoadOpClear}; !equalLoadOps(got, want) {
+	if got, want := passLoadOps(rec), []gputypes.LoadOp{gputypes.LoadOpClear}; !equalLoadOps(got, want) {
 		t.Fatalf("render-pass load ops = %v, want %v", got, want)
 	}
-	if got, want := halDevice.encoders[0].uniformOffsets, [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
+	if got, want := bindGroupOffsets(rec), [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
 		t.Fatalf("uniform dynamic offsets = %v, want %v", got, want)
 	}
 
 	target.submitFrameEncoder(target.renderer)
-	if queue.submits != 1 {
-		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	if got := rec.Counts().Submits; got != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", got)
 	}
 }
 
@@ -233,8 +189,7 @@ func TestDrawTexturedQuadsReuseFrameEncoderAndPreserveLoadOrder(t *testing.T) {
 // and have its deferred write target the new buffer, all in the same pass and
 // the same frame encoder.
 func TestTexturedQuadUniformsSpillIntoSecondChunk(t *testing.T) {
-	halDevice := &recordingCommandEncoderDevice{}
-	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 	target.format = gputypes.TextureFormatBGRA8Unorm
 	target.width = 1
@@ -264,10 +219,10 @@ func TestTexturedQuadUniformsSpillIntoSecondChunk(t *testing.T) {
 		t.Fatal("second chunk reuses the first chunk's buffer or bind group")
 	}
 
-	if got := len(halDevice.encoders); got != 1 {
+	if got := rec.Counts().Encoders; got != 1 {
 		t.Fatalf("frame command encoders created = %d, want 1", got)
 	}
-	offsets := halDevice.encoders[0].uniformOffsets
+	offsets := bindGroupOffsets(rec)
 	if len(offsets) != n {
 		t.Fatalf("draws recorded = %d, want %d", len(offsets), n)
 	}
@@ -288,14 +243,13 @@ func TestTexturedQuadUniformsSpillIntoSecondChunk(t *testing.T) {
 	}
 
 	target.submitFrameEncoder(target.renderer)
-	if queue.submits != 1 {
-		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	if got := rec.Counts().Submits; got != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", got)
 	}
 }
 
 func TestTexturedQuadPassPreservesExternalAndClearBoundaries(t *testing.T) {
-	halDevice := &recordingCommandEncoderDevice{}
-	ctx, target, queue := newSharedEncoderTestContextWithDevice(t, halDevice)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 	target.format = gputypes.TextureFormatBGRA8Unorm
 	target.width = 1
@@ -342,10 +296,10 @@ func TestTexturedQuadPassPreservesExternalAndClearBoundaries(t *testing.T) {
 		t.Fatalf("third DrawTextureEx: %v", err)
 	}
 
-	if got := len(halDevice.encoders); got != 1 {
+	if got := rec.Counts().Encoders; got != 1 {
 		t.Fatalf("frame command encoders created = %d, want 1", got)
 	}
-	if got, want := halDevice.encoders[0].loadOps, []gputypes.LoadOp{
+	if got, want := passLoadOps(rec), []gputypes.LoadOp{
 		gputypes.LoadOpClear,
 		gputypes.LoadOpLoad,
 		gputypes.LoadOpLoad,
@@ -353,15 +307,15 @@ func TestTexturedQuadPassPreservesExternalAndClearBoundaries(t *testing.T) {
 	}; !equalLoadOps(got, want) {
 		t.Fatalf("render-pass load ops = %v, want %v", got, want)
 	}
-	if got, want := halDevice.encoders[0].uniformOffsets, [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
+	if got, want := bindGroupOffsets(rec), [][]uint32{{0}, {256}, {512}}; !equalOffsets(got, want) {
 		t.Fatalf("uniform dynamic offsets = %v, want %v", got, want)
 	}
-	if queue.submits != 0 {
-		t.Fatalf("submissions before EndFrame = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("submissions before EndFrame = %d, want 0", got)
 	}
 	target.submitFrameEncoder(target.renderer)
-	if queue.submits != 1 {
-		t.Fatalf("submissions after EndFrame = %d, want 1", queue.submits)
+	if got := rec.Counts().Submits; got != 1 {
+		t.Fatalf("submissions after EndFrame = %d, want 1", got)
 	}
 }
 
@@ -397,8 +351,7 @@ func equalOffsets(got, want [][]uint32) bool {
 func BenchmarkDrawTexturedQuadsSharedFrameEncoder(b *testing.B) {
 	for _, draws := range []int{1, 20, 100} {
 		b.Run(fmt.Sprintf("draws=%d", draws), func(b *testing.B) {
-			halDevice := &recordingCommandEncoderDevice{}
-			ctx, target, queue := newSharedEncoderTestContextWithDevice(b, halDevice)
+			ctx, target, rec := newSharedEncoderTestContext(b)
 			target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 			target.format = gputypes.TextureFormatBGRA8Unorm
 			target.width = 1
@@ -410,6 +363,9 @@ func BenchmarkDrawTexturedQuadsSharedFrameEncoder(b *testing.B) {
 			}
 			b.Cleanup(tex.Destroy)
 
+			// Only the frame loop's own work counts: the recorder is reset
+			// after setup, so the counts below are the delta the loop created.
+			rec.Reset()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				target.frameCleared = false
@@ -423,20 +379,21 @@ func BenchmarkDrawTexturedQuadsSharedFrameEncoder(b *testing.B) {
 						b.Fatalf("DrawTextureEx(%d): %v", j, err)
 					}
 				}
-				if got := len(halDevice.encoders[i].loadOps); got != 1 {
-					b.Fatalf("render passes for %d draws = %d, want 1", draws, got)
-				}
 				target.submitFrameEncoder(target.renderer)
 				target.renderer.pollSubmissions()
 				target.releaseTexQuadUniformChunks()
 			}
 			b.StopTimer()
 
-			if got := len(halDevice.encoders); got != b.N {
-				b.Fatalf("frame command encoders created = %d, want %d", got, b.N)
+			counts := rec.Counts()
+			if counts.Encoders != b.N {
+				b.Fatalf("frame command encoders created = %d, want %d (one per frame)", counts.Encoders, b.N)
 			}
-			if got := queue.submits; got != b.N {
-				b.Fatalf("frame submissions = %d, want %d", got, b.N)
+			if counts.Passes != b.N {
+				b.Fatalf("render passes = %d, want %d (one per frame)", counts.Passes, b.N)
+			}
+			if counts.Submits != b.N {
+				b.Fatalf("frame submissions = %d, want %d", counts.Submits, b.N)
 			}
 			b.ReportMetric(float64(draws), "draws/frame")
 			b.ReportMetric(1, "passes/frame")
@@ -460,7 +417,7 @@ func TestContextRenderTargetCommandEncoderForwardsActiveEncoder(t *testing.T) {
 }
 
 func TestContextCommandEncoderFlushesPendingClearFirst(t *testing.T) {
-	ctx, target, queue := newSharedEncoderTestContext(t)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	target.clear(0.1, 0.2, 0.3, 1)
 
 	if encoder := ctx.CommandEncoder(); encoder == nil {
@@ -472,8 +429,8 @@ func TestContextCommandEncoderFlushesPendingClearFirst(t *testing.T) {
 	if !target.frameCleared {
 		t.Fatal("frame was not marked cleared")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("clear submitted before frame end: %d", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("clear submitted before frame end: %d", got)
 	}
 }
 
@@ -499,14 +456,18 @@ func TestEnsureFrameEncoderWithoutFrameFails(t *testing.T) {
 }
 
 func TestContextCommandEncoderReturnsNilWhenCreationFails(t *testing.T) {
-	ctx, _, _ := newSharedEncoderTestContextWithDevice(t, &commandEncoderFailDevice{})
+	ctx, _, _ := newSharedEncoderTestContextWithOptions(t, wgputest.WithFaults(wgputest.Faults{
+		CreateCommandEncoder: errors.New("injected command encoder failure"),
+	}))
 	if got := ctx.CommandEncoder(); got != nil {
 		t.Fatalf("CommandEncoder() = %v after creation failure, want nil", got)
 	}
 }
 
 func TestContextCommandEncoderReturnsNilWhenTexturedQuadPassEndFails(t *testing.T) {
-	ctx, target, queue := newSharedEncoderTestContext(t)
+	ctx, target, rec := newSharedEncoderTestContextWithOptions(t, wgputest.WithFaults(wgputest.Faults{
+		WriteBuffer: errors.New("injected uniform write failure"),
+	}))
 	target.renderer.surfaceFormat = gputypes.TextureFormatBGRA8Unorm
 	target.format = gputypes.TextureFormatBGRA8Unorm
 	target.width = 1
@@ -518,7 +479,6 @@ func TestContextCommandEncoderReturnsNilWhenTexturedQuadPassEndFails(t *testing.
 	}
 	t.Cleanup(tex.Destroy)
 
-	queue.writeBufferErr = errors.New("injected uniform write failure")
 	if err := ctx.DrawTextureEx(tex, DrawTextureOptions{Width: 1, Height: 1, Alpha: 1}); err != nil {
 		t.Fatalf("DrawTextureEx: %v", err)
 	}
@@ -535,20 +495,20 @@ func TestContextCommandEncoderReturnsNilWhenTexturedQuadPassEndFails(t *testing.
 	if target.frameEncoder != nil {
 		t.Fatal("failed shared encoder was retained")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("failed shared encoder submissions = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("failed shared encoder submissions = %d, want 0", got)
 	}
 }
 
 func TestFlushClearStandaloneSubmitsOnce(t *testing.T) {
-	_, target, queue := newSharedEncoderTestContext(t)
+	_, target, rec := newSharedEncoderTestContext(t)
 	target.clear(0.1, 0.2, 0.3, 1)
 
 	if !target.flushClear(target.renderer.device, target.renderer) {
 		t.Fatal("flushClear failed")
 	}
-	if queue.submits != 1 {
-		t.Fatalf("standalone clear submissions = %d, want 1", queue.submits)
+	if got := rec.Counts().Submits; got != 1 {
+		t.Fatalf("standalone clear submissions = %d, want 1", got)
 	}
 	if target.hasPendingClear || !target.frameCleared {
 		t.Fatal("standalone clear did not update frame state")
@@ -556,20 +516,20 @@ func TestFlushClearStandaloneSubmitsOnce(t *testing.T) {
 }
 
 func TestFlushClearDiscardsStandaloneEncoderOnInvalidView(t *testing.T) {
-	_, target, queue := newSharedEncoderTestContext(t)
+	_, target, rec := newSharedEncoderTestContext(t)
 	target.currentView.Release()
 	target.clear(0.1, 0.2, 0.3, 1)
 
 	if target.flushClear(target.renderer.device, target.renderer) {
 		t.Fatal("flushClear succeeded with a released view")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("invalid clear submissions = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("invalid clear submissions = %d, want 0", got)
 	}
 }
 
 func TestContextCommandEncoderDiscardsSharedEncoderWhenClearFails(t *testing.T) {
-	ctx, target, queue := newSharedEncoderTestContext(t)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	if encoder := ctx.CommandEncoder(); encoder == nil {
 		t.Fatal("CommandEncoder returned nil")
 	}
@@ -582,13 +542,13 @@ func TestContextCommandEncoderDiscardsSharedEncoderWhenClearFails(t *testing.T) 
 	if target.frameEncoder != nil {
 		t.Fatal("failed shared encoder was retained")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("failed shared encoder submissions = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("failed shared encoder submissions = %d, want 0", got)
 	}
 }
 
 func TestSubmitFrameEncoderDropsFinishFailure(t *testing.T) {
-	ctx, target, queue := newSharedEncoderTestContext(t)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	encoder := ctx.CommandEncoder()
 	if encoder == nil {
 		t.Fatal("CommandEncoder returned nil")
@@ -599,13 +559,13 @@ func TestSubmitFrameEncoderDropsFinishFailure(t *testing.T) {
 	if target.frameEncoder != nil {
 		t.Fatal("failed frame encoder was retained")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("invalid frame submissions = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("invalid frame submissions = %d, want 0", got)
 	}
 }
 
 func TestEndFrameDiscardsEncoderAfterPixelPresent(t *testing.T) {
-	ctx, target, queue := newSharedEncoderTestContext(t)
+	ctx, target, rec := newSharedEncoderTestContext(t)
 	if encoder := ctx.CommandEncoder(); encoder == nil {
 		t.Fatal("CommandEncoder returned nil")
 	}
@@ -617,7 +577,7 @@ func TestEndFrameDiscardsEncoderAfterPixelPresent(t *testing.T) {
 	if target.frameEncoder != nil {
 		t.Fatal("pixel-presented frame retained its encoder")
 	}
-	if queue.submits != 0 {
-		t.Fatalf("pixel-presented frame submissions = %d, want 0", queue.submits)
+	if got := rec.Counts().Submits; got != 0 {
+		t.Fatalf("pixel-presented frame submissions = %d, want 0", got)
 	}
 }

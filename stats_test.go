@@ -7,7 +7,6 @@ import (
 
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
-	_ "github.com/gogpu/wgpu/hal/software"
 )
 
 // TestUpdateRegionStrideValidation covers layout validation with a live headless renderer.
