@@ -471,18 +471,11 @@ func (r *ContextRenderTarget) Compositor() gpucontext.SurfaceCompositor {
 // describing why the device was removed. This is a diagnostic method for
 // debugging DX12 DEVICE_REMOVED issues.
 func (c *Context) CheckDeviceHealth() error {
-	type healthChecker interface {
-		CheckHealth(label string) error
-	}
-	// Check the underlying HAL device for health (e.g., DX12 DEVICE_REMOVED).
+	// Check the underlying device for health (e.g., DX12 DEVICE_REMOVED).
 	if c.renderer.device == nil {
 		return nil
 	}
-	halDev := c.renderer.device.HalDevice()
-	if hc, ok := halDev.(healthChecker); ok {
-		return hc.CheckHealth("Context.CheckDeviceHealth")
-	}
-	return nil // Backend doesn't support health check
+	return c.renderer.device.CheckHealth()
 }
 
 // SurfaceSize returns the current GPU surface dimensions in physical device pixels.

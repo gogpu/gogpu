@@ -6,7 +6,7 @@
 // via build tags. gogpu always uses the wgpu public API — the implementation
 // is transparent.
 //
-//   - Default: Pure Go (wgpu/core → wgpu/hal → Vulkan/Metal/DX12/GLES/Software)
+//   - Default: Pure Go (wgpu → Vulkan/Metal/DX12/GLES/Software)
 //   - -tags rust: Rust FFI (go-webgpu/webgpu → wgpu-native)
 //   - js,wasm: Browser (syscall/js → Browser WebGPU)
 //
