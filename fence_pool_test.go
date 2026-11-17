@@ -1,150 +1,28 @@
 package gogpu
 
 import (
-	"fmt"
-	"image"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/wgputest"
 )
 
-// --- Mock types for submissionTracker testing ---
-
-// mockFenceDevice implements hal.Device for testing.
-type mockFenceDevice struct {
-	freedCmdBufs []hal.CommandBuffer
-}
-
-func (d *mockFenceDevice) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error) { return nil, nil } //nolint:nilnil // mock
-func (d *mockFenceDevice) DestroyBuffer(_ hal.Buffer)                               {}
-func (d *mockFenceDevice) MapBuffer(_ hal.Buffer, _, _ uint64) (hal.BufferMapping, error) {
-	return hal.BufferMapping{}, nil
-}
-func (d *mockFenceDevice) UnmapBuffer(_ hal.Buffer) error { return nil }
-func (d *mockFenceDevice) CreateTexture(_ *hal.TextureDescriptor) (hal.Texture, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyTexture(_ hal.Texture) {}
-func (d *mockFenceDevice) CreateTextureView(_ hal.Texture, _ *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyTextureView(_ hal.TextureView) {}
-func (d *mockFenceDevice) CreateSampler(_ *hal.SamplerDescriptor) (hal.Sampler, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroySampler(_ hal.Sampler) {}
-func (d *mockFenceDevice) CreateBindGroupLayout(_ *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyBindGroupLayout(_ hal.BindGroupLayout) {}
-func (d *mockFenceDevice) CreateBindGroup(_ *hal.BindGroupDescriptor) (hal.BindGroup, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyBindGroup(_ hal.BindGroup) {}
-func (d *mockFenceDevice) CreatePipelineLayout(_ *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyPipelineLayout(_ hal.PipelineLayout) {}
-func (d *mockFenceDevice) CreateShaderModule(_ *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyShaderModule(_ hal.ShaderModule) {}
-func (d *mockFenceDevice) CreateRenderPipeline(_ *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyRenderPipeline(_ hal.RenderPipeline) {}
-func (d *mockFenceDevice) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) DestroyComputePipeline(_ hal.ComputePipeline) {}
-func (d *mockFenceDevice) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
-	return nil, hal.ErrTimestampsNotSupported
-}
-func (d *mockFenceDevice) DestroyQuerySet(_ hal.QuerySet) {}
-func (d *mockFenceDevice) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	return nil, nil //nolint:nilnil // mock
-}
-func (d *mockFenceDevice) CreateFence() (hal.Fence, error) { return nil, nil } //nolint:nilnil // mock
-func (d *mockFenceDevice) DestroyFence(_ hal.Fence)        {}
-func (d *mockFenceDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, error) {
-	return true, nil
-}
-func (d *mockFenceDevice) ResetFence(_ hal.Fence) error             { return nil }
-func (d *mockFenceDevice) GetFenceStatus(_ hal.Fence) (bool, error) { return true, nil }
-func (d *mockFenceDevice) FreeCommandBuffer(cb hal.CommandBuffer) {
-	d.freedCmdBufs = append(d.freedCmdBufs, cb)
-}
-func (d *mockFenceDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
-	return nil, fmt.Errorf("mock: render bundles not supported")
-}
-func (d *mockFenceDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
-func (d *mockFenceDevice) CreateAccelerationStructure(_ *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
-	return nil, fmt.Errorf("mock: ray tracing not supported")
-}
-func (d *mockFenceDevice) DestroyAccelerationStructure(_ hal.AccelerationStructure) {}
-func (d *mockFenceDevice) GetAccelerationStructureBuildSizes(_ *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
-	return hal.AccelerationStructureBuildSizes{}
-}
-func (d *mockFenceDevice) GetAccelerationStructureDeviceAddress(_ hal.AccelerationStructure) uint64 {
-	return 0
-}
-func (d *mockFenceDevice) TlasInstanceToBytes(_ hal.TlasInstance) []byte { return nil }
-func (d *mockFenceDevice) WaitIdle() error                               { return nil }
-func (d *mockFenceDevice) Destroy()                                      {}
-
-// Verify the mockFenceDevice satisfies the hal.Device interface at compile time.
-var _ hal.Device = (*mockFenceDevice)(nil)
-
-// mockQueue implements hal.Queue for testing.
-type mockQueue struct {
-	submissionIndex uint64
-}
-
-func (q *mockQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
-	q.submissionIndex++
-	return q.submissionIndex, nil
-}
-func (q *mockQueue) PollCompleted() uint64                              { return q.submissionIndex }
-func (q *mockQueue) WriteBuffer(_ hal.Buffer, _ uint64, _ []byte) error { return nil }
-func (q *mockQueue) WriteTexture(_ *hal.ImageCopyTexture, _ []byte, _ *hal.ImageDataLayout, _ *hal.Extent3D) error {
-	return nil
-}
-func (q *mockQueue) ReadBuffer(_ hal.Buffer, _ uint64, _ []byte) error { return nil }
-func (q *mockQueue) Present(_ hal.Surface, _ hal.SurfaceTexture, _ []image.Rectangle) error {
-	return nil
-}
-func (q *mockQueue) GetTimestampPeriod() float32                                     { return 0 }
-func (q *mockQueue) Destroy()                                                        {}
-func (q *mockQueue) CopyExternalImageToTexture(_ any, _ *hal.ImageCopyTexture) error { return nil }
-func (q *mockQueue) SupportsCommandBufferCopies() bool                               { return false }
-func (q *mockQueue) SetSwapchainSuppressed(_ bool)                                   {}
-
-// Verify the mockQueue satisfies the hal.Queue interface at compile time.
-var _ hal.Queue = (*mockQueue)(nil)
-
-// newTestDevice creates a wgpu.Device wrapping a mock HAL device for testing.
-func newTestDevice(t *testing.T, mockDev *mockFenceDevice) *wgpu.Device {
+// newTestDevice returns a *wgpu.Device backed by the noop backend. The
+// submission tracker only frees command buffers and waits idle, both of which
+// the noop device performs without a GPU.
+func newTestDevice(t *testing.T) *wgpu.Device {
 	t.Helper()
-	device, err := wgpu.NewDeviceFromHAL(
-		mockDev,
-		&mockQueue{},
-		gputypes.Features(0),
-		gputypes.DefaultLimits(),
-		"test",
-	)
+	device, _, cleanup, err := wgputest.NewNoopDevice()
 	if err != nil {
-		t.Fatalf("NewDeviceFromHAL failed: %v", err)
+		t.Fatalf("wgputest.NewNoopDevice: %v", err)
 	}
+	t.Cleanup(cleanup)
 	return device
 }
 
 func TestSubmissionTracker_Track(t *testing.T) {
-	dev := &mockFenceDevice{}
-	device := newTestDevice(t, dev)
+	device := newTestDevice(t)
 
 	var tracker submissionTracker
 	tracker.track(1)
@@ -168,8 +46,7 @@ func TestSubmissionTracker_Track(t *testing.T) {
 }
 
 func TestSubmissionTracker_TriageFreesCmdBufs(t *testing.T) {
-	dev := &mockFenceDevice{}
-	device := newTestDevice(t, dev)
+	device := newTestDevice(t)
 
 	var tracker submissionTracker
 
@@ -185,8 +62,7 @@ func TestSubmissionTracker_TriageFreesCmdBufs(t *testing.T) {
 }
 
 func TestSubmissionTracker_WaitAll(t *testing.T) {
-	dev := &mockFenceDevice{}
-	device := newTestDevice(t, dev)
+	device := newTestDevice(t)
 
 	var tracker submissionTracker
 	tracker.track(1)
@@ -200,8 +76,7 @@ func TestSubmissionTracker_WaitAll(t *testing.T) {
 }
 
 func TestSubmissionTracker_ConcurrentAccess(t *testing.T) {
-	dev := &mockFenceDevice{}
-	device := newTestDevice(t, dev)
+	device := newTestDevice(t)
 
 	var tracker submissionTracker
 	var wg sync.WaitGroup

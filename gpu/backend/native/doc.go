@@ -1,9 +1,7 @@
-// Package native links the wgpu backends of the pure Go implementation and maps
-// gogpu's GraphicsAPI selector to the backend mask that wgpu.CreateInstance
-// needs. gogpu has no hardware abstraction of its own: the HAL lives in
-// wgpu/hal, and the per-platform files here only import its backends so that
-// their init() calls hal.RegisterBackend and wgpu can discover the linked
-// implementations. The linked set is chosen by build tags (ADR-038).
+// Package native maps gogpu's GraphicsAPI selector to the backend mask that
+// wgpu.CreateInstance needs. gogpu has no hardware abstraction of its own: the
+// backends live inside wgpu and are registered by default (ADR-070), so no
+// blank imports are needed. The linked set is chosen by build tags (ADR-038).
 //
 //   - Windows: DX12, Vulkan, GLES, software
 //   - Linux: Vulkan, GLES, software

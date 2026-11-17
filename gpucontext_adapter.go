@@ -17,7 +17,7 @@ import (
 // to the concrete wgpu types when they need the full API:
 //
 //	dev := provider.Device().(*wgpu.Device)
-//	halDevice := dev.HalDevice()
+//	err := dev.CheckHealth()
 type gpuContextAdapter struct {
 	renderer *Renderer
 	tracker  *resourceTracker

@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies:** wgpu v0.34.15 → v0.35.0, gputypes v0.8.2 → v0.9.1. wgpu v0.35.0 moves its implementation into
+  internal packages and leaves a thin public `hal` (ADR-070); the Pure Go backends register by default, so gogpu no
+  longer imports them and a `wgpu_nosoftware` build simply has no software backend. `GraphicsAPISoftware` now names
+  `gputypes.BackendsSoftware` in the instance mask: after ADR-083 a zero mask means the default hardware set, so the
+  old zero would have selected Auto instead of the software renderer. `Context.CheckDeviceHealth` uses the public
+  `(*wgpu.Device).CheckHealth()`; the `hal.HalDevice` route is gone.
 - **Dependencies:** wgpu v0.34.14 → v0.34.15, naga v0.21.10 → v0.21.12. Vulkan tracks the present barrier per
   image and presents on every acquired surface; a surface is configured only on a queue family that can present to
   it; `ErrDeviceLost` comes back from submit and wait-idle, and a lost device's swapchain is destroyed so its window
