@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Config.Background` starts macOS apps without activating or showing the primary window. The hidden window still renders; a later `Window.Show()` presents it. Other platforms ignore this option.
+
 - **Linux: dead keys and the Compose key produce their composed characters** (#562, by @dvoyni). X11 and Wayland text
   input now run each key through libxkbcommon's compose table, loaded for the active locale: a dead key or the Compose
   key on its own types nothing, and the key that completes the sequence types the composed character.
