@@ -64,6 +64,8 @@ type darwinWindow struct {
 // darwinPlatform implements Platform for macOS using Cocoa/AppKit.
 // Holds process-level state and a primary window for single-window API.
 type darwinPlatform struct {
+	background bool
+
 	mu  sync.RWMutex
 	app *darwin.Application
 
@@ -104,13 +106,16 @@ func (p *darwinPlatform) ScaleFactor() float64 {
 
 // --- PlatformManager implementation on darwinPlatform ---
 
+// SetBackground configures nonactivating startup before Init.
+func (p *darwinPlatform) SetBackground(background bool) { p.background = background }
+
 // Init initializes the macOS platform subsystem (process-level, no window).
 func (p *darwinPlatform) Init() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.app = darwin.GetApplication()
-	if err := p.app.Init(); err != nil {
+	if err := p.app.InitWithBackground(p.background); err != nil {
 		return err
 	}
 
