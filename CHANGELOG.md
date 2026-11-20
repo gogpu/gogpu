@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Config.Background` starts macOS apps without activating or showing the primary window. The hidden window still renders; a later `Window.Show()` presents it. Other platforms ignore this option.
+
 - **Windows: input method (IME) support (IMM32)**, based on #462 by @besmpl. `App` implements `gpucontext.IMEController`:
   composition start, update and end reach `EventSource.OnIMEComposition*` with the preedit and UTF-8 byte-offset cursor
   and selection ranges, cancel and disable arrive through the optional `gpucontext.IMEEventSource`, and

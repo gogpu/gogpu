@@ -150,7 +150,7 @@ func TestApp_RegisterPrimaryWindow(t *testing.T) {
 		renderer: &Renderer{},
 	}
 
-	app.registerPrimaryWindow(win)
+	app.registerPrimaryWindow(win, false)
 
 	if app.windowManager == nil {
 		t.Fatal("windowManager should be initialized")

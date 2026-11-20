@@ -38,6 +38,10 @@ const (
 
 // Config configures the application.
 type Config struct {
+	// Background starts the primary macOS window hidden without activating the app.
+	// Other operating systems currently ignore this option. Default is false.
+	Background bool
+
 	// Title is the window title.
 	Title string
 
@@ -403,3 +407,10 @@ const (
 	// TabbingDisallowed explicitly prevents the window from being grouped into tabs.
 	TabbingDisallowed TabbingMode = 2
 )
+
+// WithBackground sets whether macOS starts hidden without activating the app.
+// Other operating systems currently ignore this option.
+func (c Config) WithBackground(background bool) Config {
+	c.Background = background
+	return c
+}

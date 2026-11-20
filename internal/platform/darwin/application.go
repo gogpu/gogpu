@@ -45,6 +45,12 @@ func GetApplication() *Application {
 // Init initializes the NSApplication.
 // This must be called before creating windows or processing events.
 func (a *Application) Init() error {
+	return a.InitWithBackground(false)
+}
+
+// InitWithBackground initializes AppKit and skips foreground activation
+// when background is true. The policy applies when AppKit is first initialized.
+func (a *Application) InitWithBackground(background bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -71,8 +77,12 @@ func (a *Application) Init() error {
 		return errors.New("darwin: failed to get NSApplication")
 	}
 
-	// Set activation policy to regular app (with dock icon)
-	a.nsApp.SendInt(selectors.setActivationPolicy, int64(NSApplicationActivationPolicyRegular))
+	policy := NSApplicationActivationPolicyRegular
+	if background {
+		// Accessory apps can create windows without taking over the Dock.
+		policy = NSApplicationActivationPolicyAccessory
+	}
+	a.nsApp.SendInt(selectors.setActivationPolicy, int64(policy))
 
 	// Create default application menu (ADR-016: Cmd+Q, Cmd+H, Cmd+M).
 	if a.appName == "" {
@@ -84,7 +94,9 @@ func (a *Application) Init() error {
 	a.nsApp.Send(selectors.finishLaunching)
 
 	// Activate the application
-	a.nsApp.SendBool(selectors.activateIgnoringOtherApps, true)
+	if !background {
+		a.nsApp.SendBool(selectors.activateIgnoringOtherApps, true)
+	}
 
 	a.initialized = true
 	return nil
