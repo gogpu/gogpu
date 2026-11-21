@@ -1303,7 +1303,7 @@ func (w *darwinWindow) createPointerEvent(
 		Button:      button,
 		Buttons:     w.buttons,
 		Modifiers:   w.modifiers,
-		DeltaX:      info.LocationX - w.oldPointerX,
+		DeltaX:      info.LocationX - w.oldPointerX, // TODO: use CGGetLastMouseDelta instead.
 		DeltaY:      y - w.oldPointerY,
 		Timestamp:   w.eventTimestamp(),
 	}
