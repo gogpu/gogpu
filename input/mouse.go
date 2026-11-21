@@ -21,7 +21,7 @@ const (
 type MouseState struct {
 	mu                         sync.RWMutex
 	x, y                       float32
-	prevX, prevY               float32
+	deltaX, deltaY             float32
 	scrollX, scrollY           float32
 	frameScrollX, frameScrollY float32
 	current                    [MouseButtonCount]bool
@@ -39,6 +39,16 @@ func (m *MouseState) SetPosition(x, y float32) {
 	defer m.mu.Unlock()
 	m.x = x
 	m.y = y
+}
+
+// AddDelta adds to the delta values (called by platform layer).
+// Thread-safe.
+func (m *MouseState) AddDelta(dx, dy float32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.deltaX += dx
+	m.deltaY += dy
 }
 
 // SetButton sets button state (called by platform layer).
@@ -90,7 +100,7 @@ func (m *MouseState) Y() float32 {
 func (m *MouseState) Delta() (dx, dy float32) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.x - m.prevX, m.y - m.prevY
+	return m.deltaX, m.deltaY
 }
 
 // Scroll returns scroll wheel delta.
@@ -142,8 +152,8 @@ func (m *MouseState) UpdateFrame() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.previous = m.current
-	m.prevX = m.x
-	m.prevY = m.y
+	m.deltaX = 0
+	m.deltaY = 0
 
 	m.frameScrollX = m.scrollX
 	m.frameScrollY = m.scrollY
