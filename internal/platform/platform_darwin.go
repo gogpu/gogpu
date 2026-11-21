@@ -34,6 +34,8 @@ type darwinWindow struct {
 	// Mouse state tracking
 	pointerX      float64
 	pointerY      float64
+	oldPointerX   float64
+	oldPointerY   float64
 	buttons       gpucontext.Buttons
 	modifiers     gpucontext.Modifiers
 	mouseInWindow bool
@@ -807,6 +809,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	// Mouse button down events
 	case darwin.NSEventTypeLeftMouseDown:
 		w.buttons |= gpucontext.ButtonsLeft
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonLeft, info, y)
@@ -814,6 +818,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	case darwin.NSEventTypeRightMouseDown:
 		w.buttons |= gpucontext.ButtonsRight
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerDown, gpucontext.ButtonRight, info, y)
@@ -822,6 +828,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	case darwin.NSEventTypeOtherMouseDown:
 		btn := buttonFromNumber(info.ButtonNumber)
 		w.buttons |= buttonsFromNumber(info.ButtonNumber)
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerDown, btn, info, y)
@@ -830,6 +838,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	// Mouse button up events
 	case darwin.NSEventTypeLeftMouseUp:
 		w.buttons &^= gpucontext.ButtonsLeft
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonLeft, info, y)
@@ -837,6 +847,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	case darwin.NSEventTypeRightMouseUp:
 		w.buttons &^= gpucontext.ButtonsRight
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerUp, gpucontext.ButtonRight, info, y)
@@ -845,6 +857,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	case darwin.NSEventTypeOtherMouseUp:
 		btn := buttonFromNumber(info.ButtonNumber)
 		w.buttons &^= buttonsFromNumber(info.ButtonNumber)
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerUp, btn, info, y)
@@ -853,6 +867,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	// Mouse move events
 	case darwin.NSEventTypeMouseMoved:
 		wasInWindow := w.mouseInWindow
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 
@@ -879,6 +895,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	case darwin.NSEventTypeLeftMouseDragged,
 		darwin.NSEventTypeRightMouseDragged,
 		darwin.NSEventTypeOtherMouseDragged:
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerMove, gpucontext.ButtonNone, info, y)
@@ -887,6 +905,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 	// Mouse enter/exit events (for tracking areas)
 	case darwin.NSEventTypeMouseEntered:
 		w.mouseInWindow = true
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerEnter, gpucontext.ButtonNone, info, y)
@@ -894,6 +914,8 @@ func (w *darwinWindow) handleEvent(event darwin.ID, eventType darwin.NSEventType
 
 	case darwin.NSEventTypeMouseExited:
 		w.mouseInWindow = false
+		w.oldPointerX = w.pointerX
+		w.oldPointerY = w.pointerY
 		w.pointerX = info.LocationX
 		w.pointerY = y
 		ev := w.createPointerEvent(gpucontext.PointerLeave, gpucontext.ButtonNone, info, y)
@@ -1281,6 +1303,8 @@ func (w *darwinWindow) createPointerEvent(
 		Button:      button,
 		Buttons:     w.buttons,
 		Modifiers:   w.modifiers,
+		DeltaX:      info.LocationX - w.oldPointerX,
+		DeltaY:      y - w.oldPointerY,
 		Timestamp:   w.eventTimestamp(),
 	}
 }
