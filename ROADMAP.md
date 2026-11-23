@@ -25,9 +25,12 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 ---
 
-## Current State: v0.54.1
+## Current State: v0.55.0
 
 ✅ **Production-ready** with full feature set:
+- **Input methods (IME)** — Windows IMM32 and macOS NSTextInputClient: composition events, committed text, candidate-area placement, password/hidden content keeps the system IME disabled. Linux X11/Wayland follow in #331
+- **Breaking: the legacy backend and provider API is gone** (#458) — `App.DeviceProvider()`, `Config.Backend`/`WithBackend`, the `Backend*` constants and `gpu/types.BackendType`; migration in the CHANGELOG
+- **Textured quads share the frame encoder** (#461, @besmpl) — one encoder and one submit per frame instead of one per quad
 - **Strided texture uploads + GPUStats** (#484) — `Texture.UpdateRegion(region, data, layout)` for zero-copy dirty bands; `Renderer.GetCounters()` + `Context.FrameStats()` behind `GOGPU_STATS=1`
 - **Outgoing drag source** (#427, ADR-061) — `Window.StartDrag(DragData, callback)` on all 5 platforms (Windows COM DoDragDrop, macOS NSDraggingSource, X11 XDND v5, Wayland wl_data_source, Browser stub). Enterprise references: Qt6, SDL3, winit
 - **Per-pixel alpha transparency** (#361, @shaolei) — `Config.WithTransparent(bool)` for overlay/tray popup windows. Windows DwmBlurBehind, macOS isOpaque+clearColor, X11 ARGB visual
@@ -94,6 +97,7 @@ Our goal is to become the **reference graphics ecosystem** for Go — comparable
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v0.55.0** | 2026-11-23 | **IME on Windows and macOS** (#560 @lkmavi; Windows backend based on #462 @besmpl; Linux to follow #331). **Breaking**: legacy backend/provider API removed (#458) with migration. Textured quads share the frame encoder (#461). Fixes: pre-1607 Windows startup (#472), Wayland input stall (ui#240), `EventSource.OnResize`. deps wgpu v0.35.5, gputypes v0.9.2, naga v0.22.7. |
 | **v0.54.1** | 2026-11-08 | **Fix release**: Windows fullscreen at startup (#508), Windows keys by physical position (#520), Wayland CSD teardown (#518), macOS fullscreen deadlock (#522) and cursor unhide (#523), panic stacks across the thread boundary (#494), FFI pointer pinning, software identity present. deps wgpu v0.34.9, naga v0.21.4, goffi v0.6.8, gputypes v0.8.2. |
 | **v0.54.0** | 2026-08-31 | **Strided UpdateRegion + GPUStats** (#484). Struct params (ADR-072). deps wgpu v0.34.2, gpucontext v0.31.3, gputypes v0.8.0. |
 | **v0.53.2** | 2026-08-30 | DownlevelCapabilities (ADR-071). deps wgpu v0.33.0, gpucontext v0.30.0. |
@@ -282,13 +286,13 @@ Surface-based lifecycle for desktop + mobile + web + headless. Replaces "primary
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **gogpu/gogpu** | v0.54.1 | GPU application framework, windowing, multi-window, damage-aware present |
-| **gogpu/wgpu** | v0.34.9 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
-| **gogpu/naga** | v0.21.4 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
+| **gogpu/gogpu** | v0.55.0 | GPU application framework, windowing, multi-window, damage-aware present |
+| **gogpu/wgpu** | v0.35.5 | Pure Go WebGPU (Vulkan, Metal, DX12, GLES, Software) |
+| **gogpu/naga** | v0.22.7 | Shader compiler (WGSL → SPIR-V/MSL/GLSL/HLSL/DXIL) |
 | **gogpu/gg** | v0.52.5 | 2D graphics with GPU acceleration, Vello compute, scene renderer |
 | **gogpu/ui** | v0.1.54 | GUI toolkit: 22+ widgets, 4 themes, offscreen renderer |
-| **gogpu/gpucontext** | v0.31.3 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
-| **gogpu/gputypes** | v0.8.2 | WebGPU type definitions (zero value = spec default) |
+| **gogpu/gpucontext** | v0.32.0 | Shared interfaces (DeviceProvider, TextureView, TextureRegionUpdater) |
+| **gogpu/gputypes** | v0.9.2 | WebGPU type definitions (zero value = spec default) |
 | **gogpu/compose** | design | Multi-process composition library |
 | **gogpu/g3d** | v0.1.11 | 3D rendering (scene graph, PBR Blinn-Phong, forward renderer, 5 backends) |
 | **gogpu/gg-pdf** | v0.1.0 | PDF export |
