@@ -7,8 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Linux: dead keys and the Compose key produce their composed characters** (#562, by @dvoyni). X11 and Wayland text
+  input now run each key through libxkbcommon's compose table, loaded for the active locale: a dead key or the Compose
+  key on its own types nothing, and the key that completes the sequence types the composed character.
+
 ### Fixed
 
+- **macOS: `Zoom` and `RequestSize` no longer hold the window mutex across AppKit sends** (#559, by @dvoyni). `zoom:`
+  delivers `windowWillStartLiveResize:` synchronously, and the delegate callback takes the same mutex the sender held,
+  so the window deadlocked. Both methods now read the state under the lock and send the selector after releasing it,
+  as `ToggleFullScreen` does.
+- **Wayland: one mouse-wheel notch scrolls one line** (#563, by @dvoyni). The wheel read the continuous `axis_value`,
+  whose units the compositor chooses, so one notch scrolled an amount that varied by compositor. It now takes the
+  notches from `axis_discrete` (v5-v7) or `axis_value120` (v8+, fractional for high-resolution wheels), one notch to a
+  line, and falls back to the continuous value when the compositor sends neither. The pointer is bound at its own
+  interface version, up to v8, instead of clamping the seat to v7.
+- **Wayland: a second window answers an error instead of opening without input** (#564, by @dvoyni). Wayland binds one
+  seat to the first connection, so a window on a connection of its own received no keyboard or pointer input while
+  looking alive. `NewWindow` now returns an error while the one window is open, and the unused second-connection
+  machinery (`secondaryWaylandConn`, `createSecondaryConn`, `setupSecondaryCSD`) is removed.
 - **Windows: the window class is registered once per process and never unregistered** (follow-up of #561). #561 made
   `Destroy` unregister `GoGPUWindow`, so whether a later `Init` could register it again depended on no window of the
   class being left anywhere in the process — an `UnregisterClassW` while one exists is refused by Win32 without a
