@@ -222,6 +222,18 @@ func (k *KeyboardState) Modifier(mod Modifier) bool {
 	return false
 }
 
+// Reset clears every pressed key, modifiers included, and the frame's
+// just-pressed/just-released history. Call it when keyboard input continuity
+// ends — a window losing focus — so a key held through the transition does not
+// stay pressed with its release event lost.
+// Thread-safe.
+func (k *KeyboardState) Reset() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.current = [KeyCount]bool{}
+	k.previous = [KeyCount]bool{}
+}
+
 // UpdateFrame advances the keyboard state to the next frame.
 // Call this once per frame before processing new events.
 // Thread-safe.

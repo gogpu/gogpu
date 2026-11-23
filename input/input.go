@@ -19,6 +19,16 @@ func New() *State {
 	}
 }
 
+// Reset clears the pressed keys, modifiers and mouse buttons, and their frame
+// history. Call it when input continuity ends — the window loses focus — so a
+// key or button held through the transition does not stay pressed after its
+// release event was delivered to another window.
+// Thread-safe.
+func (s *State) Reset() {
+	s.keyboard.Reset()
+	s.mouse.Reset()
+}
+
 // Update should be called each frame to update input state.
 // This advances the "just pressed/released" tracking to the next frame.
 // Thread-safe.
