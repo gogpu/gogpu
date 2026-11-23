@@ -837,6 +837,28 @@ func (a *App) handleSecondaryResize(ev platform.Event) {
 // for the render thread to use. This avoids accessing window/platform state
 // from the render thread.
 // classifyEvent routes a single platform event to the appropriate handler.
+// handleFocusEvent applies a focus change: the window bookkeeping, the input
+// reset on loss, the event-source dispatch and the queued FocusEvent.
+func (a *App) handleFocusEvent(event *platform.Event) {
+	a.focused = event.Focused
+	if !event.Focused && a.inputState != nil {
+		// The release of a key or button held while the focus goes away is
+		// delivered to the new focus owner, never to us: clear the state so
+		// a modifier does not stay stuck.
+		a.inputState.Reset()
+	}
+	if event.Focused {
+		if w := a.windowManager.getByPlatformID(event.WindowID); w != nil {
+			a.windowManager.setFocus(w.id)
+		}
+	}
+	if a.eventSource != nil {
+		a.eventSource.dispatchFocus(event.Focused)
+	}
+	a.inputEvents = append(a.inputEvents, gpucontext.FocusEvent{Focused: event.Focused})
+	a.RequestRedraw()
+}
+
 func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, secondaryResizes []platform.Event) (*platform.Event, []platform.Event) {
 	isPrimary := event.WindowID == 0 ||
 		(a.primaryWindow != nil && event.WindowID == a.primaryWindow.platformID)
@@ -857,17 +879,7 @@ func (a *App) classifyEvent(event *platform.Event, lastResize *platform.Event, s
 		// No X11 background pixmap — repaint revealed regions ourselves.
 		a.RequestRedraw()
 	case platform.EventFocus:
-		a.focused = event.Focused
-		if event.Focused {
-			if w := a.windowManager.getByPlatformID(event.WindowID); w != nil {
-				a.windowManager.setFocus(w.id)
-			}
-		}
-		if a.eventSource != nil {
-			a.eventSource.dispatchFocus(event.Focused)
-		}
-		a.inputEvents = append(a.inputEvents, gpucontext.FocusEvent{Focused: event.Focused})
-		a.RequestRedraw()
+		a.handleFocusEvent(event)
 
 	case platform.EventKeyDown:
 		a.dispatchKeyEvent(event, true)

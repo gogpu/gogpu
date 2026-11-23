@@ -135,6 +135,18 @@ func (m *MouseState) JustReleased(button MouseButton) bool {
 	return !m.current[button] && m.previous[button]
 }
 
+// Reset clears the pressed buttons and their frame history. The pointer
+// position and scroll deltas stay: the pointer is still where it is, and only
+// the button releases may have been lost. Call it when button input continuity
+// ends — a window losing focus.
+// Thread-safe.
+func (m *MouseState) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.current = [MouseButtonCount]bool{}
+	m.previous = [MouseButtonCount]bool{}
+}
+
 // UpdateFrame advances the mouse state to the next frame.
 // Call this once per frame before processing new events.
 // Thread-safe.
