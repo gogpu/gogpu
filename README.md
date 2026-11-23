@@ -38,6 +38,7 @@ Built on [gogpu/wgpu](https://github.com/gogpu/wgpu) — the unified Go WebGPU p
 | **Platforms** | Windows (Vulkan/DX12/GLES), Linux X11/Wayland (Vulkan/GLES), macOS (Metal), Browser/WASM (WebGPU) |
 | **Rendering** | Event-driven three-state model (idle/animating/continuous), 0% CPU when idle (lazy acquire), zero-copy surface rendering, damage-aware presentation |
 | **Input Models** | Three coexisting models: callbacks (`EventSource`), state polling (`Input()`, Ebiten-style), SDL-style event queue (`PollInputEvent()`) |
+| **Text Input (IME)** | Windows (IMM32) and macOS (NSTextInputClient): composition start/update/end with preedit and UTF-8 cursor ranges, committed text, candidate-area placement; password and hidden content keep the system IME disabled; Linux X11/Wayland to follow (#331) |
 | **Graphics** | Windowing, input handling, multi-keyboard layout (X11 XKB + Wayland xkbcommon), AltGr/international text input (unified xkbcommon, ADR-029), key repeat on all platforms (Wayland client-side timer, ADR-033), texture loading, frameless windows, runtime window resize (`RequestSize`), mouse grab / pointer lock (Win32 + X11 + Wayland, SDL parity), OS drag-and-drop: incoming (all 4 desktop platforms) + outgoing drag source (`StartDrag`, all 5 platforms), GPU adapter power preference, native macOS window tabbing, native system menus (macOS + Windows), native file dialogs (macOS + Windows + Linux D-Bus/zenity/kdialog), native print contract and desktop backends (Windows/macOS/Linux portal) |
 | **Scroll** | ScrollPhase + IsMomentum for macOS trackpad momentum detection (ADR-032), pixel/line/page delta modes |
 | **Sound** | 12 UI sound types (UWP ElementSoundPlayer parity): Click, Invoke, Focus, Navigate, Show/Hide, feedback. winmm, NSSound, canberra |
@@ -630,6 +631,8 @@ Vulkan     DX12  Metal  GLES   Software
 
 Native Win32 windowing with Vulkan, DirectX 12, GLES, and Software backends.
 
+Input methods (IME) are supported through IMM32: composition events, committed text and candidate-window placement reach the app through the `gpucontext` IME contract.
+
 ### Linux
 
 X11 and Wayland support with Vulkan, GLES, and Software (headless) backends.
@@ -650,6 +653,8 @@ internal/platform/darwin/
 ```
 
 Native system window tabbing supported via `Config.WithTabbingMode(gogpu.TabbingPreferred)` — windows with the same `TabbingIdentifier` group into macOS system tabs automatically.
+
+Input methods (IME) are supported through NSTextInputClient: marked text and commits reach the app while GPU renders the preedit.
 
 **Note:** macOS Cocoa requires UI operations on the main thread. GoGPU handles this automatically.
 
