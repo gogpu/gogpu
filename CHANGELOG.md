@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.55.1] - 2026-11-23
+
+### Fixed
+
+- **Keyboard and mouse state after a window loses focus** (#571). The release of a key or button held while the
+  focus goes away is delivered to the new focus owner, so the state kept it pressed: a stuck Alt or Ctrl broke
+  shortcuts after Alt+Tab or a screenshot tool. Losing the focus now clears the pressed keys, modifiers and buttons
+  together with their frame history — the lost release cannot surface as a spurious `JustReleased` — while the
+  pointer position and scroll stay. Wayland's already-held keys on focus gain follow separately.
+
 ## [0.55.0] - 2026-11-23
 
 ### Added
