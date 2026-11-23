@@ -297,7 +297,6 @@ var (
 	user32                 = windows.NewLazyDLL("user32.dll")
 	kernel32               = windows.NewLazyDLL("kernel32.dll")
 	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
-	procUnregisterClassW   = user32.NewProc("UnregisterClassW")
 	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
 	procShowWindow         = user32.NewProc("ShowWindow")
 	procUpdateWindow       = user32.NewProc("UpdateWindow")
@@ -726,10 +725,14 @@ func (p *windowsPlatform) initProcess() error {
 	wndClass.hCursor = windows.Handle(cursor)
 	p.cursor = cursor
 
-	ret, _, _ = procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass)))
-	if ret == 0 {
-		return fmt.Errorf("RegisterClassExW failed")
-	}
+	// The window class is process-wide and registered once per process, so a
+	// second Init here registers a class that already exists, which fails with
+	// ERROR_CLASS_ALREADY_EXISTS. Ignore the result, as winit does
+	// (winit-win32/src/window.rs: "We ignore errors because registering the
+	// same window class twice would trigger an error, and because errors here
+	// are detected during CreateWindowEx anyway"); a real failure fails
+	// CreateWindowExW below, whose error carries the Win32 code.
+	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wndClass)))
 
 	return nil
 }
@@ -897,7 +900,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 	physH := outerRect.bottom - outerRect.top
 
 	// Create window with pre-scaled outer dimensions.
-	hwnd, _, _ := procCreateWindowExW.Call(
+	hwnd, _, createErr := procCreateWindowExW.Call(
 		dwExStyle,
 		uintptr(unsafe.Pointer(windowClassName)),
 		uintptr(unsafe.Pointer(titlePtr)),
@@ -911,7 +914,7 @@ func (p *windowsPlatform) createWindowWin32(config Config) (*win32Window, error)
 		0,
 	)
 	if hwnd == 0 {
-		return nil, fmt.Errorf("CreateWindowExW failed")
+		return nil, fmt.Errorf("CreateWindowExW failed: %w", createErr)
 	}
 
 	// Post-create verify — if the window landed on a monitor with a
@@ -1451,9 +1454,10 @@ func (w *win32Window) setModalFrameCallback(fn func()) {
 }
 
 // Destroy implements PlatformManager.Destroy.
-// Destroys all remaining windows and releases process-level resources,
-// the window class included, so a platform initialized later in the same
-// process registers it again.
+// Destroys all remaining windows and releases process-level resources.
+// The window class stays registered for the process: it is process-wide,
+// initProcess tolerates registering it again, and unregistering it would pull
+// the class out from under a platform in the same process that is still open.
 // Pattern: collect + remove under lock, then DestroyWindow outside lock.
 // DestroyWindow sends WM_DESTROY synchronously to wndProc, which needs
 // windowMu.RLock — holding the write lock would deadlock.
@@ -1479,7 +1483,6 @@ func (p *windowsPlatform) Destroy() {
 			procDestroyWindow.Call(hwnd)
 		}
 	}
-	procUnregisterClassW.Call(uintptr(unsafe.Pointer(windowClassName)), uintptr(p.hinstance))
 	p.hMenu = 0
 	p.primary = nil
 	globalPlatform = nil
