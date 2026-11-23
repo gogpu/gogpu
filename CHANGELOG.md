@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows: a platform can be initialized again after another one is destroyed** (#561, by @dvoyni). The window
+  class is unregistered in `Destroy` so the next `Init` can register it, and the window-procedure callback and the
+  UTF-16 class name are made once per process instead of per `Init`.
 - **macOS: the frame pool owns its OS thread.** An `NSAutoreleasePool` belongs to the thread that creates it, and
   `RunInFramePool` drained it from a goroutine that could be rescheduled onto another thread in between — a rare
   SIGSEGV inside the drain (seen on macOS CI) and a latent crash for any caller not already pinned. The wrapper now
