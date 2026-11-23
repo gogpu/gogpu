@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Windows: the window class is registered once per process and never unregistered** (follow-up of #561). #561 made
+  `Destroy` unregister `GoGPUWindow`, so whether a later `Init` could register it again depended on no window of the
+  class being left anywhere in the process — an `UnregisterClassW` while one exists is refused by Win32 without a
+  word, and the next `Init` then failed with `RegisterClassExW failed` (seen as a flaky Windows CI leg). Registration
+  is now idempotent, as winit does it: the result is ignored, the class lives as long as the process, and a real
+  failure surfaces at `CreateWindowExW`, whose error now carries the Win32 code.
+
 ## [0.55.1] - 2026-11-23
 
 ### Fixed
