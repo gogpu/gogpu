@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **macOS: the frame pool owns its OS thread.** An `NSAutoreleasePool` belongs to the thread that creates it, and
+  `RunInFramePool` drained it from a goroutine that could be rescheduled onto another thread in between — a rare
+  SIGSEGV inside the drain (seen on macOS CI) and a latent crash for any caller not already pinned. The wrapper now
+  pins the thread for the pool's lifetime; the render thread and the main goroutine keep their own pins. This also
+  covers the public `StartDrag`, which reaches the wrapper on the caller's goroutine.
 - **Keyboard and mouse state after a window loses focus** (#571). The release of a key or button held while the
   focus goes away is delivered to the new focus owner, so the state kept it pressed: a stuck Alt or Ctrl broke
   shortcuts after Alt+Tab or a screenshot tool. Losing the focus now clears the pressed keys, modifiers and buttons
