@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.55.0] - 2026-11-23
 
 ### Added
 
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from any goroutine, while the window opens and closes too: the native IMM32 state is applied on the window thread. `IMECapabilities` reports the cursor area only — IMM32 has no surrounding-text or content-hint API; those come
   with the later TSF backend. X11 and Wayland backends follow in their own changes.
 
-- **macOS: input method (IME) support (NSTextInputClient)** (#331). A custom, invisible `NSTextView` receives AppKit's
+- **macOS: input method (IME) support (NSTextInputClient)** (#560, by @lkmavi; issue #331). A custom, invisible `NSTextView` receives AppKit's
   marked-text and commit callbacks while GoGPU renders the preedit. Cocoa UTF-16 ranges are converted to UTF-8 byte
   ranges for `EventSource.OnIMEComposition*`; committed text is dispatched once, cursor geometry follows
   `SetIMECursorArea`. Password, hidden, and sensitive content disables IME. Surrounding-text and delete-surrounding
@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies:** wgpu v0.35.0 → v0.35.5, gputypes v0.9.1 → v0.9.2, naga v0.22.4 → v0.22.7. wgpu v0.35.3 adds
+  device-lost and uncaptured-error callbacks and makes error scopes current on every backend; v0.35.4 adds
+  `Instance.EnumerateAdapters`; v0.35.5 adds `(*Adapter).Identity()` (device UUID, PCI bus ID, LUID, Metal registry ID,
+  where the backend can supply them); v0.35.2 and v0.35.3 cut software-backend allocation and per-draw bytes several
+  times over. gputypes v0.9.2 carries the ray-query types and `Limits` helpers. Public API unchanged (the golden
+  regenerates with zero diff in all four build contexts).
 - **Dependencies:** wgpu v0.34.15 → v0.35.0, gputypes v0.8.2 → v0.9.1. wgpu v0.35.0 moves its implementation into
   internal packages and leaves a thin public `hal` (ADR-070); the Pure Go backends register by default, so gogpu no
   longer imports them and a `wgpu_nosoftware` build simply has no software backend. `GraphicsAPISoftware` now names
