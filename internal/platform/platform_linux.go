@@ -69,13 +69,15 @@ type waylandWindow struct {
 	savedHeight int
 
 	// Pointer state tracking
-	pointerX  float64
-	pointerY  float64
-	buttons   gpucontext.Buttons
-	modifiers gpucontext.Modifiers
-	pointerMu sync.RWMutex
-	pointerIn bool // True when pointer is inside our surface
-	startTime time.Time
+	pointerX    float64
+	pointerY    float64
+	oldPointerX float64
+	oldPointerY float64
+	buttons     gpucontext.Buttons
+	modifiers   gpucontext.Modifiers
+	pointerMu   sync.RWMutex
+	pointerIn   bool // True when pointer is inside our surface
+	startTime   time.Time
 
 	// The wheel notches the compositor reported on each axis (vertical,
 	// horizontal) for the axis event that follows them; 0 for none.
@@ -1346,6 +1348,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 		// Pointer events
 		OnPointerEnter: func(serial uint32, x, y float64) {
 			w.pointerMu.Lock()
+			w.oldPointerX = w.pointerX
+			w.oldPointerY = w.pointerY
 			w.pointerX = x
 			w.pointerY = y
 			w.pointerIn = true
@@ -1374,6 +1378,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				Button:      gpucontext.ButtonNone,
 				Buttons:     w.getButtons(),
 				Modifiers:   w.getModifiers(),
+				DeltaX:      x - w.oldPointerX,
+				DeltaY:      y - w.oldPointerY,
 				Timestamp:   w.eventTimestamp(),
 			})
 		},
@@ -1405,6 +1411,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				w.pointerMu.Unlock()
 				return
 			}
+			w.oldPointerX = w.pointerX
+			w.oldPointerY = w.pointerY
 			w.pointerX = x
 			w.pointerY = y
 			buttons := w.buttons
@@ -1428,6 +1436,8 @@ func (p *waylandPlatform) setupInputCallbacks() {
 				Button:      gpucontext.ButtonNone,
 				Buttons:     buttons,
 				Modifiers:   w.getModifiers(),
+				DeltaX:      x - w.oldPointerX,
+				DeltaY:      y - w.oldPointerY,
 				Timestamp:   w.eventTimestamp(),
 			})
 		},

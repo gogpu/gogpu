@@ -1914,8 +1914,9 @@ func (a *App) updateMouseStateFromPointer(ev gpucontext.PointerEvent) {
 		return
 	}
 
-	// Update mouse position on any pointer event
+	// Update mouse position & delta on any pointer event
 	a.inputState.Mouse().SetPosition(float32(ev.X), float32(ev.Y))
+	a.inputState.Mouse().AddDelta(float32(ev.DeltaX), float32(ev.DeltaY))
 
 	// Update button state on press/release (mouse only)
 	if ev.PointerType != gpucontext.PointerTypeMouse {
