@@ -416,9 +416,10 @@ func (a *App) Run() error {
 	return nil
 }
 
-// startsHidden limits background startup to macOS.
+// startsHidden reports whether the primary window starts hidden. On macOS
+// the platform also takes it as the nonactivating startup policy.
 func (a *App) startsHidden() bool {
-	return runtime.GOOS == "darwin" && a.config.Background
+	return a.config.StartHidden
 }
 
 // startPrimaryWindow makes the first window ready for the render loop.

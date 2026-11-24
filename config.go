@@ -38,9 +38,14 @@ const (
 
 // Config configures the application.
 type Config struct {
-	// Background starts the primary macOS window hidden without activating the app.
-	// Other operating systems currently ignore this option. Default is false.
-	Background bool
+	// StartHidden creates the primary window without showing it. The window
+	// still renders, and a later Window.Show presents it. Default is false.
+	//
+	// Windows and X11 create the window hidden (unmapped on X11). macOS
+	// also starts the app with the Accessory activation policy and does
+	// not activate it, so it takes no focus. Wayland cannot keep a
+	// toplevel hidden: the compositor decides, and the window appears.
+	StartHidden bool
 
 	// Title is the window title.
 	Title string
@@ -408,9 +413,9 @@ const (
 	TabbingDisallowed TabbingMode = 2
 )
 
-// WithBackground sets whether macOS starts hidden without activating the app.
-// Other operating systems currently ignore this option.
-func (c Config) WithBackground(background bool) Config {
-	c.Background = background
+// WithStartHidden sets whether the primary window is created without being
+// shown. See Config.StartHidden for what each platform does.
+func (c Config) WithStartHidden(hidden bool) Config {
+	c.StartHidden = hidden
 	return c
 }

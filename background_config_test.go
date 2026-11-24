@@ -8,21 +8,25 @@ import (
 	"github.com/gogpu/gogpu/internal/platform"
 )
 
-func TestBackgroundSetsPolicyBeforeInit(t *testing.T) {
-	for _, background := range []bool{false, true} {
-		want := background && runtime.GOOS == "darwin"
+// The activation policy is macOS-only: the platform manager takes it before
+// Init, so the app never activates.
+func TestStartHiddenSetsPolicyBeforeInitOnMacOS(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the activation policy is specific to macOS")
+	}
+	for _, hidden := range []bool{false, true} {
 		manager := &backgroundStartupManager{}
 		original := newPlatformManagerFn
 		newPlatformManagerFn = func() platform.PlatformManager { return manager }
 		t.Cleanup(func() { newPlatformManagerFn = original })
-		app := &App{config: DefaultConfig().WithBackground(background)}
+		app := &App{config: DefaultConfig().WithStartHidden(hidden)}
 		_, err := app.initPlatform()
 		if !errors.Is(err, errStopBackgroundInit) {
 			t.Fatalf("startup did not reach the fake manager: %v", err)
 		}
-		if !manager.configured || manager.backgroundAtInit != want {
-			t.Fatalf("background = %t: policy set = %t, policy at init = %t; want %t",
-				background, manager.configured, manager.backgroundAtInit, want)
+		if !manager.configured || manager.backgroundAtInit != hidden {
+			t.Fatalf("start hidden = %t: policy set = %t, policy at init = %t; want %t",
+				hidden, manager.configured, manager.backgroundAtInit, hidden)
 		}
 		newPlatformManagerFn = original
 	}
@@ -47,10 +51,10 @@ func (m *backgroundStartupManager) Init() error {
 
 func TestNormalStartupShowsPrimaryWindow(t *testing.T) {
 	original := DefaultConfig()
-	enabled := original.WithBackground(true)
-	disabled := enabled.WithBackground(false)
-	if original.Background || !enabled.Background || disabled.Background {
-		t.Fatal("background should default to false and its builder should return a copy")
+	enabled := original.WithStartHidden(true)
+	disabled := enabled.WithStartHidden(false)
+	if original.StartHidden || !enabled.StartHidden || disabled.StartHidden {
+		t.Fatal("start hidden should default to false and its builder should return a copy")
 	}
 
 	native := &backgroundTestWindow{}
@@ -61,14 +65,13 @@ func TestNormalStartupShowsPrimaryWindow(t *testing.T) {
 	}
 }
 
-func TestBackgroundStartupKeepsWindowHiddenUntilShown(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("hidden startup is specific to macOS")
-	}
+// A window started hidden is not shown, still renders, and is shown by an
+// explicit Show, on every platform.
+func TestStartHiddenKeepsWindowHiddenUntilShown(t *testing.T) {
 	window := &backgroundTestWindow{}
 	loop := &startupFrameRecorder{}
 	app := &App{
-		config: DefaultConfig().WithBackground(true), platWindow: window,
+		config: DefaultConfig().WithStartHidden(true), platWindow: window,
 		renderer: &Renderer{}, renderLoop: loop,
 	}
 	app.startPrimaryWindow(window)

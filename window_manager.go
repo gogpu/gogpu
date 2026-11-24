@@ -33,7 +33,7 @@ type Window struct {
 	surface    *RenderTarget
 	platWindow platform.PlatformWindow // underlying platform window
 
-	// startHidden: started hidden by Config.Background; drawn, not shown.
+	// startHidden: started hidden by Config.StartHidden; drawn, not shown.
 	startHidden bool
 
 	// Header configuration
@@ -147,13 +147,13 @@ func (w *Window) PhysicalSize() (int, int) {
 }
 
 // Visible returns whether the window is currently visible and rendering.
-// A window started with Config.Background is not visible until Show.
+// A window started with Config.StartHidden is not visible until Show.
 func (w *Window) Visible() bool {
 	return w.visible
 }
 
 // renders reports whether the render loop draws this window. A window that
-// started hidden by Config.Background is drawn before its first Show.
+// started hidden by Config.StartHidden is drawn before its first Show.
 func (w *Window) renders() bool {
 	return w.visible || w.startHidden
 }
