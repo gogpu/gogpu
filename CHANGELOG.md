@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linux: dead keys and the Compose key produce their composed characters** (#562, by @dvoyni). X11 and Wayland text
   input now run each key through libxkbcommon's compose table, loaded for the active locale: a dead key or the Compose
   key on its own types nothing, and the key that completes the sequence types the composed character.
+- **`App.OnDragEnter` / `OnDragMove` / `OnDragLeave`** (#506, by @sogonov). A file drag in progress, not only the
+  drop: the macOS, X11 and Wayland platform layers already queued `EventDragEnter` / `EventDragMove` /
+  `EventDragLeave`, but `App` passed on only `EventDragDrop`, so an application could not show where a drop would land
+  until it had happened. Same coordinate units as `OnDragDrop`. Windows (`WM_DROPFILES`) reports only the drop, so they
+  never fire there.
 
 ### Fixed
 
