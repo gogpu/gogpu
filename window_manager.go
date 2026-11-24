@@ -147,7 +147,8 @@ func (w *Window) PhysicalSize() (int, int) {
 }
 
 // Visible returns whether the window is currently visible and rendering.
-// A window started with Config.StartHidden is not visible until Show.
+// A window started with Config.StartHidden is not visible until Show, except
+// on Wayland where presenting its first frame shows it.
 func (w *Window) Visible() bool {
 	return w.visible
 }

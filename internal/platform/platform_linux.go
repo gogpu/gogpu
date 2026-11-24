@@ -851,6 +851,9 @@ func (w *waylandPlatformWindow) Close() {
 	w.platform.CloseWindow()
 }
 
+// ShowsOnFirstFrame reports that presenting a buffer makes the toplevel visible.
+func (w *waylandPlatformWindow) ShowsOnFirstFrame() bool { return true }
+
 func (w *waylandPlatformWindow) Show() {}
 
 // Hide is a no-op on Wayland: the compositor controls window visibility and

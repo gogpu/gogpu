@@ -1116,6 +1116,10 @@ type windowFrame struct {
 func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow, startHidden bool) {
 	a.windowManager = newWindowManager()
 	internalID := a.windowManager.allocate()
+	visible := !startHidden
+	if startup, ok := platWindow.(interface{ ShowsOnFirstFrame() bool }); ok && startup.ShowsOnFirstFrame() {
+		visible = true
+	}
 	a.primaryWindow = &Window{
 		id:              internalID,
 		platformID:      platWindow.ID(),
@@ -1125,7 +1129,7 @@ func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow, startHid
 		onDraw:          a.onDraw,
 		onResize:        a.onResize,
 		headerAlignment: a.config.HeaderAlignment,
-		visible:         !startHidden,
+		visible:         visible,
 		startHidden:     startHidden,
 	}
 	a.primaryPlatformID = platWindow.ID()

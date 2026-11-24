@@ -104,6 +104,26 @@ type backgroundTestWindow struct {
 	shows, hides int
 }
 
+type firstFrameWindow struct{ backgroundTestWindow }
+
+func (w *firstFrameWindow) ShowsOnFirstFrame() bool { return true }
+
+func TestStartHiddenWindowShownByFirstFrameIsVisible(t *testing.T) {
+	window := &firstFrameWindow{}
+	loop := &startupFrameRecorder{}
+	app := &App{config: DefaultConfig().WithStartHidden(true), platWindow: window,
+		renderer: &Renderer{}, renderLoop: loop}
+	app.startPrimaryWindow(window)
+	if !app.primaryWindow.Visible() || window.shows != 0 {
+		t.Fatal("a window shown by its first frame should be visible without an explicit Show")
+	}
+	before := loop.calls
+	app.renderFrameMultiThread()
+	if loop.calls != before+1 {
+		t.Fatal("a window shown by its first frame should reach the render loop")
+	}
+}
+
 func (w *backgroundTestWindow) Show() { w.shows++ }
 func (w *backgroundTestWindow) Hide() { w.hides++ }
 
