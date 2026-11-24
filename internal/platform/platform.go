@@ -35,6 +35,24 @@ type Config struct {
 	MaxWidth             int // 0 = no maximum constraint
 	MaxHeight            int // 0 = no maximum constraint
 	Icon                 image.Image
+
+	// LayerShell, when non-nil, creates a wlr-layer-shell surface (panel,
+	// overlay, wallpaper) instead of an ordinary window. Linux/Wayland only;
+	// ignored on other platforms.
+	LayerShell *LayerShellConfig
+}
+
+// LayerShellConfig describes the wlr-layer-shell surface to create. Values map
+// to wlr-layer-shell-unstable-v1: Layer and Anchor are bitfields/enums from
+// that protocol, and KeyboardInteractivity selects none/exclusive/on_demand.
+type LayerShellConfig struct {
+	Namespace             string // namespace for compositor rules
+	Layer                 uint32 // 0=background 1=bottom 2=top 3=overlay
+	Anchor                uint32 // bitmask: 1=top 2=bottom 4=left 8=right
+	KeyboardInteractivity uint32 // 0=none 1=exclusive 2=on_demand (needs v4)
+	Width                 int32  // 0 with opposite edges anchored = compositor decides
+	Height                int32
+	ExclusiveZone         int32 // -1 = never reserve space
 }
 
 // Event represents a platform event.
