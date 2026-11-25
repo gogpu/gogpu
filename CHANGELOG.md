@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.56.0] - 2026-11-26
 
 ### Added
 
@@ -3101,7 +3101,10 @@ Window responsiveness fix for Pure Go Vulkan backend.
 - **Examples**
   - `examples/triangle/` — Simple triangle demo
 
-[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.54.1...HEAD
+[Unreleased]: https://github.com/gogpu/gogpu/compare/v0.56.0...HEAD
+[0.56.0]: https://github.com/gogpu/gogpu/compare/v0.55.1...v0.56.0
+[0.55.1]: https://github.com/gogpu/gogpu/compare/v0.55.0...v0.55.1
+[0.55.0]: https://github.com/gogpu/gogpu/compare/v0.54.1...v0.55.0
 [0.54.1]: https://github.com/gogpu/gogpu/compare/v0.54.0...v0.54.1
 [0.20.5]: https://github.com/gogpu/gogpu/compare/v0.20.4...v0.20.5
 [0.20.4]: https://github.com/gogpu/gogpu/compare/v0.20.3...v0.20.4
