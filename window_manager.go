@@ -333,7 +333,7 @@ func (wm *WindowManager) getByPlatformID(pid platform.WindowID) *Window {
 // nothing while the primary window is open.
 func (a *App) NewWindow(config Config) (*Window, error) {
 	if a.manager == nil || a.renderer == nil {
-		return nil, fmt.Errorf("gogpu: NewWindow called before Run()")
+		return nil, fmt.Errorf("%w: NewWindow called before Run()", ErrNotInitialized)
 	}
 
 	// Create platform window via PlatformManager.

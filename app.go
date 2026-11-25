@@ -62,6 +62,8 @@ type App struct {
 	onResumed          func()                             // app visible/active (ADR-026)
 	onSuspended        func()                             // app backgrounded (ADR-026)
 	onMemoryWarning    func()                             // free caches or be killed (ADR-026)
+	onSurfaceLost      func(error)                        // surface-loss episode (P2-API-009)
+	onDeviceLost       func(error)                        // terminal device loss (P2-API-009)
 	onFileDrop         func(paths []string, x, y float64) // OS file drag-and-drop
 	hitTestCallback    gpucontext.HitTestCallback
 
@@ -71,6 +73,10 @@ type App struct {
 	lifecycle              AppLifecycle // ADR-026 universal lifecycle state
 	quitOnLastWindowClosed bool         // default true — exit when last window closes
 	lastFrame              time.Time
+
+	// deviceLostErr is the terminal error delivered by OnDeviceLost; Run
+	// returns it once the loop stops. Consumer-owned (event-loop goroutine).
+	deviceLostErr error
 
 	// Event-driven rendering
 	invalidator   *Invalidator
@@ -189,6 +195,50 @@ func (a *App) OnSuspended(fn func()) *App {
 // to Activity.onLowMemory / UIApplication.didReceiveMemoryWarning.
 func (a *App) OnMemoryWarning(fn func()) *App {
 	a.onMemoryWarning = fn
+	return a
+}
+
+// OnSurfaceLost registers a callback invoked when the renderer loses its
+// surface and begins recovering by recreating it.
+//
+// The delivered error satisfies errors.Is(err, ErrSurfaceLost) and carries the
+// backend cause, so errors.Is also matches the backend's own sentinel where it
+// reports one. It fires on the transition into a loss episode — once per
+// episode, and again only after a successful recreate followed by a new loss;
+// episodes that begin between two dispatches coalesce into one callback
+// carrying the latest cause (the app observes "lost now", not a count).
+// While the surface is lost, drawing calls return errors that match
+// ErrSurfaceLost and frames pause. Three consecutive failed recreates escalate
+// to a terminal device loss: OnDeviceLost fires instead and Run returns the
+// error.
+//
+// Unlike OnSurfaceDestroyed, which reports the platform destroying the surface
+// (ADR-026: the app must drop GPU surfaces immediately, e.g. Android onStop),
+// this reports a GPU-side loss that gogpu recovers from on its own.
+//
+// The callback runs on the event-loop goroutine.
+func (a *App) OnSurfaceLost(fn func(err error)) *App {
+	a.onSurfaceLost = fn
+	return a
+}
+
+// OnDeviceLost registers a callback invoked when the GPU device is lost and
+// cannot recover. The delivered error satisfies errors.Is(err, ErrDeviceLost)
+// and carries the backend cause.
+//
+// Per-backend coverage: device loss is reported where the backend exposes it —
+// today the DX12 health check (DEVICE_REMOVED diagnostics) and any backend
+// whose submit reports a lost device. The browser build has no health signal;
+// the -tags rust build reports only "destroyed" until the webgpu binding gains
+// lost-device reporting (webgpu v0.6.0). Where the backend cannot tell, this
+// callback never fires and rendering continues.
+//
+// The callback runs once, on the event-loop goroutine, before Run returns; it
+// must not block. After Run returns that error the App is not re-runnable —
+// restarting means a new process (an in-place restart would be a separate,
+// later addition).
+func (a *App) OnDeviceLost(fn func(err error)) *App {
+	a.onDeviceLost = fn
 	return a
 }
 
@@ -417,6 +467,9 @@ func (a *App) Run() error {
 	a.runMainLoop()
 
 	a.lifecycle = AppIdle
+	if a.deviceLostErr != nil {
+		return a.deviceLostErr
+	}
 	return nil
 }
 
@@ -553,6 +606,27 @@ func (a *App) runFrame() {
 	// Lazy acquire inside: if OnDraw doesn't draw, no swapchain acquire.
 	if (continuousRender || invalidated) && a.frameCallbackReady() {
 		a.renderFrameMultiThread()
+	}
+
+	a.deliverLossCallbacks()
+}
+
+// deliverLossCallbacks hands the renderer's pending loss to the App callbacks
+// on the event-loop goroutine (P2-API-009). Device loss is terminal and
+// subsumes a pending surface episode: only the device callback fires then.
+func (a *App) deliverLossCallbacks() {
+	if a.renderer == nil {
+		return
+	}
+	surfaceErr, deviceErr := a.renderer.ConsumeLoss()
+	if surfaceErr != nil && a.onSurfaceLost != nil {
+		a.onSurfaceLost(surfaceErr)
+	}
+	if deviceErr != nil {
+		if a.onDeviceLost != nil {
+			a.onDeviceLost(deviceErr)
+		}
+		a.deviceLostErr = deviceErr
 	}
 }
 
@@ -741,6 +815,12 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
 			a.config.Transparent,
 		)
+		if a.renderer != nil {
+			// Loss delivery (P2-API-009): the render thread nudges the event
+			// loop after recording a loss, so delivery does not wait for an
+			// unrelated event. RequestRedraw is safe from any goroutine.
+			a.renderer.wake = a.RequestRedraw
+		}
 	})
 	if initErr != nil {
 		return initErr

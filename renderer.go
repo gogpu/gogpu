@@ -90,6 +90,11 @@ type RenderTarget struct {
 
 	state SurfaceState
 
+	// lostFails counts consecutive surface-loss episodes without a successful
+	// configure. Render-thread-owned; maxSurfaceRecoverAttempts escalates to
+	// device loss (P2-API-009).
+	lostFails int
+
 	// Current frame state (reused, zero alloc per frame)
 	currentSurfaceTexture *wgpu.SurfaceTexture
 	currentView           *wgpu.TextureView
@@ -271,6 +276,17 @@ type Renderer struct {
 	// Submission tracker for non-blocking resource recycling.
 	tracker submissionTracker
 
+	// Loss handoff (P2-API-009): the render thread records the first loss of an
+	// episode here; the event-loop goroutine consumes it and delivers the App
+	// callbacks. Atomics only — this path never takes a lock. Producer and
+	// consumer ownership rules live on lossSignal.
+	loss lossSignal
+
+	// wake nudges the event loop after a loss is recorded, so delivery does not
+	// wait for an unrelated event. Set by App inside initRenderer's render-thread
+	// step, before any frame runs; RequestRedraw is safe from any goroutine.
+	wake func()
+
 	// Built-in pipelines (shared across all windows)
 	trianglePipeline       *wgpu.RenderPipeline
 	trianglePipelineLayout *wgpu.PipelineLayout
@@ -447,7 +463,7 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 	var err error
 	r.adapter, err = r.instance.RequestAdapter(opts)
 	if err != nil {
-		return fmt.Errorf("gogpu: failed to request adapter: %w", err)
+		return fmt.Errorf("%w: request adapter: %w", ErrNoGPU, err)
 	}
 	info := r.adapter.Info()
 	slog.Info("adapter selected", "name", info.Name, "backend", info.Backend, "type", info.DeviceType)
@@ -456,7 +472,7 @@ func (r *Renderer) initAdapterDevice(surfaceHint *wgpu.Surface) error {
 
 	r.device, err = r.adapter.RequestDevice(nil)
 	if err != nil {
-		return fmt.Errorf("gogpu: failed to request device: %w", err)
+		return fmt.Errorf("%w: request device: %w", ErrNoGPU, err)
 	}
 	return nil
 }
@@ -488,6 +504,7 @@ func (r *Renderer) configureSurface(ws *RenderTarget) error {
 			return fmt.Errorf("gogpu: failed to configure surface: %w", err)
 		}
 		ws.state = SurfaceConfigured
+		ws.lostFails = 0 // a successful configure re-arms the loss escalation
 	} else {
 		slog.Debug("gogpu: configureSurface skipping (zero dimensions)",
 			"width", width, "height", height)
@@ -654,6 +671,7 @@ func (ws *RenderTarget) resize(width, height int, device *wgpu.Device, adapter *
 		return
 	}
 	ws.state = SurfaceConfigured
+	ws.lostFails = 0 // a successful configure re-arms the loss escalation
 }
 
 // BeginFrame prepares a new frame for rendering on the primary surface.
@@ -751,17 +769,31 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 			if cfgErr := ws.configure(device, adapter); cfgErr != nil {
 				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
 				ws.state = SurfaceLost
+				ws.noteSurfaceLost(cfgErr)
 			}
 		}
 	case errors.Is(err, wgpu.ErrSurfaceLost):
 		slog.Error("gogpu: surface lost", "err", err)
 		ws.state = SurfaceLost
+		ws.noteSurfaceLost(err)
 	default:
 		slog.Error("gogpu: surface texture acquire failed", "err", err)
 		if ws.width > 0 && ws.height > 0 {
 			_ = ws.configure(device, adapter)
 		}
 	}
+}
+
+// noteSurfaceLost records a surface-loss episode for the app-facing handoff and
+// escalates to a terminal device loss after maxSurfaceRecoverAttempts
+// consecutive failed recoveries. Render-thread only.
+func (ws *RenderTarget) noteSurfaceLost(cause error) {
+	ws.lostFails++
+	if ws.lostFails >= maxSurfaceRecoverAttempts {
+		ws.renderer.recordDeviceLost(fmt.Errorf("surface could not be recovered after %d attempts: %w", ws.lostFails, cause))
+		return
+	}
+	ws.renderer.recordSurfaceLost(cause)
 }
 
 // EndFrame presents the rendered frame on the primary surface.
@@ -954,6 +986,7 @@ func (ws *RenderTarget) present() (reconfigured, presented bool) {
 			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
 				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
 				ws.state = SurfaceLost
+				ws.noteSurfaceLost(cfgErr)
 				return false, false
 			}
 			return true, false
@@ -963,6 +996,7 @@ func (ws *RenderTarget) present() (reconfigured, presented bool) {
 	if errors.Is(err, wgpu.ErrSurfaceLost) {
 		slog.Error("gogpu: surface lost on present", "err", err)
 		ws.state = SurfaceLost
+		ws.noteSurfaceLost(err)
 		return false, false
 	}
 	slog.Error("PRESENT ERROR", "err", err)
@@ -1057,6 +1091,9 @@ func (ws *RenderTarget) tryOverlayOnlyFrame() bool {
 // frame, creating it lazily. Ownership remains with RenderTarget.
 func (ws *RenderTarget) ensureFrameEncoder() (*wgpu.CommandEncoder, error) {
 	if !ws.ensureFrameStarted() {
+		if ws.state == SurfaceLost {
+			return nil, fmt.Errorf("gogpu: surface frame not available: %w", ErrSurfaceLost)
+		}
 		return nil, fmt.Errorf("gogpu: surface frame not available")
 	}
 	ws.materializeIdentityPresent()
@@ -1556,8 +1593,17 @@ func (ws *RenderTarget) flushClear(device *wgpu.Device, r *Renderer) bool {
 func (r *Renderer) submitTracked(commands *wgpu.CommandBuffer) {
 	subIdx, err := r.device.Queue().Submit(commands)
 	if err != nil {
+		if errors.Is(err, wgpu.ErrDeviceLost) {
+			r.recordDeviceLost(err)
+		}
 		slog.Error("submit failed", "err", err)
 		return
+	}
+	// Where the backend exposes a health check (DX12's DEVICE_REMOVED
+	// diagnostics today; nil elsewhere), a lost device is detected here even
+	// when the submit itself succeeded.
+	if herr := r.device.CheckHealth(); herr != nil {
+		r.recordDeviceLost(herr)
 	}
 	r.tracker.track(subIdx, commands)
 }
@@ -1854,6 +1900,9 @@ func (r *Renderer) getOrCreateTexBindGroup(tex *Texture) (*wgpu.BindGroup, error
 // materializeIdentityPresent.
 func (r *Renderer) drawTexturedQuad(ws *RenderTarget, tex *Texture, opts DrawTextureOptions) error {
 	if !ws.ensureFrameStarted() {
+		if ws.state == SurfaceLost {
+			return fmt.Errorf("gogpu: surface frame not available: %w", ErrSurfaceLost)
+		}
 		return fmt.Errorf("gogpu: surface frame not available")
 	}
 	ws.materializeIdentityPresent()

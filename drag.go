@@ -72,7 +72,7 @@ func (w *Window) StartDrag(data DragData, onComplete func(DragResult)) error {
 // Convenience wrapper around PrimaryWindow().StartDrag().
 func (a *App) StartDrag(data DragData, onComplete func(DragResult)) error {
 	if a.primaryWindow == nil {
-		return fmt.Errorf("gogpu: StartDrag called before Run()")
+		return fmt.Errorf("%w: StartDrag called before Run()", ErrNotInitialized)
 	}
 	return a.primaryWindow.StartDrag(data, onComplete)
 }

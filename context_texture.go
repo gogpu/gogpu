@@ -1,8 +1,6 @@
 package gogpu
 
 import (
-	"errors"
-
 	"github.com/gogpu/gpucontext"
 )
 
@@ -28,17 +26,7 @@ type DrawTextureOptions struct {
 	Alpha float32
 }
 
-// ErrTextureNil is returned when attempting to draw a nil texture.
-var ErrTextureNil = errors.New("gogpu: texture is nil")
-
-// ErrTextureDestroyed is returned when attempting to draw a destroyed texture.
-var ErrTextureDestroyed = errors.New("gogpu: texture has been destroyed")
-
-// ErrInvalidDimensions is returned when texture dimensions are invalid.
-var ErrInvalidDimensions = errors.New("gogpu: invalid texture dimensions")
-
-// ErrNotImplemented is returned for features that are not yet implemented.
-var ErrNotImplemented = errors.New("gogpu: feature not implemented")
+// The texture sentinels live with the rest of the root set in errors.go.
 
 // DrawTexture draws a texture at the specified position.
 // The texture is drawn at its original size with the top-left corner
@@ -160,9 +148,6 @@ func validateTexture(tex *Texture) error {
 
 	return nil
 }
-
-// ErrInvalidTextureType is returned when a texture has an unexpected type.
-var ErrInvalidTextureType = errors.New("gogpu: texture must be *Texture")
 
 // Compile-time interface compliance checks.
 var (

@@ -6,34 +6,31 @@ import (
 	"testing"
 )
 
-// rootSentinels are the eleven sentinel errors the root package exports.
+// rootSentinels are the eight sentinel errors the root package exports.
 //
 // Error identity is part of the frozen v1.0 shape: a consumer matches these
 // with errors.Is, so their messages and distinctness are pinned here
-// (P2-API-008 row 2). Which of them a public path actually produces is a
-// separate decision recorded in P2-API-009 — this test pins the declared
-// contract, not the wiring.
+// (P2-API-008). Every one of them is produced by a real path (P2-API-009):
+// the texture/dimension failures, the pre-Run call-order errors, GPU
+// acquisition, and the surface/device loss reports.
 var rootSentinels = []struct {
 	name string
 	err  error
 	want string
 }{
 	{"ErrNotInitialized", ErrNotInitialized, "gogpu: not initialized"},
-	{"ErrPlatformNotSupported", ErrPlatformNotSupported, "gogpu: platform not supported"},
 	{"ErrNoGPU", ErrNoGPU, "gogpu: no suitable GPU found"},
 	{"ErrSurfaceLost", ErrSurfaceLost, "gogpu: surface lost"},
-	{"ErrWindowClosed", ErrWindowClosed, "gogpu: window closed"},
 	{"ErrDeviceLost", ErrDeviceLost, "gogpu: GPU device lost"},
 	{"ErrTextureNil", ErrTextureNil, "gogpu: texture is nil"},
 	{"ErrTextureDestroyed", ErrTextureDestroyed, "gogpu: texture has been destroyed"},
 	{"ErrInvalidDimensions", ErrInvalidDimensions, "gogpu: invalid texture dimensions"},
-	{"ErrNotImplemented", ErrNotImplemented, "gogpu: feature not implemented"},
 	{"ErrInvalidTextureType", ErrInvalidTextureType, "gogpu: texture must be *Texture"},
 }
 
 func TestRootSentinelsIdentity(t *testing.T) {
-	if len(rootSentinels) != 11 {
-		t.Fatalf("rootSentinels holds %d entries; the root package exports 11 — a new sentinel needs its row here", len(rootSentinels))
+	if len(rootSentinels) != 8 {
+		t.Fatalf("rootSentinels holds %d entries; the root package exports 8 — a new sentinel needs its row here", len(rootSentinels))
 	}
 
 	for _, tt := range rootSentinels {
