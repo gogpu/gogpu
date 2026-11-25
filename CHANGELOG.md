@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dependencies: gpucontext v0.32.0 → v0.32.1.** gpucontext's public API is unchanged (its signature golden is
   zero-diff); the release brings gputypes v0.9.2 as its requirement. Its Go floor stays 1.25 — this release keeps every
   consumer at Go 1.25.
+- **Dependencies: wgpu v0.35.5 → v0.35.6.** The release adds the software backend's 4-sample multisampled color,
+  a distinct `ErrSurfaceZeroArea` for a zero-sized surface configure, and a Metal depth-bias fix. Its Go floor and
+  x/sys stay at 1.25 and v0.47.0.
 - **Error identity is wired end to end** (v1.0 shape freeze, P2-API-009): `App.NewWindow` and `App.StartDrag` before
   `Run` match `ErrNotInitialized`; a failed adapter or device creation matches `ErrNoGPU` with the backend cause;
   surface-loss drawing errors and the `OnSurfaceLost` error match `ErrSurfaceLost`; the `OnDeviceLost` error and
