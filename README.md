@@ -437,6 +437,12 @@ app.SetQuitOnLastWindowClosed(false) // tray/headless: stay alive with zero wind
 app.OnSurfaceAvailable(func() { /* create GPU resources */ })
 app.OnSurfaceDestroyed(func() { /* drop GPU surfaces NOW */ })
 
+// GPU loss (0.56.0): a lost surface is transient and gogpu recreates it —
+// drawing calls match ErrSurfaceLost meanwhile; a lost device is terminal
+// and Run returns the error after the callback
+app.OnSurfaceLost(func(err error) { /* your state may need a redraw */ })
+app.OnDeviceLost(func(err error) { /* release what the device owned */ })
+
 // App lifecycle (desktop: no-ops; mobile: Activity/UIApplication events)
 app.OnResumed(func() { /* app visible */ })
 app.OnSuspended(func() { /* app backgrounded, stop rendering */ })
@@ -444,6 +450,11 @@ app.OnMemoryWarning(func() { /* free caches */ })
 ```
 
 See `examples/lifecycle/` for a visual demo: close the primary window, the secondary keeps rendering.
+
+Both loss callbacks run on the event-loop goroutine and must not block. They fire once per episode: after a
+device loss, surface episodes are considered delivered. Device-loss detection is per backend — the DX12
+health check and backends whose submit reports a lost device; three consecutive failed surface recreates
+escalate to device loss. The full contract is in the `App.OnSurfaceLost` and `App.OnDeviceLost` docs.
 
 ### Event-Driven Rendering
 
