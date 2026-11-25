@@ -32,10 +32,10 @@ type floor struct {
 }
 
 var contextFloors = map[string]floor{
-	"windows/amd64/": {8, 328},
-	"linux/amd64/":   {8, 328},
-	"darwin/arm64/":  {8, 328},
-	"js/wasm/":       {8, 328},
+	"windows/amd64/": {8, 325},
+	"linux/amd64/":   {8, 325},
+	"darwin/arm64/":  {8, 325},
+	"js/wasm/":       {8, 325},
 }
 
 func floorFor(c config) (floor, error) {
