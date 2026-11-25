@@ -12,6 +12,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linux: dead keys and the Compose key produce their composed characters** (#562, by @dvoyni). X11 and Wayland text
   input now run each key through libxkbcommon's compose table, loaded for the active locale: a dead key or the Compose
   key on its own types nothing, and the key that completes the sequence types the composed character.
+- **`App.OnSurfaceLost` and `App.OnDeviceLost`.** The renderer now reports GPU losses the app could not see before: a
+  lost surface (transient — gogpu recreates it; drawing calls match `ErrSurfaceLost` meanwhile) and a lost device
+  (terminal — `Run` returns the error after the callback). Both callbacks run on the event-loop goroutine; the
+  delivered errors carry the backend cause as well as the gogpu sentinel. Device-loss coverage is per backend: the
+  DX12 health check and any backend whose submit reports a lost device; the browser build has no health signal, and
+  the `-tags rust` build reports only "destroyed" until the webgpu binding gains lost-device reporting (v0.6.0).
+  Three consecutive failed surface recreates escalate to device loss.
+
+### Changed
+
+- **Error identity is wired end to end** (v1.0 shape freeze, P2-API-009): `App.NewWindow` and `App.StartDrag` before
+  `Run` match `ErrNotInitialized`; a failed adapter or device creation matches `ErrNoGPU` with the backend cause;
+  surface-loss drawing errors and the `OnSurfaceLost` error match `ErrSurfaceLost`; the `OnDeviceLost` error and
+  `Run`'s return match `ErrDeviceLost`. The root sentinels now live in one place (`errors.go`).
+
+### Removed (breaking)
+
+- **Three sentinels that nothing could return:** `ErrPlatformNotSupported` (an unsupported GOOS fails to build —
+  there is no runtime path), `ErrWindowClosed` (every `Window` operation is void; there is no error to carry it), and
+  `ErrNotImplemented` (no public path returns it). Pre-1.0, so the removal is allowed; each was a promise to callers
+  that the API did not keep.
 
 ### Fixed
 

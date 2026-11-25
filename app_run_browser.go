@@ -133,7 +133,8 @@ func (l *browserFrameLoop) cancelPendingFrame() {
 }
 
 func (l *browserFrameLoop) shouldExit() bool {
-	return !l.app.running.Load() || (l.app.platWindow != nil && l.app.platWindow.ShouldClose())
+	return !l.app.running.Load() || l.app.deviceLostErr != nil ||
+		(l.app.platWindow != nil && l.app.platWindow.ShouldClose())
 }
 
 func (l *browserFrameLoop) documentHidden() bool {
