@@ -30,8 +30,10 @@ is refused rather than given a weak default.
 ## The floor
 
 `contextFloors` pins the package and identifier counts the loader must reach before a golden is written
-(currently 8 packages / 328 identifiers in every context). A load that loses a package or drops
-identifiers fails instead of producing a short file that looks reviewed.
+(currently 8 packages / 325 identifiers in every context). A load that loses a package or drops
+identifiers fails instead of producing a short file that looks reviewed. When an intended public-API
+change moves the count, regenerating includes lowering the floor to the reviewed count in the same
+commit.
 
 ## Regenerating after an intended change
 
