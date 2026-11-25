@@ -294,27 +294,9 @@ func TestDrawTextureExAlphaClamping(t *testing.T) {
 	}
 }
 
-func TestContextTextureErrorConstants(t *testing.T) {
-	// Verify error messages are meaningful
-	tests := []struct {
-		err  error
-		want string
-	}{
-		{ErrTextureNil, "gogpu: texture is nil"},
-		{ErrTextureDestroyed, "gogpu: texture has been destroyed"},
-		{ErrInvalidDimensions, "gogpu: invalid texture dimensions"},
-		{ErrNotImplemented, "gogpu: feature not implemented"},
-		{ErrInvalidTextureType, "gogpu: texture must be *Texture"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.err.Error(), func(t *testing.T) {
-			if tt.err.Error() != tt.want {
-				t.Errorf("Error() = %q, want %q", tt.err.Error(), tt.want)
-			}
-		})
-	}
-}
+// The texture sentinels' messages and distinctness are pinned in
+// TestRootSentinelsIdentity and TestRootSentinelsAreDistinct (errors_test.go),
+// the canonical identity set.
 
 func TestContextTextureDrawerInvalidType(t *testing.T) {
 	ctx := &Context{renderer: &Renderer{}}
