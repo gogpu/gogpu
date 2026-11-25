@@ -256,14 +256,6 @@ type MetalDrawable struct {
 	id ID
 }
 
-// NewMetalDrawableFromID creates a MetalDrawable from an ID.
-func NewMetalDrawableFromID(id ID) *MetalDrawable {
-	if id.IsNil() {
-		return nil
-	}
-	return &MetalDrawable{id: id}
-}
-
 // ID returns the underlying Objective-C object ID.
 func (d *MetalDrawable) ID() ID {
 	if d == nil {

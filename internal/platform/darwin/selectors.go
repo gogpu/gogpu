@@ -553,11 +553,6 @@ func Selectors() *Sel {
 	return &Sel{}
 }
 
-// Classes initializes and returns class cache.
-func Classes() {
-	initClasses()
-}
-
 // Convenience accessors for selectors
 
 // Alloc returns the alloc selector.
