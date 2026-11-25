@@ -95,7 +95,9 @@ Then open a PR on GitHub.
 - [ ] Linter passes (`golangci-lint run --timeout=5m`)
 - [ ] Code is formatted (`gofmt -l .` returns nothing)
 - [ ] Documentation updated (if applicable)
-- [ ] CHANGELOG.md updated (for features/fixes)
+- **Don't edit `CHANGELOG.md`.** The maintainer writes the entry under `[Unreleased]` with your credit (`(#123, by
+  @you)`) when merging, so entries are written once and in one voice — and no two PRs conflict on the same
+  `[Unreleased]` section. Write the user-visible summary in your PR description instead.
 
 ### PR Title Format
 
