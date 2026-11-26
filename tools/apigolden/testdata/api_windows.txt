@@ -110,6 +110,7 @@ const AppSuspended AppLifecycle = 3
 const AppSuspending AppLifecycle = 2
 
 type Config struct {
+    StartHidden bool
     Title string
     Width int
     Height int
@@ -145,6 +146,7 @@ method (Config) WithPowerPreference(pref github.com/gogpu/gputypes.PowerPreferen
 method (Config) WithRenderMode(mode RenderMode) Config
 method (Config) WithResizable(resizable bool) Config
 method (Config) WithSize(width int, height int) Config
+method (Config) WithStartHidden(hidden bool) Config
 method (Config) WithTabbingIdentifier(id string) Config
 method (Config) WithTabbingMode(mode TabbingMode) Config
 method (Config) WithTitle(title string) Config

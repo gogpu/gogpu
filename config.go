@@ -38,6 +38,17 @@ const (
 
 // Config configures the application.
 type Config struct {
+	// StartHidden creates the primary window without showing it. The window
+	// still renders, and a later Window.Show presents it. Default is false.
+	//
+	// Windows and X11 create the window hidden (unmapped on X11). macOS
+	// also starts the app with the Accessory activation policy and does
+	// not activate it, so it takes no focus. Wayland cannot keep a
+	// toplevel hidden: a presented buffer lets the compositor show it.
+	// In browsers, the DOM controls canvas visibility and this option has
+	// no effect.
+	StartHidden bool
+
 	// Title is the window title.
 	Title string
 
@@ -403,3 +414,10 @@ const (
 	// TabbingDisallowed explicitly prevents the window from being grouped into tabs.
 	TabbingDisallowed TabbingMode = 2
 )
+
+// WithStartHidden sets whether the primary window is created without being
+// shown. See Config.StartHidden for what each platform does.
+func (c Config) WithStartHidden(hidden bool) Config {
+	c.StartHidden = hidden
+	return c
+}

@@ -452,12 +452,8 @@ func (a *App) Run() error {
 		return err
 	}
 
-	platWindow.Show()
-	a.syncInitialSurfaceSize()
-
+	a.startPrimaryWindow(platWindow)
 	defer a.shutdown(platWindow)
-
-	a.registerPrimaryWindow(platWindow)
 	a.startRunLoop()
 
 	// Main loop with three rendering modes (ADR-023):
@@ -474,10 +470,25 @@ func (a *App) Run() error {
 	return nil
 }
 
-// syncInitialSurfaceSize resizes the GPU surface once after the window is
-// shown. macOS can report 0×0 PhysicalSize until the first layout pass, so
-// configureSurface during initRenderer may skip; this sync lets the first
-// OnDraw present.
+// startsHidden reports whether the primary window starts hidden. On macOS
+// the platform also takes it as the nonactivating startup policy.
+func (a *App) startsHidden() bool {
+	return a.config.StartHidden && runtime.GOOS != "js"
+}
+
+// startPrimaryWindow makes the first window ready for the render loop.
+func (a *App) startPrimaryWindow(platWindow platform.PlatformWindow) {
+	startHidden := a.startsHidden()
+	if !startHidden {
+		platWindow.Show()
+	}
+	a.syncInitialSurfaceSize()
+	a.registerPrimaryWindow(platWindow, startHidden)
+}
+
+// syncInitialSurfaceSize reconciles the GPU surface with the window size
+// before the first frame. On macOS, PhysicalSize can be 0×0 until the first
+// layout, so initRenderer may leave surface configuration pending.
 func (a *App) syncInitialSurfaceSize() {
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		if a.renderer != nil && a.platWindow != nil && a.renderer.primary != nil {
@@ -640,6 +651,9 @@ func (a *App) initPlatform() (platform.PlatformWindow, error) {
 	// Initialize platform manager (process-level) — must be on main thread.
 	platform.SetLogger(slogger())
 	a.manager = newPlatformManagerFn()
+	if background, ok := a.manager.(interface{ SetBackground(bool) }); ok {
+		background.SetBackground(a.startsHidden())
+	}
 	if err := a.manager.Init(); err != nil {
 		return nil, err
 	}
@@ -1179,11 +1193,14 @@ type windowFrame struct {
 	physH  int
 }
 
-// renderFrameMultiThread renders a frame using the render thread.
-// All GPU operations happen on the render thread to keep main thread responsive.
-func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow) {
+// registerPrimaryWindow records the startup window for the render loop.
+func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow, startHidden bool) {
 	a.windowManager = newWindowManager()
 	internalID := a.windowManager.allocate()
+	visible := !startHidden
+	if startup, ok := platWindow.(interface{ ShowsOnFirstFrame() bool }); ok && startup.ShowsOnFirstFrame() {
+		visible = true
+	}
 	a.primaryWindow = &Window{
 		id:              internalID,
 		platformID:      platWindow.ID(),
@@ -1193,7 +1210,8 @@ func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow) {
 		onDraw:          a.onDraw,
 		onResize:        a.onResize,
 		headerAlignment: a.config.HeaderAlignment,
-		visible:         true,
+		visible:         visible,
+		startHidden:     startHidden,
 	}
 	a.primaryPlatformID = platWindow.ID()
 	a.windowManager.add(a.primaryWindow)
@@ -1204,12 +1222,12 @@ func (a *App) registerPrimaryWindow(platWindow platform.PlatformWindow) {
 // its own beginFrame/draw/endFrame cycle. GPU submission polling happens once
 // after all windows are presented.
 func (a *App) renderFrameMultiThread() {
-	// Collect visible windows with their main-thread state.
+	// Collect windows eligible to draw with their main-thread state.
 	a.windowManager.mu.RLock()
 	frames := make([]windowFrame, 0, len(a.windowManager.order))
 	for _, id := range a.windowManager.order {
 		w := a.windowManager.windows[id]
-		if w == nil || !w.visible {
+		if w == nil || !w.renders() {
 			continue
 		}
 		pw, ph := w.platWindow.PhysicalSize()

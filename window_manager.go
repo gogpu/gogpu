@@ -33,6 +33,9 @@ type Window struct {
 	surface    *RenderTarget
 	platWindow platform.PlatformWindow // underlying platform window
 
+	// startHidden: started hidden by Config.StartHidden; drawn, not shown.
+	startHidden bool
+
 	// Header configuration
 	headerAlignment HeaderAlignment
 
@@ -143,9 +146,17 @@ func (w *Window) PhysicalSize() (int, int) {
 	return w.config.Width, w.config.Height
 }
 
-// Visible returns whether the window is currently visible and rendering.
+// Visible reports the visibility state tracked by the app. On Wayland,
+// the app treats the primary window as visible from startup because the
+// compositor can show it once a buffer is presented.
 func (w *Window) Visible() bool {
 	return w.visible
+}
+
+// renders reports whether the render loop draws this window. A window that
+// started hidden by Config.StartHidden is drawn before its first Show.
+func (w *Window) renders() bool {
+	return w.visible || w.startHidden
 }
 
 // Show makes the window visible and gives it input focus.
@@ -154,6 +165,7 @@ func (w *Window) Show() {
 		w.platWindow.Show()
 	}
 	w.visible = true
+	w.startHidden = false
 }
 
 // Hide hides the window.
@@ -162,6 +174,7 @@ func (w *Window) Hide() {
 		w.platWindow.Hide()
 	}
 	w.visible = false
+	w.startHidden = false
 }
 
 // SetPosition moves the window to the given logical screen position
