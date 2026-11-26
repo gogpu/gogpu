@@ -5,7 +5,8 @@ import "errors"
 // Sentinel errors of the root package. Error identity is part of the frozen
 // v1.0 shape: consumers match these with errors.Is, and every one of them is
 // produced by a real path — the texture/dimension failures below, the pre-Run
-// call-order errors, GPU acquisition, and the surface/device loss reports
+// call-order errors, a Run or Start while a HostLoop owns the loop, GPU
+// acquisition, and the surface/device loss reports
 // (P2-API-008, P2-API-009).
 var (
 	// ErrNotInitialized is returned when an operation is attempted before the
@@ -40,4 +41,8 @@ var (
 
 	// ErrInvalidTextureType is returned when a texture has an unexpected type.
 	ErrInvalidTextureType = errors.New("gogpu: texture must be *Texture")
+
+	// ErrHostLoopStarted is returned by Run while a HostLoop owns the loop,
+	// and by HostLoop.Start when it already does.
+	ErrHostLoopStarted = errors.New("gogpu: a HostLoop has started")
 )

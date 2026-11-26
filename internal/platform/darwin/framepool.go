@@ -4,6 +4,28 @@ package darwin
 
 import "runtime"
 
+// PushFramePool opens a fresh NSAutoreleasePool for a frame split across two
+// calls; PopFramePool drains it. As RunInFramePool does, the pair owns the
+// goroutine's OS thread for the pool's lifetime: PushFramePool locks it
+// before the pool exists and PopFramePool unlocks it after the drain, so the
+// pool is drained on the thread that made it. Both must be called on the same
+// goroutine, and every PushFramePool must be followed by one PopFramePool.
+func PushFramePool() uintptr {
+	initSelectors()
+	initClasses()
+	runtime.LockOSThread()
+	return uintptr(classes.NSAutoreleasePool.Send(selectors.new))
+}
+
+// PopFramePool drains the pool PushFramePool returned, if it made one, and
+// releases the thread PushFramePool locked.
+func PopFramePool(pool uintptr) {
+	defer runtime.UnlockOSThread()
+	if pool != 0 {
+		ID(pool).Send(selectors.drain)
+	}
+}
+
 // RunInFramePool executes fn inside a fresh NSAutoreleasePool.
 //
 // Use on the render thread once per frame. Metal drawables and transient ObjC

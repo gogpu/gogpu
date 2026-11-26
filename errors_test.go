@@ -6,13 +6,14 @@ import (
 	"testing"
 )
 
-// rootSentinels are the eight sentinel errors the root package exports.
+// rootSentinels are the nine sentinel errors the root package exports.
 //
 // Error identity is part of the frozen v1.0 shape: a consumer matches these
 // with errors.Is, so their messages and distinctness are pinned here
 // (P2-API-008). Every one of them is produced by a real path (P2-API-009):
-// the texture/dimension failures, the pre-Run call-order errors, GPU
-// acquisition, and the surface/device loss reports.
+// the texture/dimension failures, the pre-Run call-order errors, a Run or
+// Start while a HostLoop owns the loop, GPU acquisition, and the
+// surface/device loss reports.
 var rootSentinels = []struct {
 	name string
 	err  error
@@ -26,11 +27,12 @@ var rootSentinels = []struct {
 	{"ErrTextureDestroyed", ErrTextureDestroyed, "gogpu: texture has been destroyed"},
 	{"ErrInvalidDimensions", ErrInvalidDimensions, "gogpu: invalid texture dimensions"},
 	{"ErrInvalidTextureType", ErrInvalidTextureType, "gogpu: texture must be *Texture"},
+	{"ErrHostLoopStarted", ErrHostLoopStarted, "gogpu: a HostLoop has started"},
 }
 
 func TestRootSentinelsIdentity(t *testing.T) {
-	if len(rootSentinels) != 8 {
-		t.Fatalf("rootSentinels holds %d entries; the root package exports 8 — a new sentinel needs its row here", len(rootSentinels))
+	if len(rootSentinels) != 9 {
+		t.Fatalf("rootSentinels holds %d entries; the root package exports 9 — a new sentinel needs its row here", len(rootSentinels))
 	}
 
 	for _, tt := range rootSentinels {

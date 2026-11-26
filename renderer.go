@@ -338,7 +338,10 @@ type Renderer struct {
 	frameStats         frameStatsState
 }
 
-// newRenderer creates and initializes a new renderer.
+// newRenderer creates and initializes a new renderer. When a phase fails, it
+// returns the error with the renderer as far as it got, for the caller to
+// tear down in the order a started one is: Destroy, then the platform, then
+// ReleaseInstance (see App.shutdown).
 func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI, vsync bool, powerPref gputypes.PowerPreference, transparent bool) (*Renderer, error) {
 	r := &Renderer{
 		powerPreference: powerPref,
@@ -352,7 +355,7 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 
 	// Phase 1: Create GPU instance with backend mask (may include multiple backends).
 	if err := r.initInstance(graphicsAPI); err != nil {
-		return nil, err
+		return r, err
 	}
 
 	// Phase 2: Create the surface before adapter enumeration.
@@ -360,17 +363,17 @@ func newRenderer(platWin platform.PlatformWindow, graphicsAPI types.GraphicsAPI,
 	// the surface early is harmless for other backends and enables multi-backend
 	// Auto mode where GLES participates in adapter selection alongside Vulkan/DX12.
 	if err := r.createSurface(r.primary); err != nil {
-		return nil, err
+		return r, err
 	}
 
 	// Phase 3: Request adapter (with surface hint for GLES deferred enumeration) and device.
 	if err := r.initAdapterDevice(r.primary.surface); err != nil {
-		return nil, err
+		return r, err
 	}
 
 	// Phase 4: Configure surface dimensions.
 	if err := r.configureSurface(r.primary); err != nil {
-		return nil, err
+		return r, err
 	}
 
 	return r, nil
@@ -2180,6 +2183,13 @@ func (r *Renderer) readbackTexture(src *wgpu.Texture, width, height int, label s
 // Call this before destroying user-created GPU resources to prevent
 // Vulkan validation errors about resources still in use by command buffers.
 func (r *Renderer) WaitForGPU() {
+	// Only the device-less renderer that tests inject through newRendererFn
+	// gets here without a device: shutdown runs only after a renderer was
+	// created successfully. The guard keeps shutdown as safe without a device
+	// as Destroy already is.
+	if r.device == nil {
+		return
+	}
 	r.tracker.waitAll(r.device)
 }
 
