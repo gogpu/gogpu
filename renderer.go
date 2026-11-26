@@ -767,9 +767,7 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 		slog.Debug("gogpu: surface outdated, reconfiguring", "width", ws.width, "height", ws.height)
 		if ws.width > 0 && ws.height > 0 {
 			if cfgErr := ws.configure(device, adapter); cfgErr != nil {
-				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
-				ws.state = SurfaceLost
-				ws.noteSurfaceLost(cfgErr)
+				ws.reconfigureFailed(cfgErr)
 			}
 		}
 	case errors.Is(err, wgpu.ErrSurfaceLost):
@@ -782,6 +780,24 @@ func (ws *RenderTarget) recoverFromAcquireError(err error, device *wgpu.Device, 
 			_ = ws.configure(device, adapter)
 		}
 	}
+}
+
+// reconfigureFailed handles a reconfigure after an outdated surface that
+// failed. ErrSurfaceZeroArea means the window was minimized and the surface saw
+// the zero extent before the pump read the minimize: the surface waits
+// unconfigured, as a minimize leaves it, and the first frame after the restore
+// configures it again. That is no loss, so nothing reaches OnSurfaceLost or
+// counts toward the escalation to device loss. Any other failure loses the
+// surface. Render-thread only.
+func (ws *RenderTarget) reconfigureFailed(err error) {
+	if errors.Is(err, wgpu.ErrSurfaceZeroArea) {
+		slog.Debug("gogpu: surface has zero area, waiting for restore", "width", ws.width, "height", ws.height)
+		ws.state = SurfaceReady
+		return
+	}
+	slog.Error("gogpu: reconfigure after outdated failed", "err", err)
+	ws.state = SurfaceLost
+	ws.noteSurfaceLost(err)
 }
 
 // noteSurfaceLost records a surface-loss episode for the app-facing handoff and
@@ -984,9 +1000,7 @@ func (ws *RenderTarget) present() (reconfigured, presented bool) {
 		slog.Debug("gogpu: surface outdated on present, reconfiguring", "width", ws.width, "height", ws.height)
 		if ws.width > 0 && ws.height > 0 {
 			if cfgErr := ws.configure(ws.renderer.device, ws.renderer.adapter); cfgErr != nil {
-				slog.Error("gogpu: reconfigure after outdated failed", "err", cfgErr)
-				ws.state = SurfaceLost
-				ws.noteSurfaceLost(cfgErr)
+				ws.reconfigureFailed(cfgErr)
 				return false, false
 			}
 			return true, false
