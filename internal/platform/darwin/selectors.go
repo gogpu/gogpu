@@ -57,6 +57,8 @@ var selectors struct {
 	isVisible                                SEL
 	isMiniaturized                           SEL
 	isZoomed                                 SEL
+	windowNumber                             SEL
+	windowNumberAtPoint                      SEL
 	setReleasedWhenClosed                    SEL
 	center                                   SEL
 	toggleFullScreen                         SEL
@@ -325,6 +327,8 @@ func initSelectors() {
 		selectors.isVisible = RegisterSelector("isVisible")
 		selectors.isMiniaturized = RegisterSelector("isMiniaturized")
 		selectors.isZoomed = RegisterSelector("isZoomed")
+		selectors.windowNumber = RegisterSelector("windowNumber")
+		selectors.windowNumberAtPoint = RegisterSelector("windowNumberAtPoint:belowWindowWithWindowNumber:")
 		selectors.setReleasedWhenClosed = RegisterSelector("setReleasedWhenClosed:")
 		selectors.center = RegisterSelector("center")
 		selectors.toggleFullScreen = RegisterSelector("toggleFullScreen:")
