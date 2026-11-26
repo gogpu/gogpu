@@ -397,6 +397,29 @@ func TestApp_Fullscreen_WithPlatWindow(t *testing.T) {
 }
 
 // =============================================================================
+// MonitorSize
+// =============================================================================
+
+func TestApp_MonitorSize_NilPlatWindow(t *testing.T) {
+	app := &App{}
+	if w, h, ok := app.MonitorSize(); ok || w != 0 || h != 0 {
+		t.Errorf("MonitorSize() = %d, %d, %v; want 0, 0, false with nil platWindow", w, h, ok)
+	}
+}
+
+func TestApp_MonitorSize_WithPlatWindow(t *testing.T) {
+	app := &App{platWindow: &mockWindow{monitorW: 2560, monitorH: 1440}}
+	if w, h, ok := app.MonitorSize(); !ok || w != 2560 || h != 1440 {
+		t.Errorf("MonitorSize() = %d, %d, %v; want 2560, 1440, true", w, h, ok)
+	}
+
+	app.platWindow = &mockWindow{}
+	if _, _, ok := app.MonitorSize(); ok {
+		t.Error("MonitorSize() should report ok=false when the platform cannot tell")
+	}
+}
+
+// =============================================================================
 // GetSystemMenu
 // =============================================================================
 

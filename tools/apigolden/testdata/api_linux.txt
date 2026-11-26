@@ -41,6 +41,7 @@ method (*App) IsMaximized() bool
 method (*App) Lifecycle() AppLifecycle
 method (*App) Maximize()
 method (*App) Minimize()
+method (*App) MonitorSize() (width int, height int, ok bool)
 method (*App) NewWindow(config Config) (*Window, error)
 method (*App) OnAnyWindowClosed(fn func(WindowID)) *App
 method (*App) OnClose(fn func()) *App
