@@ -171,6 +171,41 @@ func TestHostLoop_NotRunningAfterWindowCloses(t *testing.T) {
 	loop.Stop() // the close cleared the app's window; Stop must not panic
 }
 
+func TestHostLoop_PumpEventsDeliversSurfaceLoss(t *testing.T) {
+	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	defer loop.Stop()
+	var delivered error
+	app.OnSurfaceLost(func(err error) { delivered = err })
+
+	app.renderer.recordSurfaceLost(errors.New("surface cause"))
+	loop.PumpEvents()
+	if !errors.Is(delivered, ErrSurfaceLost) {
+		t.Fatalf("OnSurfaceLost got %v, want an error matching ErrSurfaceLost", delivered)
+	}
+	if !loop.Running() {
+		t.Error("Running after a surface loss: got false, want true")
+	}
+}
+
+func TestHostLoop_PumpEventsDeliversDeviceLossAndStopsRunning(t *testing.T) {
+	app, loop, _ := startedHostLoop(t, &mockWindow{width: 800, height: 600})
+	defer loop.Stop()
+	var delivered error
+	app.OnDeviceLost(func(err error) { delivered = err })
+
+	app.renderer.recordDeviceLost(errors.New("device cause"))
+	if !loop.Running() {
+		t.Fatal("Running before PumpEvents delivered the loss: got false, want true")
+	}
+	loop.PumpEvents()
+	if !errors.Is(delivered, ErrDeviceLost) {
+		t.Fatalf("OnDeviceLost got %v, want an error matching ErrDeviceLost", delivered)
+	}
+	if loop.Running() {
+		t.Error("Running after a device loss: got true, want false")
+	}
+}
+
 func TestHostLoop_StopBeforeStartDoesNothing(t *testing.T) {
 	loop := NewHostLoop(NewApp(DefaultConfig()))
 

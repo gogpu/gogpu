@@ -68,7 +68,8 @@ func (loop *HostLoop) Start() error {
 // input-event queue registered on the App, for every window. The primary
 // window's latest resize reaches App.OnResize and EventSource.OnResize, as
 // under Run; the surface itself is resized at the next BeginFrame. It ends
-// the gesture frame.
+// the gesture frame. Then it delivers a surface or device loss recorded since
+// the last pump to App.OnSurfaceLost or App.OnDeviceLost, as Run's loop does.
 //
 // It never runs onUpdate or draws, and returns once the queue is empty. It
 // waits only while the user drags a move or resize (see HostLoop). A close is
@@ -80,13 +81,15 @@ func (loop *HostLoop) Start() error {
 // recurs.
 func (loop *HostLoop) PumpEvents() {
 	loop.app.processEventsMultiThread()
+	loop.app.deliverLossCallbacks()
 }
 
 // Running reports whether the app is still running: false once the primary
-// window was closed or Quit was called.
+// window was closed, Quit was called or PumpEvents delivered a device loss.
 func (loop *HostLoop) Running() bool {
 	a := loop.app
-	return a.running.Load() && (a.platWindow == nil || !a.platWindow.ShouldClose())
+	return a.running.Load() && a.deviceLostErr == nil &&
+		(a.platWindow == nil || !a.platWindow.ShouldClose())
 }
 
 // ConsumeRedrawRequest reports whether a redraw was requested since its last

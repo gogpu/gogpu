@@ -222,8 +222,9 @@ func (a *App) OnMemoryWarning(fn func()) *App {
 // (ADR-026: the app must drop GPU surfaces immediately, e.g. Android onStop),
 // this reports a GPU-side loss that gogpu recovers from on its own.
 //
-// The callback runs on the event-loop goroutine and must not block — a stalled
-// surface callback stalls the very recovery it reports.
+// The callback runs on the event-loop goroutine, from PumpEvents under a
+// HostLoop, and must not block — a stalled surface callback stalls the very
+// recovery it reports.
 func (a *App) OnSurfaceLost(fn func(err error)) *App {
 	a.onSurfaceLost = fn
 	return a
@@ -241,7 +242,8 @@ func (a *App) OnSurfaceLost(fn func(err error)) *App {
 // callback never fires and rendering continues.
 //
 // The callback runs once, on the event-loop goroutine, before Run returns; it
-// must not block. After Run returns that error the App is not re-runnable —
+// must not block. Under a HostLoop it runs from PumpEvents, and Running then
+// reports false. After Run returns that error the App is not re-runnable —
 // restarting means a new process (an in-place restart would be a separate,
 // later addition).
 func (a *App) OnDeviceLost(fn func(err error)) *App {
