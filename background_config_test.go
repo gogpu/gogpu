@@ -66,7 +66,7 @@ func TestNormalStartupShowsPrimaryWindow(t *testing.T) {
 }
 
 // A window started hidden is not shown, still renders, and is shown by an
-// explicit Show, on every platform.
+// explicit Show on native platforms that can start hidden.
 func TestStartHiddenKeepsWindowHiddenUntilShown(t *testing.T) {
 	window := &backgroundTestWindow{}
 	loop := &startupFrameRecorder{}
@@ -76,6 +76,12 @@ func TestStartHiddenKeepsWindowHiddenUntilShown(t *testing.T) {
 	}
 	app.startPrimaryWindow(window)
 	primary := app.primaryWindow
+	if runtime.GOOS == "js" {
+		if window.shows != 1 || !primary.Visible() {
+			t.Fatal("StartHidden should preserve normal browser startup")
+		}
+		return
+	}
 	if window.shows != 0 || primary.Visible() {
 		t.Fatalf("startup: native shows %d, visible %t; want no Show and a hidden window",
 			window.shows, primary.Visible())
@@ -108,14 +114,17 @@ type firstFrameWindow struct{ backgroundTestWindow }
 
 func (w *firstFrameWindow) ShowsOnFirstFrame() bool { return true }
 
-func TestStartHiddenWindowShownByFirstFrameIsVisible(t *testing.T) {
+func TestStartHiddenWindowShownByFirstFrameRemainsEligible(t *testing.T) {
+	if runtime.GOOS == "js" {
+		t.Skip("browser startup does not use the native first-frame visibility policy")
+	}
 	window := &firstFrameWindow{}
 	loop := &startupFrameRecorder{}
 	app := &App{config: DefaultConfig().WithStartHidden(true), platWindow: window,
 		renderer: &Renderer{}, renderLoop: loop}
 	app.startPrimaryWindow(window)
 	if !app.primaryWindow.Visible() || window.shows != 0 {
-		t.Fatal("a window shown by its first frame should be visible without an explicit Show")
+		t.Fatal("the app should treat a first-frame window as visible without an explicit Show")
 	}
 	before := loop.calls
 	app.renderFrameMultiThread()

@@ -44,7 +44,9 @@ type Config struct {
 	// Windows and X11 create the window hidden (unmapped on X11). macOS
 	// also starts the app with the Accessory activation policy and does
 	// not activate it, so it takes no focus. Wayland cannot keep a
-	// toplevel hidden: the compositor decides, and the window appears.
+	// toplevel hidden: a presented buffer lets the compositor show it.
+	// In browsers, the DOM controls canvas visibility and this option has
+	// no effect.
 	StartHidden bool
 
 	// Title is the window title.

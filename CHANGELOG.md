@@ -9,11 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`Config.StartHidden`** (#573, by @janearc). `Config.StartHidden` / `WithStartHidden` creates the primary window
-  without showing it; the hidden window still renders, and a later `Window.Show()` presents it. Windows and X11 create
-  it hidden; macOS also starts with the Accessory activation policy and does not activate the app, so it takes no focus.
-  Wayland cannot hide a toplevel, so there the window appears.
-
 - **Linux: dead keys and the Compose key produce their composed characters** (#562, by @dvoyni). X11 and Wayland text
   input now run each key through libxkbcommon's compose table, loaded for the active locale: a dead key or the Compose
   key on its own types nothing, and the key that completes the sequence types the composed character.

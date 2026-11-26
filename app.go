@@ -419,7 +419,7 @@ func (a *App) Run() error {
 // startsHidden reports whether the primary window starts hidden. On macOS
 // the platform also takes it as the nonactivating startup policy.
 func (a *App) startsHidden() bool {
-	return a.config.StartHidden
+	return a.config.StartHidden && runtime.GOOS != "js"
 }
 
 // startPrimaryWindow makes the first window ready for the render loop.
