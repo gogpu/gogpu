@@ -814,7 +814,7 @@ func (a *App) initRenderer(platWindow platform.PlatformWindow) error {
 	a.renderLoop.RunOnRenderThreadVoid(func() {
 		a.renderer, initErr = newRenderer(
 			platWindow, a.config.GraphicsAPI, a.config.VSync, a.config.PowerPreference,
-			a.config.Transparent,
+			a.config.Transparent, a.config.RequiredFeatures,
 		)
 		if a.renderer != nil {
 			// Loss delivery (P2-API-009): the render thread nudges the event

@@ -121,6 +121,7 @@ type Config struct {
     Frameless bool
     Transparent bool
     PowerPreference github.com/gogpu/gputypes.PowerPreference
+    RequiredFeatures github.com/gogpu/gputypes.Features
     RenderMode RenderMode
     TabbingMode TabbingMode
     TabbingIdentifier string
@@ -143,6 +144,7 @@ method (Config) WithMaxSize(width int, height int) Config
 method (Config) WithMinSize(width int, height int) Config
 method (Config) WithPowerPreference(pref github.com/gogpu/gputypes.PowerPreference) Config
 method (Config) WithRenderMode(mode RenderMode) Config
+method (Config) WithRequiredFeatures(features github.com/gogpu/gputypes.Features) Config
 method (Config) WithResizable(resizable bool) Config
 method (Config) WithSize(width int, height int) Config
 method (Config) WithTabbingIdentifier(id string) Config
