@@ -1,6 +1,11 @@
 package gogpu
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -123,5 +128,56 @@ func TestBeginFrame_SkipsWhenNotConfigured(t *testing.T) {
 				t.Error("beginFrame should return false when not configured")
 			}
 		})
+	}
+}
+
+// errorRecords returns the error-level records logged through slog.Default
+// for the rest of the test.
+func errorRecords(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var records bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&records, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	return &records
+}
+
+// A minimized window's surface can report a zero extent before the pump has
+// read the minimize, so the reconfigure after an outdated surface fails with
+// ErrSurfaceZeroArea. That is a minimize, not a loss: the surface waits
+// unconfigured for the restore, and nothing reaches OnSurfaceLost.
+func TestReconfigureFailed_ZeroAreaWaitsForRestore(t *testing.T) {
+	records := errorRecords(t)
+	renderer := &Renderer{}
+	ws := &RenderTarget{renderer: renderer, state: SurfaceConfigured, width: 800, height: 600}
+
+	ws.reconfigureFailed(fmt.Errorf("configure: %w", wgpu.ErrSurfaceZeroArea))
+
+	if ws.state != SurfaceReady {
+		t.Errorf("state after a zero-area reconfigure: got %v, want SurfaceReady", ws.state)
+	}
+	if records.Len() != 0 {
+		t.Errorf("a zero-area reconfigure logged an error: %s", records.String())
+	}
+	if surfaceErr, deviceErr := renderer.ConsumeLoss(); surfaceErr != nil || deviceErr != nil {
+		t.Errorf("a zero-area reconfigure recorded a loss: surface %v, device %v", surfaceErr, deviceErr)
+	}
+}
+
+func TestReconfigureFailed_OtherErrorLosesSurface(t *testing.T) {
+	records := errorRecords(t)
+	renderer := &Renderer{}
+	ws := &RenderTarget{renderer: renderer, state: SurfaceConfigured, width: 800, height: 600}
+
+	ws.reconfigureFailed(errors.New("device gone"))
+
+	if ws.state != SurfaceLost {
+		t.Errorf("state after a failed reconfigure: got %v, want SurfaceLost", ws.state)
+	}
+	if !strings.Contains(records.String(), "reconfigure after outdated failed") {
+		t.Errorf("a failed reconfigure logged no error, got: %q", records.String())
+	}
+	if surfaceErr, _ := renderer.ConsumeLoss(); !errors.Is(surfaceErr, ErrSurfaceLost) {
+		t.Errorf("a failed reconfigure recorded surface loss %v, want one matching ErrSurfaceLost", surfaceErr)
 	}
 }
